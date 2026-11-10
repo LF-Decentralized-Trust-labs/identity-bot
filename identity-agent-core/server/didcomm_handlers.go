@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 
@@ -629,9 +629,9 @@ func (s *CoreServer) whyAControllerMayNotSendAs(aid string) string {
 // resolves the recipient keyset by kid, the sender DID by skid (must be a registered
 // peer), unpacks + verifies, applies replay protection, and stores the message.
 func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	raw, err := boundedread.All(r.Body, boundedread.Document)
 	if err != nil {
-		jsonError(w, "read error", http.StatusBadRequest)
+		jsonError(w, "read error", boundedread.Status(err))
 		return
 	}
 	var env didcomm.Envelope

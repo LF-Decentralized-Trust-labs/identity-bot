@@ -55,3 +55,25 @@ func TestAKeyLogIsAnsweredWithTheKeyStateItEstablishes(t *testing.T) {
 		t.Fatal("the route is not declared public")
 	}
 }
+
+// A body over the limit is refused with 413 by every handler that reads a key
+// log or a seed the app sends, even where the bytes before the limit are a
+// complete request: a body cut at the limit is not what was sent.
+func TestARequestOverItsLimitIsRefusedNotCut(t *testing.T) {
+	s := appHeldCore(t)
+	over := func(doc string, limit int) string { return doc + strings.Repeat(" ", limit+1-len(doc)) }
+	for name, c := range map[string]struct {
+		handler http.HandlerFunc
+		body    string
+	}{
+		"key state":      {s.handleKeyState, over(`{"aid":"E1"}`, int(maxKeyStateBody))},
+		"restore":        {s.handleRestoreIdentity, over(`{"aid":"E1"}`, int(maxKeyStateBody))},
+		"messaging seed": {s.handleMessagingSeed, over(`{"seed_hex":"`+messagingSeedHex(7)+`"}`, 4<<10)},
+	} {
+		rec := httptest.NewRecorder()
+		c.handler(rec, ownerRequest(http.MethodPost, "/x", strings.NewReader(c.body), s))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("%s: a body one byte over its limit was answered %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+}

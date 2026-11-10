@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 // Signer signs a control request with the enrolment key, over CanonicalBody.
@@ -64,7 +65,11 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 		return nil, fmt.Errorf("descriptor %d", resp.StatusCode)
 	}
 	var d ServiceDescriptor
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswer)).Decode(&d); err != nil {
+	raw, err := boundedread.All(resp.Body, maxAnswer)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
 		return nil, err
 	}
 	if d.Protocol != relayproto.ProtocolVersion {
@@ -357,7 +362,10 @@ func (c *Client) control(ctx context.Context, op, aid string, fields map[string]
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
+	b, err := boundedread.All(resp.Body, maxAnswer)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		refused := &RefusedError{Op: op, Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
 		var e struct {

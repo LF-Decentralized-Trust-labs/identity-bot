@@ -3,13 +3,14 @@ package remote
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/hirochachacha/go-smb2"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 type smbBackend struct {
@@ -109,7 +110,7 @@ func (b *smbBackend) Pull(ctx context.Context, objectKey string) ([]byte, error)
 			return err
 		}
 		defer f.Close()
-		out, err = io.ReadAll(f)
+		out, err = boundedread.All(f, boundedread.Archive)
 		return err
 	})
 	return out, err

@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
 )
 
@@ -318,8 +318,11 @@ func askWitnessForLaterEventsWith(clientFor func(url string) *http.Client, base,
 			if err != nil {
 				continue
 			}
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			body, rerr := boundedread.All(resp.Body, boundedread.Document)
 			resp.Body.Close()
+			if rerr != nil {
+				continue // an answer over the limit is refused, not read in part
+			}
 			var ev witness.SignedEvent
 			if resp.StatusCode == http.StatusOK && json.Unmarshal(body, &ev) == nil && ev.RawBytesB64 != "" && ev.CesrSignature != "" {
 				got = &ev
@@ -358,7 +361,7 @@ func (s *CoreServer) askWitnessForEndpoint(base, contactAID string, key ed25519.
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("witness returned %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
 		return nil, err
 	}

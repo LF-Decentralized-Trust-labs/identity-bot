@@ -2,11 +2,12 @@ package update
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 const healthCheckTimeout = 60 * time.Second
@@ -110,7 +111,7 @@ func (a *Applier) download(url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download status %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 512<<20))
+	return boundedread.All(resp.Body, 512<<20)
 }
 
 func (a *Applier) waitForHealth() error {

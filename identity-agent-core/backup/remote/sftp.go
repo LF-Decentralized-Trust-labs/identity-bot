@@ -3,7 +3,6 @@ package remote
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 type sftpBackend struct {
@@ -110,7 +111,7 @@ func (b *sftpBackend) Pull(ctx context.Context, objectKey string) ([]byte, error
 			return err
 		}
 		defer f.Close()
-		out, err = io.ReadAll(f)
+		out, err = boundedread.All(f, boundedread.Archive)
 		return err
 	})
 	return out, err

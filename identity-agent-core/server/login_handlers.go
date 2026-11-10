@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"identity-agent-core/schemas"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
 )
 
@@ -211,9 +211,9 @@ func (s *CoreServer) mountAssetLoginChallenge(r chi.Router) {
 // challenge (site_aid) and its nonce and audience, it must be fresh, and the asserter
 // must satisfy the asset's enrollment policy.
 func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := boundedread.All(r.Body, boundedread.Document)
 	if err != nil {
-		http.Error(w, "bad json", http.StatusBadRequest)
+		http.Error(w, "bad json", boundedread.Status(err))
 		return
 	}
 	a, err := login.ReadAssertion(body)

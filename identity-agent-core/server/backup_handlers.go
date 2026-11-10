@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"identity-agent-core/internal/boundedread"
 	"io"
 	"log"
 	"net/http"
@@ -331,7 +332,7 @@ type backupReceiveRequest struct {
 // string and base64-decoded into bytes, so a machine accepting nothing for
 // nobody was as exposed as one that had volunteered. Every other route in this
 // package that takes a JSON body already limits it.
-const maxArchiveUpload = 2 << 30 // 2 GiB of base64, ~1.5 GiB of archive
+const maxArchiveUpload = boundedread.ArchiveUploadBase64 // 2 GiB of base64, 1.5 GiB of archive; the most boundedread.Archive lets be fetched back
 
 func (s *CoreServer) handleBackupReceive(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxArchiveUpload)

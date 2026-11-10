@@ -16,6 +16,7 @@ import (
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 )
 
 // Client is the IA-side BRR HTTP client (issuer push + verifier fetch).
@@ -180,7 +181,7 @@ func (c *Client) PushBlindedEvent(registryPrefix, blindedID, eventType string, s
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(resp.Body)
+		msg := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("event %d: %s", resp.StatusCode, string(msg))
 	}
 	return nil
@@ -202,11 +203,11 @@ func (c *Client) FetchBulkProof(registryPrefix, bucketHint string) (BulkProof, e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(resp.Body)
+		msg := boundedread.Snippet(resp.Body)
 		return BulkProof{}, fmt.Errorf("bulk-proof %d: %s", resp.StatusCode, string(msg))
 	}
 	var out bulkProofResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.Document)).Decode(&out); err != nil {
 		return BulkProof{}, err
 	}
 	return out.Proof, nil

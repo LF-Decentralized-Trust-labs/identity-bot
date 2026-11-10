@@ -7,11 +7,12 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 type gcsBackend struct {
@@ -52,7 +53,7 @@ func (b *gcsBackend) Push(ctx context.Context, objectKey string, data []byte) er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("gcs push %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -71,10 +72,10 @@ func (b *gcsBackend) Pull(ctx context.Context, objectKey string) ([]byte, error)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("gcs pull %d: %s", resp.StatusCode, string(body))
 	}
-	return io.ReadAll(resp.Body)
+	return boundedread.All(resp.Body, boundedread.Archive)
 }
 
 func (b *gcsBackend) List(ctx context.Context, prefix string) ([]string, error) {
@@ -94,10 +95,10 @@ func (b *gcsBackend) List(ctx context.Context, prefix string) ([]string, error) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("gcs list %d: %s", resp.StatusCode, string(body))
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := boundedread.All(resp.Body, maxListBytes)
 	if err != nil {
 		return nil, err
 	}

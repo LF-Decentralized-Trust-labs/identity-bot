@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/secureenclave"
 
@@ -131,10 +131,10 @@ func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeB
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("bundle fetch %d: %s", resp.StatusCode, string(b))
+		b := boundedread.Snippet(resp.Body)
+		return nil, fmt.Errorf("bundle fetch %d: %s", resp.StatusCode, b)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,7 @@ func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Ass
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("callback %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -689,7 +689,7 @@ func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship, bundle *Chal
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
+		b := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("relay register %d: %s", resp.StatusCode, string(b))
 	}
 	return nil

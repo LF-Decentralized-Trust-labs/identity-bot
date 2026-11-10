@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/internal/atomicfile"
-	"io"
+	"identity-agent-core/internal/boundedread"
 	"log"
 	"net/http"
 	"os"
@@ -1150,19 +1150,26 @@ func (s *Service) retrieveFromCloud(req RetrieveRequest) (*RetrieveResponse, err
 	}, nil
 }
 
+// backupDownloadClient has a timeout: the default client has none, so a peer
+// that stops sending would hold the download forever.
+var backupDownloadClient = &http.Client{Timeout: 15 * time.Minute}
+
+// maxBackupArchiveBytes is the most of an archive the core will take from a peer.
+var maxBackupArchiveBytes = boundedread.Archive
+
 // FetchBackupOnlyArchive downloads opaque archive bytes from a paired backup-only agent.
 func FetchBackupOnlyArchive(baseURL, identityAID, archiveName string) ([]byte, error) {
 	url := fmt.Sprintf("%s/api/backup/receive/%s/download/%s", trimSlash(baseURL), identityAID, archiveName)
-	resp, err := http.Get(url)
+	resp, err := backupDownloadClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("backup download %d: %s", resp.StatusCode, string(b))
+		b := boundedread.Snippet(resp.Body)
+		return nil, fmt.Errorf("backup download %d: %s", resp.StatusCode, b)
 	}
-	return io.ReadAll(resp.Body)
+	return boundedread.All(resp.Body, maxBackupArchiveBytes)
 }
 
 func decodeArchiveInput(archiveB64 string) ([]byte, error) {

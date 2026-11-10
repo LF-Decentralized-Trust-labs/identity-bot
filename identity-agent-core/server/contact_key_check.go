@@ -1,14 +1,13 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/store"
 )
 
@@ -217,7 +216,7 @@ func (s *CoreServer) fetchKELFromOOBI(oobiURL string) ([]map[string]interface{},
 	var body struct {
 		KEL []map[string]interface{} `json:"kel"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
+	if err := boundedread.Decode(resp.Body, 4<<20, &body); err != nil {
 		return nil, err
 	}
 	return body.KEL, nil

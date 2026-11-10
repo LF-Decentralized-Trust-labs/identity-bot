@@ -1,10 +1,11 @@
 package server
 
 import (
+	"identity-agent-core/internal/boundedread"
+
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
 
 	"identity-agent-core/didcomm"
@@ -39,8 +40,8 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		SeedHex string `json:"seed_hex"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body", "seed_hex is required")
+	if err := boundedread.Decode(r.Body, 4<<10, &req); err != nil {
+		writeError(w, boundedread.Status(err), "Invalid request body", "seed_hex is required")
 		return
 	}
 	seed, err := hex.DecodeString(req.SeedHex)

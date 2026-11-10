@@ -1,10 +1,11 @@
 package server
 
 import (
+	"identity-agent-core/internal/boundedread"
+
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	keri "github.com/grapeid/keri-go"
@@ -65,8 +66,8 @@ type anchoredKeySet struct {
 
 func (s *CoreServer) handleKeyState(w http.ResponseWriter, r *http.Request) {
 	var req keyStateRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxKeyStateBody)).Decode(&req); err != nil || req.AID == "" {
-		writeError(w, http.StatusBadRequest, "aid and a key log are required", "send events or stream_b64")
+	if err := boundedread.Decode(r.Body, maxKeyStateBody, &req); err != nil || req.AID == "" {
+		writeError(w, boundedread.Status(err), "aid and a key log are required", "send events or stream_b64")
 		return
 	}
 	messages, err := keyStateMessages(req)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/login"
 )
 
@@ -186,7 +187,11 @@ func (s *CoreServer) handleWhatTheInvitingAppPublished(w http.ResponseWriter, r 
 		return
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, publishedBodyLimit))
+	raw, rerr := boundedread.All(resp.Body, publishedBodyLimit)
+	if rerr != nil {
+		http.Error(w, "the inviting app answered with something unreadable", http.StatusBadGateway)
+		return
+	}
 	switch resp.StatusCode {
 	case http.StatusOK:
 		if !json.Valid(raw) {

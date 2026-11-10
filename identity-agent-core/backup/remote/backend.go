@@ -68,3 +68,7 @@ func LatestArchiveKey(ctx context.Context, b Backend, prefix string) (string, er
 	}
 	return latest, nil
 }
+
+// maxListBytes is the most of a listing of stored backups that is read from a
+// remote store; one longer is refused, never cut.
+const maxListBytes int64 = 16 << 20
