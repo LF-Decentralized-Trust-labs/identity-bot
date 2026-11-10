@@ -119,7 +119,7 @@ func (s *CoreServer) proveAnAgentAt(origin, wantAID string) (aid, key string, no
 		return "", "", &notProved{why: "what answers at that address is not the identity this computer was connected to", kind: KindDifferent}
 	}
 
-	events, currentKey, why := s.verifiedKeyLogAt(aid, origin+"/oobi/"+aid)
+	events, currentKey, why := s.verifiedKeyLogAt(aid, origin+"/public/oobi/"+aid)
 	if why != "" {
 		// A history that cannot be read is not the same as one that does not
 		// check out: the first says nothing about who is there.
@@ -129,7 +129,17 @@ func (s *CoreServer) proveAnAgentAt(origin, wantAID string) (aid, key string, no
 		}
 		return "", "", &notProved{why: why, kind: kind}
 	}
-	if err := didcomm.CheckKeyProof(&proof, aid, origin, challenge, events, currentKey, time.Now()); err != nil {
+	// The history is published as records that carry each event as text;
+	// CheckKeyProof reads the events themselves.
+	plainEvents := make([]map[string]interface{}, 0, len(events))
+	for _, entry := range events {
+		ev, err := eventFromKELEntry(entry)
+		if err != nil {
+			return "", "", &notProved{why: err.Error(), kind: KindDifferent}
+		}
+		plainEvents = append(plainEvents, ev)
+	}
+	if err := didcomm.CheckKeyProof(&proof, aid, origin, challenge, plainEvents, currentKey, time.Now()); err != nil {
 		log.Printf("[agent-at-address] %s did not pass the proof for %s: %v", origin, aid, err)
 		return "", "", &notProved{why: "what answers at that address could not prove it is the identity it names", kind: KindDifferent}
 	}

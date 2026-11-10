@@ -5,6 +5,7 @@ import 'package:agent_client/services/a_controller_offering_itself.dart';
 import 'package:agent_client/services/an_agent_proving_itself.dart';
 import 'package:agent_client/services/asking_to_act_for_an_identity.dart';
 import 'package:agent_client/services/controller_signing_client.dart';
+import 'package:agent_client/services/the_owner_at_this_computer.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -367,6 +368,41 @@ void main() {
       // under question to answer for itself proves nothing.
       expect(at.toString(), '$localCore/api/verify/agent-at-address');
       expect(asked!['address'], agent);
+    });
+
+    test('is asked as the owner of this computer, because the route is the '
+        "owner's", () async {
+      // A core that holds the secret, so that it is proven and the secret may
+      // be sent to it (nothing is sent to a core that has not proved it).
+      LocalOwnerSecret.use('the-secret');
+      addTearDown(LocalOwnerSecret.forget);
+      expect(
+          await LocalOwnerSecret.proveTheCoreAt('http://127.0.0.1:5050',
+              using: MockClient((req) async => http.Response(
+                  jsonEncode({
+                    'proof': LocalOwnerSecret.proof('the-secret',
+                        req.url.queryParameters['nonce']!, 5050)
+                  }),
+                  200))),
+          isTrue);
+      http.BaseRequest? seen;
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: 'http://127.0.0.1:5050',
+        client: MockClient((req) async {
+          seen = req;
+          return http.Response(
+              jsonEncode({
+                'verified': true,
+                'aid': 'EMYIDENTITY',
+                'public_key': 'DK'
+              }),
+              200);
+        }),
+      );
+      await asking.proveWhoIsAt(agent);
+      expect(seen!.headers[LocalOwnerSecret.header], 'the-secret',
+          reason: 'the core refused the proof route to a request that did not '
+              'carry the owner secret');
     });
 
     test('something answering that could not prove it is refused', () async {

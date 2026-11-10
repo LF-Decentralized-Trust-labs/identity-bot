@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// Checking that what answers at an address holds the keys of the identity it
 /// names (ADR-062, "an address also shows it holds the keys").
@@ -72,8 +73,11 @@ Future<ProvedAgent> proveTheAgentAt(
   String? localCoreOrigin,
   http.Client? client,
 }) async {
+  // The route is the owner's: it asks this core to dial an address on this
+  // person's behalf, so the request carries the owner's secret like every other
+  // request this app makes to the core beside it.
   final own = client == null;
-  final c = client ?? http.Client();
+  final c = ProvingThisComputer.over(client);
   try {
     final http.Response res;
     try {
@@ -134,6 +138,7 @@ Future<ProvedAgent> proveTheAgentAt(
             why);
     }
   } finally {
+    // Closes only what this function made: a client handed in is its owner's.
     if (own) c.close();
   }
 }

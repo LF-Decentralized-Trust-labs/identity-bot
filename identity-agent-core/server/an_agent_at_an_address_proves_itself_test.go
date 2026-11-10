@@ -17,7 +17,7 @@ func theHostOfAnAgent(t *testing.T, agent *CoreServer, publish func() []map[stri
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.Handle("/api/identity/proof", agent.buildRouter())
-	mux.HandleFunc("/oobi/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/oobi/", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"kel": publish()})
 	})
 	srv := httptest.NewServer(mux)
@@ -51,12 +51,7 @@ func TestAnAgentThatHoldsTheKeysItsLogCommitsToIsProved(t *testing.T) {
 	kel := inceptionCommittingTo(t, proofAgentAID, ks)
 	// the engine's own view of the log is the bytes it was verified by; the
 	// agent publishes the plain events
-	plain := []map[string]interface{}{}
-	for _, e := range kel {
-		var ev map[string]interface{}
-		_ = json.Unmarshal([]byte(e["event_json"].(string)), &ev)
-		plain = append(plain, ev)
-	}
+	plain := kel // records carrying each event as text, as an agent publishes them
 	origin := theHostOfAnAgent(t, agent, func() []map[string]interface{} { return plain })
 	asker := theAsker(t)
 	out := askWhoIsAt(t, asker, origin, "")
@@ -79,12 +74,7 @@ func TestAHostThatReplaysTheLogButHoldsOtherKeysIsNotProved(t *testing.T) {
 	real, _ := anAgentHoldingKeys(t)
 	realKeys, _ := real.keySetFor(proofAgentAID)
 	published := inceptionCommittingTo(t, proofAgentAID, realKeys)
-	plain := []map[string]interface{}{}
-	for _, e := range published {
-		var ev map[string]interface{}
-		_ = json.Unmarshal([]byte(e["event_json"].(string)), &ev)
-		plain = append(plain, ev)
-	}
+	plain := published
 
 	impostor, _ := anAgentHoldingKeys(t) // same identifier, its own keys
 	origin := theHostOfAnAgent(t, impostor, func() []map[string]interface{} { return plain })
