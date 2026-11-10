@@ -48,9 +48,10 @@ func startPeer(t *testing.T, name string) *peerAgent {
 
 	svc := witness.NewService(witness.NewSQLiteStore(dataStore.DB()), dataStore, nil, witness.BackendDesktop)
 	svc.OurEntityType = func() witness.EntityType { return witness.EntityIndividual }
-	// The witness list in force after an event is read from the key log by the core's own rule, as the
-	// core wires it; the events this agent sends are kept in that log first (see keep).
-	svc.DesignationAfter = (&CoreServer{DataStore: dataStore}).designationAfter
+	// The key log the witnesses in force are read from is the one the core
+	// keeps, as the core wires it; the events this agent sends are kept in it
+	// first (see keep).
+	svc.KeyLogOf = (&CoreServer{DataStore: dataStore}).keyLogOf
 
 	// The witnessing key belongs to the agent, not to the witness package, so
 	// the host supplies both signing and the identifier. Each agent gets its

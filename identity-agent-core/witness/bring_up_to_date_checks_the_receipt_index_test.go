@@ -45,8 +45,9 @@ func TestBringUpToDateCountsAReceiptOnlyAtTheWitnessesPlace(t *testing.T) {
 	cesr, _ := keri.MatterQB64(keri.CodeEd25519Sig, rawSig)
 	log := []SignedEvent{{RawBytesB64: base64.StdEncoding.EncodeToString(icp), CesrSignature: cesr}}
 
-	run := func(index int) int {
+	run := func(index int) (int, int) {
 		sender, mc := testService(t)
+		sender.KeyLogOf = keyLog(ev.Identifier, icp)
 		mc.contacts["EWitness"] = store.ContactRecord{AID: "EWitness", OobiURL: "http://w.test", IsWitness: true}
 		_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: wkey})
 		sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
@@ -70,12 +71,13 @@ func TestBringUpToDateCountsAReceiptOnlyAtTheWitnessesPlace(t *testing.T) {
 		if f == nil {
 			t.Fatal("no finalisation was started for the event")
 		}
-		return f.ReceiptCount
+		held, _ := mc.GetWitnessReceipts(ev.SAID)
+		return f.ReceiptCount, len(held)
 	}
-	if n := run(0); n != 0 {
-		t.Fatalf("a receipt at place 0, where the list has the witness at 1, was counted (%d)", n)
+	if n, held := run(0); n != 0 || held != 0 {
+		t.Fatalf("a receipt at place 0, where the list has the witness at 1, was counted (%d) or kept (%d)", n, held)
 	}
-	if n := run(1); n != 1 {
-		t.Fatalf("the receipt at the witness's own place was not counted (%d)", n)
+	if n, held := run(1); n != 1 || held != 1 {
+		t.Fatalf("the receipt at the witness's own place was not counted (%d) or kept (%d)", n, held)
 	}
 }

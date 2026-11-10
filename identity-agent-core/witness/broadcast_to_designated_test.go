@@ -29,7 +29,7 @@ func (k *keepingContacts) SaveWitnessReceipt(r store.WitnessReceiptRecord) error
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.kept = append(k.kept, r)
-	return nil
+	return k.memContacts.SaveWitnessReceipt(r)
 }
 
 // An event goes to exactly the witnesses its identity names, found by their

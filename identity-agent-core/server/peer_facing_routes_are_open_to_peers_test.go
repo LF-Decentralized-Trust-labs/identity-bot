@@ -171,8 +171,12 @@ func TestAPeerDeliversAnEventAndReadsTheLogBackThroughTheFullRouter(t *testing.T
 	base := servedThroughTheRealRouter(t, bob)
 
 	rot, sig := c.rotateCutting(t, bob.witnessKey)
-	if err := bob.takesAt(t, base, c.aid, rot, sig); err != nil {
-		t.Fatalf("a peer's event was refused by the router: %v", err)
+	// The router takes the event (it answers 200). The rotation cuts bob, so
+	// bob's receipt of it does not count: it is not among the witnesses in force
+	// after it. A refusal by the router would be a 403 instead.
+	err := bob.takesAt(t, base, c.aid, rot, sig)
+	if err == nil || !strings.Contains(err.Error(), "designates") {
+		t.Fatalf("expected the receipt of the witness the rotation cuts not to count, got: %v", err)
 	}
 	// The controller reads its own log back, signed as itself by the key now in force.
 	for _, path := range []string{"/api/witness/kel/" + c.aid, "/api/witness/kel/" + c.aid + "/event/1",

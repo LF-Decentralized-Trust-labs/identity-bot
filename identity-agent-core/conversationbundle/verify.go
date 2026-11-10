@@ -292,9 +292,10 @@ func (v *verifier) checkKeyLogs() {
 			in.CesrSignatures = append(in.CesrSignatures, ev.Signature)
 			said, _ := parsed["d"].(string)
 			// A receipt's index is its witness's place in the list in force at
-			// its event, which the events read so far define.
+			// its event, which the events read so far define. A list that cannot
+			// be read as far as the event is not a list to check against.
 			var designated []string
-			if row, found := drivers.WitnessingOf(drivers.ValidateKELInput{RawEvents: in.RawEvents}, said); found {
+			if row, found := drivers.WitnessingOf(drivers.ValidateKELInput{RawEvents: in.RawEvents}, said); found && row.Known {
 				designated = row.Designated
 			}
 			for _, rc := range ev.Receipts {

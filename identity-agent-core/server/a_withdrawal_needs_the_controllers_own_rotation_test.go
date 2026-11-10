@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -138,14 +139,37 @@ func (c *rotatingController) craftedRotation(t *testing.T, witnessKey string) []
 
 func (p *peerAgent) takes(t *testing.T, aid string, raw []byte, sig string) error {
 	t.Helper()
+	p.keep(t, raw)
 	_, err := p.svc.SubmitToWitness(context.Background(), p.base+"/api/witness/event", aid, raw, sig)
 	return err
+}
+
+// keep puts an event in the key log this agent keeps, as an agent does before
+// it sends one of its own events to its witnesses: the witnesses in force after
+// the event are read from that log.
+func (p *peerAgent) keep(t *testing.T, raw []byte) {
+	t.Helper()
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var k struct {
+		T string `json:"t"`
+		S string `json:"s"`
+	}
+	_ = json.Unmarshal(raw, &k)
+	seq, _ := strconv.ParseInt(k.S, 16, 32)
+	if err := p.store.SaveEvent(store.EventRecord{AID: ev.Identifier, SequenceNumber: int(seq), EventType: k.T,
+		EventJSON: string(raw), RawBytesB64: base64.StdEncoding.EncodeToString(raw)}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // takesAt delivers an event to the witness at the given address, the way a
 // peer's BroadcastEvent does.
 func (p *peerAgent) takesAt(t *testing.T, base, aid string, raw []byte, sig string) error {
 	t.Helper()
+	p.keep(t, raw)
 	_, err := p.svc.SubmitToWitness(context.Background(), base+"/api/witness/event", aid, raw, sig)
 	return err
 }
@@ -223,8 +247,10 @@ func TestAnotherIdentitysRotationDoesNotMakeTheWitnessStandDownForThisOne(t *tes
 		t.Fatal(err)
 	}
 	otherRot, otherSig := other.rotateCutting(t, bob.witnessKey)
-	if err := bob.takes(t, other.aid, otherRot, otherSig); err != nil {
-		t.Fatalf("bob would not take the other identity's rotation: %v", err)
+	// bob is cut by this rotation, so it is not among the witnesses in force
+	// after it and its receipt does not count; the witness still holds the event.
+	if err := bob.takes(t, other.aid, otherRot, otherSig); err == nil {
+		t.Fatal("a receipt from the witness the rotation cuts was counted")
 	}
 	if code := bob.confirm(t, c.aid, otherRot); code == http.StatusOK {
 		t.Fatal("another identity's rotation made the witness stand down for this one")
@@ -243,8 +269,10 @@ func TestTheControllersOwnSignedRotationMakesTheWitnessStandDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	rot, sig := c.rotateCutting(t, bob.witnessKey)
-	if err := bob.takes(t, c.aid, rot, sig); err != nil {
-		t.Fatalf("bob would not take the controller's real rotation: %v", err)
+	// A rotation is receipted by the witnesses in force after it, so the one it
+	// cuts is not counted; it still holds the event, which is what it checks.
+	if err := bob.takes(t, c.aid, rot, sig); err == nil {
+		t.Fatal("a receipt from the witness the rotation cuts was counted")
 	}
 	if code := bob.confirm(t, c.aid, rot); code != http.StatusOK {
 		t.Fatalf("the controller's own signed rotation was refused (%d)", code)
@@ -307,8 +335,10 @@ func withdrawalBetweenTwoAgents(t *testing.T, reach func(*peerAgent) string) {
 	if err := carol.svc.ConfirmWithdrawal(ctx, "EBob", conf); err == nil {
 		t.Fatal("the witness stood down on a rotation it had never been shown")
 	}
-	if err := bob.takesAt(t, reach(bob), c.aid, rot, sig); err != nil {
-		t.Fatal(err)
+	// The rotation cuts bob, so bob's own receipt of it does not count; it
+	// still holds the event, which is what the confirmation is checked against.
+	if err := bob.takesAt(t, reach(bob), c.aid, rot, sig); err == nil {
+		t.Fatal("a receipt from the witness the rotation cuts was counted")
 	}
 	if err := carol.svc.ConfirmWithdrawal(ctx, "EBob", conf); err != nil {
 		t.Fatalf("the witness refused the controller's real rotation: %v", err)

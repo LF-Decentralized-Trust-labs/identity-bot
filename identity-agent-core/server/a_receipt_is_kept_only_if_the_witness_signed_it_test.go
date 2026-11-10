@@ -31,6 +31,13 @@ func witnessedIdentity(t *testing.T) receiptWorld { return witnessedIdentityOf(t
 // witnesses, with a threshold of n.
 func witnessedIdentityOf(t *testing.T, n int) receiptWorld {
 	t.Helper()
+	return witnessedIdentityAs(t, n, func(raw []byte) []byte { return raw })
+}
+
+// witnessedIdentityAs is that, with the inception stored as change makes it of
+// the one built, for a log that is not as a controller would publish it.
+func witnessedIdentityAs(t *testing.T, n int, change func([]byte) []byte) receiptWorld {
+	t.Helper()
 	ds, err := store.NewSQLiteStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +61,7 @@ func witnessedIdentityOf(t *testing.T, n int) receiptWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw = change(raw)
 	ev, _ := keri.ParseEvent(raw)
 	w.said = ev.SAID
 	if err := ds.SaveIdentity(store.IdentityState{AID: ev.Identifier, PublicKey: pub}); err != nil {

@@ -2,11 +2,11 @@ package server
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"fmt"
 	"identity-agent-core/drivers"
 	"identity-agent-core/internal/backoff"
 	"identity-agent-core/recovery"
+	"identity-agent-core/store"
 	"identity-agent-core/witness"
 	"log"
 	"sync"
@@ -204,44 +204,46 @@ func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
 	return out
 }
 
-// designationAfter is the witnesses an identity's key log designates, and the
-// threshold it asks of them, once ev is in it. Read from the log by the same
-// rule everything else uses (witnessesAfter), so an identity founded when the
-// registry listed more witnesses keeps reaching, and counting receipts from,
-// every one it designates. ev may already be in the log, or be the next event
-// to go in; it is applied once either way. A nil ev reads the log as it stands.
-func (s *CoreServer) designationAfter(aid string, ev map[string]interface{}) ([]string, int) {
+// keyLogOf is the key log kept here for aid: the bytes each of its events was
+// published as, in order. The witnesses an identity designates, and the
+// threshold it asks of them, are read from it by one rule
+// (drivers.WitnessingOf), so an identity founded when the registry listed more
+// witnesses keeps reaching, and counting receipts from, every one it designates.
+//
+// A log that cannot be read is an error, never a shorter log: an event that
+// will not decode could be the rotation that cut a witness, so reading past it
+// would leave that witness in force. An identifier with no events is an error
+// too, not an empty log: nothing was read.
+func (s *CoreServer) keyLogOf(aid string) ([][]byte, error) {
 	if s.DataStore == nil {
-		return nil, 0
+		return nil, fmt.Errorf("there is no key log to read for %s", aid)
 	}
-	events, _ := s.DataStore.GetEvents(aid)
-	evD, _ := ev["d"].(string)
-	var current []string
-	toad := 0
-	apply := func(parsed map[string]interface{}) {
-		if next, ok := witnessesAfter(current, parsed); ok {
-			current = next
-			toad = thresholdOf(parsed["bt"])
+	events, err := s.DataStore.GetEvents(aid)
+	if err != nil {
+		return nil, fmt.Errorf("the key log of %s cannot be read: %w", aid, err)
+	}
+	if len(events) == 0 {
+		return nil, fmt.Errorf("the key log of %s holds no events", aid)
+	}
+	raw, err := rawEventsOf(events)
+	if err != nil {
+		return nil, fmt.Errorf("the key log of %s: %w", aid, err)
+	}
+	return raw, nil
+}
+
+// rawEventsOf is the bytes each stored event was published as, in order. An
+// event with none that decode is an error, not a shorter log.
+func rawEventsOf(events []store.EventRecord) ([][]byte, error) {
+	raw := make([][]byte, 0, len(events))
+	for i, e := range events {
+		b, err := drivers.DecodeRawBytes(e.RawBytesB64)
+		if err != nil || len(b) == 0 {
+			return nil, fmt.Errorf("event %d has no readable bytes", i)
 		}
+		raw = append(raw, b)
 	}
-	for _, e := range events {
-		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
-		var parsed map[string]interface{}
-		if json.Unmarshal(raw, &parsed) != nil {
-			continue
-		}
-		if d, _ := parsed["d"].(string); evD != "" && d == evD {
-			break
-		}
-		apply(parsed)
-	}
-	if ev != nil {
-		apply(ev)
-	}
-	if toad < 0 {
-		toad = 0
-	}
-	return current, toad
+	return raw, nil
 }
 
 // witnessOwnLog brings the identity's witnesses up to date with its own key

@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+
+	"identity-agent-core/drivers"
 )
 
 // SubmitToWitness sends one event to one witness and returns its receipt.
@@ -33,11 +35,24 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	}
 	// Checked, not assumed. A reply that does not carry a receipt covering this
 	// event is a witness that has not witnessed, whatever its status code said.
-	designated, _ := s.designationAfter(signerAID, ked)
-	sig, wit, err := receiptFromResponse(resp, rawEvent, said, designated)
+	// The witness list in force at this event is read from the key log. A reply
+	// from a witness the log does not designate there is refused as that, before
+	// its receipt's index is looked at: it has no place in the list to have.
+	row, lerr := s.witnessing(signerAID, said, rawEvent)
+	sig, wit, err := receiptFromResponse(resp, rawEvent, said, nil)
 	if err != nil {
 		return nil, err
 	}
-	s.onReceipt(said, wit, sig, rawEvent, designated)
+	if lerr == nil {
+		if !drivers.Designates(row.Designated, wit) {
+			return nil, fmt.Errorf("%s is not a witness the key log designates for this event", wit)
+		}
+		if err := drivers.VerifyEventReceipt(wit, rawEvent, said, sig, designatedIn(row)); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.receive(said, wit, sig, rawEvent); err != nil {
+		return nil, err
+	}
 	return resp, nil
 }

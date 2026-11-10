@@ -42,29 +42,38 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A receipt is kept only from a witness the key log designates at its event,
+	// as on every route that keeps one (handleSubmitReceipt, Service.receive).
+	in, ok := s.logOfEvent(req.EventSAID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
+			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
+		return
+	}
+	// The event bytes and the witness list in force at that event, read once
+	// as handleSubmitReceipt reads them. A list that cannot be read is not one
+	// a receipt is kept against.
+	raw, designated, ok := eventAndWitnessesIn(in, req.EventSAID)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, "The receipt cannot be checked",
+			"the witness list in force at this event cannot be read from its key log")
+		return
+	}
+	if !drivers.Designates(designated, req.WitnessAID) {
+		writeError(w, http.StatusUnprocessableEntity, "The receipt is not from a designated witness",
+			"the key log does not designate this witness at this event")
+		return
+	}
+
 	record := store.WitnessReceiptRecord{
 		EventSAID:     req.EventSAID,
 		WitnessAID:    req.WitnessAID,
 		CesrSignature: req.CesrSignature,
 		ReceivedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
-	// A receipt signed over the event is checked against the event, found as
-	// handleSubmitReceipt finds it, and its index against the witness list in
-	// force at that event. One for an event no key log kept here holds cannot
-	// be checked and is refused.
+	// A receipt signed over the event is checked against the event and its index
+	// against the witness list in force at it.
 	if drivers.IsEventSignedReceipt(req.CesrSignature) {
-		in, ok := s.logOfEvent(req.EventSAID)
-		if !ok {
-			writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
-				"a receipt signed over the event is kept here only for an event in a key log this Identity Agent keeps")
-			return
-		}
-		raw, designated, ok := eventAndWitnessesIn(in, req.EventSAID)
-		if !ok {
-			writeError(w, http.StatusUnprocessableEntity, "The receipt cannot be checked",
-				"the witness list in force at this event cannot be read from its key log")
-			return
-		}
 		if err := drivers.VerifyEventReceipt(req.WitnessAID, raw, req.EventSAID, req.CesrSignature, designated); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
 			return
@@ -79,6 +88,8 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 		writeError(w, status, "Failed to store receipt", err.Error())
 		return
 	}
+
+	s.recountReceipts(req.EventSAID)
 
 	log.Printf("[identity-agent-core] STORE: Receipt saved for event %s from witness %s", req.EventSAID, req.WitnessAID)
 

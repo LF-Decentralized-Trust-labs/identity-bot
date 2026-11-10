@@ -73,6 +73,15 @@ type EventWitnessing struct {
 	// a threshold, since anyone can generate a key and sign.
 	Verified int  `json:"verified"`
 	Met      bool `json:"met"`
+	// Known is whether the log up to and including this event was read in
+	// full, so Designated and Threshold are what the log says. False after an
+	// event that did not parse or an establishment event with no usable
+	// witness threshold: from there on the list is not known, not empty, and
+	// a caller that needs it must not take the zero value for it.
+	Known bool `json:"-"`
+	// Counted is the designated witnesses whose receipts are counted in
+	// Verified, as they were written in the receipts.
+	Counted []string `json:"-"`
 }
 
 // ValidateKELFromBytes checks a key log and reports what it established.
@@ -402,6 +411,22 @@ func WitnessKey(witnessAID string) (string, bool) {
 	return string(pub), true
 }
 
+// Designates is whether witnessAID is in the designated list, matched by key
+// as the count is, so a witness is the same one however it is written. False for
+// a name that is not a witness identifier.
+func Designates(designated []string, witnessAID string) bool {
+	key, ok := WitnessKey(witnessAID)
+	if !ok {
+		return false
+	}
+	for _, d := range designated {
+		if k, ok := WitnessKey(d); ok && k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // WitnessingByEvent is the witnessing report for every event of a key log,
 // by the event's identifier: one walk of the log for all of them, where
 // WitnessingOf walks it once per event asked about.
@@ -457,12 +482,7 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			broken, allMet = true, false
 			continue
 		}
-		switch ev.Ilk {
-		case "icp", "dip":
-			designated = append([]string(nil), ev.Witnesses...)
-		case "rot", "drt":
-			designated = amendWitnesses(designated, ev.WitnessCut, ev.WitnessAdd)
-		}
+		designated, _ = WitnessesAfter(designated, ev)
 		if ev.Establishment() {
 			if !ev.HasTOAD || ev.TOAD > math.MaxInt32 {
 				broken = true
@@ -476,6 +496,7 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			EventSAID:      ev.SAID,
 			Designated:     append([]string(nil), designated...),
 			Threshold:      threshold,
+			Known:          !broken,
 		}
 
 		// Count each designated witness at most once, by its key. Without that
@@ -484,7 +505,7 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 		// party becomes a quorum.
 		counted := map[string]bool{}
 		for _, r := range in.Receipts[ev.SAID] {
-			if !contains(designated, r.WitnessAID) {
+			if !Designates(designated, r.WitnessAID) {
 				continue
 			}
 			key, ok := WitnessKey(r.WitnessAID)
@@ -496,6 +517,7 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			}
 			counted[key] = true
 			row.Verified++
+			row.Counted = append(row.Counted, r.WitnessAID)
 		}
 		// A threshold of zero is met by definition — an identity that asked for
 		// no witnesses is not failing to reach them.
@@ -508,21 +530,70 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 	return report, allMet
 }
 
-// amendWitnesses applies a rotation's cuts and adds to the designated set.
-func amendWitnesses(current, cuts, adds []string) []string {
-	out := make([]string, 0, len(current)+len(adds))
-	for _, w := range current {
-		if contains(cuts, w) {
-			continue
+// WitnessesAfter is the one rule for the witness list in force: what an event
+// leaves it as, given what it was before. An inception (or delegated
+// inception) names the list outright; a rotation (or delegated rotation) cuts
+// the witnesses in br, then adds those in ba that are not already in it, so a
+// witness is in the list once and stands at one place; every other event
+// leaves it as it was. The bool is whether the event touched the list.
+//
+// A witness's receipt carries its place in this list, so everything that
+// reads a list, from a log's own events to a receipt arriving late, reads it
+// here.
+func WitnessesAfter(current []string, ev *keri.Event) ([]string, bool) {
+	switch ev.Ilk {
+	case "icp", "dip":
+		return append([]string{}, ev.Witnesses...), true
+	case "rot", "drt":
+		out := make([]string, 0, len(current)+len(ev.WitnessAdd))
+		for _, w := range current {
+			if !contains(ev.WitnessCut, w) {
+				out = append(out, w)
+			}
 		}
-		out = append(out, w)
-	}
-	for _, w := range adds {
-		if !contains(out, w) {
-			out = append(out, w)
+		for _, w := range ev.WitnessAdd {
+			if !contains(out, w) {
+				out = append(out, w)
+			}
 		}
+		return out, true
 	}
-	return out
+	return current, false
+}
+
+// AppendEvent is the log rawEvents with the event next at its end, for asking
+// what the log says once next is in it. It is refused unless next belongs
+// there: an inception to a log with nothing in it, and otherwise the event one
+// past the last, naming the last as its prior, for the same identifier. A log
+// whose events do not all parse is refused too. An event already in the log is
+// not added again, so the answer is the same before and after it is stored.
+func AppendEvent(rawEvents [][]byte, next []byte) ([][]byte, error) {
+	ev, err := keri.ParseEvent(next)
+	if err != nil {
+		return nil, fmt.Errorf("the event is not readable: %w", err)
+	}
+	var last *keri.Event
+	for i, raw := range rawEvents {
+		prev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return nil, fmt.Errorf("event %d of the key log is not readable: %w", i, err)
+		}
+		if prev.SAID == ev.SAID {
+			return rawEvents, nil
+		}
+		last = prev
+	}
+	switch {
+	case last == nil:
+		if ev.Ilk != "icp" && ev.Ilk != "dip" {
+			return nil, fmt.Errorf("the key log holds nothing before this %s event, so the witnesses it follows are not known", ev.Ilk)
+		}
+	case ev.Ilk == "icp" || ev.Ilk == "dip":
+		return nil, fmt.Errorf("a %s event cannot follow events already in the key log", ev.Ilk)
+	case ev.SN != last.SN+1 || ev.PriorSAID != last.SAID || ev.Identifier != last.Identifier:
+		return nil, fmt.Errorf("the event (sequence %d) does not follow the last event of the key log (sequence %d)", ev.SN, last.SN)
+	}
+	return append(append([][]byte(nil), rawEvents...), next), nil
 }
 
 func contains(list []string, v string) bool {

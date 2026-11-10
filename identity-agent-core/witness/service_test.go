@@ -2,9 +2,13 @@ package witness
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"sync"
 	"testing"
 
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -15,6 +19,7 @@ type memContacts struct {
 	contacts map[string]store.ContactRecord
 	identity *store.IdentityState
 	tasks    []store.TaskRecord
+	receipts map[string][]store.WitnessReceiptRecord
 }
 
 func (m *memContacts) GetContacts() ([]store.ContactRecord, error) {
@@ -48,7 +53,30 @@ func (m *memContacts) GetIdentity() (*store.IdentityState, error) {
 	return m.identity, nil
 }
 
-func (m *memContacts) SaveWitnessReceipt(store.WitnessReceiptRecord) error { return nil }
+// SaveWitnessReceipt keeps a receipt as the stores do: one per witness per
+// event, a new one replacing what was held.
+func (m *memContacts) SaveWitnessReceipt(r store.WitnessReceiptRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.receipts == nil {
+		m.receipts = map[string][]store.WitnessReceiptRecord{}
+	}
+	held := m.receipts[r.EventSAID][:0:0]
+	for _, h := range m.receipts[r.EventSAID] {
+		if h.WitnessAID != r.WitnessAID {
+			held = append(held, h)
+		}
+	}
+	m.receipts[r.EventSAID] = append(held, r)
+	return nil
+}
+
+func (m *memContacts) GetWitnessReceipts(eventSAID string) ([]store.WitnessReceiptRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]store.WitnessReceiptRecord(nil), m.receipts[eventSAID]...), nil
+}
+
 func (m *memContacts) SaveTask(t store.TaskRecord) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -150,13 +178,31 @@ func TestHealthRetentionDropsWitness(t *testing.T) {
 
 func TestFinalizeThreshold(t *testing.T) {
 	s, _ := testService(t)
-	said := "EHtestevent"
+	const aid = "ERoot"
+	var keys []string
+	seeds := map[string][]byte{}
+	for i := 0; i < 5; i++ {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		key := iacrypto.NonTransferableAIDQB64(pub)
+		keys = append(keys, key)
+		seeds[key] = priv.Seed()
+	}
+	icp := inceptionOf(aid, keys, 5)
+	s.KeyLogOf = keyLog(aid, icp)
+	said := saidOf(icp)
 	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: "ERoot", SequenceNum: 1,
+		EventSAID: said, SignerAID: aid, SequenceNum: 0,
 		State: FinalizePending, Threshold: 5, StartedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
 	})
-	for i := 0; i < 5; i++ {
-		s.onReceipt(said, "EW"+string(rune('0'+i)), "", nil, nil)
+	for i, key := range keys {
+		sig, _ := login.SignString(said, seeds[key])
+		if err := s.receive(said, key, sig, icp); err != nil {
+			t.Fatal(err)
+		}
+		f, _ := s.Store.GetFinalization(said)
+		if f.ReceiptCount != i+1 {
+			t.Fatalf("after %d receipts the count is %d", i+1, f.ReceiptCount)
+		}
 	}
 	f, _ := s.Store.GetFinalization(said)
 	if f.State != FinalizeFinalized {

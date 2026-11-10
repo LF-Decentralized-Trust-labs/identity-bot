@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,6 +28,8 @@ import (
 	"identity-agent-core/permission"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // The record is anchored in a key log.
@@ -156,30 +159,6 @@ func signTip(rec *recordIdentityRecord, seed []byte) error {
 // is gone. A second one is never made in its place.
 var errRecordGone = errors.New("this identity approved a record identity whose record here is gone; a second one is not made")
 
-// witnessesAfter is the witness set an establishment event leaves in force,
-// given the set before it: an inception (or delegated inception) names the set
-// outright in b, and a rotation (or delegated rotation) cuts those in br and
-// adds those in ba. ok is false for an event that does not touch the set.
-func witnessesAfter(current []string, ev map[string]interface{}) (next []string, ok bool) {
-	switch ev["t"] {
-	case "icp", "dip":
-		return stringsOf(ev["b"]), true
-	case "rot", "drt":
-		cut := map[string]bool{}
-		for _, w := range stringsOf(ev["br"]) {
-			cut[w] = true
-		}
-		var kept []string
-		for _, w := range current {
-			if !cut[w] {
-				kept = append(kept, w)
-			}
-		}
-		return append(kept, stringsOf(ev["ba"])...), true
-	}
-	return current, false
-}
-
 // approvedRecordIdentities are the record identities this identity's key log
 // approves. The record identity's keys are derived from the first place in the
 // record pool, always the same one, so an attempt that failed never moves it.
@@ -199,23 +178,36 @@ func (s *CoreServer) approvedRecordIdentities(owner string) ([]string, error) {
 	}
 	configs := []config{{nil, 0}}
 	var current []string
-	for _, ev := range events {
-		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		var parsed map[string]interface{}
-		if json.Unmarshal(raw, &parsed) != nil {
-			continue
+	for i, rec := range events {
+		raw, err := drivers.DecodeRawBytes(rec.RawBytesB64)
+		if err != nil || len(raw) == 0 {
+			return nil, fmt.Errorf("event %d of the key log of %s has no readable bytes", i, owner)
 		}
-		switch parsed["t"] {
-		case "icp", "rot":
-			current, _ = witnessesAfter(current, parsed)
-			configs = append(configs, config{current, thresholdOf(parsed["bt"])})
+		// One reading of each event, by the parser the key log is judged with.
+		// An event it rejects is an error: it could be the rotation that changed
+		// the witnesses, and a log read past it would be a different log.
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return nil, fmt.Errorf("event %d of the key log of %s is not readable: %w", i, owner, err)
 		}
-		seals, _ := parsed["a"].([]interface{})
-		for _, x := range seals {
-			if seal, ok := x.(map[string]interface{}); ok && seal["s"] == "0" {
-				i, _ := seal["i"].(string)
+		if ev.Ilk == "icp" || ev.Ilk == "rot" {
+			current, _ = drivers.WitnessesAfter(current, ev)
+			toad := 0
+			if ev.HasTOAD && ev.TOAD <= math.MaxInt32 {
+				toad = int(ev.TOAD)
+			}
+			configs = append(configs, config{current, toad})
+		}
+		// The seals are the one thing the parsed event does not carry.
+		var anchored struct {
+			Seals []map[string]interface{} `json:"a"`
+		}
+		_ = json.Unmarshal(raw, &anchored)
+		for _, seal := range anchored.Seals {
+			if seal["s"] == "0" {
+				id, _ := seal["i"].(string)
 				d, _ := seal["d"].(string)
-				sealed[i] = d
+				sealed[id] = d
 			}
 		}
 	}

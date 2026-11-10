@@ -749,7 +749,7 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		// The witness set now in force, read back off the event rather than
 		// recomputed here. The event is what everyone else will read, so
 		// anything this engine believes that the event does not say is wrong.
-		id.Witnesses = witnessesAfter(id.Witnesses, ev)
+		id.Witnesses, _ = drivers.WitnessesAfter(id.Witnesses, ev)
 		id.Toad = witnessThreshold(ev)
 	}); err != nil {
 		return nil, err
@@ -1107,7 +1107,8 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 		case "icp", "dip":
 			witnesses, toad = ev.Witnesses, witnessThreshold(ev)
 		case "rot", "drt":
-			witnesses, toad = witnessesAfter(witnesses, ev), witnessThreshold(ev)
+			witnesses, _ = drivers.WitnessesAfter(witnesses, ev)
+			toad = witnessThreshold(ev)
 		}
 		// The key in force is the one the last establishment event names,
 		// whatever the caller says: every event appended from here must be
@@ -1164,29 +1165,4 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 		KelEvents:      len(entries),
 		Status:         status,
 	}, nil
-}
-
-// witnessesAfter applies a rotation's cuts and adds to the set that preceded it.
-//
-// Taken from the event rather than from the request, so that what this engine
-// believes about an identity cannot drift from what the identity has published.
-// A rotation that says nothing about witnesses leaves the set alone.
-func witnessesAfter(prior []string, ev *keri.Event) []string {
-	if ev == nil || (len(ev.WitnessCut) == 0 && len(ev.WitnessAdd) == 0) {
-		return prior
-	}
-	cut := map[string]bool{}
-	for _, w := range ev.WitnessCut {
-		cut[w] = true
-	}
-	out := make([]string, 0, len(prior)+len(ev.WitnessAdd))
-	for _, w := range prior {
-		if !cut[w] {
-			out = append(out, w)
-		}
-	}
-	for _, w := range ev.WitnessAdd {
-		out = append(out, w)
-	}
-	return out
 }

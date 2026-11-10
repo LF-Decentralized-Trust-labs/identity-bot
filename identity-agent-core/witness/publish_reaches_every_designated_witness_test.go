@@ -34,7 +34,7 @@ func designatedOnly(t *testing.T) (s *Service, root string, keys []string, poste
 		_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: aid, WitnessKey: key})
 		keys = append(keys, key)
 	}
-	s.DesignationAfter = func(string, map[string]interface{}) ([]string, int) { return keys, 2 }
+	s.KeyLogOf = keyLog(root, inceptionOf(root, keys, 2))
 
 	var mu sync.Mutex
 	hosts := map[string]bool{}
