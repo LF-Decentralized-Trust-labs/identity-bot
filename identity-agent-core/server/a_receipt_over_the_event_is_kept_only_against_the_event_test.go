@@ -54,6 +54,16 @@ func TestAReceiptOverTheEventIsKeptOnlyAgainstTheEvent(t *testing.T) {
 	if code := post(w.witnesses[0], good, w.said); code != 201 || held() != 1 {
 		t.Fatalf("the genuine receipt: %d, kept %d", code, held())
 	}
+	// What is held is not replaced by what does not verify, or by a copy of
+	// the genuine receipt carrying another place in the list.
+	for _, junk := range []string{otherEvent, wrongIndex} {
+		if code := post(w.witnesses[0], junk, w.said); code != 422 {
+			t.Fatalf("junk offered over a held receipt: %d", code)
+		}
+	}
+	if h, _ := w.s.DataStore.GetWitnessReceipts(w.said); len(h) != 1 || h[0].CesrSignature != good {
+		t.Fatalf("the verified receipt was replaced: %+v", h)
+	}
 	// The store itself refuses one offered without its event, whichever route.
 	if err := w.s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
 		EventSAID: w.said, WitnessAID: w.witnesses[1], CesrSignature: good,

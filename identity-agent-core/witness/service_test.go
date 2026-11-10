@@ -156,7 +156,7 @@ func TestFinalizeThreshold(t *testing.T) {
 		State: FinalizePending, Threshold: 5, StartedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
 	})
 	for i := 0; i < 5; i++ {
-		s.onReceipt(said, "EW"+string(rune('0'+i)), "", nil)
+		s.onReceipt(said, "EW"+string(rune('0'+i)), "", nil, nil)
 	}
 	f, _ := s.Store.GetFinalization(said)
 	if f.State != FinalizeFinalized {

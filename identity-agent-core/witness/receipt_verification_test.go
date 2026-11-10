@@ -270,3 +270,43 @@ func TestAReceiptIsHeldToTheWitnessListItIsCheckedAgainst(t *testing.T) {
 		t.Fatal("a receipt was accepted at an index that is not the witness's place in the list")
 	}
 }
+
+// A receipt whose index is not its witness's place in the list in force is not
+// kept and not counted when it arrives: the index sits outside the signature,
+// so a copy of a genuine receipt can carry another, and the count must be the
+// one the key log check makes.
+func TestAMisIndexedReceiptIsNeitherKeptNorCountedOnArrival(t *testing.T) {
+	s, aid, raw, sig := enrolled(t)
+	out, err := s.ReceiveEvent(aid, raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := out["event_said"].(string)
+	wit := out["witness_aid"].(string)
+	good := out["cesr_signature"].(string)
+	_, at, _, err := iacrypto.DecodeIndexedEd25519SignatureQB64(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, rawSig, _ := iacrypto.DecodeIndexedEd25519SignatureQB64(good)
+	moved, err := iacrypto.MatterIndexedSigQB64("A", at+1, rawSig, 88)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := make([]string, at+1)
+	for i := range list {
+		list[i] = "BOtherWitnessKey0123456789ABCDEFGHIJKLMNOPQ"
+	}
+	list[at] = wit
+
+	now := NowRFC3339()
+	_ = s.Store.SaveFinalization(FinalizationState{EventSAID: said, SignerAID: aid, State: FinalizePending, Threshold: 1, StartedAt: now, UpdatedAt: now})
+	s.onReceipt(said, wit, moved, raw, list)
+	if f, _ := s.Store.GetFinalization(said); f.ReceiptCount != 0 {
+		t.Fatalf("a mis-indexed copy was counted: %d", f.ReceiptCount)
+	}
+	s.onReceipt(said, wit, good, raw, list)
+	if f, _ := s.Store.GetFinalization(said); f.ReceiptCount != 1 {
+		t.Fatalf("the genuine receipt was not counted: %d", f.ReceiptCount)
+	}
+}

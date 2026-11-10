@@ -1059,7 +1059,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					return
 				}
 				if sig, wit, verr := receiptFromResponse(resp, raw, said, designatedAt(allRaw, said)); verr == nil && wit == key {
-					s.onReceipt(said, key, sig, raw)
+					s.onReceipt(said, key, sig, raw, designatedAt(allRaw, said))
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -1382,7 +1382,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, sig, rawEventOf(body))
+	s.onReceipt(eventSAID, witnessAID, sig, rawEventOf(body), designated)
 }
 
 // receiptFromResponse pulls a verified receipt out of a witness's reply.
@@ -1405,10 +1405,23 @@ func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID
 	return sig, witnessAID, nil
 }
 
-func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []byte) {
+//
+// designated is the witness list in force at the event, where it is known. The
+// index of a receipt sits outside what the witness signed, so a copy of a
+// genuine receipt can carry another one; checked here, at every arrival, a
+// mis-indexed copy is neither kept nor counted, and the count agrees with the
+// one the key log check makes. Nil means the list is not known here, and the
+// index is then checked where the log is judged.
+func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []byte, designated []string) {
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil {
 		return
+	}
+	if len(rawEvent) > 0 {
+		if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, cesrSig, designated); err != nil {
+			log.Printf("[witness] receipt from %s for %s not counted: %v", witnessAID, eventSAID, err)
+			return
+		}
 	}
 	// Counted only once it is kept, so the count never runs ahead of the
 	// receipts anyone can be shown.
