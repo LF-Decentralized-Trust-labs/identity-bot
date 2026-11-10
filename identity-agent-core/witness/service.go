@@ -1604,12 +1604,13 @@ func (s *Service) BuildStatus() (*StatusResponse, error) {
 	}
 	for _, c := range contacts {
 		if c.IsWitness {
-			entry := WitnessEntry{AID: c.AID, Alias: c.Alias}
+			entry := WitnessEntry{AID: c.AID, Alias: c.Alias, Class: ClassPeer}
 			if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil {
 				entry.BackendType = meta.BackendType
 				entry.Status = meta.WitnessStatus
 				entry.IsMutual = meta.IsMutual
 				entry.IsCommercial = meta.IsCommercial
+				entry.Class = ClassOf(meta.IsCommercial)
 				entry.OfflineCount = meta.OfflineCount
 				entry.LastReceiptAt = meta.LastReceiptAt
 			}

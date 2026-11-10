@@ -54,6 +54,24 @@ const (
 	BackendCommercial = "commercial"
 )
 
+// A witness is one of two classes (ADR-069). The class is what a person is
+// told when they are told who their witnesses are, and what is sent on the
+// wire; IsCommercial remains alongside it for clients that read the boolean.
+const (
+	// ClassPeer is another Identity Agent acting as a witness for a contact.
+	ClassPeer = "PEER"
+	// ClassCommercial is a Service Provider running witnessing as a product.
+	ClassCommercial = "COMMERCIAL"
+)
+
+// ClassOf names the class of a witness from its commercial flag.
+func ClassOf(isCommercial bool) string {
+	if isCommercial {
+		return ClassCommercial
+	}
+	return ClassPeer
+}
+
 const (
 	StatusOnline  = "online"
 	StatusOffline = "offline"
@@ -228,6 +246,7 @@ type WitnessEntry struct {
 	Status        string `json:"status"`
 	IsMutual      bool   `json:"is_mutual"`
 	IsCommercial  bool   `json:"is_commercial"`
+	Class         string `json:"class"` // ClassPeer or ClassCommercial
 	OfflineCount  int    `json:"offline_count"`
 	LastReceiptAt string `json:"last_receipt_at,omitempty"`
 }
