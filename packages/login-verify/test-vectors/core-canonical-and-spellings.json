@@ -580,6 +580,14 @@
       "bound_issuer_aids": [
         "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
       ]
+    },
+    {
+      "name": "a credential whose top-level issuer key is spelled \\u0069",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EH7_lHLuCD6lN6vwOFQxrB5GdhyrR0Gppt4VCsKgq85F\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EH7_lHLuCD6lN6vwOFQxrB5GdhyrR0Gppt4VCsKgq85F\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1YV8iLCJkIjoiRUg3X2xITHVDRDZsTjZ2d09GUXhyQjVHZGh5clIwR3BwdDRWQ3NLZ3E4NUYiLCJcdTAwNjkiOiJFSXNzdWVyQWlkMDEyMzQ1Njc4OUFCQ0RFRkdISUpLTE1OT1BRUlNUVVYiLCJzIjoiRUJkWHQzZ0lYT2YyQkJXTkhkU1hDSm5GSkw1T3VRUHlNNUswbmV1bmljY00iLCJhIjp7ImQiOiJFQ2dMV0Iza1A2SlNOU0pqZ3lWREYxQVM4cmpEUnN4RUVCM3dLU3ROOWdQTSIsImkiOiJFSG9sZGVyQWlkMDEyMzQ1Njc4OUFCQ0RFRkdISUpLTE1OT1BRUlNUVVYiLCJkdCI6IjIwMjYtMDYtMTdUMTI6MDA6MDAuMDAwMDAwKzAwOjAwIiwiZW1wbG95ZXIiOiJGaXJzdCJ9fQ\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     }
   ],
   "signed_assertion": {
