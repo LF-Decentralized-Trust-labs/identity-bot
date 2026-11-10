@@ -26,6 +26,10 @@ class BackupDestination {
   /// else looks.
   final bool elsewhere;
 
+  /// For a cloud destination the person manages, which service it is
+  /// (`google_drive`), so an app can tell Drive from another provider.
+  final String? cloudProvider;
+
   BackupDestination({
     required this.id,
     required this.type,
@@ -35,6 +39,7 @@ class BackupDestination {
     this.iaGated = false,
     this.enabled = true,
     this.elsewhere = false,
+    this.cloudProvider,
     this.lastSuccessAt,
     this.lastError,
   });
@@ -49,6 +54,7 @@ class BackupDestination {
       iaGated: json['ia_gated'] ?? false,
       enabled: json['enabled'] ?? true,
       elsewhere: json['elsewhere'] ?? false,
+      cloudProvider: json['cloud_provider'],
       lastSuccessAt: json['last_success_at'],
       lastError: json['last_error'],
     );
@@ -486,6 +492,62 @@ class BackupService {
     if (resp.statusCode != 200) throw Exception('Add destination failed');
   }
 
+  /// Asks the core for the Google address the app opens for the person to sign
+  /// in at. [redirectUri] is where the app will catch Google's answer: a
+  /// loopback address on a desktop, the app's own reverse-DNS scheme on a phone.
+  ///
+  /// Throws [GoogleDriveNotSetUp] when this build carries no Google OAuth client
+  /// (the core says so; nothing is guessed here), and [Exception] otherwise.
+  static Future<GoogleSignInStart> startGoogleSignIn(String redirectUri) async {
+    final resp = await _client.post(
+      Uri.parse('$_base/google/start'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'redirect_uri': redirectUri}),
+    );
+    if (resp.statusCode != 200) {
+      final why = _errorDetails(resp.body);
+      if (why.contains(GoogleDriveNotSetUp.marker)) {
+        throw GoogleDriveNotSetUp(why);
+      }
+      throw Exception('Could not start Google sign-in: $why');
+    }
+    final j = jsonDecode(resp.body) as Map<String, dynamic>;
+    return GoogleSignInStart(
+        authUrl: j['auth_url'] as String, state: j['state'] as String);
+  }
+
+  /// Hands the core the code Google returned to the app, and gets back the
+  /// Drive destination it made. [redirectUri] must be the one the sign-in
+  /// started with.
+  static Future<BackupDestination> completeGoogleSignIn({
+    required String state,
+    required String code,
+    required String redirectUri,
+  }) async {
+    final resp = await _client.post(
+      Uri.parse('$_base/google/complete'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(
+          {'state': state, 'code': code, 'redirect_uri': redirectUri}),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('Google sign-in failed: ${_errorDetails(resp.body)}');
+    }
+    return BackupDestination.fromJson(
+        (jsonDecode(resp.body) as Map<String, dynamic>)['destination']
+            as Map<String, dynamic>);
+  }
+
+  static String _errorDetails(String body) {
+    try {
+      final j = jsonDecode(body) as Map<String, dynamic>;
+      final d = j['details'];
+      return (d is String && d.isNotEmpty) ? d : '${j['error'] ?? body}';
+    } catch (_) {
+      return body;
+    }
+  }
+
   static Future<void> removeDestination(String id) async {
     final resp = await _client
         .delete(Uri.parse('$_base/destinations/${Uri.encodeComponent(id)}'));
@@ -877,4 +939,22 @@ class HolderSetupResult {
   final Map<String, String> couldNotAsk;
 
   HolderSetupResult({required this.holders, required this.couldNotAsk});
+}
+
+/// The address to open for a Google sign-in, and the state that must come back
+/// with the code.
+class GoogleSignInStart {
+  final String authUrl;
+  final String state;
+  const GoogleSignInStart({required this.authUrl, required this.state});
+}
+
+/// This build has no Google OAuth client, so Drive cannot be offered.
+class GoogleDriveNotSetUp implements Exception {
+  /// What the core says when it has no client id configured.
+  static const marker = 'not set up in this build';
+  final String reason;
+  GoogleDriveNotSetUp(this.reason);
+  @override
+  String toString() => reason;
 }

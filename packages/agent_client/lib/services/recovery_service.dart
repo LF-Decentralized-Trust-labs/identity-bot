@@ -31,11 +31,22 @@ class RecoveryVerifyResult {
   final int sectionCount;
   final List<PairwiseCheck> pairwiseChecks;
 
+  /// When the archive says it was made, read from inside it after it proved
+  /// authentic. The name it was stored under is not believed.
+  final String? archiveCreatedAt;
+
+  /// What the person must be told before going on, in the core's own words: an
+  /// archive older than one this device has seen, or named as newer than it is.
+  /// Shown as given; an app composes no warning of its own.
+  final List<String> warnings;
+
   RecoveryVerifyResult({
     required this.valid,
     this.identityAid,
     required this.sectionCount,
     required this.pairwiseChecks,
+    this.archiveCreatedAt,
+    this.warnings = const [],
   });
 
   factory RecoveryVerifyResult.fromJson(Map<String, dynamic> json) {
@@ -45,6 +56,10 @@ class RecoveryVerifyResult {
       sectionCount: json['section_count'] ?? 0,
       pairwiseChecks: (json['pairwise_checks'] as List<dynamic>? ?? [])
           .map((e) => PairwiseCheck.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      archiveCreatedAt: json['archive_created_at'],
+      warnings: (json['warnings'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
           .toList(),
     );
   }
