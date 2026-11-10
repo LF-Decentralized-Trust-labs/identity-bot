@@ -132,7 +132,10 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, grant ControllerGr
 	}
 	// The AI agent is the one on the route the app called: a statement to agent
 	// A is not delivered on agent B's route, whatever the body says.
-	agent := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[3]
+	agent, isAgent := s.theAIAgentARouteNames(strings.Split(strings.Trim(r.URL.Path, "/"), "/")[3])
+	if !isAgent {
+		return refuse(errors.New("the route does not name an AI agent of this Identity Agent that has an identifier its entries are addressed to"))
+	}
 	if st.To != agent {
 		return refuse(errors.New("the statement is to another AI agent than the one the request is sent to"))
 	}
@@ -162,4 +165,22 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, grant ControllerGr
 		return refuse(errors.New("this statement was already used"))
 	}
 	return coretypes.Signer{AID: who, Standing: "member", Asset: grant.AppAsset}, js, salt, true, nil
+}
+
+// theAIAgentARouteNames is the identifier a statement names an AI agent by, for
+// the AI agent a route names, and whether the route names one. A route names it
+// by its asset id, and the record, the statement and the verifier name it by the
+// identifier its entries are addressed to (the asset's pairwise_aid), never the
+// asset id. So it names none, and the request is refused, when no asset has that
+// id, when the asset is not an AI agent, when it has no identifier yet, and when
+// the asset cannot be read.
+func (s *CoreServer) theAIAgentARouteNames(id string) (string, bool) {
+	if s.assetHandler == nil {
+		return "", false
+	}
+	a, found, err := s.assetHandler.Store.GetAsset(id)
+	if err != nil || !found || a.AssetType != "ai_agent" || a.PairwiseAID == "" {
+		return "", false
+	}
+	return a.PairwiseAID, true
 }
