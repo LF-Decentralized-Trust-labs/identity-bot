@@ -156,10 +156,6 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 		}
 		resp, err := s.WatcherService.GetPublicDigest(aid, seq)
 		if err != nil {
-			if err.Error() == "opted_out" {
-				writeError(w, http.StatusNotFound, "Not found", "")
-				return
-			}
 			writeError(w, http.StatusInternalServerError, "digest lookup failed", err.Error())
 			return
 		}
@@ -201,7 +197,7 @@ func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "aid required", "")
 		return
 	}
-	rows, err := s.WatcherService.Store.ListFirstSeen(aid)
+	rows, err := s.WatcherService.DisclosableAll(aid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
 		return
