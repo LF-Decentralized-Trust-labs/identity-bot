@@ -117,21 +117,9 @@ func (e *Engine) prepareRegistry(id *identity) (*drivers.PreparedRegistry, error
 	if err != nil {
 		return nil, err
 	}
-	e.state.mu.RLock()
-	prior, sn := id.LastSAID, id.SN+1
-	e.state.mu.RUnlock()
-	ixn, err := keri.BuildInteraction(keri.InteractionInput{
-		Prefix:    id.AID,
-		PriorSAID: prior,
-		SN:        sn,
-		Data:      []json.RawMessage{seal},
-	})
+	ixn, ixnEvent, prior, err := e.prepareAnchoring(id, seal)
 	if err != nil {
 		return nil, fmt.Errorf("anchoring the registry: %w", err)
-	}
-	ixnEvent, err := keri.ParseEvent(ixn)
-	if err != nil {
-		return nil, err
 	}
 	return &drivers.PreparedRegistry{Issuer: id.AID, Registry: registrySAID, VcpRaw: vcp, VcpSAID: vcpEvent.SAID,
 		IxnRaw: ixn, IxnSAID: ixnEvent.SAID, SN: int(ixnEvent.SN), Prior: prior}, nil
@@ -141,12 +129,51 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 	if p == nil || p.Issuer != id.AID {
 		return nil, fmt.Errorf("the prepared registry is not this identity's")
 	}
-	e.state.mu.RLock()
-	tipSAID, tipSN := id.LastSAID, id.SN
-	e.state.mu.RUnlock()
-	if p.Prior != tipSAID || p.SN != tipSN+1 {
-		return nil, drivers.ErrStalePreparation
+	registrySAID := p.Registry
+	ixnEvent, err := e.commitAnchored(id, anchoredEvent{
+		Prior: p.Prior, SN: p.SN, IxnRaw: p.IxnRaw, IxnSAID: p.IxnSAID,
+		Check:    func() (json.RawMessage, error) { return registryAnchor(p) },
+		Mismatch: "the prepared interaction does not anchor the prepared registry",
+		Sign:     e.signedWithTEL(id, p.VcpRaw),
+		Also: func() {
+			if id.Registries == nil {
+				id.Registries = map[string]*registry{}
+			}
+			id.Registries[registrySAID] = &registry{
+				SAID:         registrySAID,
+				TEL:          map[string][][]byte{},
+				IssuanceSAID: map[string]string{},
+			}
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
+	vcpBody, err := eventMap(p.VcpRaw)
+	if err != nil {
+		return nil, err
+	}
+	ixnBody, err := eventMap(p.IxnRaw)
+	if err != nil {
+		return nil, err
+	}
+	vcp, ixn := p.VcpRaw, p.IxnRaw
+
+	return &drivers.DriverRegistryInceptResponse{
+		RegistrySaid:   registrySAID,
+		VcpSaid:        p.VcpSAID,
+		VcpEvent:       vcpBody,
+		VcpJsonB64:     b64(vcp),
+		IxnSaid:        ixnEvent.SAID,
+		IxnEvent:       ixnBody,
+		SequenceNumber: int(ixnEvent.SN),
+		IxnRawBytesB64: b64(ixn),
+	}, nil
+}
+
+// registryAnchor is what a prepared registry's interaction must anchor: the
+// registry's inception, by its registry and its digest.
+func registryAnchor(p *drivers.PreparedRegistry) (json.RawMessage, error) {
 	vcpEvent, err := keri.VerifyTELEvent(p.VcpRaw)
 	if err != nil || vcpEvent.SAID != p.VcpSAID {
 		return nil, fmt.Errorf("the prepared registry inception does not verify")
@@ -162,50 +189,7 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 	if registrySAID != p.Registry {
 		return nil, fmt.Errorf("the prepared registry inception is of another registry")
 	}
-	seal, err := eventSeal(registrySAID, "0", vcpEvent.SAID)
-	if err != nil {
-		return nil, err
-	}
-	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
-	if err != nil || string(want) != string(p.IxnRaw) {
-		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared registry")
-	}
-	vcp, ixn := p.VcpRaw, p.IxnRaw
-	ixnEvent, err := keri.ParseEvent(ixn)
-	if err != nil {
-		return nil, err
-	}
-	ixnBody, err := eventMap(ixn)
-	if err != nil {
-		return nil, err
-	}
-	sig, kept, err := e.commit(id, ixnEvent.SN, ixn, vcp)
-	if err != nil {
-		return nil, err
-	}
-	if err := e.extend(id, ixn, sig, kept, func() {
-		if id.Registries == nil {
-			id.Registries = map[string]*registry{}
-		}
-		id.Registries[registrySAID] = &registry{
-			SAID:         registrySAID,
-			TEL:          map[string][][]byte{},
-			IssuanceSAID: map[string]string{},
-		}
-	}); err != nil {
-		return nil, err
-	}
-
-	return &drivers.DriverRegistryInceptResponse{
-		RegistrySaid:   registrySAID,
-		VcpSaid:        vcpEvent.SAID,
-		VcpEvent:       vcpBody,
-		VcpJsonB64:     b64(vcp),
-		IxnSaid:        ixnEvent.SAID,
-		IxnEvent:       ixnBody,
-		SequenceNumber: int(ixnEvent.SN),
-		IxnRawBytesB64: b64(ixn),
-	}, nil
+	return eventSeal(registrySAID, "0", vcpEvent.SAID)
 }
 
 // IssueCredential issues a credential without a registry.
@@ -345,21 +329,9 @@ func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid
 	if err != nil {
 		return nil, err
 	}
-	e.state.mu.RLock()
-	prior, sn := id.LastSAID, id.SN+1
-	e.state.mu.RUnlock()
-	ixn, err := keri.BuildInteraction(keri.InteractionInput{
-		Prefix:    id.AID,
-		PriorSAID: prior,
-		SN:        sn,
-		Data:      []json.RawMessage{seal},
-	})
+	ixn, ixnEvent, prior, err := e.prepareAnchoring(id, seal)
 	if err != nil {
 		return nil, fmt.Errorf("anchoring the issuance: %w", err)
-	}
-	ixnEvent, err := keri.ParseEvent(ixn)
-	if err != nil {
-		return nil, err
 	}
 	p.IxnRaw, p.IxnSAID, p.SN, p.Prior = ixn, ixnEvent.SAID, int(ixnEvent.SN), prior
 	return p, nil
@@ -371,41 +343,32 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 	if p == nil || p.Issuer != id.AID {
 		return nil, fmt.Errorf("the prepared issuance is not this identity's")
 	}
-	e.state.mu.RLock()
-	tipSAID, tipSN := id.LastSAID, id.SN
-	e.state.mu.RUnlock()
-	if p.Prior != tipSAID || p.SN != tipSN+1 {
-		return nil, drivers.ErrStalePreparation
-	}
-	cred, err := keri.VerifyCredential(p.AcdcRaw)
-	if err != nil || cred.SAID != p.AcdcSAID {
-		return nil, fmt.Errorf("the prepared credential does not verify")
-	}
-	ixnEvent, err := keri.ParseEvent(p.IxnRaw)
-	if err != nil || ixnEvent.SAID != p.IxnSAID || int(ixnEvent.SN) != p.SN {
-		return nil, fmt.Errorf("the prepared interaction is not what was prepared")
-	}
-	// The interaction must anchor exactly this issuance, or the pair would be
-	// appended as proof of each other when it is not.
-	seal, err := eventSeal(p.AcdcSAID, "0", firstNonEmpty(p.IssSAID, p.AcdcSAID))
-	if err != nil {
-		return nil, err
-	}
-	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
-	if err != nil || string(want) != string(p.IxnRaw) {
-		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared issuance")
-	}
-	var sig string
-	var kept func(drivers.KELKeep) error
+	sign := e.signedByEngine(id)
 	if p.Registry != "" {
-		issEvent, err := keri.VerifyTELEvent(p.IssRaw)
-		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
-			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
-		}
-		if sig, kept, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
-			return nil, err
-		}
-	} else if sig, err = e.signed(id, p.IxnRaw); err != nil {
+		sign = e.signedWithTEL(id, p.IssRaw)
+	}
+	ixnEvent, err := e.commitAnchored(id, anchoredEvent{
+		Prior: p.Prior, SN: p.SN, IxnRaw: p.IxnRaw, IxnSAID: p.IxnSAID,
+		Check:    func() (json.RawMessage, error) { return issuanceAnchor(p) },
+		Mismatch: "the prepared interaction does not anchor the prepared issuance",
+		Sign:     sign,
+		Also: func() {
+			if p.Registry == "" {
+				return
+			}
+			if id.Registries == nil {
+				id.Registries = map[string]*registry{}
+			}
+			reg := id.Registries[p.Registry]
+			if reg == nil {
+				reg = &registry{SAID: p.Registry, TEL: map[string][][]byte{}, IssuanceSAID: map[string]string{}}
+				id.Registries[p.Registry] = reg
+			}
+			reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.IssRaw)
+			reg.IssuanceSAID[p.AcdcSAID] = p.IssSAID
+		},
+	})
+	if err != nil {
 		return nil, err
 	}
 	acdcBody, err := eventMap(p.AcdcRaw)
@@ -414,23 +377,6 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 	}
 	ixnBody, err := eventMap(p.IxnRaw)
 	if err != nil {
-		return nil, err
-	}
-	if err := e.extend(id, p.IxnRaw, sig, kept, func() {
-		if p.Registry == "" {
-			return
-		}
-		if id.Registries == nil {
-			id.Registries = map[string]*registry{}
-		}
-		reg := id.Registries[p.Registry]
-		if reg == nil {
-			reg = &registry{SAID: p.Registry, TEL: map[string][][]byte{}, IssuanceSAID: map[string]string{}}
-			id.Registries[p.Registry] = reg
-		}
-		reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.IssRaw)
-		reg.IssuanceSAID[p.AcdcSAID] = p.IssSAID
-	}); err != nil {
 		return nil, err
 	}
 
@@ -446,6 +392,22 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 		IssSaid:        p.IssSAID,
 		IssRawBytesB64: b64(p.IssRaw),
 	}, nil
+}
+
+// issuanceAnchor is what a prepared issuance's interaction must anchor: the
+// issuance event in the registry, or the credential itself with no registry.
+func issuanceAnchor(p *drivers.PreparedIssuance) (json.RawMessage, error) {
+	cred, err := keri.VerifyCredential(p.AcdcRaw)
+	if err != nil || cred.SAID != p.AcdcSAID {
+		return nil, fmt.Errorf("the prepared credential does not verify")
+	}
+	if p.Registry != "" {
+		issEvent, err := keri.VerifyTELEvent(p.IssRaw)
+		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
+			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
+		}
+	}
+	return eventSeal(p.AcdcSAID, "0", firstNonEmpty(p.IssSAID, p.AcdcSAID))
 }
 
 // RevokeCredential records that a credential is no longer valid.
@@ -530,16 +492,9 @@ func (e *Engine) prepareRevocation(id *identity, acdcSaid, registrySaid, issSaid
 	if err != nil {
 		return nil, err
 	}
-	e.state.mu.RLock()
-	prior, sn := id.LastSAID, id.SN+1
-	e.state.mu.RUnlock()
-	ixn, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: prior, SN: sn, Data: []json.RawMessage{seal}})
+	ixn, ixnEvent, prior, err := e.prepareAnchoring(id, seal)
 	if err != nil {
 		return nil, fmt.Errorf("anchoring the revocation: %w", err)
-	}
-	ixnEvent, err := keri.ParseEvent(ixn)
-	if err != nil {
-		return nil, err
 	}
 	return &drivers.PreparedRevocation{Issuer: id.AID, Registry: registrySaid, AcdcSAID: acdcSaid, IssSAID: issSaid,
 		RevRaw: rev, RevSAID: revEvent.SAID, IxnRaw: ixn, IxnSAID: ixnEvent.SAID, SN: int(ixnEvent.SN), Prior: prior}, nil
@@ -551,27 +506,19 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 	if p == nil || p.Issuer != id.AID {
 		return nil, fmt.Errorf("the prepared revocation is not this identity's")
 	}
-	e.state.mu.RLock()
-	tipSAID, tipSN := id.LastSAID, id.SN
-	e.state.mu.RUnlock()
-	if p.Prior != tipSAID || p.SN != tipSN+1 {
-		return nil, drivers.ErrStalePreparation
-	}
-	revEvent, err := keri.VerifyTELEvent(p.RevRaw)
-	if err != nil || revEvent.SAID != p.RevSAID || revEvent.Subject != p.AcdcSAID {
-		return nil, fmt.Errorf("the prepared revocation is not this credential's")
-	}
-	seal, err := eventSeal(p.AcdcSAID, "1", p.RevSAID)
+	ixnEvent, err := e.commitAnchored(id, anchoredEvent{
+		Prior: p.Prior, SN: p.SN, IxnRaw: p.IxnRaw, IxnSAID: p.IxnSAID,
+		Check:    func() (json.RawMessage, error) { return revocationAnchor(p) },
+		Mismatch: "the prepared interaction does not anchor the prepared revocation",
+		Sign:     e.signedWithTEL(id, p.RevRaw),
+		Also: func() {
+			if reg := id.Registries[p.Registry]; reg != nil {
+				reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
+			}
+		},
+	})
 	if err != nil {
 		return nil, err
-	}
-	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
-	if err != nil || string(want) != string(p.IxnRaw) {
-		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared revocation")
-	}
-	ixnEvent, err := keri.ParseEvent(p.IxnRaw)
-	if err != nil || ixnEvent.SAID != p.IxnSAID {
-		return nil, fmt.Errorf("the prepared interaction is not what was prepared")
 	}
 	revBody, err := eventMap(p.RevRaw)
 	if err != nil {
@@ -579,17 +526,6 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 	}
 	ixnBody, err := eventMap(p.IxnRaw)
 	if err != nil {
-		return nil, err
-	}
-	sig, kept, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
-	if err != nil {
-		return nil, err
-	}
-	if err := e.extend(id, p.IxnRaw, sig, kept, func() {
-		if reg := id.Registries[p.Registry]; reg != nil {
-			reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
-		}
-	}); err != nil {
 		return nil, err
 	}
 	return &drivers.DriverRevokeCredentialResponse{
@@ -604,6 +540,16 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 		IxnRawBytesB64: b64(p.IxnRaw),
 		SequenceNumber: int(ixnEvent.SN),
 	}, nil
+}
+
+// revocationAnchor is what a prepared revocation's interaction must anchor:
+// the revocation event, by its credential and its digest.
+func revocationAnchor(p *drivers.PreparedRevocation) (json.RawMessage, error) {
+	revEvent, err := keri.VerifyTELEvent(p.RevRaw)
+	if err != nil || revEvent.SAID != p.RevSAID || revEvent.Subject != p.AcdcSAID {
+		return nil, fmt.Errorf("the prepared revocation is not this credential's")
+	}
+	return eventSeal(p.AcdcSAID, "1", p.RevSAID)
 }
 
 // CredentialLog returns a credential's transaction log, in order, as the bytes

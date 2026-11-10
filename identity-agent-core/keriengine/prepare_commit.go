@@ -193,6 +193,13 @@ func (e *Engine) Prepare(req PrepareRequest) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
+	return e.prepareFor(id, req)
+}
+
+// prepareFor is Prepare for an identity already found, a rotation or an
+// interaction, so a caller that holds the identity for writing builds on the
+// same log it holds.
+func (e *Engine) prepareFor(id *identity, req PrepareRequest) (*Prepared, error) {
 	e.state.mu.RLock()
 	entries := append([]kelEntry(nil), id.KEL...)
 	witnesses := append([]string(nil), id.Witnesses...)
@@ -341,6 +348,21 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 		return nil, err
 	}
 	defer release()
+	return e.commitHeld(id, ev, raw, sigs, keep, commitOptions{})
+}
+
+// commitOptions are what a caller inside the core adds to Commit.
+type commitOptions struct {
+	// also runs, under the state lock, for whatever else the event changes.
+	also func()
+	// refuseWaiting refuses an event short only of signatures rather than
+	// holding it for the rest: the caller has no other signer to wait for.
+	refuseWaiting bool
+}
+
+// commitHeld is Commit for a rotation or an interaction, with its identity
+// already held for writing by the caller.
+func (e *Engine) commitHeld(id *identity, ev *keri.Event, raw []byte, sigs []string, keep func(drivers.KELKeep) error, opts commitOptions) (*CommitResult, error) {
 	if ev.Identifier != id.AID {
 		return nil, fmt.Errorf("the event belongs to %s, not %s", ev.Identifier, id.AID)
 	}
@@ -436,6 +458,9 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 			id.Witnesses = witnessesAfter(id.Witnesses, ev)
 			id.Toad = witnessThreshold(ev)
 		}
+		if opts.also != nil {
+			opts.also()
+		}
 	})
 	var na *ErrNotAuthorised
 	var ve *keri.ValidationError
@@ -446,7 +471,7 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 	// Held only when what is missing is signatures: right ones, too few.
 	shortOnlyOfSignatures := errors.As(err, &na) && !na.BadSignature && errors.As(na.Err, &ve) &&
 		ve.Has(keri.FaultThresholdNotMet) && onlyFaults(ve, keri.FaultThresholdNotMet)
-	if shortOnlyOfSignatures && len(keys) > 1 {
+	if shortOnlyOfSignatures && len(keys) > 1 && !opts.refuseWaiting {
 		// Signatures that are right and too few: an event with several
 		// signers waits for the rest.
 		signed, ok := signaturesVerify(raw, indexed, keys)
