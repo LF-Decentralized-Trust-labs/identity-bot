@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-
-	"identity-agent-core/drivers"
 )
 
 // SubmitToWitness sends one event to one witness and returns its receipt.
@@ -35,7 +33,7 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	}
 	// Checked, not assumed. A reply that does not carry a receipt covering this
 	// event is a witness that has not witnessed, whatever its status code said.
-	designated := drivers.DesignatedByInception(rawEvent)
+	designated := s.designatedInForce(signerAID, rawEvent)
 	sig, wit, err := receiptFromResponse(resp, rawEvent, said, designated)
 	if err != nil {
 		return nil, err

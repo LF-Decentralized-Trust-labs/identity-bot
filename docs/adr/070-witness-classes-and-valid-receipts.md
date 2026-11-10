@@ -28,7 +28,7 @@ The class is used in code, on the wire and in the interface, and is the thing a 
 
 Rob: *"ideally we want people to use their own cluster of witnesses (other identity agents that also serve as witnesses) because it removes centralized dependence on large witness service providers."*
 
-Commercial witnesses exist for **continuity**: confidence when a person deals with people new to their network, who have no peers yet. They are explicitly **not** architecturally required for a mature Identity Agent with many contacts. That is ADR-031's "appended, never preferred" with its reason stated: the commercial contribution is meant to shrink to nothing as the peer cluster grows. (ADR-031's pairwise exception stands: a pairwise AID takes commercial witnesses only, permanently, because on a pairwise AID the peer list is what leaks.)
+Commercial witnesses exist for **continuity**: confidence when a person deals with people new to their network, who have no peers yet. They are explicitly **not** architecturally required for a mature Identity Agent with many contacts. That is ADR-031's "appended, never preferred" with its reason stated: a person leans on their own peers first, and a commercial witness is a dependency to be grown out of, not one to be built on. ADR-031 also gives a lasting reason to keep a commercial witness: on a pairwise AID the peer list is what leaks, so it takes commercial witnesses only, permanently. (ADR-031's pairwise exception stands: a pairwise AID takes commercial witnesses only, permanently, because on a pairwise AID the peer list is what leaks.)
 
 ### Where conformance binds
 
@@ -44,9 +44,9 @@ This is not negotiable, because it is what makes a receipt mean anything to anyo
 
 **Transport layer: may differ.** The route and envelope. Peers keep the optimised path (`/api/witness/*`, JSON envelope). The outside world gets keripy's (`POST /receipts`, `application/cesr+json`, signatures in `CESR-ATTACHMENT` headers).
 
-**Why this split.** It gives **one receipt format and two thin transports**, not two receipt formats joined by a semantic adapter. An adapter translates between two things that mean subtly different things, and that is where trust gaps and bugs live. A transport shim is routing and framing only. It keeps what Rob asked for, which is simplicity, no adapters, and an optimised internal architecture where an Identity Agent can be simpler than KERI has to be, while every receipt a Grape Identity Agent produces is verifiable by any KERI verifier.
+**Why this split.** It gives **one receipt format and two thin transports**, not two receipt formats joined by a semantic adapter. An adapter translates between two things that mean subtly different things, and that is where trust gaps and bugs live. A transport shim is routing and framing only. It keeps what Rob asked for, which is simplicity, no adapters, and an optimised internal architecture where an Identity Agent can be simpler than KERI has to be, while every receipt an Identity Agent produces is verifiable by any KERI verifier.
 
-The keripy-style transport for the outside world is **not built by this ADR**; it is the transport half of this decision and is tracked separately. The envelope the agents use today carries the same receipt.
+The keripy-style transport for the outside world is **not built by this ADR**; it is the transport half of this decision and is a separate piece of work. The envelope the agents use today carries the same receipt.
 
 ### Both directions must work
 
@@ -63,10 +63,6 @@ The product always states plainly what protection the user actually has. Three A
 ### Three different sevens
 
 "One, then maybe three, at most seven" was said about **default commercial witness providers shipped in the registry**, and about nothing else. It does not change either number in `identity-agent-core/witness/types.go`: `MaxWitnessSetSize = 9` caps an identity's total designated witness set including peers, and `TargetContactWitnesses = 7` is how many contact witnesses an agent aims to enrol. ADR-024's "max 9, target 7, default threshold 5" describes those, not the provider count. Nothing here lowers `MaxWitnessSetSize`. Whether the provider ceiling and the set cap should be related is a separate decision nobody has made.
-
-### Not decided here
-
-Whether "ship with one default Service Provider witness service" means one **operator** (today: grapeid.org running three instances) or one **endpoint** (a registry change cutting the default registry from three witness entries to one) is routed to Rob and unanswered. This ADR does not assume either.
 
 ## The signing payload
 
@@ -102,6 +98,6 @@ Each answers four questions: what sentence is now false, what is true instead, w
 
 ## Consequences
 
-- A receipt a Grape witness issues is accepted by keripy's own parser and verified against the controller's key log. `identity-agent-core/interop/verify_witness_receipts_with_keripy.py` is the check, and its test vectors are made by keripy itself (`make_witness_receipt_vectors.py`, `drivers/testdata/keripy_witness_receipts.json`).
+- A receipt one of our witnesses issues is accepted by keripy's own parser and verified against the controller's key log. `identity-agent-core/interop/verify_witness_receipts_with_keripy.py` is the check, and its test vectors are made by keripy itself (`make_witness_receipt_vectors.py`, `drivers/testdata/keripy_witness_receipts.json`).
 - `witnessingReport` can now reject a receipt whose index is not the witness's place in the designated list.
-- The class names exist in this ADR. Making them visible in the registry, on the wire and in the interface is follow-on work, tracked on the witness task list.
+- The class names exist in this ADR. Making the class names visible in the registry, on the wire and in the interface is follow-on work.

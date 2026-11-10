@@ -223,8 +223,10 @@ func TestAnotherIdentitysRotationDoesNotMakeTheWitnessStandDownForThisOne(t *tes
 		t.Fatal(err)
 	}
 	otherRot, otherSig := other.rotateCutting(t, bob.witnessKey)
-	if err := bob.takes(t, other.aid, otherRot, otherSig); err != nil {
-		t.Fatalf("bob would not take the other identity's rotation: %v", err)
+	// bob is cut by this rotation, so it is not among the witnesses in force
+	// after it and its receipt does not count; the witness still holds the event.
+	if err := bob.takes(t, other.aid, otherRot, otherSig); err == nil {
+		t.Fatal("a receipt from the witness the rotation cuts was counted")
 	}
 	if code := bob.confirm(t, c.aid, otherRot); code == http.StatusOK {
 		t.Fatal("another identity's rotation made the witness stand down for this one")
@@ -243,8 +245,10 @@ func TestTheControllersOwnSignedRotationMakesTheWitnessStandDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	rot, sig := c.rotateCutting(t, bob.witnessKey)
-	if err := bob.takes(t, c.aid, rot, sig); err != nil {
-		t.Fatalf("bob would not take the controller's real rotation: %v", err)
+	// A rotation is receipted by the witnesses in force after it, so the one it
+	// cuts is not counted; it still holds the event, which is what it checks.
+	if err := bob.takes(t, c.aid, rot, sig); err == nil {
+		t.Fatal("a receipt from the witness the rotation cuts was counted")
 	}
 	if code := bob.confirm(t, c.aid, rot); code != http.StatusOK {
 		t.Fatalf("the controller's own signed rotation was refused (%d)", code)
@@ -307,8 +311,10 @@ func withdrawalBetweenTwoAgents(t *testing.T, reach func(*peerAgent) string) {
 	if err := carol.svc.ConfirmWithdrawal(ctx, "EBob", conf); err == nil {
 		t.Fatal("the witness stood down on a rotation it had never been shown")
 	}
-	if err := bob.takesAt(t, reach(bob), c.aid, rot, sig); err != nil {
-		t.Fatal(err)
+	// The rotation cuts bob, so bob's own receipt of it does not count; it
+	// still holds the event, which is what the confirmation is checked against.
+	if err := bob.takesAt(t, reach(bob), c.aid, rot, sig); err == nil {
+		t.Fatal("a receipt from the witness the rotation cuts was counted")
 	}
 	if err := carol.svc.ConfirmWithdrawal(ctx, "EBob", conf); err != nil {
 		t.Fatalf("the witness refused the controller's real rotation: %v", err)
