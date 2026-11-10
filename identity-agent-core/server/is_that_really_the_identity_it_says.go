@@ -48,9 +48,12 @@ type verifyIdentityResponse struct {
 	// PublicKey the log puts in force, for a caller that wants to check a
 	// signature against it later.
 	PublicKey string `json:"public_key,omitempty"`
+	// Sequence of the last event of the log that was proved, for the agent-at-
+	// address check, so a caller can refuse a later history that goes backwards.
+	Sequence *int64 `json:"sequence,omitempty"`
 	// Why, in words for a person, when it is not verified.
 	Why string `json:"why,omitempty"`
-	// Kind, for the agent-at-address check only: "no-answer", "different" or
+	// Kind, for the agent-at-address check only: "no-answer", "different", "not-secure" or
 	// "could-not-tell". Empty when verified.
 	Kind string `json:"kind,omitempty"`
 }

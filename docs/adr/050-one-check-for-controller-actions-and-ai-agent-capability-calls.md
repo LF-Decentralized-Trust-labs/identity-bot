@@ -54,7 +54,9 @@ opens them to a controller. They are:
 - what the key log is checked against and what the gateway trusts: adding a
   witness or watcher provider, and importing, enabling or deleting a capability;
 - speaking as the identity to another Identity Agent by a sealed request, and
-  installing software on this computer.
+  installing software on this computer, and making this computer dial an
+  address the caller names, to check who answers there (`POST
+  /api/verify/agent-at-address`, ADR-062).
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line

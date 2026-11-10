@@ -129,3 +129,67 @@ func TestAHostThatAnswersTheProofButHidesItsHistoryIsADifferentOne(t *testing.T)
 		t.Fatalf("a host answering the proof with no history behind it was reported %+v", out)
 	}
 }
+
+func askWhoIsAtKnowing(t *testing.T, asker *CoreServer, address, aid string, seq int64, key string) verifyIdentityResponse {
+	t.Helper()
+	body, _ := json.Marshal(map[string]interface{}{"address": address, "aid": aid, "known_sequence": seq, "known_key": key})
+	req := httptest.NewRequest(http.MethodPost, "/api/verify/agent-at-address", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	asker.handleVerifyAnAgentAtAnAddress(rec, req)
+	var out verifyIdentityResponse
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	return out
+}
+
+// Plain http is believed only where nobody is on the path: this computer. To any
+// other host it is refused without dialling, whatever the host would answer.
+func TestPlainHttpToAnotherHostIsRefusedWithoutDialling(t *testing.T) {
+	asker := theAsker(t)
+	for _, address := range []string{
+		"http://192.0.2.7:8080", "http://203.0.113.9", "http://box.example.com:5151",
+		"http://10.0.0.5:5151", "http://127.evil.example.com:80", "HTTP://Box.Example.com",
+	} {
+		out := askWhoIsAt(t, asker, address, "")
+		if out.Verified || out.Kind != KindNotSecure {
+			t.Errorf("%s: plain http to another host was not refused as not secure: %+v", address, out)
+		}
+	}
+	// https is not refused for its scheme (here nothing answers), and http to
+	// this computer is asked, not refused.
+	if out := askWhoIsAt(t, asker, "https://192.0.2.7:8443", ""); out.Kind == KindNotSecure {
+		t.Errorf("https was refused as not secure: %+v", out)
+	}
+	for _, address := range []string{"http://127.0.0.1:1", "http://localhost:1", "http://[::1]:1"} {
+		if out := askWhoIsAt(t, asker, address, ""); out.Kind == KindNotSecure {
+			t.Errorf("%s: http to this computer was refused as not secure", address)
+		}
+	}
+}
+
+// An identifier's log only moves forward: a host showing a history that ends
+// before the last one proved, or ends at the same event with another key, is
+// not the agent as it stands.
+func TestAHistoryThatGoesBackwardsIsRefused(t *testing.T) {
+	agent, _ := anAgentHoldingKeys(t)
+	ks, _ := agent.keySetFor(proofAgentAID)
+	plain := inceptionCommittingTo(t, proofAgentAID, ks)
+	origin := theHostOfAnAgent(t, agent, func() []map[string]interface{} { return plain })
+	asker := theAsker(t)
+
+	first := askWhoIsAt(t, asker, origin, "")
+	if !first.Verified || first.Sequence == nil || *first.Sequence != 0 {
+		t.Fatalf("the first proof did not say the sequence it proved: %+v", first)
+	}
+	if out := askWhoIsAtKnowing(t, asker, origin, proofAgentAID, 0, first.PublicKey); !out.Verified {
+		t.Fatalf("the same state was refused: %+v", out)
+	}
+	if out := askWhoIsAtKnowing(t, asker, origin, proofAgentAID, 3, first.PublicKey); out.Verified || out.Kind != KindDifferent {
+		t.Fatalf("a history that ends at 0 after 3 was proved: %+v", out)
+	}
+	if out := askWhoIsAtKnowing(t, asker, origin, proofAgentAID, 0, "DADifferentKeyThanTheOneInForce"); out.Verified {
+		t.Fatalf("the same event with another key was proved: %+v", out)
+	}
+	if out := askWhoIsAtKnowing(t, asker, origin, proofAgentAID, -1+0, first.PublicKey); !out.Verified {
+		t.Fatalf("a state older than the log was refused: %+v", out)
+	}
+}

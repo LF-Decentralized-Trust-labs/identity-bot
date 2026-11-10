@@ -258,7 +258,12 @@ computer that is only a front end) takes an address, makes a fresh challenge of
 its own, asks `/api/identity/proof` at the origin built from that address
 (`endpointrecord.OriginOf`), reads the identifier's key log from
 `/public/oobi/{aid}`, and answers `CheckKeyProof` over the whole log, with
-`kind` saying whether nothing answered or something else did. `agent_client`
+`kind` saying whether nothing answered, something else did, or the address was refused
+unasked (`not-secure`: plain http to any host but this computer, which the core
+refuses itself, because the proof is not bound to the traffic that follows). The request may carry
+the last state this computer proved (`known_sequence`, `known_key`); a history that
+ends earlier, or at the same event with another key, is refused as a rollback, and a
+proof answers with the `sequence` it proved so the caller can keep it. `agent_client`
 calls it (`proveTheAgentAt`), requires a grant and a profile to come only from
 an agent that has just proved itself, and on every launch proves the remembered
 agent again against the stored identifier (`checkTheRememberedAgent`). An app
