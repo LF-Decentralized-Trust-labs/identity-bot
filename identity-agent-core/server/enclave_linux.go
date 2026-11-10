@@ -1,12 +1,8 @@
-//go:build linux
+//go:build linux && !android
 
 package server
 
-import (
-	"os"
-
-	"identity-agent-core/secureenclave"
-)
+import "os"
 
 // detectEnclave reports what is actually protecting keys on this host.
 //
@@ -21,7 +17,10 @@ import (
 // prompts someone to go and check; a false one is relied upon. So the claim is
 // now made by the code that would do the wrapping, and the TPM fields still
 // report the hardware honestly — present, enabled, and not yet used.
-func detectEnclave() EnclaveStatusResponse {
+//
+// Not Android, although GOOS=android satisfies the linux tag: a phone has no
+// TPM, and its answer is enclave_android.go's.
+func detectEnclave(wrap seedWrapFacts) EnclaveStatusResponse {
 	present := false
 	enabled := false
 
@@ -35,10 +34,10 @@ func detectEnclave() EnclaveStatusResponse {
 		enabled = true
 	}
 
-	if secureenclave.SeedWrapAvailable() {
+	if wrap.Wrapped {
 		return EnclaveStatusResponse{
 			HardwareBacked: true,
-			BackingType:    secureenclave.SeedWrapScheme(),
+			BackingType:    wrap.Scheme,
 			BackingLabel:   "Linux TPM 2.0",
 			TpmPresent:     &present,
 			TpmEnabled:     &enabled,

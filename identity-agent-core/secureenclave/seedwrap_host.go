@@ -138,7 +138,25 @@ func declaredHostSeedWrapper() SeedWrapper {
 // (android_attestation_status.go). Checked afresh each time: the chain is a
 // signature check and a parse. The revocation list is the one input that is not
 // recomputed: it is held in memory and fetched at most once a day, never per call.
+//
+// A check that fails clears the level the last one found, so nothing goes on
+// naming hardware that the latest check did not prove.
 func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
+	f, err := w.checkAttestation()
+	if err != nil {
+		seedWrapHostMu.Lock()
+		verifiedLevel, verifiedCaveat = "", ""
+		seedWrapHostMu.Unlock()
+		return nil, err
+	}
+	seedWrapHostMu.Lock()
+	verifiedLevel = f.LevelName()
+	verifiedCaveat = f.caveat()
+	seedWrapHostMu.Unlock()
+	return f, nil
+}
+
+func (w hostedSeedWrapper) checkAttestation() (*AndroidKeyFacts, error) {
 	chain := w.host.AttestationChain()
 	if len(chain) == 0 {
 		return nil, notAttested("the app supplied no attestation chain")
@@ -156,10 +174,6 @@ func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 	if err := checkRevocation(f, attestationClock()); err != nil {
 		return nil, err
 	}
-	seedWrapHostMu.Lock()
-	verifiedLevel = f.LevelName()
-	verifiedCaveat = f.caveat()
-	seedWrapHostMu.Unlock()
 	return f, nil
 }
 
@@ -200,6 +214,21 @@ const (
 	hostedSchemePrefix = "android-keystore-"
 	hostedSchemeSuffix = "-rsa2048oaep-aes256gcm"
 )
+
+// AndroidKeystoreLevel names the Android hardware a seed-wrap scheme was
+// attested to: "strongbox" or "tee". Empty for any other scheme, including one
+// whose key could not be attested, so a caller never names hardware that was
+// not proven.
+func AndroidKeystoreLevel(scheme string) string {
+	if !(hostedSeedWrapper{}).opensScheme(scheme) {
+		return ""
+	}
+	switch level := scheme[len(hostedSchemePrefix) : len(scheme)-len(hostedSchemeSuffix)]; level {
+	case "strongbox", "tee":
+		return level
+	}
+	return ""
+}
 
 // opensScheme: this wrapper opens any seed it wrote, whichever hardware level
 // its label names. The hardware itself decides whether it can decrypt.
