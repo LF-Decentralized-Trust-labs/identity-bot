@@ -933,7 +933,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
-		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID) })
+		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, drivers.DesignatedByInception(rawEvent)) })
 	}
 	s.background(func() { s.finalizeLoop(said, threshold) })
 	return nil
@@ -993,6 +993,16 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			})
 		}
 	}
+	// A receipt's index is a position in the list in force at its event, which
+	// is not the current list for an event from before a rotation.
+	var allRaw [][]byte
+	for _, e := range events {
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil {
+			break
+		}
+		allRaw = append(allRaw, raw)
+	}
 	var wg sync.WaitGroup
 	for _, key := range designated {
 		w, ok := known[key]
@@ -1048,7 +1058,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
 					return
 				}
-				if sig, wit, verr := receiptFromResponse(resp, raw, said); verr == nil && wit == key {
+				if sig, wit, verr := receiptFromResponse(resp, raw, said, designatedAt(allRaw, said)); verr == nil && wit == key {
 					s.onReceipt(said, key, sig, raw)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
@@ -1176,7 +1186,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 		sent := s.sendBegun(signerAID)
 		if !s.background(func() {
 			defer sent()
-			s.postWithRetry(ctx, witnessEventURL(w), body, said, key)
+			s.postWithRetry(ctx, witnessEventURL(w), body, said, key, designated)
 		}) {
 			sent()
 		}
@@ -1318,7 +1328,7 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 // some number of servers had responded — not that anybody had attested to
 // anything. A witness returning 200 and no receipt finalised an event just as
 // well as one that signed it.
-func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
+func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string, designated []string) {
 	// Its own time, not the caller's: every caller starts this in the
 	// background and returns, and a caller that cancels its context on return
 	// cancelled the post before it reached the witness.
@@ -1360,7 +1370,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	//
 	// A receipt that does not check out is worse than a witness being down,
 	// because being down is visible in the count and a bad receipt is not.
-	sig, wit, verr := receiptFromResponse(resp, rawEventOf(body), eventSAID)
+	sig, wit, verr := receiptFromResponse(resp, rawEventOf(body), eventSAID, designated)
 	if verr != nil {
 		log.Printf("[witness] %s answered but its receipt does not check out: %v", witnessAID, verr)
 		return
@@ -1380,7 +1390,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 // A witness is named by a non-transferable identifier, so the identifier IS the
 // key this checks against — there is nothing to fetch and nothing that could
 // answer the fetch wrongly.
-func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string) (sig, witnessAID string, err error) {
+func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string, designated []string) (sig, witnessAID string, err error) {
 	if resp == nil {
 		return "", "", fmt.Errorf("the witness returned nothing to check")
 	}
@@ -1389,7 +1399,7 @@ func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID
 	if sig == "" || witnessAID == "" {
 		return "", "", fmt.Errorf("the reply carries no signed receipt")
 	}
-	if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, sig, nil); err != nil {
+	if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, sig, designated); err != nil {
 		return "", "", err
 	}
 	return sig, witnessAID, nil
@@ -2023,4 +2033,15 @@ func rawEventOf(body []byte) []byte {
 	}
 	raw, _ := base64.StdEncoding.DecodeString(b.EventB64)
 	return raw
+}
+
+// designatedAt is the witness list in force at the event with eventSAID in the
+// log allRaw, or nil when that cannot be read, in which case the index of a
+// receipt is not checked here and is checked where the log is judged.
+func designatedAt(allRaw [][]byte, eventSAID string) []string {
+	d, ok := drivers.DesignatedAfter(allRaw, eventSAID)
+	if !ok {
+		return nil
+	}
+	return d
 }

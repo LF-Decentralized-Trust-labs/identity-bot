@@ -1,6 +1,6 @@
 # ADR-069 — Witness classes, and a receipt any KERI verifier can check
 
-**Status:** Accepted. Supersedes ADR-016 (which was left as a stub). Corrects statements in ADR-016 and ADR-024.
+**Status:** Accepted. Supersedes three statements of ADR-016 (its "stub" status, its "max 3" cap, and its description of the receipt); the rest of ADR-016, including its endpoints and request workflow, stands. Corrects a statement in ADR-024.
 **Date:** 2026-10-24 (decisions recorded from Rob Andersen, 2026-10-15)
 
 This records decisions already made. It does not reopen them.
@@ -28,7 +28,7 @@ The class is used in code, on the wire and in the interface, and is the thing a 
 
 Rob: *"ideally we want people to use their own cluster of witnesses (other identity agents that also serve as witnesses) because it removes centralized dependence on large witness service providers."*
 
-Commercial witnesses exist for **continuity**: confidence when a person deals with people new to their network, who have no peers yet. They are explicitly **not** architecturally required for a mature Identity Agent with many contacts. That is ADR-031's "appended, never preferred" with its reason stated: the commercial contribution is meant to shrink to nothing as the peer cluster grows. (ADR-031's pairwise exception stands: on a pairwise AID, peers never displace commercial witnesses, because there the peer list is what leaks.)
+Commercial witnesses exist for **continuity**: confidence when a person deals with people new to their network, who have no peers yet. They are explicitly **not** architecturally required for a mature Identity Agent with many contacts. That is ADR-031's "appended, never preferred" with its reason stated: the commercial contribution is meant to shrink to nothing as the peer cluster grows. (ADR-031's pairwise exception stands: a pairwise AID takes commercial witnesses only, permanently, because on a pairwise AID the peer list is what leaks.)
 
 ### Where conformance binds
 
@@ -82,22 +82,22 @@ Receipts already stored were signed under the old rule and verify under the old 
 - **Readers accept both, told apart by the signature itself** (an indexed `A` signature is the current form, an unindexed `0B` is the old one), so no stored receipt is re-issued or re-signed and a witness that has not been upgraded keeps working. The old form is verified exactly as before, over the SAID string.
 - **The old reader is removed** once no witness in service still sends it. It is not kept as a permanent second format. Removing it is tracked as the end of this migration.
 - **Order of deployment: readers first.** An agent that has not yet got this change cannot verify a current-form receipt. That is accepted before release, and the order to follow after it is to upgrade agents, then the hosted witness service.
-- **Existing hosted-service and Python-driver copies** (`sp-witness-watcher` `internal/api/server.go`, `drivers/keri-core/server.py`) still write and verify the old form. They are not in this repository and move in the same release train (operating rule 7a). Until they do, the hosted service's receipts are read through the old-form reader, and receipts our agent issues are not checked by them.
+- **Other implementations of a witness** must adopt the same form. Until one does, it keeps writing the old form, which readers accept, and receipts our agent issues are not checked by it.
 
 A current-form receipt has to be checked against the event it signed, so a receipt is stored alongside nothing but its signature and is verified wherever the event is at hand: when counting receipts against a key log, when a bundle is verified, and when a receipt is first saved with its event. Read back with no event, a stored receipt is checked only for being a well-formed indexed signature by a witness that is its own key.
 
 ## Claims this retires
 
-To be registered in `strategy/4-System/superseded-claims.md` in the same change (operating rule 8b). Each answers the four questions.
+Each answers four questions: what sentence is now false, what is true instead, where it was decided, and where the old wording is still legitimately allowed.
 
-1. **"The witness protocol is a stub; full implementation deferred to Sprint 4"** (ADR-016 status). False: enrolment, requests, receipts, finalisation and withdrawal are built. True instead: ADR-016's endpoints are the protocol, as amended by its own dated amendments and this ADR. Decided here. Allowed still: ADR-016's own history.
+1. **"The witness protocol is a stub; full implementation deferred to Sprint 4"** (ADR-016 status). False: enrolment, requests, receipts, finalisation and withdrawal are built. True instead: ADR-016's endpoints and request workflow are the protocol and stand, as amended by its own dated amendments and, for the receipt, this ADR; only the stub status, the "max 3" cap and the receipt description are superseded. Decided here. Allowed still: ADR-016's own history.
 2. **"Max 3 witnesses concurrently"** (ADR-016, behaviour of `/api/witness/request`). False: the code's cap on identities one agent witnesses for is `MaxOutgoingWitnessing = 15`. True instead: 15, and an identity's own witness set is capped at `MaxWitnessSetSize = 9`. Decided here, from the code. Allowed still: nowhere.
 3. **"The service returns a CESR receipt"** (ADR-024, witness service). False: it returned a JSON object that was not a KERI receipt. True instead: it returns the five-field `rct` and an indexed signature over the event bytes, in the agents' JSON envelope; the CESR transport is separate and not yet built. Decided here. Allowed still: the description of the keripy transport as the outside-world route.
 4. **"A receipt is `v: KERI10JSON`, `i` the witness, `seq`, `aid`, `dt`, signed over the SAID"** (code comments, ADR-016 text, `receiptFromResponse` callers). False: not parseable as KERI. True instead: the five-field `rct`, `i` the controller, signed over the event bytes with an indexed signature. Decided here. Allowed still: the migration reader's comments, and this ADR.
 
 ## Corrections made in this change
 
-- ADR-016 is marked superseded by this ADR and its "max 3" is corrected to the code's value.
+- ADR-016's status line says which three statements this ADR supersedes, and its "max 3" is corrected to the code's value.
 - ADR-024's "returns a CESR receipt" is corrected to say what it returns.
 
 ## Consequences

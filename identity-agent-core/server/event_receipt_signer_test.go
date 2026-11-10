@@ -13,12 +13,18 @@ import (
 // in the form the agent does: an indexed signature over the event's bytes. The
 // index is 0 whatever the event's witness list, which these tests do not set.
 func receiptSignerFor(signer keri.Signer, key string) func([]byte, []string) (string, string, error) {
-	return func(raw []byte, _ []string) (string, string, error) {
+	return func(raw []byte, designated []string) (string, string, error) {
 		sig, err := signer.Sign(raw)
 		if err != nil {
 			return "", "", err
 		}
-		q, err := iacrypto.MatterIndexedSigQB64("A", 0, sig, 88)
+		// Indexed by the witness's place in the list, as the real signer does;
+		// a witness the test did not designate is 0, which the real one refuses.
+		at := drivers.WitnessPosition(designated, key)
+		if at < 0 {
+			at = 0
+		}
+		q, err := iacrypto.MatterIndexedSigQB64("A", at, sig, 88)
 		return key, q, err
 	}
 }

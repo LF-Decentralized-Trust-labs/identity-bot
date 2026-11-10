@@ -26,6 +26,20 @@ import (
 // the witness it names, over the event it names.
 var ErrReceiptDoesNotVerify = fmt.Errorf("the receipt does not verify")
 
+// checkReceiptToSave is the check at the door. A receipt signed over the event
+// is kept only with the event it was checked against: a shape that decodes
+// proves nothing about what was signed, and a receipt stored on its shape alone
+// is an unverified receipt in the store for as long as it stays.
+func checkReceiptToSave(r WitnessReceiptRecord) error {
+	if drivers.IsEventSignedReceipt(r.CesrSignature) && len(r.Event) == 0 {
+		return fmt.Errorf("%w: a receipt signed over the event is kept only with the event it was checked against", ErrReceiptDoesNotVerify)
+	}
+	return checkReceipt(r)
+}
+
+// checkReceipt is the check at the door and on the way out; on the way out the
+// event is not carried, so a receipt signed over the event is checked for being
+// one at all.
 func checkReceipt(r WitnessReceiptRecord) error {
 	if drivers.IsEventSignedReceipt(r.CesrSignature) {
 		// Signed over the event's bytes, which this record carries when it is

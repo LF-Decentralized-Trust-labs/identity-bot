@@ -427,6 +427,42 @@ func WitnessingOf(in ValidateKELInput, eventSAID string) (EventWitnessing, bool)
 	return EventWitnessing{}, false
 }
 
+// DesignatedAfter is the witness list in force once the event with eventSAID
+// has been applied to the log rawEvents: the inception's list, amended by each
+// rotation up to and including that event. This is the list a witness's index
+// is a position in. False when the event is not in the log or an event before
+// it does not parse.
+func DesignatedAfter(rawEvents [][]byte, eventSAID string) ([]string, bool) {
+	var designated []string
+	for _, raw := range rawEvents {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return nil, false
+		}
+		switch ev.Ilk {
+		case "icp", "dip":
+			designated = append([]string(nil), ev.Witnesses...)
+		case "rot", "drt":
+			designated = amendWitnesses(designated, ev.WitnessCut, ev.WitnessAdd)
+		}
+		if ev.SAID == eventSAID {
+			return designated, true
+		}
+	}
+	return nil, false
+}
+
+// DesignatedByInception is the witness list an event names for itself, which
+// is all that can be said of it without its log: an inception's own list. Nil
+// for any other event, whose list depends on the events before it.
+func DesignatedByInception(rawEvent []byte) []string {
+	ev, err := keri.ParseEvent(rawEvent)
+	if err != nil || (ev.Ilk != "icp" && ev.Ilk != "dip") {
+		return nil
+	}
+	return append([]string{}, ev.Witnesses...)
+}
+
 // witnessingReport works out, for each event, who was designated to witness it
 // and how many of those actually did.
 //

@@ -237,6 +237,36 @@ func TestTheIssuedReceiptIsSignedOverTheEventBytes(t *testing.T) {
 }
 
 func receiptCheck(resp map[string]interface{}, raw []byte, said string) error {
-	_, _, err := receiptFromResponse(resp, raw, said)
+	_, _, err := receiptFromResponse(resp, raw, said, nil)
 	return err
+}
+
+// A reply's receipt is held to the witness list it is checked against: its
+// index is the witness's place in that list, so a list that puts the witness
+// elsewhere refuses it, and one that puts it where the index says takes it.
+func TestAReceiptIsHeldToTheWitnessListItIsCheckedAgainst(t *testing.T) {
+	s, aid, raw, sig := enrolled(t)
+	out, err := s.ReceiveEvent(aid, raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := out["event_said"].(string)
+	wit := out["witness_aid"].(string)
+	_, at, _, err := iacrypto.DecodeIndexedEd25519SignatureQB64(out["cesr_signature"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := "BOtherWitnessKey0123456789ABCDEFGHIJKLMNOPQ"
+	right := make([]string, at+1)
+	for i := range right {
+		right[i] = other
+	}
+	right[at] = wit
+	if _, _, err := receiptFromResponse(out, raw, said, right); err != nil {
+		t.Fatalf("a receipt at its place in the list was refused: %v", err)
+	}
+	wrong := append([]string{other, other}, right...)
+	if _, _, err := receiptFromResponse(out, raw, said, wrong); err == nil {
+		t.Fatal("a receipt was accepted at an index that is not the witness's place in the list")
+	}
 }

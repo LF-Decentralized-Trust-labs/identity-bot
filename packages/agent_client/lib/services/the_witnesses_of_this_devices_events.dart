@@ -267,7 +267,7 @@ class TheWitnessesOfThisDevicesEvents {
     if (body['witness_aid'] != w ||
         body['event_said'] != digest ||
         sig is! String ||
-        !await _km.isReceipt(w, digest, sig)) {
+        !await _km.isReceipt(w, digest, sig, eventB64: bytesB64)) {
       return (_Answer.unreached, null);
     }
     return (_Answer.receipted, sig);

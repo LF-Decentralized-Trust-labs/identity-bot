@@ -1,6 +1,6 @@
 # ADR-016: Witness Protocol — Inter-Agent Witness Request Workflow
 
-**Status:** Superseded by ADR-069 (2026-10-24). Was marked a stub; the protocol below is built, and ADR-069 records the witness classes and the receipt form.
+**Status:** Accepted. Three statements are superseded by ADR-069 (2026-10-24): that this is a stub, that at most 3 witnesses are served concurrently, and the description of the receipt. The endpoints and request workflow below stand.
 **Date:** 2026-03-21
 
 ## Context

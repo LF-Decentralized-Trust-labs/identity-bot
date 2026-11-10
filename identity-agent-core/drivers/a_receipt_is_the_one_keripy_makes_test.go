@@ -22,6 +22,21 @@ type vector struct {
 		ReceiptB64 string `json:"receipt_b64"`
 		Attachment string `json:"attachment"`
 	} `json:"receipts"`
+	// Later events of the same log: a rotation that changed the witness list,
+	// and an event whose sequence number is written in hex.
+	Later []struct {
+		SN        int      `json:"sn"`
+		EventSAID string   `json:"event_said"`
+		EventB64  string   `json:"event_b64"`
+		Witnesses []string `json:"witnesses"`
+		Receipts  []struct {
+			Witness    string `json:"witness"`
+			SeedB64    string `json:"seed_b64"`
+			Index      int    `json:"index"`
+			ReceiptB64 string `json:"receipt_b64"`
+			Attachment string `json:"attachment"`
+		} `json:"receipts"`
+	} `json:"later"`
 }
 
 func loadVector(t *testing.T) (vector, []byte) {
@@ -169,5 +184,79 @@ func TestWriteOurReceiptsForKeripyToJudge(t *testing.T) {
 	})
 	if err := os.WriteFile(out, cases, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A later event's receipt is keripy's too: the sequence number is written in
+// lowercase hex (26 is "1a"), and after a rotation cut a witness the one that
+// is left stands at index 0, where it stood at 1 before.
+func TestKeripysReceiptsOfLaterEventsAreOurs(t *testing.T) {
+	v, _ := loadVector(t)
+	if len(v.Later) < 2 {
+		t.Fatal("the vectors carry no later events")
+	}
+	for _, e := range v.Later {
+		raw, _ := base64.StdEncoding.DecodeString(e.EventB64)
+		for _, r := range e.Receipts {
+			want, _ := base64.StdEncoding.DecodeString(r.ReceiptB64)
+			got, err := ReceiptMessage(v.Controller, uint64(e.SN), e.EventSAID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(want) {
+				t.Fatalf("receipt of sn %d differs from keripy's:\n ours   %s\n keripy %s", e.SN, got, want)
+			}
+			seed, _ := base64.StdEncoding.DecodeString(r.SeedB64)
+			sig, err := SignEventReceipt(raw, seed, r.Index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sig != indexedSigOf(t, r.Attachment) {
+				t.Fatalf("signature at sn %d differs from keripy's", e.SN)
+			}
+			if err := VerifyEventReceipt(r.Witness, raw, e.EventSAID, sig, e.Witnesses); err != nil {
+				t.Fatalf("keripy's receipt of sn %d is refused: %v", e.SN, err)
+			}
+			// The list before the rotation puts this witness elsewhere.
+			if VerifyEventReceipt(r.Witness, raw, e.EventSAID, sig, v.Witnesses) == nil {
+				t.Fatalf("a receipt indexed for the rotated list was accepted against the list before it")
+			}
+		}
+	}
+	if string(mustReceipt(t, v, 26)) == "" || !strings.Contains(string(mustReceipt(t, v, 26)), `"s":"1a"`) {
+		t.Fatal("sequence number 26 is not written as 1a")
+	}
+}
+
+func mustReceipt(t *testing.T, v vector, sn uint64) []byte {
+	t.Helper()
+	b, err := ReceiptMessage(v.Controller, sn, v.EventSAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// The list in force at an event is the inception's, amended by each rotation.
+func TestTheListInForceAtAnEventIsCarriedThroughRotations(t *testing.T) {
+	v, icp := loadVector(t)
+	rot, _ := base64.StdEncoding.DecodeString(v.Later[0].EventB64)
+	log := [][]byte{icp, rot}
+	at0, ok := DesignatedAfter(log, v.EventSAID)
+	if !ok || len(at0) != 2 || at0[0] != v.Witnesses[0] || at0[1] != v.Witnesses[1] {
+		t.Fatalf("at the inception: %v %v", at0, ok)
+	}
+	at1, ok := DesignatedAfter(log, v.Later[0].EventSAID)
+	if !ok || len(at1) != 1 || at1[0] != v.Later[0].Witnesses[0] {
+		t.Fatalf("after the rotation: %v %v", at1, ok)
+	}
+	if _, ok := DesignatedAfter(log, "ENotInTheLog"); ok {
+		t.Fatal("an event that is not in the log has a list")
+	}
+	if got := DesignatedByInception(icp); len(got) != 2 {
+		t.Fatalf("an inception names its own list: %v", got)
+	}
+	if DesignatedByInception(rot) != nil {
+		t.Fatal("a rotation's list depends on the log, not on itself")
 	}
 }

@@ -36,6 +36,7 @@ with habbing.openHby(name="ctl", temp=True, salt=salt(b"0123456789abcdef")) as h
     msg = ctl.makeOwnEvent(sn=0)
     serder = serdering.SerderKERI(raw=bytes(msg))
     receipts = []
+    inception_wits = list(ctl.kever.wits)
     for hab, seed in zip((h0, h1), seeds):
         hab.psr.parse(ims=bytearray(msg))
         rct = bytes(hab.witness(serder))
@@ -48,12 +49,50 @@ with habbing.openHby(name="ctl", temp=True, salt=salt(b"0123456789abcdef")) as h
             "attachment": rct[cut:].decode(),
             "message_b64": b64(rct),
         })
+
+    def receipted(sn):
+        """Every witness in the list in force after event sn receipts it."""
+        m = ctl.makeOwnEvent(sn=sn)
+        ser = serdering.SerderKERI(raw=bytes(m))
+        out = []
+        for hab, seed in zip((h0, h1), seeds):
+            if hab.pre not in ctl.kever.wits:
+                continue
+            hab.psr.parse(ims=bytearray(m))
+            rct = bytes(hab.witness(ser))
+            cut = rct.index(b"-VA")
+            out.append({
+                "witness": hab.pre,
+                "seed_b64": b64(seed),
+                "index": ctl.kever.wits.index(hab.pre),
+                "receipt_b64": b64(rct[:cut]),
+                "attachment": rct[cut:].decode(),
+            })
+        return {
+            "sn": sn,
+            "event_said": ser.said,
+            "event_b64": b64(ser.raw),
+            "witnesses": list(ctl.kever.wits),
+            "receipts": out,
+        }
+
+    # Later events, to exercise a sequence number that is not zero and written
+    # in hex, and a witness list a rotation has changed (h0 is cut, so h1
+    # moves from index 1 to index 0).
+    later = []
+    ctl.rotate(cuts=[h0.pre], toad=1)
+    later.append(receipted(1))
+    while ctl.kever.sn < 26:
+        ctl.interact()
+    later.append(receipted(26))  # "1a" in hex
+
     json.dump({
         "keripy": "1.3.6",
         "controller": ctl.pre,
         "event_said": serder.said,
         "event_b64": b64(serder.raw),
         "event_message_b64": b64(bytes(msg)),
-        "witnesses": list(ctl.kever.wits),
+        "witnesses": inception_wits,
         "receipts": receipts,
+        "later": later,
     }, sys.stdout, indent=1)

@@ -207,17 +207,19 @@ class AWitness {
       'event_said': ev.d,
       'witness_aid': namesAnother ? qb64('B', Uint8List(32)) : aid,
       'sequence_number': ev.s,
-      'cesr_signature': forgesReceipts
-          ? qb64(
-              '0B',
-              Uint8List.fromList(ed.sign(ed.generateKey().privateKey,
-                  Uint8List.fromList(utf8.encode(ev.d)))))
-          : _sign(ev.d),
+      'cesr_signature': _receipt(forgesReceipts
+          ? ed.generateKey().privateKey
+          : _key.privateKey, base64Decode(rawB64)),
     });
   }
 
   Future<String> _ilk(SignedCopy c) async =>
       (await _km.parseEvent(base64Decode(c.rawB64))).t;
+
+  /// A receipt as keripy's Hab.witness makes one: an indexed Ed25519 signature
+  /// (code `AA`, index 0) over the serialised event.
+  String _receipt(ed.PrivateKey key, Uint8List event) =>
+      qb64('AA', Uint8List.fromList(ed.sign(key, event)));
 
   String _sign(String message) => qb64(
       '0B',

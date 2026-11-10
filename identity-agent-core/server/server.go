@@ -3036,14 +3036,16 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
 		return
 	}
-	// The event bytes the receipt is of, from the log it belongs to.
+	// The event bytes the receipt is of, from the log it belongs to, and the
+	// witness list in force at that event, which the receipt's index is a place in.
 	var rawEvent []byte
 	for _, raw := range in.RawEvents {
 		if ev, err := keri.ParseEvent(raw); err == nil && ev.SAID == req.EventSAID {
 			rawEvent = raw
 		}
 	}
-	if err := drivers.VerifyEventReceipt(req.WitnessAID, rawEvent, req.EventSAID, req.CesrSignature, nil); err != nil {
+	designated, _ := drivers.DesignatedAfter(in.RawEvents, req.EventSAID)
+	if err := drivers.VerifyEventReceipt(req.WitnessAID, rawEvent, req.EventSAID, req.CesrSignature, designated); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
 		return
 	}
@@ -3073,6 +3075,23 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	jsonreply.Write(w, http.StatusOK, resp)
+}
+
+// eventAndWitnessesOf is the bytes of the event with eventSAID and the witness
+// list in force at it, from the key log it belongs to. False when no log kept
+// here claims it.
+func (s *CoreServer) eventAndWitnessesOf(eventSAID string) ([]byte, []string, bool) {
+	in, ok := s.logOfEvent(eventSAID)
+	if !ok {
+		return nil, nil, false
+	}
+	for _, raw := range in.RawEvents {
+		if ev, err := keri.ParseEvent(raw); err == nil && ev.SAID == eventSAID {
+			designated, _ := drivers.DesignatedAfter(in.RawEvents, eventSAID)
+			return raw, designated, true
+		}
+	}
+	return nil, nil, false
 }
 
 // logOfEvent is the stored key log of the identity eventSAID belongs to, as
