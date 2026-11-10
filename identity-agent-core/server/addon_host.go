@@ -1,6 +1,9 @@
 package server
 
 import (
+	"identity-agent-core/limits"
+	"identity-agent-core/mediation"
+	"identity-agent-core/trail"
 	"sync"
 
 	"context"
@@ -58,6 +61,12 @@ func (h hostWrapper) AwaitingFor(holder string, pending bool) string {
 func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, error) {
 	return h.s.bindSigner(aid, signer)
 }
+func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
+	return h.s.endBrowserKeys(r, thumbprint, person)
+}
+func (h hostWrapper) BindAppAsset(aid string, assetID string) (ControllerGrant, error) {
+	return h.s.bindAppAsset(aid, assetID)
+}
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
 }
@@ -78,11 +87,6 @@ func (h hostWrapper) GetPublicURL(r *http.Request) string { return h.s.getPublic
 func (h hostWrapper) StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error) {
 	return h.s.startBrowserKeySignIn(assetID, audience, browserKey, publicURL)
 }
-func (h hostWrapper) OpenAppSession(appID, tokenHash, x, y string, person coretypes.Signer, expires time.Time) (string, error) {
-	return h.s.OpenAppSession(appID, tokenHash, x, y, person, expires)
-}
-func (h hostWrapper) EndAppSession(tokenHash string)        { h.s.EndAppSession(tokenHash) }
-func (h hostWrapper) EndAppSessionsOf(personAID string) int { return h.s.EndAppSessionsOf(personAID) }
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
 }
@@ -137,6 +141,10 @@ func (h hostWrapper) OpenSealedTo(aid string, sender *didcomm.DID, env *didcomm.
 func (h hostWrapper) NoteRecorded() { h.s.noteRecorded() }
 func (h hostWrapper) OwnAgentAtArrival(aid string, did *didcomm.DID) (string, error) {
 	return h.s.ownAgentAtArrival(aid, did)
+}
+func (h hostWrapper) AppLimits() limits.Limits { return h.s.AppLimits() }
+func (h hostWrapper) DeliveryQueue(t *trail.Trail) (*mediation.Queue, error) {
+	return h.s.DeliveryQueue(t)
 }
 func (h hostWrapper) OwnerAuthority() (*OwnerAuthority, error) { return h.s.ownerAuthority() }
 func (h hostWrapper) PartyConversation(convID string, party string) string {

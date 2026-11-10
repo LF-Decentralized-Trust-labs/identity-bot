@@ -169,24 +169,107 @@ signatures), and a thumbprint that must be refused. Go
     error means the asset could not be read, which is not an answer either way.
     Use it to sign out someone removed from the roster since they signed in.
 
-### A signed-in person speaks to an AI agent from the app's page
+### A signed-in person speaks to an AI agent from the app's page — SUPERSEDED
 
-*Amended 2026-11-09 by ADR-072:* withdrawn as the target. A page does not call the core. The app's back end passes the page's signed request on inside its own signed call, and the core answers no app's browser origin. What this note describes is built, and it is one of the places ADR-006 lists as not conforming yet. It moves behind the app's back end.
+**Superseded 2026-11-07 by the owner's ruling, citing ADR-006, and by ADR-072.** An Identity
+Agent core is never reached from a browser, by anyone, for anything, on any
+route: a browser cannot check the code it is served, cannot verify the machine,
+and has no enclave. This section described the opposite: an app's back end
+opened a session in the core (`OpenAppSession`, `EndAppSession`,
+`EndAppSessionsOf`), and the core admitted a request carrying the session token
+and a browser-key proof from the app's origin on the talk routes, answering
+CORS for that origin. All of it is removed: the core keeps no app-session
+registry, admits no browser credential, and answers no browser origin on any
+route.
 
-The app's back end opens a session here with the Host's `OpenAppSession(appID,
-tokenHash, x, y, person, expires)`: the SHA-256 of the session token
-(`login.BrowserSessionBinding`; never the token), the P-256 key the sign-in
-approved, the person the organisation can prove, and when it ends. The talk
-routes (`POST` and `GET /api/mcp/agents/{id}/conversations`, `GET
-/api/mcp/conversations/{cid}`) then accept, besides a paired controller, a
-request that carries the token as a bearer **and** is signed by that key
-(`login.BrowserProofString`: fresh within two minutes, used once, covering the
-method, host, target and body, so a proof made for one Identity Agent is
-no proof at another). `OpenAppSession` refuses a person who stands as the
-owner, an app id that is not an `app` asset this core hosts, and a token hash
-already in use; it also drops sessions that have ended. Such a request is never a controller and has no
-grant; `TheAppSessionThatAsked` tells a handler it came this way so it can show
-that person only what is theirs. A request whose `Origin` is not the session's
-app, a session for something that is not an `app` asset, an ended or expired
-session, and a person who no longer stands are refused. The router answers CORS
-for an origin an `app` asset lists, on those routes only.
+What stays is the sign-in above, which is browser -> app: the browser key named
+in the challenge and repeated in the person's assertion, and the app's own
+session layer that makes the browser prove it holds the key.
+
+**What the core keeps from the sign-in.** When the callback verifies an
+assertion that repeats the challenge's `browser_key`, the core records, itself,
+"key K speaks for person P at asset A until T" (P is the pairwise identifier
+the assertion proved, T is 12 hours on). The app does not write it and cannot.
+It is the only way the core learns whose a browser key is.
+
+**How a person talks to an AI agent from the app's page.** The browser talks to
+the app, and the app's back end, an enrolled machine bound to the app's asset,
+talks to the core with its own signed request, naming the person and carrying
+the statement the person's browser key signed over a salted fingerprint of
+their words (ADR-067) and that fingerprint's salt. The machine's grant is the
+app's, not one person's: it may speak for whoever the asset admits now
+(`assetStillAdmits`), so an organisation's chat app can serve all its
+employees. The core admits the request only when all of these hold, and an app
+machine that sends no statement is refused:
+
+- the statement is checked by `trail.CheckAuthor`, the same function
+  `trail.Write` runs first: well formed, the signature holds, it is for this
+  Identity Agent, and the recorded sign-in says that key speaks for that person
+  at that asset, has not lapsed, and the asset still admits them;
+- it is fresh to within `authorisation.Skew` (`trail.CheckFresh`), the rule the
+  trail and the conversation bundle hold every statement to;
+- it is for this request: its fingerprint is of the words in the body under the
+  salt, and its conversation, kind (a message or an ask), recipient, reply and
+  message id (the body's `nonce`) are the route's and the body's;
+- it has not been used before.
+
+**The browser key is P-256 and stays P-256.** The statement's signer is the
+browser key itself, in the machine-key form every other key in the core has
+(`agentbody.Verify` verifies P-256 as well as Ed25519, low-s), and the key is
+matched to the sign-in by its RFC 7638 thumbprint
+(`login.BrowserKeyThumbprintOfMachineKey`). The alternative, a sign-in naming an
+Ed25519 key, would change this ADR's wire format, its vectors and its
+TypeScript packages, and a non-extractable Ed25519 key is not available in
+every browser's WebCrypto. An Ed25519 key has no thumbprint here and speaks for
+no one.
+
+Nothing in this path reaches the core from a browser. The core's other browser
+routes, and the login widget's `/api/login/session/*` CORS, are not changed by
+it.
+
+### How long a key speaks, and what ends it early
+
+A sign-in lets its key speak for at most twelve hours (`browserKeyLife`), and
+three things can end that sooner. Each is checked when the key is used, not
+only when the person signed in.
+
+- **The app signs the person out.** The app's back end calls
+  `Host.EndBrowserKeys` with the request it signs as any controller does, naming
+  a key by its thumbprint or a person by their identifier at the asset (every key
+  of theirs ends). The asset is the one the calling machine is bound to
+  (`ControllerGrant.AppAsset`), never one the caller names, so an app can end
+  only its own asset's records. Ending only takes power away, so the app that
+  signed the person in may do it. A key whose record is gone speaks for no one;
+  speaking again takes a new sign-in.
+- **The asset stops standing behind the person.** `keysSpeakingAt` asks the
+  asset's whole gate again (`assetStillStands`): the enrolment policy's
+  membership gate and, where the policy requires a credential, that credential
+  as the person presented it at sign-in, verified again. The record keeps what
+  was presented for that (`browserKeyRecord.Presented`, only the entries of the
+  required schema). A person whose required credential has lapsed or been
+  revoked stops speaking on the next use, not at the end of the twelve hours.
+  The employee list is not the asset's answer and is not consulted.
+- **A statement works once, across a restart.** What has been used is kept in
+  `person_statements_used.json` in the data directory for as long as a statement
+  could still be fresh, so restarting the core does not make a used statement
+  usable again. A statement that cannot be marked used is refused.
+
+A statement names the conversation it is for, and the request names the same
+one: a request that names none (it would open a new conversation) matches no
+statement. A statement is for the AI agent it names, and is accepted only on
+that agent's route. A person an app spoke for is `Signer{Standing: "member",
+Asset: <asset>}`, and whether they still stand for a conversation they opened is
+the asset's answer (`personStandsAtAsset`).
+
+**What the conversation bundle shows of it.** A controller entry carries the
+person's statement (`agentmessage.ControllerProof.PersonStatement`), and the
+record is held to it: signed by the key it names, from the person the entry is
+from, naming this entry's conversation, kind, recipient, reply and message id.
+The bundle also checks it names this organisation and was signed within
+`authorisation.Skew` of when the Identity Agent took it. It cannot show that
+the machine is the back end of an app, or that the key is the person's: the
+asset is not in the machine's Controller Grant credential, so the bundle says
+that is the Identity Agent's word. Carrying it in the credential is a new
+version of the Controller Grant schema and is not part of this change.
+
+**Naming the app where the key is on another device.** Binding a machine to its app asks that device for a Controller Grant 1.2.0 naming the app, with no signed request behind it, only where it is the machine's own current 1.2.0 grant with `app_asset` added and nothing else changed (schema, holder, issuer, claims compared both ways, and edges, which are none). It is checked when asked for and again when signed. The grant it replaces is withdrawn by a second signing request asked right behind the first, since each request signs one key-log event; until the device signs that, both are in the key log and the old one is shown as withdrawing. A machine still holding a Controller Grant 1.1.0 is not covered: it falls back to the old path, where a grant waits only on a signed request.

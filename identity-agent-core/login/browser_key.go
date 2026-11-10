@@ -1,9 +1,13 @@
 package login
 
 import (
+	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"math/big"
+
+	"identity-agent-core/iacrypto"
 )
 
 // BrowserKeyThumbprintLen is the length of a thumbprint: 32 bytes, unpadded
@@ -43,3 +47,27 @@ func ThumbprintP256(x, y string) (string, error) {
 // over those bytes, and reads the challenge from the same bytes, so what it
 // reads is what was signed.
 func CanonicalChallengeBody(c ChallengeBundle) string { return canonicalChallengeBody(c) }
+
+// BrowserKeyThumbprintOfMachineKey is the thumbprint (ThumbprintP256) of a
+// P-256 key given in the form a machine key takes everywhere else in the core:
+// its verkey, QB64. It is how a key that signed a statement is matched to the
+// key a sign-in named by thumbprint (ADR-066, ADR-067). A key that is not a
+// P-256 point has no browser-key thumbprint and is refused.
+func BrowserKeyThumbprintOfMachineKey(verkey string) (string, error) {
+	raw, err := iacrypto.KeyFromMachineVerkey(verkey)
+	if err != nil {
+		return "", err
+	}
+	var x, y *big.Int
+	switch len(raw) {
+	case 33:
+		x, y = elliptic.UnmarshalCompressed(elliptic.P256(), raw)
+	case 65:
+		x, y = elliptic.Unmarshal(elliptic.P256(), raw)
+	}
+	if x == nil {
+		return "", fmt.Errorf("the key is not a P-256 point")
+	}
+	enc := func(n *big.Int) string { return base64.RawURLEncoding.EncodeToString(n.FillBytes(make([]byte, 32))) }
+	return ThumbprintP256(enc(x), enc(y))
+}

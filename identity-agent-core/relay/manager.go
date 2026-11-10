@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+	"identity-agent-core/internal/backoff"
 )
 
 // A relay is how an Identity Agent that only dials out stays reachable at an
@@ -308,14 +309,16 @@ func (m *Manager) Start(parent context.Context) error {
 // lasted longer than steadySession resets it, so a relay that drops now and
 // then is retried promptly rather than after the longest wait.
 var (
-	minBackoff    = time.Second
-	maxBackoff    = time.Minute
+	minBackoff = time.Second
+	// 64s, not 60s: the wait doubled until it reached the cap, and 32s is
+	// under a minute, so the last wait has always been 64s.
+	maxBackoff    = 64 * time.Second
 	steadySession = time.Minute
 )
 
 // run keeps the session up until ctx ends.
 func (m *Manager) run(ctx context.Context, endpoint string) {
-	backoff := minBackoff
+	attempt := 0
 	for ctx.Err() == nil {
 		started := time.Now()
 		err := m.session(ctx, endpoint)
@@ -328,17 +331,21 @@ func (m *Manager) run(ctx context.Context, endpoint string) {
 			return
 		}
 		if time.Since(started) > steadySession {
-			backoff = minBackoff
+			attempt = 0
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
+		case <-time.After(reconnectWait(attempt)):
 		}
-		if backoff < maxBackoff {
-			backoff *= 2
-		}
+		attempt++
 	}
+}
+
+// reconnectWait is how long to wait before reconnecting after attempt failed
+// tries (0 first): a second, doubling to 64 seconds.
+func reconnectWait(attempt int) time.Duration {
+	return backoff.Wait(minBackoff, maxBackoff, attempt)
 }
 
 // session holds one admitted session: dial, serve, claim the address, and

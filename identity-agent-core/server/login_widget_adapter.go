@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"identity-agent-core/asset"
@@ -310,4 +311,11 @@ func corsHeaders(w http.ResponseWriter) {
 func corsPreflight(w http.ResponseWriter, r *http.Request) {
 	corsHeaders(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sameOrigin says whether two web origins are the same, ignoring case,
+// surrounding space and a trailing slash.
+func sameOrigin(a, b string) bool {
+	norm := func(o string) string { return strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/")) }
+	return a != "" && norm(a) == norm(b)
 }

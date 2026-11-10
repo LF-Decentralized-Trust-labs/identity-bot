@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/backoff"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -59,14 +60,10 @@ const telPushTime = "2006-01-02T15:04:05.000000000Z"
 // telPushRetryGap is how long to wait after the given number of failed
 // attempts: a minute, doubling, to six hours.
 func telPushRetryGap(attempts int) time.Duration {
-	gap := telPushRetryFirst
-	for i := 1; i < attempts && gap < telPushRetryMax; i++ {
-		gap *= 2
+	if attempts < 1 {
+		attempts = 1
 	}
-	if gap > telPushRetryMax {
-		gap = telPushRetryMax
-	}
-	return gap
+	return backoff.Wait(telPushRetryFirst, telPushRetryMax, attempts-1)
 }
 
 // reportWaitingRevocations says, once per revocation per run and again whenever

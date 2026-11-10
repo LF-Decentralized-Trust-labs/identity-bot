@@ -122,6 +122,15 @@ type ControllerGrant struct {
 	// one signer is bound at its first use, while there is exactly one.
 	Signer string `json:"signer,omitempty"`
 
+	// AppAsset is the app asset this machine is the back end of, when it is
+	// one: it may then speak for the people that asset admits, each with their
+	// own signed statement (an_app_speaks_for_a_person_who_signed.go), and for
+	// no one else. A machine bound to an app has no signer it speaks as. It is
+	// set once, by the add-on that runs the app (BindAppAsset), never by a
+	// controller. Binding re-issues the machine's Controller Grant (1.2.0),
+	// which names it in app_asset, so a bundle shows which app spoke.
+	AppAsset string `json:"app_asset,omitempty"`
+
 	// CredentialSAID is the Controller Grant credential this identity issued
 	// for the machine: the same authorisation, anchored in its key log, so it
 	// can be shown to anybody and named by what is done from the machine.
@@ -439,6 +448,38 @@ func (c *controllerGrants) BindSigner(aid, signer string) (ControllerGrant, erro
 	}
 	if g.Signer == "" {
 		g.Signer = signer
+		all[g.ControllerAID] = g
+		if err := c.save(all); err != nil {
+			return ControllerGrant{}, err
+		}
+	}
+	return g, nil
+}
+
+// BindAppAsset records which app asset a machine is the back end of. Set once,
+// and only for a machine that speaks as no signer: a machine already bound to a
+// signer speaks as that person and is refused, so it can never be both the
+// person's and an app's. Binding it again to the same asset changes nothing;
+// to another is refused.
+func (c *controllerGrants) BindAppAsset(aid, assetID string) (ControllerGrant, error) {
+	grantsLock.Lock()
+	defer grantsLock.Unlock()
+	all, err := c.load()
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	g, ok := all[strings.TrimSpace(aid)]
+	if !ok {
+		return ControllerGrant{}, fmt.Errorf("no such machine")
+	}
+	if g.AppAsset != "" && g.AppAsset != assetID {
+		return ControllerGrant{}, fmt.Errorf("this machine is already the back end of another app")
+	}
+	if g.Signer != "" {
+		return ControllerGrant{}, fmt.Errorf("this machine already speaks as a signer of the organisation, so it cannot be the back end of an app")
+	}
+	if g.AppAsset == "" && assetID != "" {
+		g.AppAsset = assetID
 		all[g.ControllerAID] = g
 		if err := c.save(all); err != nil {
 			return ControllerGrant{}, err

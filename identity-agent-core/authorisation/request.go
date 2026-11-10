@@ -317,7 +317,7 @@ func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, i
 	if rests.Grant == "" && rests.GrantSchema == "" {
 		return fmt.Errorf("a machine's request with no edge to its grant")
 	}
-	if rests.GrantSchema != schemas.ControllerGrant.Schema.SAID {
+	if !schemas.IsControllerGrantSchema(rests.GrantSchema) {
 		return fmt.Errorf("the edge names a credential that is not a Controller Grant")
 	}
 	g, err := keri.VerifyCredential(in.Grant)
@@ -331,7 +331,7 @@ func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, i
 	if err := json.Unmarshal(in.Grant, &grant); err != nil {
 		return err
 	}
-	if grant.Schema != schemas.ControllerGrant.Schema.SAID {
+	if !schemas.IsControllerGrantSchema(grant.Schema) {
 		return fmt.Errorf("the grant given is not a Controller Grant")
 	}
 	if grant.Issuer != cred.Issuer {
@@ -524,7 +524,7 @@ func checkAskedFor(cred acdc, kind, method, path string, asked map[string]json.R
 			return fmt.Errorf("%s %s is not a request that grants an app anything", method, path)
 		}
 		return checkCapabilitiesAsked(cred, asked)
-	case schemas.ControllerGrant.Schema.SAID:
+	case schemas.ControllerGrant.Schema.SAID, schemas.ControllerGrantV11.Schema.SAID:
 		if method != "POST" || path != "/api/controllers" {
 			return fmt.Errorf("%s %s is not a request that grants a machine", method, path)
 		}

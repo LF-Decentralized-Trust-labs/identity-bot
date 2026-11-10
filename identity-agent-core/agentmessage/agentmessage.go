@@ -35,7 +35,6 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/login"
 )
 
 // Kinds of message.
@@ -342,18 +341,16 @@ type ControllerProof struct {
 	// rather than by this Identity Agent's word. Empty for a controller granted
 	// before machines were given one.
 	ControllerGrant string `json:"controller_grant,omitempty"`
-	// Scheme says how Signature was made. Empty is a controller's Ed25519
-	// signature. "browser-key-p256" is a key a browser holds (ADR-066): Controller
-	// is "browser:" and the key's thumbprint, PublicKey its uncompressed point in
-	// unpadded base64url, and the signed string is login.BrowserProofString.
-	Scheme string `json:"scheme,omitempty"`
+	// PersonStatement is, when the controller was an app's back end speaking for
+	// a person, that person's own signed statement over a fingerprint of their
+	// words, as the app carried it (ADR-066, ADR-067). Absent when the
+	// controller spoke as the signer it belongs to. The salt is not here: the
+	// app that keeps the words keeps it.
+	PersonStatement *PersonProof `json:"person_statement,omitempty"`
 }
 
 // Verify checks the controller signed this request.
 func (p ControllerProof) Verify() error {
-	if p.Scheme != "" {
-		return p.verifyBrowserKey()
-	}
 	ok, err := iacrypto.VerifyMachineSignature(p.PublicKey, p.Signature, []byte(p.SignedString))
 	if err != nil || !ok {
 		return errors.New("the request is not signed by the controller it names")
@@ -361,35 +358,6 @@ func (p ControllerProof) Verify() error {
 	lines := strings.Split(p.SignedString, "\n")
 	if len(lines) < 2 || lines[1] != p.Controller {
 		return errors.New("the signed request names a different controller")
-	}
-	_, err = p.SignedRequest()
-	return err
-}
-
-// verifyBrowserKey checks a proof made with a key a browser holds: the
-// signature is by the key named, the key is the one the proof's controller
-// name carries the thumbprint of, and the signed string commits to the body.
-func (p ControllerProof) verifyBrowserKey() error {
-	if p.Scheme != "browser-key-p256" || p.ControllerGrant != "" {
-		return errors.New("the proof names a way of signing this Identity Agent does not know")
-	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(p.PublicKey)
-	if err != nil || len(raw) != 65 || raw[0] != 4 {
-		return errors.New("the proof's browser key is not a P-256 point")
-	}
-	x, y := base64.RawURLEncoding.EncodeToString(raw[1:33]), base64.RawURLEncoding.EncodeToString(raw[33:])
-	pub, tp, err := login.BrowserKeyFromJWK(x, y)
-	if err != nil {
-		return err
-	}
-	if p.Controller != "browser:"+tp {
-		return errors.New("the signed request names a different browser key")
-	}
-	if !login.VerifyBrowserSignature(pub, p.SignedString, p.Signature) {
-		return errors.New("the request is not signed by the browser key it names")
-	}
-	if !strings.HasPrefix(p.SignedString, login.BrowserProofLabel+"\n") {
-		return errors.New("the signed string is not a browser key's proof")
 	}
 	_, err = p.SignedRequest()
 	return err
@@ -412,11 +380,7 @@ func (p ControllerProof) SignedRequest() ([]byte, error) {
 	case len(p.RequestBytes) > 0 && len(p.Request) > 0:
 		return nil, errors.New("the proof carries the request twice")
 	case len(p.RequestBytes) > 0:
-		if p.Scheme != "" {
-			if login.BrowserProofBodyHash(p.RequestBytes) == signed {
-				return p.RequestBytes, nil
-			}
-		} else if iacrypto.Blake3QB64Must(p.RequestBytes) == signed {
+		if iacrypto.Blake3QB64Must(p.RequestBytes) == signed {
 			return p.RequestBytes, nil
 		}
 	case len(p.Request) > 0:
@@ -495,6 +459,19 @@ type Record struct {
 	HostSignature   string           `json:"host_signature,omitempty"`
 	HostVerkey      string           `json:"host_verkey,omitempty"`
 	ControllerProof *ControllerProof `json:"controller_proof,omitempty"`
+	// PersonProof is a person's statement over the fingerprint of their words,
+	// with no words in it (ADR-067, ADR-068). The same record, in the same
+	// chain, holds a person's entry whichever way they signed it.
+	PersonProof *PersonProof `json:"person_proof,omitempty"`
+	// Refusal is why the Identity Agent refused a person's write before
+	// forwarding anything. A refusal is an entry of the chain with a person's
+	// proof, so it records who tried, when and why, and holds no words.
+	Refusal string `json:"refusal,omitempty"`
+	// CiphertextHash is, for an entry the Identity Agent holds only as
+	// ciphertext, the fingerprint over the ciphertext (the statement's own).
+	CiphertextHash string `json:"ciphertext_hash,omitempty"`
+	// Outcome, on an entry of kind KindOutcome, is how an earlier entry ended.
+	Outcome *Outcome `json:"outcome,omitempty"`
 
 	// What the Identity Agent vouches for.
 	GrantSAID      string     `json:"grant_said,omitempty"`
@@ -510,6 +487,12 @@ type Record struct {
 // it agrees with what the record says.
 func (r Record) CheckSenderProof() error {
 	switch {
+	case r.Outcome != nil:
+		return r.checkOutcome()
+	case r.Kind == KindOutcome:
+		return errors.New("an outcome names the entry it is about")
+	case r.PersonProof != nil:
+		return r.checkPersonProof()
 	case r.Statement != nil && r.ControllerProof != nil:
 		return errors.New("a message carries one sender's proof, not two")
 	case r.Statement != nil:
@@ -544,9 +527,31 @@ func (r Record) CheckSenderProof() error {
 			req.Conversation != r.Conversation && req.Conversation != "" || req.InReplyTo != r.InReplyTo {
 			return errors.New("the record does not say what the person's controller signed")
 		}
-		return nil
+		return r.ControllerProof.checkPersonStatement(r, req)
 	}
 	return errors.New("the message carries no proof from its sender")
+}
+
+// checkPersonStatement checks, when an app's back end spoke for a person, that
+// the person's own statement is theirs and for this very entry: signed by the
+// key it names, from the person the record is from, and naming the
+// conversation, kind, recipient, reply and message the record and the app's
+// signed request have. Whose the key is, and that the words are the ones the
+// fingerprint is over (the salt is not kept), are not shown by the record.
+func (p ControllerProof) checkPersonStatement(r Record, req PersonMessage) error {
+	if p.PersonStatement == nil {
+		return nil
+	}
+	if err := p.PersonStatement.Verify(); err != nil {
+		return fmt.Errorf("the person's statement does not hold: %w", err)
+	}
+	st := p.PersonStatement.Statement
+	if (st.Kind != PersonKindMessage && st.Kind != PersonKindAsk) || r.From != Person(st.From) ||
+		st.Kind != r.Kind || st.To != r.To || st.InReplyTo != r.InReplyTo ||
+		st.Conversation != r.Conversation || st.MessageID != req.Nonce {
+		return errors.New("the record does not say what the person signed")
+	}
+	return nil
 }
 
 // PersonMessage is what a person's controller signs to say something to an AI
@@ -583,6 +588,11 @@ func CountersignWith(as string, pack func(m *didcomm.JWM) (*didcomm.Envelope, er
 	to := r.To
 	if aid, ok := IsPerson(to); ok {
 		to = aid
+	}
+	if to == "" {
+		// A close, a reopen and an outcome name no recipient: the envelope is
+		// addressed to the one who signed it.
+		to = as
 	}
 	return pack(&didcomm.JWM{
 		ID: r.MessageID, Type: TypeRecord,

@@ -1,0 +1,648 @@
+{
+  "about": "The salted fingerprint and the statement a person signs (ADR-067); the rules are in contracts/agent-message/signed-fingerprint.md. The person's device key is Ed25519, from seed_hex. Salts and words are hex. contracts/check_signed_fingerprint_vectors.py recomputes every value.",
+  "seed_hex": "0a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526272829",
+  "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+  "verkey": "DFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+  "fingerprints": [
+    {
+      "name": "a short message",
+      "salt_hex": "11111111111111111111111111111111",
+      "words_hex": "796573",
+      "fingerprint": "EGTQS_uUS0V_WMOpCUcxndvswBcFKVUYAMx1du37B1zX"
+    },
+    {
+      "name": "the same words under another salt",
+      "salt_hex": "12121212121212121212121212121212",
+      "words_hex": "796573",
+      "fingerprint": "EF9Z5tb7-ubDcWCfy6Cx3M8rtvoAM3NRxPysSwYM8x6o"
+    },
+    {
+      "name": "no words",
+      "salt_hex": "13131313131313131313131313131313",
+      "words_hex": "",
+      "fingerprint": "EPbQ0xBwQlS5sZv3ySxspxoPwXu5ykFZ5WbcG2DRsaZO"
+    },
+    {
+      "name": "words that are not text",
+      "salt_hex": "1414141414141414141414141414141414141414141414141414141414141414",
+      "words_hex": "00ff10c3a9e282ac",
+      "fingerprint": "EDwAGT_1sre_kFZo2I0Jn9MQVuLE64HDKROhdBYc_sni"
+    },
+    {
+      "name": "a byte moved from the salt to the words, salt side",
+      "salt_hex": "1515151515151515151515151515151515",
+      "words_hex": "796573",
+      "fingerprint": "EPdYHYAimOGt4zwFREc1ScbXfwmY_5jG6UWCOIfxT_t4"
+    },
+    {
+      "name": "a byte moved from the salt to the words, words side",
+      "salt_hex": "15151515151515151515151515151515",
+      "words_hex": "15796573",
+      "fingerprint": "EE4zFz4sPFiYpFmBH9LsU_IX1IBBwCMScPAUHESSXxFR"
+    },
+    {
+      "name": "the longest salt",
+      "salt_hex": "16161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616",
+      "words_hex": "68656c6c6f",
+      "fingerprint": "EDOunkO7tJ9VbOqn0qtFSvkh4thQknBDeOCytIlNlvMm"
+    }
+  ],
+  "refused_fingerprints": [
+    {
+      "name": "no salt",
+      "salt_hex": ""
+    },
+    {
+      "name": "a salt of 15 bytes",
+      "salt_hex": "212121212121212121212121212121"
+    },
+    {
+      "name": "a salt over 1024 bytes",
+      "salt_hex": "2222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "version_zero": {
+    "words_hex": "616e206f6c64206d657373616765",
+    "fingerprint": "EOmNeuN3uoPcoV_T5dBcMaC9AkvZPaYxrTeqZD718YNs"
+  },
+  "statements": [
+    {
+      "name": "a message",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EMT8ENYMsdaBxvtlCrGphs5MduP-fOWDo6-q0NUofyGr"
+      },
+      "salt_hex": "31313131313131313131313131313131",
+      "words_hex": "68656c6c6f",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_1\nmessage\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\nEAGENT\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEMT8ENYMsdaBxvtlCrGphs5MduP-fOWDo6-q0NUofyGr",
+      "signature": "0BDX3hYJ8098JrthJgo7HWtt0rFFoKwCUm05HQrJOAxVFvLz1VIauk0t6CoEKPe3A7bdJnhmmdI9foR7e2Qsm8cP"
+    },
+    {
+      "name": "an ask answering a message",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_2",
+        "kind": "ask",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "to": "EAGENT",
+        "in_reply_to": "m_1",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "ELNprosL3o32UNU3TljHx4yUfVJmBNhCvVNtGbDY25db"
+      },
+      "salt_hex": "32323232323232323232323232323232",
+      "words_hex": "77686174206973206e6578743f",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_2\nask\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\nEAGENT\nm_1\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nELNprosL3o32UNU3TljHx4yUfVJmBNhCvVNtGbDY25db",
+      "signature": "0BBT5U1LV33ssq14e5nn5dV31eShb98mGCy3cv3OUHb3dKNgzCVjash04S3XlDwB3Rx39H45vmu1mKXbNolzweoE"
+    },
+    {
+      "name": "a split",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_3",
+        "kind": "split",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "to": "EOWNER",
+        "range_first": "m_1",
+        "range_last": "m_2",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "ENDLtPaUohwNxLFnPJf4913VYfjw4OjTO9TAKn-THMqP"
+      },
+      "salt_hex": "33333333333333333333333333333333",
+      "words_hex": "612073756d6d617279",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_3\nsplit\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\nEOWNER\n\nm_1\nm_2\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nENDLtPaUohwNxLFnPJf4913VYfjw4OjTO9TAKn-THMqP",
+      "signature": "0BAEfwnO_UQh4aDNN_VOKU6WooWZEW_juDCyWa5rANM9Gq3Sh33j7PCfR2goHLXLKnE3VCJmd86ctJ471xvoZgYP"
+    },
+    {
+      "name": "a hand-off",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_4",
+        "kind": "hand-off",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "to": "ENEWOWNER",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EI6ya8UVbcv7PHrSrBtIelwOW_jtbYFe_yeMyOMJ6xYe"
+      },
+      "salt_hex": "34343434343434343434343434343434",
+      "words_hex": "6f76657220746f20796f75",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_4\nhand-off\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\nENEWOWNER\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEI6ya8UVbcv7PHrSrBtIelwOW_jtbYFe_yeMyOMJ6xYe",
+      "signature": "0BBCIL6R93YaEq39HhCQOqOL8k3hqU9pzZxqLcOW-Tc9tpdongGyqlRlFdS8W5q7SI7-nVzXYJTBRDlImEZhvqkM"
+    },
+    {
+      "name": "a close, with no words and no recipient",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_5",
+        "kind": "close",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EL_qdKmhDjxoEFBoL-hFrw4il7nvEhAr3UaXPP1lezn4"
+      },
+      "salt_hex": "35353535353535353535353535353535",
+      "words_hex": "",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_5\nclose\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\n\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEL_qdKmhDjxoEFBoL-hFrw4il7nvEhAr3UaXPP1lezn4",
+      "signature": "0BB3FRK0X2VEtVJ06wpzdS4sPYtxDjOMDFYUrgOzuev2Hu_fbfaipt7X2wC4HhxDPGjpvRnWMAwILStb6X-9Se8O"
+    },
+    {
+      "name": "a nonce of 8 two-byte characters, which is 16 bytes",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_7",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "to": "EAGENT",
+        "nonce": "éééééééé",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EO3TPsghRXF6qJt4hlOoFGTq73VtW3_BELrdiQGf99iH"
+      },
+      "salt_hex": "37373737373737373737373737373737",
+      "words_hex": "62797465732c206e6f742063686172616374657273",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_7\nmessage\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\nEAGENT\n\n\n\néééééééé\n2026-11-06T10:00:00Z\n1\nEO3TPsghRXF6qJt4hlOoFGTq73VtW3_BELrdiQGf99iH",
+      "signature": "0BDE_g7NCUtKpFsTKFTCh-P19hcEPBSxWZNvs2JUHHR35UjoZ6foc2ZSUsOED0h_8g9-CvoMr6JmgY00smHDCMkH"
+    },
+    {
+      "name": "a time with an offset and a fraction",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_8",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T11:00:00.25+01:00",
+        "fingerprint_version": 1,
+        "fingerprint": "EHFb0Ravc5_Admg7WPS8CSa5xvbK7A7ix37Fgg5bqEtp"
+      },
+      "salt_hex": "38383838383838383838383838383838",
+      "words_hex": "68656c6c6f",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_8\nmessage\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\nEAGENT\n\n\n\nnonce-0123456789abcdef\n2026-11-06T11:00:00.25+01:00\n1\nEHFb0Ravc5_Admg7WPS8CSa5xvbK7A7ix37Fgg5bqEtp",
+      "signature": "0BC4W8akuu2XvW79d6zlxatf6eFapfVVGEdc5Y8MXYeXdJwIrh6nYV8zcPx4nVD-TsnEyGehN1-S4iXlG80YEBwE"
+    },
+    {
+      "name": "a reopen",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_6",
+        "kind": "reopen",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EEeQIVYrv1SKsGPigZvecuBG6ecvTQ9KUMRep7eDJjxU"
+      },
+      "salt_hex": "36363636363636363636363636363636",
+      "words_hex": "",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_6\nreopen\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\n\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEEeQIVYrv1SKsGPigZvecuBG6ecvTQ9KUMRep7eDJjxU",
+      "signature": "0BD_NZCyQDPsTok7qEYo5v6VXBMl5teB5AnnusdBp34tdgxlfYaCR2zsPxcZ5BsSu3UwinVSaJlWBOvHcfaTq3wM"
+    }
+  ],
+  "refused_statements": [
+    {
+      "name": "an unsalted fingerprint (version 0)",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 0,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "an unknown fingerprint version",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 2,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "no message id",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a line break in a field",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EA\nEB",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a message to nobody",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a close naming a recipient",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "close",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a split with no range",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "split",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a message naming a range",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "range_first": "m_1",
+        "range_last": "m_2",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a kind that does not exist",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "shout",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "no identity agent",
+      "statement": {
+        "agent": "",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a short nonce",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "short",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a nonce of 15 bytes",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-123456789",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a nonce of 7 two-byte characters, 14 bytes",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "ééééééé",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a time that is not RFC 3339",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "yesterday",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a date with no time",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a time in the basic form",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "20261106T100000Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a space where the T goes",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06 10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a time with no zone",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a lower-case t and z",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06t10:00:00z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "hour 24",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T24:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a day that does not exist",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-02-30T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a leap second",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-12-31T23:59:60Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a time with spaces around it",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": " 2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    }
+  ],
+  "refused_raw_statements": [
+    {
+      "name": "the fingerprint version as JSON true",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":true,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "the fingerprint version as a string",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":\"1\",\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "the fingerprint version as 1.0",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1.0,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "the fingerprint version as 1.5",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1.5,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "the fingerprint version missing",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "a field the statement does not have",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"words\":\"hello\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "the nonce as a number",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":1234567890123456,\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "an optional field spelt in capitals",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"IN_REPLY_TO\":\"e1\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "an optional field spelt with a capital",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"In_reply_to\":\"e1\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "an optional field as null",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"in_reply_to\":null,\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "a field twice",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    }
+  ]
+}

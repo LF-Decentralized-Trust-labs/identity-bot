@@ -101,7 +101,12 @@ func TestAnAIAgentGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
 
 const pinnedAIAgentBodySAID = "EKLEEy6dupIoxaNTSE7MnWJwDyqs46hAPbTLM6wcCpW_"
 
-const pinnedControllerGrantSAID = "EIeRD21QBpbVsf-IqRez6dCkLjn9SmOocTrxt050vv3I"
+// Version 1.2.0 adds app_asset, the app asset a machine is the back end of.
+const pinnedControllerGrantSAID = "EOaTYUgBca75pC_n7EoD-y4f8ip_n6WxyarjQj3JB1cX"
+
+// pinnedControllerGrantV11SAID is the version before app_asset. Grants issued
+// under it still resolve, so it must not move.
+const pinnedControllerGrantV11SAID = "EIeRD21QBpbVsf-IqRez6dCkLjn9SmOocTrxt050vv3I"
 
 func TestTheControllerGrantSchemaIsPinned(t *testing.T) {
 	if ControllerGrant.Schema.SAID != pinnedControllerGrantSAID {
@@ -120,10 +125,13 @@ func TestTheFirstVersionsKeepTheirIdentifiers(t *testing.T) {
 	if AIAgentGrantV11.Schema.SAID != pinnedAIAgentGrantV11SAID {
 		t.Fatalf("the second AI agent grant schema moved to %s", AIAgentGrantV11.Schema.SAID)
 	}
+	if ControllerGrantV11.Schema.SAID != pinnedControllerGrantV11SAID {
+		t.Fatalf("the Controller Grant 1.1.0 schema moved to %s", ControllerGrantV11.Schema.SAID)
+	}
 	if AIAgentBodyV1.Schema.SAID != "EBjOukYuabOuiVTRLSsE_gru3xww2CWAIAsFE6DCtVr1" {
 		t.Fatalf("the first AI agent body schema moved to %s", AIAgentBodyV1.Schema.SAID)
 	}
-	for _, said := range []string{AIAgentGrantV1.Schema.SAID, AIAgentGrantV11.Schema.SAID, AIAgentBodyV1.Schema.SAID} {
+	for _, said := range []string{AIAgentGrantV1.Schema.SAID, AIAgentGrantV11.Schema.SAID, ControllerGrantV11.Schema.SAID, AIAgentBodyV1.Schema.SAID} {
 		if Catalog[said] == nil {
 			t.Fatalf("%s is no longer served, so credentials issued under it cannot be resolved", said)
 		}

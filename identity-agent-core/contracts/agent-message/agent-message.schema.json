@@ -104,8 +104,15 @@
         "reply",
         "receipt",
         "failure",
-        "progress"
-      ]
+        "progress",
+        "message",
+        "hand-off",
+        "split",
+        "close",
+        "reopen",
+        "outcome"
+      ],
+      "description": "An AI agent's kinds are ask, reply, receipt, failure and progress. A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close or reopen. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
     },
     "party": {
       "description": "An AI agent's identifier, or person: followed by a person's identifier.",
@@ -195,11 +202,9 @@
           "type": "string",
           "description": "the controller's Controller Grant credential, when it has one"
         },
-        "scheme": {
-          "description": "How signature was made. Absent: a controller's Ed25519 signature, the signed string's last line the Blake3-256 of the request bytes. \"browser-key-p256\": a key a browser holds (ADR-066): controller is \"browser:\" and the key's RFC 7638 thumbprint, public_key its uncompressed P-256 point in unpadded base64url, signature ECDSA P-256 over SHA-256 of the signed string (r then s, unpadded base64url), the signed string's last line the unpadded base64url SHA-256 of the request bytes, and there is no controller_grant.",
-          "enum": [
-            "browser-key-p256"
-          ]
+        "person_statement": {
+          "description": "When the controller was an app's back end speaking for a person: that person's own signed statement over a fingerprint of their words, as the app carried it. Absent when the controller spoke as the signer it belongs to. The salt of the fingerprint is not here.",
+          "$ref": "#/$defs/person_proof"
         }
       }
     },
@@ -231,7 +236,7 @@
       }
     },
     "record": {
-      "description": "One entry in a conversation, as the Identity Agent countersigns it. It carries exactly one sender's proof: statement with host_signature and host_verkey, or controller_proof. What the record says must be what the sender signed. prev_hash is the hash of the entry before it in the conversation (see entry_hash), empty for the first.",
+      "description": "One entry in a conversation, as the Identity Agent countersigns it. It carries exactly one sender's proof: statement with host_signature and host_verkey, controller_proof, or person_proof; an outcome carries none. A person's entry may instead be a refusal (refusal set), which holds no words. The entry's id is e and its seq, and a person's entry and its outcome are separate entries. What the record says must be what the sender signed. prev_hash is the hash of the entry before it in the conversation (see entry_hash), empty for the first.",
       "type": "object",
       "required": [
         "message_id",
@@ -271,7 +276,8 @@
           "$ref": "#/$defs/party"
         },
         "to": {
-          "$ref": "#/$defs/party"
+          "type": "string",
+          "description": "An AI agent's identifier, person: and a person's identifier, a hand-off's or split's new owner as the statement names it, or empty for a close, a reopen and an outcome."
         },
         "in_reply_to": {
           "type": "string"
@@ -312,6 +318,20 @@
         },
         "opened_by": {
           "$ref": "#/$defs/party"
+        },
+        "person_proof": {
+          "$ref": "#/$defs/person_proof"
+        },
+        "refusal": {
+          "type": "string",
+          "description": "why the Identity Agent refused a person's write before forwarding anything"
+        },
+        "ciphertext_hash": {
+          "$ref": "#/$defs/digest",
+          "description": "for an entry the Identity Agent holds only as ciphertext: the statement's fingerprint, over the ciphertext"
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome"
         }
       }
     },
@@ -447,6 +467,123 @@
         },
         "kel_sig": {
           "type": "string"
+        }
+      }
+    },
+    "person_statement": {
+      "description": "What a person's device or session signs: IA-PERSON-MSG-V1 over the fingerprint of their words, never the words (signed-fingerprint.md). Keys are exactly these, in lower case, each at most once, and no value is null: a reader refuses a statement otherwise, as Go's decoder here does.",
+      "type": "object",
+      "required": [
+        "agent",
+        "conversation",
+        "message_id",
+        "kind",
+        "from",
+        "signer",
+        "nonce",
+        "time",
+        "fingerprint_version",
+        "fingerprint"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "conversation": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "message",
+            "ask",
+            "split",
+            "hand-off",
+            "close",
+            "reopen"
+          ]
+        },
+        "from": {
+          "type": "string"
+        },
+        "signer": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "in_reply_to": {
+          "type": "string"
+        },
+        "range_first": {
+          "type": "string"
+        },
+        "range_last": {
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fingerprint_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "person_proof": {
+      "description": "A person's own statement for an entry, with no words in it: the statement, the key that signed it and the signature (encoded as for a body, see contracts/agent-body). The record must say what was signed: kind, from (as person: and the statement's from), to, in_reply_to and conversation as the statement has them, and body_hash equal to the statement's fingerprint.",
+      "type": "object",
+      "required": [
+        "statement",
+        "verkey",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "statement": {
+          "$ref": "#/$defs/person_statement"
+        },
+        "verkey": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        }
+      }
+    },
+    "outcome": {
+      "description": "How a pending entry of a person's ended. The chain is append-only, so this is an entry of its own, of kind outcome, from the Identity Agent, with in_reply_to the entry's id and no sender's proof; the countersignature is the proof.",
+      "type": "object",
+      "required": [
+        "entry",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string",
+          "description": "the id of the entry, e and its seq"
+        },
+        "state": {
+          "enum": [
+            "committed",
+            "not-kept",
+            "not-delivered"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "description": "required for not-kept and not-delivered, absent for committed. not-delivered follows a committed entry once, when the message was not delivered before the delivery queue's age ran out"
         }
       }
     }

@@ -302,6 +302,26 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// The person's own assertion named this browser key (ADR-066): keep that the
+	// key speaks for them at this asset, which is what later lets a statement
+	// signed by the key be taken as theirs (trail.CheckAuthor).
+	if bundle.BrowserKey != "" {
+		assetID, found := s.assetIDOfSite(bundle.SiteAID)
+		if !found {
+			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the asset this sign-in was for is gone"})
+			http.Error(w, "not authorized", http.StatusForbidden)
+			return
+		}
+		now := time.Now().UTC()
+		if err := s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(browserKeyLife), now,
+			s.presentedForGate(assetID, a.PresentedACDCs)); err != nil {
+			log.Printf("[identity-agent-core] a browser key's sign-in could not be kept: %v", err)
+			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the sign-in could not be recorded"})
+			http.Error(w, "could not record the sign-in", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	st := map[string]interface{}{
 		"status":       "complete",
 		"pairwise_aid": res.PairwiseAID,
@@ -346,6 +366,26 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// presentedForGate is the part of what a person presented that the asset's
+// required credential was judged on, kept to ask the gate again later; nil when
+// the asset requires none.
+func (s *CoreServer) presentedForGate(assetID string, presented []interface{}) []interface{} {
+	if s.assetHandler == nil {
+		return nil
+	}
+	a, found, err := s.assetHandler.Store.GetAsset(assetID)
+	if err != nil || !found || a.Policy.RequiredCredSchema == "" {
+		return nil
+	}
+	var kept []interface{}
+	for _, p := range presented {
+		if m, ok := p.(map[string]interface{}); ok && sameSchema(credStr(m["schema_said"]), a.Policy.RequiredCredSchema) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // memberInfoFor returns the admitting membership resolver's description of a

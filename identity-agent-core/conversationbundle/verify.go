@@ -86,13 +86,20 @@ type Message struct {
 	From      string `json:"from"`
 	To        string `json:"to"`
 	// Sender is whose own signature the entry carries: "body" for an AI
-	// agent's machine, "controller" for the app a person spoke from.
+	// agent's machine, "controller" for the app a person spoke from,
+	// "statement" for a device or session that signed a fingerprint of a
+	// person's words, and "identity agent" for an outcome, which only the
+	// Identity Agent speaks.
 	Sender string `json:"sender"`
 	// Grade is how strongly the body's key is held, as the body credential
 	// records it.
 	Grade string `json:"grade,omitempty"`
 	// Person is the person a controller acted for, as its grant names them.
-	Person   string `json:"person,omitempty"`
+	Person string `json:"person,omitempty"`
+	// App is the app asset whose back end carried a person's own statement, as
+	// the machine's Controller Grant (1.2.0) names it. Empty where the grant
+	// names none, which a bundle cannot tell from the Identity Agent's word.
+	App      string `json:"app_asset,omitempty"`
 	Anchored bool   `json:"anchored"`
 	Holds    bool   `json:"holds"`
 }
@@ -175,6 +182,12 @@ type verifier struct {
 	// opener is the first entry when an AI agent opened the conversation; the
 	// zero Record when a person did.
 	opener agentmessage.Record
+	// people is what is known, entry by entry, of the entries a person signed
+	// as a statement over a fingerprint (ADR-068): where each stands, what the
+	// chain has used up, and the versions of a person's words so far.
+	people   map[string]*personEntry
+	used     map[string]bool
+	versions []int
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -660,6 +673,7 @@ func (v *verifier) checkEntries() {
 		m := Message{Seq: seq}
 		rec, ok := v.checkEntry(where, seq, prev, e, &m)
 		if ok {
+			v.checkVersionOrder(where, rec)
 			if seq == 1 {
 				opener = rec.OpenedBy
 				v.checkOpening(where, rec)
@@ -673,6 +687,7 @@ func (v *verifier) checkEntries() {
 		}
 		v.r.Messages = append(v.r.Messages, m)
 	}
+	v.finishPeople()
 }
 
 // checkOpening checks the first entry: a conversation is opened by a person's
@@ -686,11 +701,19 @@ func (v *verifier) checkEntries() {
 // opened in an hour, and that depth beyond the opening stays within three.
 // Those are the Identity Agent's to enforce (ADR-047, Amendment 3).
 func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
+	if rec.PersonProof != nil {
+		// A person's statement opens a conversation of their own, whatever it
+		// says: a refusal may be the first thing recorded.
+		if rec.From != rec.OpenedBy {
+			v.fault(where, "a conversation is opened by the one who opened it, and this is not their entry")
+		}
+		return
+	}
 	if rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
 		v.fault(where, "a conversation is opened by an ask from the one who opened it, and this is not one")
 		return
 	}
-	if rec.ControllerProof != nil {
+	if rec.ControllerProof != nil || rec.PersonProof != nil {
 		return
 	}
 	if _, person := agentmessage.IsPerson(rec.To); person || rec.Statement == nil || !rec.Statement.Opens() || rec.Depth != 1 {
@@ -748,7 +771,9 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.fault(where, "it does not follow from the entry before it")
 	}
 	body, err := decode(e.Body)
-	if err != nil || len(body) > agentmessage.MaxBody || agentmessage.HashBody(body) != rec.BodyHash {
+	if rec.PersonProof != nil {
+		v.notePersonEntry(where, rec, e, body, err)
+	} else if err != nil || len(body) > agentmessage.MaxBody || agentmessage.HashBody(body) != rec.BodyHash || e.Salt != "" {
 		v.fault(where, "the words carried are not the words it was signed over")
 	}
 	if err := rec.CheckSenderProof(); err != nil {
@@ -756,7 +781,11 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		return rec, true
 	}
 	once := []string{}
-	if rec.Statement != nil {
+	if rec.Outcome != nil {
+		// Nothing a sender signed: the countersignature is the whole proof.
+	} else if rec.PersonProof != nil {
+		once = append(once, "signature "+rec.PersonProof.Signature)
+	} else if rec.Statement != nil {
 		once = append(once, "signature "+rec.HostSignature, "nonce "+rec.Statement.Host+" "+rec.Statement.HostNonce)
 	} else {
 		once = append(once, "signature "+rec.ControllerProof.Signature)
@@ -773,12 +802,17 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.fault(where, "the time the Identity Agent stamped on it is unreadable")
 		return rec, true
 	}
-	if rec.Statement != nil {
+	switch {
+	case rec.Outcome != nil:
+		v.checkOutcome(where, rec, m)
+	case rec.PersonProof != nil:
+		v.checkPersonStatement(where, rec, at, m)
+	case rec.Statement != nil:
 		v.checkBodySpoke(where, rec, body, at, m)
-	} else {
+	default:
 		v.checkPersonSpoke(where, rec, at, m)
 	}
-	if t := rec.To; t != "" {
+	if t := rec.To; t != "" && rec.PersonProof == nil {
 		if _, person := agentmessage.IsPerson(t); !person {
 			if why := v.delegatedFromRoot(t); why != "" {
 				v.fault(where, "it is addressed to %s: %s", t, why)
@@ -936,13 +970,6 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 			v.fault(where, "it answers message %s, which is not an earlier message addressed to this person", rec.InReplyTo)
 		}
 	}
-	if p.Scheme != "" {
-		// Spoken from an app's page with the browser key of a person's session
-		// (ADR-066). The key proves the request, but nothing a bundle carries
-		// yet shows which person held it, so it is not passed as a controller's.
-		v.fault(where, "it was spoken from an app's page with a browser key, and a bundle cannot yet show which person held that key")
-		return
-	}
 	cr, err := authorisation.ReadControllerRequest(p.SignedString)
 	if err != nil || cr.Controller != p.Controller || cr.Method != "POST" || !strings.HasSuffix(cr.Path, "/conversations") {
 		v.fault(where, "what the app signed is not a request to speak in a conversation")
@@ -966,7 +993,7 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 	switch {
 	case !ok:
 		v.fault(where, "the bundle does not carry the Controller Grant %s of the app it was sent from", p.ControllerGrant)
-	case g.schema != schemas.ControllerGrant.Schema.SAID:
+	case !schemas.IsControllerGrantSchema(g.schema):
 		v.fault(where, "%s is not a Controller Grant", p.ControllerGrant)
 	case g.holder != p.Controller || g.attr("public_key") != strings.TrimSpace(p.PublicKey):
 		v.fault(where, "the request is signed by a key the Controller Grant does not name")
@@ -983,7 +1010,32 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		if why := g.liveBetween(issuedBy, at); why != "" {
 			v.fault(where, "the app's Controller Grant was not in force when the request was signed: %s", why)
 		}
+		app := g.attr("app_asset")
+		m.App = app
 		switch signer := g.attr("signer"); {
+		case app != "" && signer != "":
+			v.fault(where, "the machine's Controller Grant names both an app, %s, and a signer, %s, but a machine is one or the other", app, signer)
+		case app != "" && p.PersonStatement == nil:
+			v.fault(where, "the machine's Controller Grant names it the back end of app %s, which speaks only with a person's own statement, and the entry carries none", app)
+		case p.PersonStatement != nil && signer != "":
+			v.fault(where, "the entry carries a person's own statement, which an app's back end carries, but the machine's Controller Grant names %s as the person it acts as", signer)
+		case p.PersonStatement != nil:
+			// An app's back end spoke for the person with their own signed
+			// statement. What the bundle can show is that the statement is
+			// theirs to the key that signed it, is for this entry, this
+			// organisation and this time, and, from a Controller Grant of the
+			// version that names it, which app's back end carried it. That the
+			// key is the person's is not in any credential.
+			if st := p.PersonStatement.Statement; st.Agent != v.b.Root {
+				v.fault(where, "the person signed it for Identity Agent %q, not for this organisation %s", st.Agent, v.b.Root)
+			} else if stAt, err := time.Parse(time.RFC3339, st.Time); err != nil || absDuration(at.Sub(stAt)) > authorisation.Skew {
+				v.fault(where, "the person's statement was not signed within %s of when the Identity Agent took it", authorisation.Skew)
+			}
+			if app == "" {
+				v.cannotRuleOut("Which app's back end carried a person's own statement is the Identity Agent's word where the machine's Controller Grant names no app (it is in version 1.2.0 of the grant), and which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's.")
+			} else {
+				v.cannotRuleOut("Which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's.")
+			}
 		case signer == "":
 			v.cannotRuleOut("Some apps' Controller Grants name no signer, so which person spoke from them is the Identity Agent's word.")
 		case signer != aid:

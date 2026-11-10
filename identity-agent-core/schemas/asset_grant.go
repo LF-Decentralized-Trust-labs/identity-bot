@@ -349,7 +349,12 @@ var (
 // Issued into the identity's registry, the grant is anchored in its key log and
 // its withdrawal is an event anybody can check, and what a person does from
 // that machine can name it as the authority it rests on.
-var ControllerGrant = mustAssetGrant(withEdges(assetGrantKind{
+//
+// Version 1.2.0 adds app_asset: the app asset a machine is the back end of, so
+// what a person said through that machine can show which app spoke. 1.1.0, the
+// version before, keeps its identifier and is still honoured wherever a
+// Controller Grant is read.
+var controllerGrantKind = assetGrantKind{
 	assetType: "controller",
 	title:     "Controller Grant",
 	description: "That one machine may act for the identity that issued this, as the signer named " +
@@ -365,7 +370,24 @@ var ControllerGrant = mustAssetGrant(withEdges(assetGrantKind{
 		{Key: "label", Label: "Machine", Type: "string", Required: true},
 		{Key: "grade", Label: "Grade", Type: "string", Required: true},
 	},
-}))
+}
+
+var (
+	ControllerGrant = mustAssetGrant(withControllerAppAsset(controllerGrantKind))
+	// ControllerGrantV11 is the version before a grant could name the app its
+	// machine is the back end of. It is still honoured.
+	ControllerGrantV11 = mustAssetGrant(withEdges(controllerGrantKind))
+)
+
+// withControllerAppAsset is the version of the Controller Grant that may name
+// the app asset its machine is the back end of.
+func withControllerAppAsset(k assetGrantKind) assetGrantKind {
+	k = withEdges(k)
+	k.version = "1.2.0"
+	k.attributes = append(append([]grantAttribute{}, k.attributes...),
+		grantAttribute{"app_asset", `{"description": "The app asset this machine is the back end of, when it is one: what a person says through it can then show which app spoke. Absent for a machine that acts as a signer", "type": "string"}`})
+	return k
+}
 
 // AppGrant says what one app may ask of the Identity Agent it runs beside.
 //
@@ -438,7 +460,7 @@ var AssetGrants = map[string]*AssetGrant{
 
 // assetCredentials are every schema built from the asset template, current
 // and first versions alike, so every one issued can be resolved.
-var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV11, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant, AppGrant, AppBody}
+var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV11, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant, ControllerGrantV11, AppGrant, AppBody}
 
 func init() {
 	for _, g := range assetCredentials {
@@ -477,4 +499,10 @@ func (g *AssetGrant) CheckAttributes(attrs map[string]interface{}) error {
 		return fmt.Errorf("a %s grant must say so in asset_type, not %v", g.AssetType, attrs["asset_type"])
 	}
 	return nil
+}
+
+// IsControllerGrantSchema reports whether a schema identifier is any version of
+// the Controller Grant still honoured.
+func IsControllerGrantSchema(said string) bool {
+	return said == ControllerGrant.Schema.SAID || said == ControllerGrantV11.Schema.SAID
 }

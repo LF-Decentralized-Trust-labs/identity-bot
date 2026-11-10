@@ -14,6 +14,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/ratewindow"
 	"identity-agent-core/store"
 )
 
@@ -63,8 +64,8 @@ const (
 // introductionLimiter is one server's count of recent introductions. The zero
 // value is ready to use.
 type introductionLimiter struct {
-	mu   sync.Mutex
-	seen []time.Time
+	once sync.Once
+	w    *ratewindow.Window
 }
 
 // allow reports whether another stranger may be verified now.
@@ -74,20 +75,8 @@ type introductionLimiter struct {
 // requests either way, and a queue is the point at which flooding becomes
 // visible to a person.
 func (l *introductionLimiter) allow(now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	kept := l.seen[:0]
-	for _, t := range l.seen {
-		if now.Sub(t) < firstContactWindow {
-			kept = append(kept, t)
-		}
-	}
-	l.seen = kept
-	if len(l.seen) >= firstContactBurst {
-		return false
-	}
-	l.seen = append(l.seen, now)
-	return true
+	l.once.Do(func() { l.w = ratewindow.New(firstContactBurst, firstContactWindow, 0, nil) })
+	return l.w.AllowAt("", now)
 }
 
 // identifyStranger turns a presented key history into keys that provably belong

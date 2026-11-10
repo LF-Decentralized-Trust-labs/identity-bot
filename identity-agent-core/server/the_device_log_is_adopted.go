@@ -279,7 +279,7 @@ func (s *CoreServer) adoptGrant(row waitingRow, signature string) error {
 	if asked && kind != nil {
 		shown, err := sameAsBuilt(p)
 		if err == nil {
-			err = s.stillWhatItGrants(kind, shown)
+			err = s.stillWhatItGrants(kind, shown, p.Spec.RegrantOf)
 		}
 		if err == nil {
 			err = s.checkAuthorisationOf(p.Prepared.AcdcRaw, p.Spec.Issuer, "", "", p.Spec.by())
@@ -466,6 +466,9 @@ func schemaSigned(shown *authorisation.ToSign) string {
 		return shown.Schema
 	case "app":
 		return schemas.AppGrant.Schema.SAID
+	}
+	if schemas.IsControllerGrantSchema(shown.Schema) {
+		return shown.Schema // a machine's, in the version it was issued in
 	}
 	return schemas.ControllerGrant.Schema.SAID
 }

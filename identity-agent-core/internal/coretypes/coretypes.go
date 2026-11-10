@@ -16,6 +16,9 @@ type Authority struct {
 	// from. Empty for an owner-signed request, and for a machine whose grant
 	// is waiting for the device that holds the identity's key.
 	ControllerGrant string
+	// ControllerGrantSchema is the schema that grant was issued under, as the
+	// edge states it. Empty means the current Controller Grant.
+	ControllerGrantSchema string
 	// CreatorGrant is, for a request an AI agent's body signed (kind
 	// ai_agent_body), the creator's AI Agent Grant: the credential the grant
 	// being issued names as what authorised it, which must hold agent.create.
@@ -30,6 +33,10 @@ type Authority struct {
 	Request *SignedRequest
 	// About is what the request named as the thing it acts on.
 	About string
+	// RegrantOf is, for a machine's Controller Grant re-issued only to name its
+	// app, the SAID of the grant it replaces. It stands in for a signed request
+	// and only for that (server mayWaitWithoutARequest). Empty otherwise.
+	RegrantOf string
 }
 
 // SignedRequest is a request exactly as it was signed, with its body.
@@ -53,6 +60,10 @@ type Signer struct {
 	Standing   string
 	Credential string
 	Name       string
+	// Asset is, for a person an app's back end speaks for, the app asset whose
+	// sign-in the person stands on: whether they still stand is that asset's
+	// answer, not the employee list's. Empty for every other signer.
+	Asset string
 }
 
 // ControllerProof is a controller's signature over a request, as proof of what
@@ -66,15 +77,16 @@ type ControllerProof struct {
 	Signature       string
 	RequestBytes    []byte
 	ControllerGrant string
-	// Scheme says how Signature was made. Empty is a controller's Ed25519
-	// signature; BrowserKeyScheme is a key a browser holds (ADR-066), in which
-	// case Controller is "browser:" and the key's thumbprint, PublicKey the
-	// key's uncompressed point in unpadded base64url and ControllerGrant empty.
-	Scheme string
+	// PersonStatement is, when an app's back end spoke for a person, that
+	// person's own signed statement over a fingerprint of their words
+	// (agentmessage.PersonProof as JSON, ADR-067). Empty when the controller
+	// spoke as the signer it belongs to.
+	PersonStatement []byte
+	// PersonSalt is the salt that statement's fingerprint is over, checked
+	// against the words in the request body. The trail keeps neither; the app
+	// that keeps the words keeps the salt (ADR-067, ADR-068).
+	PersonSalt []byte
 }
-
-// BrowserKeyScheme is a ControllerProof made with a browser's P-256 key.
-const BrowserKeyScheme = "browser-key-p256"
 
 // AgentRef is an AI agent an identity holds, as its asset names it.
 type AgentRef struct {

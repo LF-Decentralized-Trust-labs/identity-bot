@@ -37,10 +37,13 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
+	"identity-agent-core/limits"
+	"identity-agent-core/mediation"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
+	"identity-agent-core/trail"
 	"net/http"
 	"time"
 )
@@ -76,6 +79,13 @@ type (
 // OpenSealedTo return it, wrapped, for that and for nothing else.
 var ErrKeysUnavailable = coretypes.ErrKeysUnavailable
 
+// RefuseAnAppOverItsRate answers 429 with a Retry-After when err, from
+// ThePersonAsking, says the app is over its request rate, and reports whether
+// it did. Every route that asks ThePersonAsking calls it before its own errors.
+func RefuseAnAppOverItsRate(w http.ResponseWriter, err error) bool {
+	return server.RefuseAnAppOverItsRate(w, err)
+}
+
 // Of is the handle on s.
 func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.New()).(Host) }
 
@@ -88,12 +98,30 @@ type Host interface {
 	// make the first time it is asked for. Keep a key of an unexported type
 	// of the add-on's own, so no two add-ons share one.
 	AddonState(key any, make func() any) any
+	// AppLimits is what apps are held to; pass it to trail.New as Options.Limits.
+	AppLimits() limits.Limits
+	// DeliveryQueue is the sealed-message queue, kept across a restart, for the
+	// add-on whose conversation record is t (build it with trail.New from
+	// AppLimits). The core marks an expired delivery in t on its own tick
+	// (ADR-069), so a queue is not given without one. Each add-on passes its own.
+	DeliveryQueue(t *trail.Trail) (*mediation.Queue, error)
 
 	AnchorRecord() (bool, error)
 	AssetHandler() *asset.Handler
 	AuthorityOf(r *http.Request) (Authority, func(), error)
 	AwaitingFor(holder string, pending bool) string
 	BindSigner(aid string, signer string) (server.ControllerGrant, error)
+	// EndBrowserKeys ends, before its twelve hours are up, what a sign-in let a
+	// browser's key say: the key with this thumbprint, or, when thumbprint is
+	// empty, every key the person (by their identifier at the asset) holds. r is
+	// the request the app's back end signed, and the asset is the one that
+	// machine is bound to, never one the caller names. It returns how many
+	// records ended. An app calls it when it signs a person out.
+	EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error)
+	// BindAppAsset binds a machine to the app asset it is the back end of, once.
+	// It then speaks only for the people that asset admits, each with their own
+	// signed statement, and as no signer of its own.
+	BindAppAsset(aid string, assetID string) (server.ControllerGrant, error)
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error
 	EngineSigns()
@@ -117,19 +145,6 @@ type Host interface {
 	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key
 	// the person's signed assertion repeated.
 	BrowserKeySignInResult(session, collector string) (server.BrowserKeySignInResult, error)
-	// OpenAppSession lets a person who signed in at the app with this asset id
-	// speak to an AI agent from its pages: a session bound to the P-256 browser
-	// key whose JWK coordinates are x and y (the key the sign-in approved),
-	// named by tokenHash (login.BrowserSessionBinding of the session token; the
-	// token is never given here), ending at expires. It returns the key's
-	// thumbprint. The session reaches the talk routes only, only with each
-	// request signed by that key, only from that app's origin, and never as a
-	// controller. person must be someone the organisation can prove.
-	OpenAppSession(appID, tokenHash, x, y string, person Signer, expires time.Time) (string, error)
-	// EndAppSession ends one session, and EndAppSessionsOf every session of a
-	// person (returning how many).
-	EndAppSession(tokenHash string)
-	EndAppSessionsOf(personAID string) int
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
 	HoldTheRecord() (string, bool, bool, func(), error)
