@@ -4,6 +4,7 @@
 **Date:** 2026-11-05
 **Deciders:** Rob Andersen
 **Amends:** ADR-021 (Sign In with Identity Agent — Login Protocol)
+**Amended by:** ADR-072, 2026-11-09 (the talk-route note)
 
 ---
 
@@ -169,6 +170,8 @@ signatures), and a thumbprint that must be refused. Go
     Use it to sign out someone removed from the roster since they signed in.
 
 ### A signed-in person speaks to an AI agent from the app's page
+
+*Amended 2026-11-09 by ADR-072:* withdrawn as the target. A page does not call the core. The app's back end passes the page's signed request on inside its own signed call, and the core answers no app's browser origin. What this note describes is built, and it is one of the places ADR-006 lists as not conforming yet. It moves behind the app's back end.
 
 The app's back end opens a session here with the Host's `OpenAppSession(appID,
 tokenHash, x, y, person, expires)`: the SHA-256 of the session token
