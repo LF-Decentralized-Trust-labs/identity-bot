@@ -11,7 +11,6 @@ import (
 	"html"
 	"identity-agent-core/limits"
 	"identity-agent-core/trail"
-	"io"
 	"log"
 	"net"
 	"net/http"
