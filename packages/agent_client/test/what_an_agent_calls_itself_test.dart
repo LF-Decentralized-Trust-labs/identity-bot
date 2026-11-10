@@ -12,8 +12,8 @@ import 'package:agent_client/services/what_an_agent_calls_itself.dart';
 void main() {
   test('an organisation is shown by its organisation name', () {
     final calls = WhatAnAgentCallsItself.fromProfileJson(
-        jsonEncode({'fn': 'Pat Doe', 'org_name': 'America Ascent'}));
-    expect(calls.name, 'America Ascent',
+        jsonEncode({'fn': 'Pat Doe', 'org_name': 'Example Organisation'}));
+    expect(calls.name, 'Example Organisation',
         reason: 'the person recognises the organisation, not whoever filled in '
             'the form');
   });
@@ -40,9 +40,9 @@ void main() {
 
   test('a picture that does not decode costs the picture, not the name', () {
     final calls = WhatAnAgentCallsItself.fromProfileJson(
-        jsonEncode({'org_name': 'America Ascent', 'photo': '%%%not base64'}));
+        jsonEncode({'org_name': 'Example Organisation', 'photo': '%%%not base64'}));
     expect(calls.picture, isNull);
-    expect(calls.name, 'America Ascent');
+    expect(calls.name, 'Example Organisation');
   });
 
   test('an agent that has been given nothing is shown as nothing, not as an error',
@@ -75,7 +75,7 @@ void main() {
               }),
               200);
         }
-        return http.Response(jsonEncode({'org_name': 'America Ascent'}), 200);
+        return http.Response(jsonEncode({'org_name': 'Example Organisation'}), 200);
       });
     }
 
@@ -88,7 +88,7 @@ void main() {
           knownKey: 'DK',
           localCoreOrigin: localCore,
           inner: core([proved], asked));
-      expect(calls.name, 'America Ascent');
+      expect(calls.name, 'Example Organisation');
       expect(asked.single['known_sequence'], 7);
       expect(asked.single['known_key'], 'DK');
     });
@@ -104,7 +104,7 @@ void main() {
             {'verified': false, 'kind': 'no-answer'},
             proved
           ], asked));
-      expect(calls.name, 'America Ascent');
+      expect(calls.name, 'Example Organisation');
       expect(asked, hasLength(2));
 
       final again = <Map<String, dynamic>>[];

@@ -14,7 +14,7 @@ import 'controller_signing_client.dart';
 /// remembers it. An address says where something is, and the identifier that
 /// comes back with the approval says nothing a person can recognise; a name and
 /// a face is what people actually know their own organisation by. The
-/// identifier is never shown (M82 §2) — it is checked internally, here by
+/// identifier is never shown — it is checked internally, here by
 /// [WhichHalfThisAppIsRunning] on every later launch.
 ///
 /// What it says is for a person to look at, never for the app to decide on, but
