@@ -2,8 +2,6 @@ package server
 
 import (
 	"identity-agent-core/limits"
-	"identity-agent-core/mediation"
-	"identity-agent-core/trail"
 	"sync"
 
 	"context"
@@ -142,10 +140,7 @@ func (h hostWrapper) NoteRecorded() { h.s.noteRecorded() }
 func (h hostWrapper) OwnAgentAtArrival(aid string, did *didcomm.DID) (string, error) {
 	return h.s.ownAgentAtArrival(aid, did)
 }
-func (h hostWrapper) AppLimits() limits.Limits { return h.s.AppLimits() }
-func (h hostWrapper) DeliveryQueue(t *trail.Trail) (*mediation.Queue, error) {
-	return h.s.DeliveryQueue(t)
-}
+func (h hostWrapper) AppLimits() limits.Limits                 { return h.s.AppLimits() }
 func (h hostWrapper) OwnerAuthority() (*OwnerAuthority, error) { return h.s.ownerAuthority() }
 func (h hostWrapper) PartyConversation(convID string, party string) string {
 	return h.s.partyConversation(convID, party)

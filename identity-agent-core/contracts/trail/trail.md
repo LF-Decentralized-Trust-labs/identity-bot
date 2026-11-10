@@ -6,7 +6,10 @@ the countersigned entries of `../agent-message/agent-message.schema.json`
 (`record`), each carrying the hash of the one before it
 (`entry_hash`), and one verifier of it, `../../conversationbundle` (see
 `../conversation-bundle`). The trail is that chain extended, not a second one.
-Implementation of the rules: `../../trail`.
+The check that a person's statement is the person's and was signed in time is
+`../../trail` (`CheckAuthor`, `CheckFresh`). What keeps a trail, and the delivery
+queue beside it, is an add-on's and is not in this repository (ADR-068,
+ADR-069).
 
 ## What a person's entries add to the record
 

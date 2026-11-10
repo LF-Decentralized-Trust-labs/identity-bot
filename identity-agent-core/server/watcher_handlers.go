@@ -16,7 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/internal/jsonreply"
-	"identity-agent-core/internal/ratewindow"
+	"identity-agent-core/ratewindow"
 )
 
 // maxRateLimitedClients bounds the limiter's memory. Each key is a caller

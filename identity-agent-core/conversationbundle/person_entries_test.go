@@ -2,7 +2,6 @@ package conversationbundle
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
@@ -13,100 +12,92 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/didcomm"
-	"identity-agent-core/trail"
 )
 
 // A person's entries, their refusals and how each ended are entries of the
 // conversation's one chain, checked by this verifier and no other (ADR-068).
-// These write a conversation with the real trail and check what it wrote.
+// These write a conversation by hand, as the contract describes one, and check
+// what was written. That the add-on that keeps trails writes the same is its own
+// test, against this verifier.
 
 type edSigner struct{ priv ed25519.PrivateKey }
 
 func (s edSigner) PublicKey() ([]byte, error)    { return s.priv.Public().(ed25519.PublicKey), nil }
 func (s edSigner) Sign(d []byte) ([]byte, error) { return ed25519.Sign(s.priv, d), nil }
 
-type allowAll struct{ owner string }
+// keepingApp stands for the app that keeps the words: wrong makes it answer
+// with a fingerprint that is not the one signed, so the entry is not kept.
+type keepingApp struct{ wrong bool }
 
-func (allowAll) KeySpeaksFor(string, string, string) bool { return true }
-func (allowAll) IsAIAgent(id string) bool                 { return id == "EBOT" }
-func (allowAll) MayUseAgent(string, string) bool          { return true }
-func (allowAll) AgentGrantAllows(string, string) bool     { return true }
-func (allowAll) ActiveEmployee(string) bool               { return true }
-func (allowAll) IsSigner(string) bool                     { return false }
+// How a written entry stood at the end, as the chain says it.
+const (
+	committed = "committed"
+	refused   = "refused"
+	notKept   = "not-kept"
+)
 
-type keepingApp struct {
-	fail  bool
-	wrong bool
-}
-
-func (keepingApp) Reachable(context.Context) error { return nil }
-func (a keepingApp) Keep(_ context.Context, f trail.Forward) (trail.Receipt, error) {
-	if a.fail {
-		return trail.Receipt{}, fmt.Errorf("no")
-	}
-	fp, _ := agentmessage.Fingerprint(f.Salt, f.Words)
-	if a.wrong {
-		fp = "Ewrong"
-	}
-	return trail.Receipt{Fingerprint: fp}, nil
-}
-func (keepingApp) Discard(context.Context, string, string) error { return nil }
+type result struct{ EntryID, State string }
 
 const rootAID = "EROOT"
 
 type kept struct{ salt, words []byte }
 
 // conversation is a written conversation: its chain, and the words and salts
-// the app holds under each entry id.
+// the app holds under each entry id. The chain is written here by hand, as
+// ../contracts/trail/trail.md describes it (a person's entry, then the Identity
+// Agent's outcome after it; a refusal has none), because keeping a trail is an
+// add-on's (ADR-068) and this package only checks one.
 type conversation struct {
 	t     *testing.T
-	tr    *trail.Trail
 	keys  *didcomm.KeySet
 	app   *keepingApp
 	now   time.Time
 	n     int
+	chain []agentmessage.Entry
 	words map[string]kept
+	// seen is the ids a person has used, to refuse the reuse of one.
+	seen map[string]bool
 }
 
 func newConversation(t *testing.T) *conversation {
-	t.Helper()
-	return newConversationWith(t, allowAll{}, nil)
-}
-
-// newConversationWith is newConversation with another roster, and with an app
-// that can also be read when backend is given a constructor for it.
-func newConversationWith(t *testing.T, roster trail.Roster, backend func(*conversation) trail.Backend) *conversation {
 	t.Helper()
 	keys, err := didcomm.GenerateKeySet(rootAID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &conversation{t: t, keys: keys, app: &keepingApp{}, now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC), words: map[string]kept{}}
-	var be trail.Backend = c.app
-	if backend != nil {
-		be = backend(c)
+	return &conversation{t: t, keys: keys, app: &keepingApp{}, now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC),
+		words: map[string]kept{}, seen: map[string]bool{}}
+}
+
+// append countersigns a record as the next entry of the chain.
+func (c *conversation) append(rec agentmessage.Record) agentmessage.Entry {
+	c.t.Helper()
+	c.now = c.now.Add(time.Second)
+	rec.Conversation, rec.Seq, rec.IATime = "c1", len(c.chain)+1, c.now.UTC().Format(time.RFC3339Nano)
+	rec.MessageID, rec.OpenedBy = agentmessage.EntryID(rec.Seq), agentmessage.Person("EALICE")
+	if n := len(c.chain); n > 0 {
+		rec.PrevHash = c.chain[n-1].Hash
 	}
-	c.tr = trail.New(roster, be, trail.Options{Agent: rootAID, Now: func() time.Time { c.now = c.now.Add(time.Second); return c.now },
-		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) }})
-	if err := c.tr.Open("c1", "EALICE", true); err != nil {
-		t.Fatal(err)
+	env, err := agentmessage.Countersign(c.keys, rec)
+	if err != nil {
+		c.t.Fatal(err)
 	}
-	return c
+	e := agentmessage.Entry{Conversation: "c1", Seq: rec.Seq, MessageID: rec.MessageID, Kind: rec.Kind, From: rec.From, To: rec.To,
+		InReplyTo: rec.InReplyTo, BodyHash: rec.BodyHash, ContentRef: rec.MessageID, Envelope: env, Hash: agentmessage.Hash(env), CreatedAt: c.now.UTC()}
+	c.chain = append(c.chain, e)
+	return e
+}
+
+// ends writes how entry ended: the Identity Agent's outcome record after it.
+func (c *conversation) ends(entry, state, reason string) {
+	c.t.Helper()
+	c.append(agentmessage.Record{Kind: agentmessage.KindOutcome, From: rootAID, InReplyTo: entry, BodyHash: agentmessage.HashBody(nil),
+		Outcome: &agentmessage.Outcome{Entry: entry, State: state, Reason: reason}})
 }
 
 // say writes one message from a person. edit changes the statement before it
 // is signed.
-func (c *conversation) say(from, words string, edit func(*agentmessage.PersonStatement)) trail.Result {
-	c.t.Helper()
-	res, err := c.trySay(from, words, edit)
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	return res
-}
-
-// trySay is say, returning the error a rejected write gives.
-func (c *conversation) trySay(from, words string, edit func(*agentmessage.PersonStatement)) (trail.Result, error) {
+func (c *conversation) say(from, words string, edit func(*agentmessage.PersonStatement)) result {
 	c.t.Helper()
 	c.n++
 	signer := edSigner{ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))}
@@ -126,23 +117,41 @@ func (c *conversation) trySay(from, words string, edit func(*agentmessage.Person
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	res, err := c.tr.Write(context.Background(), trail.Write{Statement: s, Verkey: verkey, Signature: sig, Salt: salt, Words: []byte(words)})
-	if err != nil {
-		return res, err
+	rec := agentmessage.Record{
+		Kind: s.Kind, From: agentmessage.Person(s.From), To: s.To, InReplyTo: s.InReplyTo, BodyHash: s.Fingerprint,
+		PersonProof: &agentmessage.PersonProof{Statement: s, Verkey: verkey, Signature: sig},
 	}
-	if res.State == trail.Committed {
-		// The app keeps the words of a kept entry only: a refusal never reached
-		// it, and it was told to discard what it did not keep.
-		c.words[res.EntryID] = kept{salt, []byte(words)}
+	used := s.From + "\n" + s.MessageID
+	if c.seen[used] {
+		// The reuse of an id is a refusal, which has no outcome and uses up
+		// the nonce too.
+		rec.Refusal = "id already used"
+		e := c.append(rec)
+		return result{e.MessageID, refused}
 	}
-	return res, nil
+	c.seen[used] = true
+	if from != "EALICE" {
+		// Only the conversation's owner may write; anyone else is refused.
+		rec.Refusal = "only the conversation's owner may do that"
+		e := c.append(rec)
+		return result{e.MessageID, refused}
+	}
+	e := c.append(rec)
+	if c.app.wrong {
+		c.ends(e.MessageID, notKept, "the app's confirmation did not match what was sent")
+		return result{e.MessageID, notKept}
+	}
+	c.ends(e.MessageID, committed, "")
+	// The app keeps the words of a kept entry only.
+	c.words[e.MessageID] = kept{salt, []byte(words)}
+	return result{e.MessageID, committed}
 }
 
 // bundle is the conversation as an export carries it. withWords puts the
 // words in beside the entries that have them.
 func (c *conversation) bundle(withWords bool) *Bundle {
 	b := &Bundle{Format: Format, Conversation: "c1", Root: rootAID}
-	for _, e := range c.tr.Chain("c1") {
+	for _, e := range c.chain {
 		x := Entry{Envelope: e.Envelope}
 		if k, ok := c.words[e.MessageID]; ok && withWords {
 			x.Body, x.Salt = base64.StdEncoding.EncodeToString(k.words), base64.StdEncoding.EncodeToString(k.salt)
@@ -184,7 +193,7 @@ func TestAConversationOfPersonEntriesVerifiesInTheOneChain(t *testing.T) {
 	// decide; make it one by reusing an id instead.
 	c.say("EALICE", "one", nil)
 	dup := c.say("EALICE", "two", func(s *agentmessage.PersonStatement) { s.MessageID = "m1" })
-	if dup.State != trail.Refused {
+	if dup.State != refused {
 		t.Fatalf("the reuse of an id was %s", dup.State)
 	}
 	c.app.wrong = true
@@ -257,7 +266,7 @@ func TestAnOutcomeIsHeldToTheChain(t *testing.T) {
 	c.say("EALICE", "one", nil) // e1, and its outcome e2
 	records := func() []agentmessage.Record {
 		var rs []agentmessage.Record
-		for _, e := range c.tr.Chain("c1") {
+		for _, e := range c.chain {
 			r, err := agentmessage.Read(e.Envelope)
 			if err != nil {
 				t.Fatal(err)
@@ -337,7 +346,7 @@ func TestUnsaltedWordsAfterASaltedEntryAreAFault(t *testing.T) {
 
 	c := newConversation(t)
 	c.say("EALICE", "one", nil) // e1 salted, e2 its outcome
-	salted := mustRead(t, c.tr.Chain("c1")[0].Envelope)
+	salted := mustRead(t, c.chain[0].Envelope)
 	if v, person := salted.FingerprintVersion(); !person || v != agentmessage.FingerprintV1 {
 		t.Fatalf("a person's statement is version %d", v)
 	}
@@ -356,7 +365,7 @@ func TestUnsaltedWordsAfterASaltedEntryAreAFault(t *testing.T) {
 		t.Fatalf("unsalted words after a salted entry were not a fault at entry 3: %q", got)
 	}
 	agentEntry := mustRead(t, genuine.Entries[2].Envelope)
-	if got := faults(salted, agentEntry, mustRead(t, c.tr.Chain("c1")[1].Envelope)); got != "" {
+	if got := faults(salted, agentEntry, mustRead(t, c.chain[1].Envelope)); got != "" {
 		t.Fatalf("an AI agent's entry or an outcome after a salted one was a fault: %s", got)
 	}
 
@@ -381,7 +390,7 @@ func mustRead(t *testing.T, env *didcomm.Envelope) agentmessage.Record {
 
 func recordsOf(t *testing.T, c *conversation) []agentmessage.Record {
 	var rs []agentmessage.Record
-	for _, e := range c.tr.Chain("c1") {
+	for _, e := range c.chain {
 		rs = append(rs, mustRead(t, e.Envelope))
 	}
 	return rs
@@ -393,16 +402,14 @@ func recordsOf(t *testing.T, c *conversation) []agentmessage.Record {
 func TestANotDeliveredNoteFollowsAKeptEntryOnce(t *testing.T) {
 	c := newConversation(t)
 	writeMixed(c) // e1 committed, e3 refused, e4 not kept, e6 committed
-	if err := c.tr.MarkNotDelivered("c1", "e1", "the recipient was not reachable for 7 days"); err != nil {
-		t.Fatal(err)
-	}
+	c.ends("e1", agentmessage.OutcomeNotDelivered, "the recipient was not reachable for 7 days")
 	if got := openingFaults(c.check(c.bundle(true))); got != "" {
 		t.Fatalf("a not-delivered note is a fault: %s", got)
 	}
-	// The trail refuses what the verifier would, so the bad chains are built by hand.
+	// A trail refuses what the verifier would, so the bad chains are built by hand.
 	records := func() []agentmessage.Record {
 		var rs []agentmessage.Record
-		for _, e := range c.tr.Chain("c1") {
+		for _, e := range c.chain {
 			rs = append(rs, mustRead(t, e.Envelope))
 		}
 		return rs

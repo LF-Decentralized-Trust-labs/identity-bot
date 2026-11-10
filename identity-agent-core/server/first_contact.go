@@ -14,7 +14,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/ratewindow"
+	"identity-agent-core/ratewindow"
 	"identity-agent-core/store"
 )
 

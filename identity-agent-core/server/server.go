@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"html"
 	"identity-agent-core/limits"
-	"identity-agent-core/trail"
 	"log"
 	"net"
 	"net/http"
@@ -76,15 +75,11 @@ type CoreServer struct {
 	// addonStates is what each add-on keeps for this server
 	// (addon_host.go).
 	addonStates addonStates
-	// limits, appLimits: the limits apps are held to, the per-app rate and the
-	// delivery queue (an_apps_reach_into_the_core_is_bounded.go).
+	// limits, appLimits: the limits apps are held to and the per-app rate
+	// (an_apps_reach_into_the_core_is_bounded.go).
 	limitsMu  sync.Mutex
 	limits    limits.Limits
 	appLimits appLimitState
-	// expiryTrails are the records the core marks an expired delivery in, one
-	// per add-on that holds messages; see DeliveryQueue.
-	expiryMu     sync.Mutex
-	expiryTrails []*trail.Trail
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers     *provider.Registry

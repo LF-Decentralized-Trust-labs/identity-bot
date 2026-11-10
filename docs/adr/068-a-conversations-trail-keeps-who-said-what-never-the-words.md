@@ -5,8 +5,35 @@
 **Deciders:** Rob Andersen
 **Builds on:** ADR-067 (a person signs a salted fingerprint of their words, not the words)
 **Extends:** ADR-047 (AI agents talk through the Identity Agent that holds them) — its countersigned, chained conversation record, which this ADR makes the trail rather than sitting beside it
+**Amended:** 2026-11-10 — what keeps the trail is an add-on's, not the core's (see "Where the store lives", below)
 
 ---
+
+## Where the store lives
+
+Not every Identity Agent keeps a conversation's trail, so the code that keeps
+it is not in this repository. The **format** and the **checks** are, because
+others need them to build against and to verify what they are given:
+
+- the signed-fingerprint format and its vectors (ADR-067);
+- the entry format: the chain's records (`agentmessage.Record`), with the
+  person's statement, refusal and outcome entries this ADR defines, and the
+  contract that describes them (`identity-agent-core/contracts/trail`);
+- the offline checker of a conversation (`conversationbundle.Verify`);
+- the one check that a person's statement is the person's and was signed in
+  time (`trail.CheckAuthor`, `trail.CheckFresh`, with `trail.KeyRoster` and
+  `trail.Write`), which the core runs at the door for an app speaking for a
+  person, and which every store runs first on every write;
+- the limits that protect the core (`limits.Limits`, `AppLimits`), including
+  the numbers a store of conversations is held to.
+
+The **store** (`Trail`: the conversations in memory, the rules of steps 4 to 6
+below, the forwarding to the app, `Read`, `ReadPage`, `AppendAgent`, and the
+not-delivered mark) belongs to an add-on kept outside this repository. An
+Identity Agent that includes such an add-on still keeps the trail of
+fingerprints while the app keeps the words. Where this ADR names `Trail.*`
+below, it names that store. Nothing about what the store does has changed, only
+where it lives.
 
 ## One record, not two
 
@@ -157,8 +184,9 @@ Identity Agent's word.
   them needs the agent's statement to name its fingerprint version, which
   `IA-AGENT-MSG-V1/V2` does not yet; a later change.
 - It does not store the chain durably, record the head in the key history, or
-  rate-limit. The `trail` package keeps the chain in memory behind the rules
-  above and below; the Identity Agent's table and routes use it.
+  rate-limit. The store (the add-on's) keeps the chain in
+  memory behind the rules above and below; the Identity Agent's table and routes
+  use it.
 
 ## A message id is used up by a refusal
 
@@ -212,6 +240,6 @@ entry with a new id.
 
 ## Reversing it
 
-Nothing yet depends on this: no route uses the trail, and no export carries a
-person's statement entry. The fields it adds to the record are optional, so a
+Nothing in this repository depends on the store: the core keeps only the format
+and the checks, and no export carries a person's statement entry. The fields it adds to the record are optional, so a
 record without them verifies as before.

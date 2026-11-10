@@ -38,12 +38,10 @@ import (
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
 	"identity-agent-core/limits"
-	"identity-agent-core/mediation"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
-	"identity-agent-core/trail"
 	"net/http"
 	"time"
 )
@@ -98,13 +96,9 @@ type Host interface {
 	// make the first time it is asked for. Keep a key of an unexported type
 	// of the add-on's own, so no two add-ons share one.
 	AddonState(key any, make func() any) any
-	// AppLimits is what apps are held to; pass it to trail.New as Options.Limits.
+	// AppLimits is what apps are held to, the numbers an add-on that keeps a
+	// conversation trail or a delivery queue builds them from.
 	AppLimits() limits.Limits
-	// DeliveryQueue is the sealed-message queue, kept across a restart, for the
-	// add-on whose conversation record is t (build it with trail.New from
-	// AppLimits). The core marks an expired delivery in t on its own tick
-	// (ADR-069), so a queue is not given without one. Each add-on passes its own.
-	DeliveryQueue(t *trail.Trail) (*mediation.Queue, error)
 
 	AnchorRecord() (bool, error)
 	AssetHandler() *asset.Handler
