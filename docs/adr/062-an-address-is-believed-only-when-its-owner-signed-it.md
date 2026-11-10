@@ -251,11 +251,16 @@ answer. Anything at a genuine origin of the agent (its URL relay, or a reverse
 proxy that decrypts the agent's traffic) can pass the proof, by forwarding the
 question to the agent, and then alter later responses.
 
-No Dart verifier exists yet: `packages/agent_client` has no key-proof check at
-all, so an app built on it does not make this check. A verifier written there
-must check that the log's inception names the identifier asked, send the origin
-built from the URL it dialled spelled as `endpointrecord.CheckOrigin` expects
-(an explicit port, `:443` for https), and require both signatures, which needs
-ML-DSA-65 as well as Ed25519. An identifier whose log anchors no keyset is
-checked by the identity's signature over the keys, as before
-(`CheckKeysBelongTo`, "vouched").
+An app does not carry a Dart verifier. The check needs ML-DSA-65 as well as
+Ed25519, and the core is the one implementation of it, so the core beside an app
+makes it: `POST /api/verify/agent-at-address` (owner-only, and still served by a
+computer that is only a front end) takes an address, makes a fresh challenge of
+its own, asks `/api/identity/proof` at the origin built from that address
+(`endpointrecord.OriginOf`), reads the identifier's key log from
+`/public/oobi/{aid}`, and answers `CheckKeyProof` over the whole log, with
+`kind` saying whether nothing answered or something else did. `agent_client`
+calls it (`proveTheAgentAt`), requires a grant and a profile to come only from
+an agent that has just proved itself, and on every launch proves the remembered
+agent again against the stored identifier (`checkTheRememberedAgent`). An app
+requires https for any address that is not the computer itself, because the proof
+is not bound to the connection that follows it.
