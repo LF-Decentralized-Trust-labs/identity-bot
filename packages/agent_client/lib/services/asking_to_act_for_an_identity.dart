@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
 import 'a_controller_offering_itself.dart';
+import 'an_agent_proving_itself.dart';
 import 'controller_signing_client.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -141,102 +142,22 @@ class AskingToActForAnIdentity {
     }
   }
 
-  /// Whether an Identity Agent is really at [agentOrigin].
+  /// Which Identity Agent is really at [agentOrigin], proved.
   ///
-  /// ASKED OF THE ONE ROUTE AN AGENT ANSWERS TO A STRANGER, and checked on what
-  /// comes back rather than on the status alone. Health is a liveness probe
-  /// that reveals nothing, which is exactly why it is public — and it names the
-  /// software answering, so a 200 from something else does not pass.
+  /// Not a liveness probe and not a read of what the address claims. The agent
+  /// is asked, by the core beside this app, to sign a fresh challenge with the
+  /// keys its identifier has in force, and the answer is checked against the key
+  /// history it publishes (ADR-062). A host that merely replays a public key
+  /// history cannot do that, and neither can a proxy: the agent signs only for
+  /// its own address. See [proveTheAgentAt].
   ///
-  /// It cannot say WHICH identity is there. Nothing public does: the routes that
-  /// name an identity all need to know the identifier already, which is the
-  /// thing being looked for. So the identifier is learned when the grant
-  /// arrives, and this establishes only that the address leads to an agent —
-  /// which is the common mistake, a typo, and worth catching before somebody
-  /// watches a code for ten minutes.
+  /// This is also where the identifier is learned. It used to be taken from
+  /// the grant, from whatever answered; now it is the identifier a proving
+  /// agent named, and the grant must agree with it.
   ///
-  /// Reaching for an owner-only route and reading its refusal as success would
-  /// accept far more: anything behind an access proxy, any server with a deny
-  /// rule, any JSON endpoint, and any OTHER person's agent all refuse
-  /// identically.
-  Future<void> confirmAnAgentIsAt(String agentOrigin) async {
-    late final http.Response res;
-    try {
-      res = await _plain.get(Uri.parse('$agentOrigin/api/health'));
-    } catch (e) {
-      throw Exception('nothing answered at $agentOrigin — check the address');
-    }
-    if (res.statusCode != 200) {
-      throw Exception('something answered at $agentOrigin and it is not an '
-          'Identity Agent (${res.statusCode})');
-    }
-    Object? body;
-    try {
-      body = jsonDecode(res.body);
-    } catch (_) {
-      throw Exception('whatever is at $agentOrigin did not answer like an '
-          'Identity Agent');
-    }
-    // The shape, not merely the status. A great many things answer 200 at a
-    // path they do not know; far fewer describe themselves this way.
-    if (body is! Map<String, dynamic> ||
-        (body['agent'] ?? '').toString().isEmpty ||
-        (body['status'] ?? '').toString().isEmpty) {
-      throw Exception('whatever is at $agentOrigin did not answer like an '
-          'Identity Agent');
-    }
-  }
-
-  /// Whether the identity answering at an address really is the one it claims.
-  ///
-  /// THE CHECK THAT RUNS THE OTHER WAY. Everything else here is about the
-  /// Identity Agent satisfying itself that a request came from a machine it
-  /// authorised. This is the reverse, and without it the machine took the
-  /// identifier the agent reported at face value and wrote it down as the
-  /// identity it now fronts for — so anything at that address could name any
-  /// identity and be believed, permanently, because every later launch trusts
-  /// what was written.
-  ///
-  /// Asked of THIS computer's own core, which is the only party with an engine
-  /// it controls. Asking the agent to verify itself would be asking the thing
-  /// under question to answer for itself.
-  ///
-  /// The answer is worth something because a key event log is self-verifying:
-  /// the identifier is derived from the inception event, so a log that checks
-  /// out cannot name an identifier other than its own. Nobody is trusted for
-  /// this — not the agent, not the address, not whatever is in between.
-  ///
-  /// Throws rather than returning false. There is one thing to do about every
-  /// reason it fails, and a caller offered a boolean will eventually treat one
-  /// of them as good enough.
-  Future<String> confirmThisIsReally(String agentAid, String agentOrigin) async {
-    final res = await _plain.post(
-      Uri.parse('$_localCore/api/verify/identity-elsewhere'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': agentAid,
-        // Where a KERI identity publishes its history, composed from the
-        // address rather than taken from the far side — an address that names
-        // where to check itself is not a check.
-        'oobi_url': '$agentOrigin/oobi/$agentAid',
-      }),
-    );
-    if (res.statusCode != 200) {
-      throw Exception('this computer could not check who is at $agentOrigin '
-          '(${res.statusCode}): ${res.body}');
-    }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (body['verified'] != true) {
-      throw Exception('the identity at $agentOrigin could not be verified: '
-          '${body['why'] ?? 'no reason given'}');
-    }
-    final confirmed = (body['aid'] ?? '').toString();
-    if (confirmed != agentAid) {
-      throw Exception('the address $agentOrigin answers for $confirmed, not '
-          'for $agentAid');
-    }
-    return (body['public_key'] ?? '').toString();
-  }
+  /// Throws [AnAgentCouldNotBeProved], whose `words` are fit for the screen.
+  Future<ProvedAgent> proveWhoIsAt(String agentOrigin) =>
+      proveTheAgentAt(agentOrigin, localCoreOrigin: _localCore, client: _plain);
 
   /// Whether the core beside this app will actually sign for it.
   ///
@@ -267,17 +188,26 @@ class AskingToActForAnIdentity {
 
   /// Asks until the agent says this machine may act, or [until] passes.
   ///
-  /// Every failure is treated as "not yet". The agent is reached over a network
-  /// that may be down, through a relay that may still be allocating, on a
-  /// machine that may still be starting — and none of those is distinguishable
-  /// from "nobody has approved you", nor should they be: the person is waiting
-  /// for the same thing either way.
+  /// THE GRANT IS BELIEVED ONLY FROM AN AGENT THAT PROVED ITSELF. The agent
+  /// named by [agentAid] (found by [proveWhoIsAt]) is asked to prove it holds
+  /// that identifier's keys right after it has answered with a grant; a grant
+  /// from anything else is thrown away, and so is one that names another
+  /// identifier. Nothing the agent says is authenticated by itself: it is plain
+  /// JSON that anyone at the address could write.
+  ///
+  /// Every failure to REACH the agent is treated as "not yet". The agent is
+  /// reached over a network that may be down, through a relay that may still be
+  /// allocating, on a machine that may still be starting — and none of those is
+  /// distinguishable from "nobody has approved you", nor should they be. A
+  /// failure to PROVE is not that: something is answering and it is not the
+  /// agent, so [AnAgentCouldNotBeProved] is thrown at once.
   ///
   /// Returns null on running out, which the screen says as "nothing yet" rather
   /// than as a failure, because the usual reason is that nobody has picked up
   /// their phone.
   Future<WhatThisMachineWasTold?> waitUntilGranted(
     String agentOrigin, {
+    required String agentAid,
     Duration every = const Duration(seconds: 2),
     Duration until = const Duration(minutes: 10),
   }) async {
@@ -289,11 +219,25 @@ class AskingToActForAnIdentity {
 
     final deadline = DateTime.now().add(until);
     while (!_disposed && DateTime.now().isBefore(deadline)) {
+      WhatThisMachineWasTold? told;
       try {
-        final told = await whatTheAgentSays(agentOrigin);
-        if (told != null) return told;
+        told = await whatTheAgentSays(agentOrigin);
       } catch (_) {
         // Not yet, for one of many reasons that look the same from here.
+      }
+      if (told != null) {
+        // Proved AFTER the grant arrived, so a grant is taken from an agent
+        // that has just shown it holds the keys, not one that did a minute ago.
+        final proved = await proveTheAgentAt(agentOrigin,
+            aid: agentAid, localCoreOrigin: _localCore, client: _plain);
+        if (proved.aid != told.agentAid) {
+          throw const AnAgentCouldNotBeProved(
+              NotProved.somethingElse,
+              'Something answered at that address, but it could not show '
+              'that it is the one you meant.',
+              'the grant named another identifier than the one proved');
+        }
+        return told;
       }
       await Future<void>.delayed(every);
     }

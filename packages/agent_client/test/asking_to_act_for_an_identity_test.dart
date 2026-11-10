@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:agent_client/config/agent_config.dart';
 import 'package:agent_client/services/a_controller_offering_itself.dart';
+import 'package:agent_client/services/an_agent_proving_itself.dart';
 import 'package:agent_client/services/asking_to_act_for_an_identity.dart';
 import 'package:agent_client/services/controller_signing_client.dart';
 import 'package:http/http.dart' as http;
@@ -189,6 +190,7 @@ void main() {
 
       final told = await asking.waitUntilGranted(
         agent,
+        agentAid: 'EMYIDENTITY',
         every: const Duration(milliseconds: 1),
         until: const Duration(milliseconds: 20),
       );
@@ -314,6 +316,7 @@ void main() {
 
       await expectLater(
         asking.waitUntilGranted(agent,
+            agentAid: 'EMYIDENTITY',
             every: const Duration(milliseconds: 1),
             until: const Duration(milliseconds: 20)),
         throwsA(isA<Exception>()),
@@ -336,59 +339,182 @@ void main() {
     });
   });
 
-  /// Which Identity Agent is at an address, and whether one is.
-  ///
-  /// Asked of the two routes a real agent answers to a stranger. Reaching for
-  /// an owner-only route and reading its refusal as success accepts far too
-  /// much: anything behind an access proxy, any server with a deny rule, any
-  /// JSON endpoint returning an object without the field, and any OTHER
-  /// person's agent all refuse identically — and the person then spends ten
-  /// silent minutes waiting on a machine that was never going to answer.
+  /// Which Identity Agent is at an address: proved, not read off the address.
   group('which agent is at an address', () {
-    http.Client answering(Map<String, int> codes, {String body = '{}'}) =>
-        MockClient((req) async =>
-            http.Response(body, codes[req.url.path] ?? 404));
+    http.Client theCoreSaying(Map<String, dynamic> answer, [int code = 200]) =>
+        MockClient((req) async => http.Response(jsonEncode(answer), code));
 
-    test('a real Identity Agent is recognised by how it answers', () async {
+    test('an agent that proved it holds its keys is named', () async {
+      Map<String, dynamic>? asked;
+      Uri? at;
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
         client: MockClient((req) async {
-          if (req.url.path == '/api/health') {
-            return http.Response(
-                jsonEncode({'status': 'active', 'agent': 'keri-go'}), 200);
-          }
-          return http.Response('no', 404);
+          at = req.url;
+          asked = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response(
+              jsonEncode({
+                'verified': true,
+                'aid': 'EMYIDENTITY',
+                'public_key': 'DTHEKEY'
+              }),
+              200);
         }),
       );
-      await asking.confirmAnAgentIsAt(agent);
+      final proved = await asking.proveWhoIsAt(agent);
+      expect(proved.aid, 'EMYIDENTITY');
+      // Asked of THIS computer's own core, never of the agent: asking the thing
+      // under question to answer for itself proves nothing.
+      expect(at.toString(), '$localCore/api/verify/agent-at-address');
+      expect(asked!['address'], agent);
     });
 
-    test('a server that merely refuses is not an Identity Agent', () async {
-      // The whole class an owner-only check accepted: an access proxy, a deny
-      // rule, a relay that refuses unknown paths, somebody else's agent.
+    test('something answering that could not prove it is refused', () async {
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: answering({'/api/health': 403}),
+        client: theCoreSaying({
+          'verified': false,
+          'kind': 'different',
+          'why': 'the answer is not signed by the keys it has in force'
+        }),
       );
-      expect(asking.confirmAnAgentIsAt(agent), throwsA(isA<Exception>()));
+      await expectLater(
+          asking.proveWhoIsAt(agent),
+          throwsA(isA<AnAgentCouldNotBeProved>()
+              .having((e) => e.kind, 'kind', NotProved.somethingElse)));
     });
 
-    test('a JSON endpoint answering 200 is not an Identity Agent', () async {
-      // The status alone is not enough: a great many things answer 200 at a
-      // path they do not know. Far fewer describe themselves this way.
+    test('nothing answering is said as such', () async {
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: answering({'/api/health': 200}, body: '{"status":"ok"}'),
+        client: theCoreSaying({'verified': false, 'kind': 'no-answer'}),
       );
-      expect(asking.confirmAnAgentIsAt(agent), throwsA(isA<Exception>()));
+      await expectLater(
+          asking.proveWhoIsAt(agent),
+          throwsA(isA<AnAgentCouldNotBeProved>()
+              .having((e) => e.kind, 'kind', NotProved.noAnswer)));
     });
 
-    test('an HTML page is refused rather than parsed', () async {
+    test('a computer that cannot check says so rather than shrugging',
+        () async {
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: answering({'/api/health': 200}, body: '<html>hello</html>'),
+        client: MockClient((_) async => http.Response('no engine', 501)),
       );
-      expect(asking.confirmAnAgentIsAt(agent), throwsA(isA<Exception>()));
+      await expectLater(
+          asking.proveWhoIsAt(agent),
+          throwsA(isA<AnAgentCouldNotBeProved>()
+              .having((e) => e.kind, 'kind', NotProved.couldNotTell)));
+    });
+
+    test('a verified answer for another identifier than the one remembered '
+        'is refused', () async {
+      await expectLater(
+          proveTheAgentAt(agent,
+              aid: 'EMYIDENTITY',
+              localCoreOrigin: localCore,
+              client: theCoreSaying({
+                'verified': true,
+                'aid': 'ESOMEBODYELSE',
+                'public_key': 'DTHEIRKEY'
+              })),
+          throwsA(isA<AnAgentCouldNotBeProved>()));
+    });
+
+    test('a verified answer with no key is not an answer', () async {
+      await expectLater(
+          proveTheAgentAt(agent,
+              localCoreOrigin: localCore,
+              client: theCoreSaying({'verified': true, 'aid': 'EMYIDENTITY'})),
+          throwsA(isA<AnAgentCouldNotBeProved>()));
+    });
+  });
+
+  /// A grant is believed only from an agent that has just proved itself.
+  group('a grant', () {
+    MockClient theAgentGranting({required Map<String, dynamic> proofAnswer}) =>
+        MockClient((req) async {
+          if (req.url.path == '/api/controller/sign') {
+            return http.Response(
+                jsonEncode({
+                  'controller_aid': 'BTHISMACHINE',
+                  'signature': '0BSIG',
+                  'timestamp': '2026-09-01T00:00:00Z',
+                }),
+                200);
+          }
+          if (req.url.path == '/api/verify/agent-at-address') {
+            return http.Response(jsonEncode(proofAnswer), 200);
+          }
+          return http.Response(
+              jsonEncode({
+                'aid': 'EMYIDENTITY',
+                'label': 'x',
+                'your_label': 'the study iMac',
+                'your_grade': 'enrolled'
+              }),
+              200);
+        });
+
+    test('is accepted from an agent that proved itself', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: theAgentGranting(proofAnswer: {
+          'verified': true,
+          'aid': 'EMYIDENTITY',
+          'public_key': 'DK'
+        }),
+      );
+      final told = await asking.waitUntilGranted(agent,
+          agentAid: 'EMYIDENTITY', every: const Duration(milliseconds: 1));
+      expect(told!.agentAid, 'EMYIDENTITY');
+    });
+
+    test('is thrown away when whatever answered cannot prove itself', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: theAgentGranting(proofAnswer: {
+          'verified': false,
+          'kind': 'different',
+          'why': 'not signed by the keys in force'
+        }),
+      );
+      await expectLater(
+          asking.waitUntilGranted(agent,
+              agentAid: 'EMYIDENTITY', every: const Duration(milliseconds: 1)),
+          throwsA(isA<AnAgentCouldNotBeProved>()));
+    });
+
+    test('naming another identifier than the one proved is refused', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((req) async {
+          if (req.url.path == '/api/controller/sign') {
+            return http.Response(
+                jsonEncode({
+                  'controller_aid': 'B',
+                  'signature': '0BSIG',
+                  'timestamp': '2026-09-01T00:00:00Z'
+                }),
+                200);
+          }
+          if (req.url.path == '/api/verify/agent-at-address') {
+            return http.Response(
+                jsonEncode({
+                  'verified': true,
+                  'aid': 'EMYIDENTITY',
+                  'public_key': 'DK'
+                }),
+                200);
+          }
+          return http.Response(
+              jsonEncode({'aid': 'EANOTHER', 'your_grade': 'enrolled'}), 200);
+        }),
+      );
+      await expectLater(
+          asking.waitUntilGranted(agent,
+              agentAid: 'EMYIDENTITY', every: const Duration(milliseconds: 1)),
+          throwsA(isA<AnAgentCouldNotBeProved>()));
     });
   });
 
@@ -430,6 +556,7 @@ void main() {
     );
 
     final waiting = asking.waitUntilGranted(agent,
+            agentAid: 'EMYIDENTITY',
         every: const Duration(milliseconds: 5),
         until: const Duration(seconds: 30));
 
@@ -442,85 +569,5 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 40));
     expect(asked, lessThanOrEqualTo(afterDispose + 1),
         reason: 'it went on asking after being disposed');
-  });
-
-  /// The agent has to prove itself back.
-  ///
-  /// Everything else in the ceremony is this computer proving itself to the
-  /// Identity Agent. Without this, the identity was whatever the agent said it
-  /// was — written down, and believed by every later launch. Anything at that
-  /// address could have named any identity.
-  group('the identity at an address is checked, not taken on its word', () {
-    test('a verified log answers with the key it puts in force', () async {
-      Map<String, dynamic>? asked;
-      final asking = AskingToActForAnIdentity(
-        localCoreOrigin: localCore,
-        client: MockClient((req) async {
-          asked = jsonDecode(req.body) as Map<String, dynamic>;
-          return http.Response(
-              jsonEncode({
-                'verified': true,
-                'aid': 'EMYIDENTITY',
-                'public_key': 'DTHEKEY',
-              }),
-              200);
-        }),
-      );
-
-      expect(await asking.confirmThisIsReally('EMYIDENTITY', agent), 'DTHEKEY');
-      // Asked of THIS computer's own core. Asking the agent to verify itself
-      // is asking the thing under question to answer for itself.
-      expect(asked!['aid'], 'EMYIDENTITY');
-      // The address to check at is composed here rather than taken from the far
-      // side: an address that names where to check itself is not a check.
-      expect(asked!['oobi_url'], '$agent/oobi/EMYIDENTITY');
-    });
-
-    test('an unverified identity is refused, with what went wrong', () async {
-      final asking = AskingToActForAnIdentity(
-        localCoreOrigin: localCore,
-        client: MockClient((_) async => http.Response(
-            jsonEncode({
-              'verified': false,
-              'why': 'that key history did not check out',
-            }),
-            200)),
-      );
-      expect(
-        asking.confirmThisIsReally('EMYIDENTITY', agent),
-        throwsA(predicate(
-            (e) => '$e'.contains('that key history did not check out'))),
-      );
-    });
-
-    test('a log that checks out for somebody else is refused', () async {
-      // The case the whole check exists for: something at the address answers,
-      // its history is real, and it is not the identity that was claimed.
-      final asking = AskingToActForAnIdentity(
-        localCoreOrigin: localCore,
-        client: MockClient((_) async => http.Response(
-            jsonEncode({
-              'verified': true,
-              'aid': 'ESOMEBODYELSE',
-              'public_key': 'DTHEIRKEY',
-            }),
-            200)),
-      );
-      expect(
-        asking.confirmThisIsReally('EMYIDENTITY', agent),
-        throwsA(predicate((e) => '$e'.contains('ESOMEBODYELSE'))),
-      );
-    });
-
-    test('a computer that cannot check refuses rather than shrugging', () async {
-      // Not the same as "not verified". A machine with no engine cannot tell,
-      // and an identity that cannot be checked must not be acted on.
-      final asking = AskingToActForAnIdentity(
-        localCoreOrigin: localCore,
-        client: MockClient((_) async => http.Response('no engine', 501)),
-      );
-      expect(asking.confirmThisIsReally('EMYIDENTITY', agent),
-          throwsA(isA<Exception>()));
-    });
   });
 }
