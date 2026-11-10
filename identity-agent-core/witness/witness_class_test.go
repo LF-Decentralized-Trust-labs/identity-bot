@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// A witness is reported by the class ADR-069 names, on the wire as well as in
+// A witness is reported by the class ADR-070 names, on the wire as well as in
 // code, and the boolean older clients read agrees with it.
 func TestWitnessEntryCarriesItsClass(t *testing.T) {
 	if ClassOf(true) != "COMMERCIAL" || ClassOf(false) != "PEER" {

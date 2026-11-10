@@ -14,7 +14,7 @@ import (
 // receipt, and Hab.witness in keri/app/habbing.py): five fields, signed over the
 // serialised event it receipts with an indexed signature. A receipt in this form
 // is verifiable by software written against the KERI specification and nothing
-// of ours. See docs/adr/069-witness-classes-and-valid-receipts.md.
+// of ours. See docs/adr/070-witness-classes-and-valid-receipts.md.
 
 // receiptVersionPrefix is the version string of a JSON receipt up to the size.
 const receiptVersionPrefix = "KERI10JSON"

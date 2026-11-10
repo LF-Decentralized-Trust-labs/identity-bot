@@ -1,4 +1,4 @@
-# ADR-069 — Witness classes, and a receipt any KERI verifier can check
+# ADR-070 — Witness classes, and a receipt any KERI verifier can check
 
 **Status:** Accepted. Supersedes three statements of ADR-016 (its "stub" status, its "max 3" cap, and its description of the receipt); the rest of ADR-016, including its endpoints and request workflow, stands. Corrects a statement in ADR-024.
 **Date:** 2026-10-24 (decisions recorded from Rob Andersen, 2026-10-15)

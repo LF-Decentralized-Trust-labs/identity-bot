@@ -54,7 +54,7 @@ const (
 	BackendCommercial = "commercial"
 )
 
-// A witness is one of two classes (ADR-069). The class is what a person is
+// A witness is one of two classes (ADR-070). The class is what a person is
 // told when they are told who their witnesses are, and what is sent on the
 // wire; IsCommercial remains alongside it for clients that read the boolean.
 const (
