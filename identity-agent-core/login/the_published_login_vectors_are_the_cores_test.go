@@ -36,14 +36,15 @@ var loginVectorsPath = filepath.Join("..", "..", "packages", "login-verify", "te
 // The fields are in the order the file has them; the file is written with
 // encoding/json and compared as bytes.
 type loginVectorFile struct {
-	CanonicalAssertions []canonicalCase `json:"canonical_assertions"`
-	CanonicalChallenges []canonicalCase `json:"canonical_challenges"`
-	Description         string          `json:"description"`
-	Ed25519Signatures   []ed25519Case   `json:"ed25519_signatures"`
-	NonTransferableAID  []spellingCase  `json:"non_transferable_aid"`
-	SignedAssertion     signedAssertion `json:"signed_assertion"`
-	Times               []timeCase      `json:"times"`
-	VerkeyQB64          []spellingCase  `json:"verkey_qb64"`
+	CanonicalAssertions []canonicalCase  `json:"canonical_assertions"`
+	CanonicalChallenges []canonicalCase  `json:"canonical_challenges"`
+	Description         string           `json:"description"`
+	Ed25519Signatures   []ed25519Case    `json:"ed25519_signatures"`
+	NonTransferableAID  []spellingCase   `json:"non_transferable_aid"`
+	SignInPosts         []signInPostCase `json:"sign_in_posts"`
+	SignedAssertion     signedAssertion  `json:"signed_assertion"`
+	Times               []timeCase       `json:"times"`
+	VerkeyQB64          []spellingCase   `json:"verkey_qb64"`
 }
 
 // A signature over message under a raw key, and whether the core's login
@@ -84,6 +85,17 @@ type spellingCase struct {
 	Value     string `json:"value"`
 	GoAccepts bool   `json:"go_accepts"`
 	RawHex    string `json:"raw_hex,omitempty"`
+}
+
+// What a callback is posted (ADR-071): a bare assertion, or an envelope of the
+// assertion and the credentials beside it. Whether the core reads it, and the
+// SAIDs of the credentials it counts as presented: those the assertion names
+// whose bodies have the SAID, and any carried whole in the older form.
+type signInPostCase struct {
+	Name       string   `json:"name"`
+	Post       string   `json:"post"`
+	GoReads    bool     `json:"go_reads"`
+	BoundSaids []string `json:"bound_saids"`
 }
 
 type signatureCase struct {
@@ -127,7 +139,7 @@ func TestThePublishedLoginVectorsAreTheCores(t *testing.T) {
 		t.Fatalf("the login verifier's vectors do not have the shape this test writes: %v", err)
 	}
 	if len(file.CanonicalAssertions) == 0 || len(file.CanonicalChallenges) == 0 || len(file.VerkeyQB64) == 0 ||
-		len(file.NonTransferableAID) == 0 || len(file.SignedAssertion.Signatures) == 0 {
+		len(file.NonTransferableAID) == 0 || len(file.SignInPosts) == 0 || len(file.SignedAssertion.Signatures) == 0 {
 		t.Fatal("the login verifier's vectors are missing a section")
 	}
 
@@ -213,6 +225,23 @@ func recomputeLoginVectors(file loginVectorFile) (loginVectorFile, error) {
 		}
 		ok, verr := VerifyString(c.Message, c.Sig, pub)
 		out.Ed25519Signatures[i].GoAccepts = verr == nil && ok
+	}
+
+	out.SignInPosts = make([]signInPostCase, len(file.SignInPosts))
+	for i, c := range file.SignInPosts {
+		out.SignInPosts[i] = signInPostCase{Name: c.Name, Post: c.Post, BoundSaids: []string{}}
+		_, a, posted, err := ReadSignInPost([]byte(c.Post))
+		if err != nil {
+			continue
+		}
+		out.SignInPosts[i].GoReads = true
+		for _, b := range BoundCredentials(a.PresentedACDCs, posted) {
+			if m, ok := b.(map[string]interface{}); ok {
+				if said, ok := m["said"].(string); ok {
+					out.SignInPosts[i].BoundSaids = append(out.SignInPosts[i].BoundSaids, said)
+				}
+			}
+		}
 	}
 
 	s, err := recomputeSignedAssertion(file.SignedAssertion)
@@ -376,6 +405,13 @@ func describeLoginVectorDrift(file, now loginVectorFile) string {
 			fmt.Sprint(file.Times[i].UnixMs) != fmt.Sprint(now.Times[i].UnixMs)) {
 			fmt.Fprintf(&b, "  time %q: the file says reads=%v, the core reads=%v\n", file.Times[i].Name,
 				file.Times[i].GoReads, now.Times[i].GoReads)
+		}
+	}
+	for i := range file.SignInPosts {
+		if i < len(now.SignInPosts) && fmt.Sprint(file.SignInPosts[i]) != fmt.Sprint(now.SignInPosts[i]) {
+			fmt.Fprintf(&b, "  sign-in post %q: the file says reads=%v counts %v, the core reads=%v counts %v\n",
+				file.SignInPosts[i].Name, file.SignInPosts[i].GoReads, file.SignInPosts[i].BoundSaids,
+				now.SignInPosts[i].GoReads, now.SignInPosts[i].BoundSaids)
 		}
 	}
 	for i := range file.Ed25519Signatures {

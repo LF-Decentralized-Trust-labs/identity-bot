@@ -2,6 +2,7 @@ import type { IRouter, Request, Response } from "express";
 import type { IdentityAgentVerifier } from "./verifier.js";
 import type { LoginAssertion } from "./types.js";
 import { readSignInPost, utf8Text } from "./canonical.js";
+import { boundCredentials } from "./credentials.js";
 
 const MAX_BODY_BYTES = 1 << 20;
 
@@ -146,20 +147,22 @@ const RAW_BODY_GONE =
   "callback's full path if the routes sit under a prefix), or give them " +
   "{ verify: keepLoginRawBody }";
 
-/** The assertion posted to the callback, read from its text as the core reads
+/** The sign-in posted to the callback (the assertion and the credentials beside it), read from its text as the core reads
  *  one, so a repeated key, a byte order mark or a whole number spelled 1.0 is
  *  refused. The text comes from `identityAgentCallbackBody` or
  *  `keepLoginRawBody` where the app has a parser, and is read here where it
  *  has none. Where it is gone, the callback is refused rather than checked
  *  from what a lenient parser left. */
-async function postedAssertion(req: Request): Promise<LoginAssertion> {
+async function postedSignIn(req: Request): Promise<{ assertion: LoginAssertion; credentials: unknown[] }> {
   const kept = (req as WithRawBody)[RAW_BODY];
-  // The credentials beside the assertion are for the website owner's Identity
-  // Agent. This route checks the assertion, which names them by digest, and
-  // keeps none of them.
-  if (kept) return readSignInPost(utf8Text(await kept)).assertion;
-  if (!alreadyRead(req)) return readSignInPost(utf8Text(await readBody(req))).assertion;
-  throw new Error(RAW_BODY_GONE);
+  let post;
+  if (kept) post = readSignInPost(utf8Text(await kept));
+  else if (!alreadyRead(req)) post = readSignInPost(utf8Text(await readBody(req)));
+  else throw new Error(RAW_BODY_GONE);
+  // The credentials beside the assertion are for this site's server alone, and
+  // count only as far as the assertion's signature names them (ADR-071). They
+  // are not kept with the session, which a page can read.
+  return { assertion: post.assertion, credentials: boundCredentials(post.assertion.presented_acdcs, post.credentials) };
 }
 
 /** The options a site's own page posts to start a sign-in, as an object.
@@ -199,6 +202,12 @@ export interface MountOptions {
     disclosures: Record<string, string>;
     sessionToken: string;
     appSessionToken: string;
+    /** The credentials the person presented that the signed assertion names,
+     *  whole (`requestCredentials` on the sign-in asks for them). Each is a
+     *  credential's body as sent, checked to have the SAID the assertion
+     *  signed; checking the credential itself (its issuer, its status) is still
+     *  the site's to do. Empty when none was presented. */
+    credentials: unknown[];
   }) => void | Promise<void>;
   issueAppSession?: (pairwiseAid: string, disclosures: Record<string, string>) => string;
 }
@@ -298,8 +307,9 @@ export function mountIdentityAgentLoginRoutes(
         return res.status(400).json({ error: "session query param required" });
       }
       let assertion: LoginAssertion;
+      let credentials: unknown[];
       try {
-        assertion = await postedAssertion(req);
+        ({ assertion, credentials } = await postedSignIn(req));
       } catch (err) {
         if (err instanceof BodyTooLarge) res.setHeader("Connection", "close");
         return res.status(unreadableStatus(err)).json({ error: `the assertion cannot be read: ${(err as Error).message}` });
@@ -323,6 +333,7 @@ export function mountIdentityAgentLoginRoutes(
           disclosures: verified.verifiedResult.disclosures ?? {},
           sessionToken: token,
           appSessionToken: verified.appSessionToken,
+          credentials,
         });
       }
 

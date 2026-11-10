@@ -48,10 +48,21 @@ they showed, not to carry their contents.
    `packages/login-verify` take assertions from Identity Agents that have not
    updated. Such an assertion is **never** handed to a page collector, since it
    would carry the credentials with it; the sign-in completes without it. The
-   window ends in the first release after every Identity Agent we ship sends the
-   new form; the old form is then refused, by a later ADR amendment.
+   window ends in the first release after no supported Identity Agent still sends the
+   old form; the old form is then refused, by a later ADR amendment.
 5. **The OIDC adapter** puts the full credentials in the VP token it builds, as
    now, and the digests in the assertion it embeds in the ID token.
+
+   **Known remaining path.** The authorization redirect
+   (`BuildAuthorizationRedirect` in `identity-agent-core/oidc/auth.go`) carries
+   that VP token in the redirect URL, so on this route the credentials do reach
+   the person's browser, and so any script on the relying party's page. Sending
+   digests there and fetching the credentials back-channel would close it, but
+   the relying party's server cannot reach the person's Identity Agent, which is
+   on their own device, without the relay broker the cross-device flow waits for
+   (`handleOIDCComplete` in `identity-agent-core/server/oidc_handlers.go`). The
+   path stays as it is until then. It is not the web sign-in of points 1 to 4,
+   which never hands a page the credentials.
 
 ## Consequences
 
@@ -76,11 +87,15 @@ they showed, not to carry their contents.
 
 ## Implementation notes
 
-- Person's side: `login.Handler.buildAssertion` and `postAssertion`
+- Person's side: `login.Handler.BuildAssertionWithCredentials` and `postAssertion`
   (`identity-agent-core/login`); the post body is read by `login.ReadSignInPost`.
-- Owner's side: `handleLoginCallback` and `boundCredentials` in
-  `identity-agent-core/server/login_handlers.go`.
-- TypeScript: `postedAssertion` in `packages/login-verify/src/express-handlers.ts`
-  reads both bodies.
+- Owner's side: `handleLoginCallback` in
+  `identity-agent-core/server/login_handlers.go`, which counts a posted
+  credential by `login.BoundCredentials`.
+- TypeScript: `postedSignIn` in `packages/login-verify/src/express-handlers.ts`
+  reads both bodies and hands the site's server (`onVerified`) the credentials
+  `boundCredentials` keeps, the same rule as `login.BoundCredentials`.
 - Vectors: `packages/login-verify/test-vectors/core-canonical-and-spellings.json`
-  gains an assertion presenting digests, read by Go and TypeScript alike.
+  gains an assertion presenting digests, and `sign_in_posts`, the callback's
+  body as posted (bare, or with credentials beside the assertion) with the
+  credentials that count, run by Go and TypeScript alike.

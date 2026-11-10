@@ -347,11 +347,6 @@ func (h *Handler) BuildAssertionWithCredentials(rel *SiteRelationship, bundle *C
 	return h.buildAssertionWithCredentials(rel, bundle, customData)
 }
 
-func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, error) {
-	a, _, err := h.buildAssertionWithCredentials(rel, bundle, customData)
-	return a, err
-}
-
 func (h *Handler) buildAssertionWithCredentials(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, []PresentedCredential, error) {
 	seed, err := loadRelationshipSeed(h, rel)
 	if err != nil {

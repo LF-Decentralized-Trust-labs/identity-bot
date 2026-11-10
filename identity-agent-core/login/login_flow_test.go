@@ -76,7 +76,7 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	}
 
 	// The signed Grant carries the pairwise AID as `i` and only requested fields.
-	asrt, err := h.buildAssertion(relA, bundleA, nil)
+	asrt, err := h.BuildAssertion(relA, bundleA, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	// inception is rebuilt from the keys it was minted with.
 	old := *relA
 	old.InceptionB64 = ""
-	asrt2, err := h.buildAssertion(&old, bundleA, nil)
+	asrt2, err := h.BuildAssertion(&old, bundleA, nil)
 	if err != nil {
 		t.Fatalf("a relationship without its kept inception could not sign: %v", err)
 	}

@@ -139,7 +139,7 @@ func TestACredentialPostedBesideTheAssertionCountsOnlyIfTheAssertionNamesIt(t *t
 	c := held[0]
 	gate := func(presented []interface{}, posted []login.PresentedCredential) bool {
 		ok, _ := w.s.credentialGateSatisfied(context.Background(),
-			boundCredentials(presented, posted), w.holder, w.schema, w.issuer)
+			login.BoundCredentials(presented, posted), w.holder, w.schema, w.issuer)
 		return ok
 	}
 
