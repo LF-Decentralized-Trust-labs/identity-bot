@@ -87,6 +87,11 @@ type VerifyKelInput struct {
 }
 
 // VerifyKelResult is returned to callers after L1+L2 evaluation.
+//
+// What the watcher had seen before (whether this was a first contact, each
+// source's outcome, the alert with the digest it held) stays unexported: a
+// caller in another package gets the verdict and its reason, never a way to
+// read an observation around the opt-out check.
 type VerifyKelResult struct {
 	OK             bool
 	Blocked        bool
@@ -95,7 +100,7 @@ type VerifyKelResult struct {
 	SequenceNum    int
 	Digest         string
 	OverallOutcome string
-	SourcesQueried []SourceOutcome
-	DuplicityAlert *DuplicityAlert
-	FirstContact   bool
+	sourcesQueried []SourceOutcome
+	duplicityAlert *DuplicityAlert
+	firstContact   bool
 }

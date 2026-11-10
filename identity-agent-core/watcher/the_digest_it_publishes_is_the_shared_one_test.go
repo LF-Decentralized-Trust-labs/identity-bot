@@ -48,7 +48,7 @@ func TestTheDigestTheWatcherRecordsIsTheSharedVectorsDigest(t *testing.T) {
 		if res.Digest != v.Digest {
 			t.Errorf("%s: the watcher recorded %s, the shared vectors say %s", v.Name, res.Digest, v.Digest)
 		}
-		rec, _ := ws.Store.GetFirstSeen("E"+v.Name, v.Seq)
+		rec, _ := ws.Store.getFirstSeen("E"+v.Name, v.Seq)
 		if rec == nil || rec.KelDigest != v.Digest {
 			t.Errorf("%s: the stored first-seen digest is not the vectors' digest", v.Name)
 		}

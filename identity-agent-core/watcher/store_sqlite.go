@@ -34,7 +34,7 @@ func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
 	return err
 }
 
-func (s *SQLiteStore) GetFirstSeen(aid string, seq int) (*FirstSeenRecord, error) {
+func (s *SQLiteStore) getFirstSeen(aid string, seq int) (*FirstSeenRecord, error) {
 	row := s.db.QueryRow(`
 		SELECT aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
 		       seen_count, source_type, source_url
@@ -42,7 +42,7 @@ func (s *SQLiteStore) GetFirstSeen(aid string, seq int) (*FirstSeenRecord, error
 	return scanFirstSeen(row)
 }
 
-func (s *SQLiteStore) ListFirstSeen(aid string) ([]FirstSeenRecord, error) {
+func (s *SQLiteStore) listFirstSeen(aid string) ([]FirstSeenRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
 		       seen_count, source_type, source_url
@@ -88,7 +88,7 @@ func (s *SQLiteStore) InsertDuplicityAlert(alert DuplicityAlert) (int64, error) 
 	return id, err
 }
 
-func (s *SQLiteStore) ListDuplicityAlerts(aid string) ([]DuplicityAlert, error) {
+func (s *SQLiteStore) listDuplicityAlerts(aid string) ([]DuplicityAlert, error) {
 	rows, err := s.db.Query(`
 		SELECT id, aid, sequence_num, our_digest, their_digest, source_url,
 		       detected_at, resolved, resolution_note

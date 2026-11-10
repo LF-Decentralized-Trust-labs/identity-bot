@@ -54,7 +54,9 @@ opens them to a controller. They are:
 - what the key log is checked against and what the gateway trusts: adding a
   witness or watcher provider, and importing, enabling or deleting a capability;
 - speaking as the identity to another Identity Agent by a sealed request, and
-  installing software on this computer.
+  installing software on this computer;
+- what this agent's watcher tells peers: opting an identity out of, or back
+  into, being discussed (`PUT /api/watcher/opt-out`).
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line

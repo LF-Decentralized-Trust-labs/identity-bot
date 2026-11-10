@@ -3,7 +3,6 @@ package watcher
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"time"
 
@@ -93,7 +92,7 @@ func (s *Service) SetWatcherHints(urls []string) error {
 // RecordFirstSeen stores L1 digest at seq (creates or reinforces).
 func (s *Service) RecordFirstSeen(aid string, seq int, digest string, source SourceType, sourceURL string) error {
 	now := time.Now().UTC()
-	existing, err := s.Store.GetFirstSeen(aid, seq)
+	existing, err := s.Store.getFirstSeen(aid, seq)
 	if err != nil {
 		return err
 	}
@@ -115,9 +114,9 @@ func firstSeenTime(existing *FirstSeenRecord, now time.Time) time.Time {
 	return now
 }
 
-// DetectDuplicity compares digest against stored first-seen at same seq.
-func (s *Service) DetectDuplicity(aid string, seq int, digest string) (bool, *FirstSeenRecord, error) {
-	existing, err := s.Store.GetFirstSeen(aid, seq)
+// detectDuplicity compares digest against stored first-seen at same seq.
+func (s *Service) detectDuplicity(aid string, seq int, digest string) (bool, *FirstSeenRecord, error) {
+	existing, err := s.Store.getFirstSeen(aid, seq)
 	if err != nil {
 		return false, nil, err
 	}
@@ -153,12 +152,12 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 
 	result := &VerifyKelResult{
 		AID: in.AID, SequenceNum: seq, Digest: digest,
-		SourcesQueried: []SourceOutcome{},
+		sourcesQueried: []SourceOutcome{},
 	}
 
-	existing, _ := s.Store.GetFirstSeen(in.AID, seq)
+	existing, _ := s.Store.getFirstSeen(in.AID, seq)
 	firstContact := existing == nil
-	result.FirstContact = firstContact
+	result.firstContact = firstContact
 
 	var l1Outcome string
 	if existing == nil {
@@ -172,7 +171,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	} else {
 		l1Outcome = "mismatch"
 	}
-	result.SourcesQueried = append(result.SourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
+	result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
 
 	// L2-standing query (default the commercial witness/watcher service)
 	l2URL := s.DefaultL2URL()
@@ -192,7 +191,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		} else {
 			l2Outcome = "mismatch"
 		}
-		result.SourcesQueried = append(result.SourcesQueried, SourceOutcome{
+		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
 			Type: "L2_standing", URL: l2URL, Outcome: l2Outcome, LatencyMs: ms,
 		})
 	}
@@ -211,7 +210,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 				outcome = "mismatch"
 			}
 		}
-		result.SourcesQueried = append(result.SourcesQueried, SourceOutcome{
+		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
 			Type: "L2_bootstrap", URL: hint, Outcome: outcome,
 		})
 	}
@@ -222,7 +221,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// opinion. L1 is this agent's own memory and L2 is a service, so without
 	// peers the whole pipeline rests on one operator agreeing with itself.
 	peerOutcomes, _, peersDisagreed := s.crossCheckPeers(ctx, in.AID, seq, digest)
-	result.SourcesQueried = append(result.SourcesQueried, peerOutcomes...)
+	result.sourcesQueried = append(result.sourcesQueried, peerOutcomes...)
 
 	// Blocking: repeat L1 mismatch, or first-contact L1+L2-standing conflict (≥2 sources).
 	shouldBlock := false
@@ -251,7 +250,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		result.OK = false
 		result.Reason = blockReason
 		result.OverallOutcome = "duplicity"
-		result.DuplicityAlert = alert
+		result.duplicityAlert = alert
 		_ = alertID
 		s.emit("kel_duplicity_detected", map[string]interface{}{
 			"aid": in.AID, "seq": seq, "reason": blockReason,
@@ -267,7 +266,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	result.OK = true
 	result.OverallOutcome = "confirmed"
 	s.emit("kel_verification", map[string]interface{}{
-		"aid": in.AID, "sequence_num": seq, "sources": result.SourcesQueried,
+		"aid": in.AID, "sequence_num": seq, "sources": result.sourcesQueried,
 		"overall_outcome": result.OverallOutcome,
 	})
 	s.pruneAID(in.AID, seq)
@@ -295,16 +294,48 @@ func (s *Service) recordDuplicity(aid string, seq int, ourDigest, sourceURL stri
 	return id, &alert, nil
 }
 
-// GetPublicDigest serves this agent's L1 observation for /public/kel-digest.
-func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) {
+// Disclosable returns this watcher's first-seen record for aid at seq, or nil
+// when there is none OR the identity opted out, so an opted-out identity is
+// indistinguishable from one never seen. It and DisclosableAll and
+// DisclosableAlerts are the only exported ways to read what the watcher has
+// seen or caught: the store's reads are unexported, and
+// TestNoExportedReadReturnsAnObservation fails on any other exported method
+// that returns one. That keeps a route in another package from skipping the
+// opt-out; it does not stop code inside this package from reading the store.
+func (s *Service) Disclosable(aid string, seq int) (*FirstSeenRecord, error) {
+	return disclose(s, aid, func() (*FirstSeenRecord, error) { return s.Store.getFirstSeen(aid, seq) })
+}
+
+// DisclosableAll is Disclosable for every sequence number held for aid.
+func (s *Service) DisclosableAll(aid string) ([]FirstSeenRecord, error) {
+	return disclose(s, aid, func() ([]FirstSeenRecord, error) { return s.Store.listFirstSeen(aid) })
+}
+
+// DisclosableAlerts is Disclosable for the duplicity alerts raised about aid.
+func (s *Service) DisclosableAlerts(aid string) ([]DuplicityAlert, error) {
+	return disclose(s, aid, func() ([]DuplicityAlert, error) { return s.Store.listDuplicityAlerts(aid) })
+}
+
+// disclose is the one opt-out check. The read runs whether or not the identity
+// opted out and its result is then dropped, so an opted-out identity costs the
+// same queries as one never seen and the time an answer takes does not tell
+// them apart.
+func disclose[T any](s *Service, aid string, read func() (T, error)) (T, error) {
+	var none T
 	opted, err := s.Store.IsOptedOut(aid)
 	if err != nil {
-		return nil, err
+		return none, err
 	}
-	if opted {
-		return nil, fmt.Errorf("opted_out")
+	found, err := read()
+	if err != nil || opted {
+		return none, err
 	}
-	rec, err := s.Store.GetFirstSeen(aid, seq)
+	return found, nil
+}
+
+// GetPublicDigest serves this agent's L1 observation for /public/kel-digest.
+func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) {
+	rec, err := s.Disclosable(aid, seq)
 	if err != nil {
 		return nil, err
 	}
@@ -341,17 +372,8 @@ func (s *Service) signDigest(r *DigestResponse) {
 
 // KelCheck handles POST /public/kel-check (L3 peer cross-check).
 func (s *Service) KelCheck(req KelCheckRequest) (*KelCheckResponse, error) {
-	// An identity that opted out is not discussed with peers either. The answer
-	// is the one given for an identity never seen, so it does not reveal that
-	// the watcher holds a record, its digest, or when it was first seen.
-	opted, err := s.Store.IsOptedOut(req.AID)
-	if err != nil {
-		return nil, err
-	}
-	if opted {
-		return &KelCheckResponse{Match: false}, nil
-	}
-	rec, err := s.Store.GetFirstSeen(req.AID, req.Seq)
+	// An opted-out identity is answered as one never seen (see Disclosable).
+	rec, err := s.Disclosable(req.AID, req.Seq)
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +437,7 @@ func (s *Service) Prune() error {
 }
 
 func (s *Service) pruneAID(aid string, latestSeq int) error {
-	rows, err := s.Store.ListFirstSeen(aid)
+	rows, err := s.Store.listFirstSeen(aid)
 	if err != nil || len(rows) <= 2 {
 		return err
 	}

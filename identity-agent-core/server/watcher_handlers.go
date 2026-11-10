@@ -156,10 +156,6 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 		}
 		resp, err := s.WatcherService.GetPublicDigest(aid, seq)
 		if err != nil {
-			if err.Error() == "opted_out" {
-				writeError(w, http.StatusNotFound, "Not found", "")
-				return
-			}
 			writeError(w, http.StatusInternalServerError, "digest lookup failed", err.Error())
 			return
 		}
@@ -201,7 +197,7 @@ func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "aid required", "")
 		return
 	}
-	rows, err := s.WatcherService.Store.ListFirstSeen(aid)
+	rows, err := s.WatcherService.DisclosableAll(aid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
 		return
@@ -240,4 +236,53 @@ func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[
 		log.Printf("[watcher] DUPLICITY blocked aid=%s seq=%d reason=%s", aid, res.SequenceNum, res.Reason)
 	}
 	return res
+}
+
+// handleWatcherOptOutGet says whether this agent's watcher is silent about an
+// identity. Under /api, so a stranger is refused; a paired controller may read it.
+func (s *CoreServer) handleWatcherOptOutGet(w http.ResponseWriter, r *http.Request) {
+	if s.WatcherService == nil {
+		writeError(w, http.StatusNotFound, "watcher not running", "")
+		return
+	}
+	aid := r.URL.Query().Get("aid")
+	if aid == "" {
+		writeError(w, http.StatusBadRequest, "aid required", "")
+		return
+	}
+	opted, err := s.WatcherService.Store.IsOptedOut(aid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"aid": aid, "opted_out": opted})
+}
+
+// handleWatcherOptOutSet opts an identity out of, or back into, being discussed
+// by this agent's watcher. From then on /public/kel-digest, /public/kel-check and
+// the owner listing all answer as for an identity never seen. Owner-only: it is
+// on controllerOwnerOnly, so a paired controller is refused at any score.
+//
+// This only hides what the watcher says. VerifyKel still records first-seen for
+// an opted-out identity, because duplicity detection needs it: stopping would
+// let a forked key log pass unnoticed.
+func (s *CoreServer) handleWatcherOptOutSet(w http.ResponseWriter, r *http.Request) {
+	if s.WatcherService == nil {
+		writeError(w, http.StatusNotFound, "watcher not running", "")
+		return
+	}
+	var req struct {
+		AID      string `json:"aid"`
+		OptedOut *bool  `json:"opted_out"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AID == "" || req.OptedOut == nil {
+		writeError(w, http.StatusBadRequest, "aid and opted_out required", "")
+		return
+	}
+	if err := s.WatcherService.Store.SetOptOut(req.AID, *req.OptedOut); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"aid": req.AID, "opted_out": *req.OptedOut})
 }

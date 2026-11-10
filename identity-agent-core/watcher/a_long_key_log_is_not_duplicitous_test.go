@@ -122,10 +122,10 @@ func TestAnObservationRecordedWithADecimalSequenceIsForgotten(t *testing.T) {
 	if after.Blocked || !after.OK {
 		t.Fatalf("still refused after the migration: %s", after.Reason)
 	}
-	if kept, _ := ws.Store.GetFirstSeen(aid, 3); kept == nil || kept.KelDigest != sound {
+	if kept, _ := ws.Store.getFirstSeen(aid, 3); kept == nil || kept.KelDigest != sound {
 		t.Fatalf("the sound observation at position 3 was not kept: %+v", kept)
 	}
-	alerts, err := ws.Store.ListDuplicityAlerts(aid)
+	alerts, err := ws.Store.listDuplicityAlerts(aid)
 	if err != nil {
 		t.Fatal(err)
 	}
