@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -101,11 +102,26 @@ func (s *Service) RecordFirstSeen(aid string, seq int, digest string, source Sou
 	if existing != nil {
 		count = existing.SeenCount + 1
 	}
-	return s.Store.RecordFirstSeen(FirstSeenRecord{
+	err = s.Store.RecordFirstSeen(FirstSeenRecord{
 		AID: aid, SequenceNum: seq, KelDigest: digest,
 		FirstSeenAt: firstSeenTime(existing, now), LastConfirmedAt: now,
 		SeenCount: count, SourceType: source, SourceURL: sourceURL,
 	})
+	if errors.Is(err, ErrFirstSeenConflict) {
+		// A different digest at a position already observed is a fork, not an
+		// update. The first observation stands and the conflict is recorded.
+		their := ""
+		if first, gerr := s.Store.GetFirstSeen(aid, seq); gerr == nil && first != nil {
+			their = first.KelDigest
+		}
+		if _, aerr := s.Store.InsertDuplicityAlert(DuplicityAlert{
+			AID: aid, SequenceNum: seq, OurDigest: their, TheirDigest: digest,
+			SourceURL: sourceURL, DetectedAt: now,
+		}); aerr != nil {
+			return aerr
+		}
+	}
+	return err
 }
 
 func firstSeenTime(existing *FirstSeenRecord, now time.Time) time.Time {
@@ -183,6 +199,11 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		s.emit("kel_l2_query_latency", map[string]interface{}{
 			"url": l2URL, "error": l2Err.Error(), "latency_ms": latency.Milliseconds(),
 		})
+		// Kept in the evidence: "asked and could not answer" must not read as
+		// "never asked", or making L2 unreachable would quietly shrink the record.
+		result.SourcesQueried = append(result.SourcesQueried, SourceOutcome{
+			Type: "L2_standing", URL: l2URL, Outcome: "unavailable", LatencyMs: int(latency.Milliseconds()),
+		})
 	} else {
 		ms := int(latency.Milliseconds())
 		if l2Resp.Digest == nil {
@@ -204,7 +225,9 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		}
 		resp, _, err := s.L2.QueryDigest(ctx, hint, in.AID, seq)
 		outcome := "unknown"
-		if err == nil && resp.Digest != nil {
+		if err != nil {
+			outcome = "unavailable"
+		} else if resp.Digest != nil {
 			if *resp.Digest == digest {
 				outcome = "match"
 			} else {
@@ -270,7 +293,6 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		"aid": in.AID, "sequence_num": seq, "sources": result.SourcesQueried,
 		"overall_outcome": result.OverallOutcome,
 	})
-	s.pruneAID(in.AID, seq)
 	return result, nil
 }
 
@@ -400,9 +422,10 @@ func (s *Service) AnchorAlertToKEL(alert *DuplicityAlert) error {
 	return nil
 }
 
-// Prune applies retention: keep min+max seq per AID, drop stale AIDs.
+// Prune applies retention by age only: an identity not confirmed within the
+// stale TTL is dropped whole. No observation is dropped while its identity is
+// live, because any of them could be the one a later fork is compared against.
 func (s *Service) Prune() error {
-	// Stale TTL prune is store-wide; per-AID min/max handled on verify.
 	cutoff := time.Now().UTC().Add(-defaultStaleTTL)
 	n, err := s.Store.PruneStale(cutoff)
 	if err != nil {
@@ -412,27 +435,6 @@ func (s *Service) Prune() error {
 		log.Printf("[watcher] pruned %d stale first-seen rows", n)
 	}
 	return nil
-}
-
-func (s *Service) pruneAID(aid string, latestSeq int) error {
-	rows, err := s.Store.ListFirstSeen(aid)
-	if err != nil || len(rows) <= 2 {
-		return err
-	}
-	minSeq, maxSeq := rows[0].SequenceNum, rows[0].SequenceNum
-	for _, r := range rows[1:] {
-		if r.SequenceNum < minSeq {
-			minSeq = r.SequenceNum
-		}
-		if r.SequenceNum > maxSeq {
-			maxSeq = r.SequenceNum
-		}
-	}
-	keep := []int{minSeq, maxSeq}
-	if latestSeq != minSeq && latestSeq != maxSeq {
-		keep = append(keep, latestSeq)
-	}
-	return s.Store.PruneIntermediate(aid, keep)
 }
 
 func (s *Service) emit(eventType string, payload map[string]interface{}) {

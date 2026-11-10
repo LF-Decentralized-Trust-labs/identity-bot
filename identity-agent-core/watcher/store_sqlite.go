@@ -2,8 +2,6 @@ package watcher
 
 import (
 	"database/sql"
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -17,21 +15,28 @@ func NewSQLiteStore(db *sql.DB) *SQLiteStore {
 }
 
 func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		INSERT INTO kel_first_seen (
 			aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
 			seen_count, source_type, source_url
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, sequence_num) DO UPDATE SET
-			kel_digest = excluded.kel_digest,
 			last_confirmed_at = excluded.last_confirmed_at,
-			seen_count = kel_first_seen.seen_count + 1`,
+			seen_count = kel_first_seen.seen_count + 1
+		WHERE kel_first_seen.kel_digest = excluded.kel_digest`,
 		rec.AID, rec.SequenceNum, rec.KelDigest,
 		rec.FirstSeenAt.UTC().Format(time.RFC3339),
 		rec.LastConfirmedAt.UTC().Format(time.RFC3339),
 		rec.SeenCount, string(rec.SourceType), rec.SourceURL,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// The upsert touches no row when the digest differs from the one first seen.
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrFirstSeenConflict
+	}
+	return nil
 }
 
 func (s *SQLiteStore) GetFirstSeen(aid string, seq int) (*FirstSeenRecord, error) {
@@ -141,24 +146,6 @@ func (s *SQLiteStore) SetConfig(key, value string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO watcher_config (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
-	return err
-}
-
-func (s *SQLiteStore) PruneIntermediate(aid string, keepSeqs []int) error {
-	if len(keepSeqs) == 0 {
-		return nil
-	}
-	placeholders := strings.Repeat("?,", len(keepSeqs))
-	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]interface{}, 0, len(keepSeqs)+1)
-	args = append(args, aid)
-	for _, seq := range keepSeqs {
-		args = append(args, seq)
-	}
-	_, err := s.db.Exec(
-		fmt.Sprintf(`DELETE FROM kel_first_seen WHERE aid = ? AND sequence_num NOT IN (%s)`, placeholders),
-		args...,
-	)
 	return err
 }
 
