@@ -193,3 +193,37 @@ func TestAHistoryThatGoesBackwardsIsRefused(t *testing.T) {
 		t.Fatalf("a state older than the log was refused: %+v", out)
 	}
 }
+
+// A host that ignores which identifier was asked for and proves another one,
+// fully and correctly, is still not the identity this computer was connected to:
+// the core compares what was proved with what it asked for, whatever the far
+// side's own route would have refused.
+func TestAHostThatProvesAnotherIdentityThanTheOneAskedForIsADifferentOne(t *testing.T) {
+	agent, _ := anAgentHoldingKeys(t)
+	ks, _ := agent.keySetFor(proofAgentAID)
+	plain := inceptionCommittingTo(t, proofAgentAID, ks)
+	router := agent.buildRouter()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/identity/proof", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		q.Del("aid") // answers for itself whoever was asked for
+		r.URL.RawQuery = q.Encode()
+		router.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/public/oobi/", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"kel": plain})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	agent.EndpointService.SetOverrideURL(srv.URL)
+
+	asker := theAsker(t)
+	if out := askWhoIsAt(t, asker, srv.URL, ""); !out.Verified {
+		t.Fatalf("the host's own identity was not proved when none was asked for: %+v", out)
+	}
+	other := "EAnotherIdentifierOfTheRightShape0123456789"
+	out := askWhoIsAt(t, asker, srv.URL, other)
+	if out.Verified || out.Kind != KindDifferent {
+		t.Fatalf("a host proving %s was accepted as %s: %+v", proofAgentAID, other, out)
+	}
+}
