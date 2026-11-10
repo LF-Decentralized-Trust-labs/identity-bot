@@ -11,8 +11,7 @@ witness in the controller's list, and verified the signature over the event.
 Each receipt is then given again with one character of its signature changed,
 and that must not be stored, so a run shows the judge can say no.
 
-Nothing here is Grape code: keripy reads the receipts and the controller's key
-log, and decides.
+keripy reads the receipts and the controller's key log, and decides.
 """
 import base64
 import importlib.metadata

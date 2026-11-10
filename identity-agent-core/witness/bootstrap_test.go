@@ -314,7 +314,7 @@ func TestAnExistingThreeWitnessIdentityKeepsWorking(t *testing.T) {
 		mu.Unlock()
 		return map[string]interface{}{}, nil
 	}
-	s.DesignationAfter = func(string, map[string]interface{}) ([]string, int) { return keys, 2 }
+	s.DesignationAfter = func(string, map[string]interface{}) ([]string, int, error) { return keys, 2, nil }
 
 	// Every designated key resolves to an address.
 	if known := s.designatedTargets(keys); len(known) != 3 {

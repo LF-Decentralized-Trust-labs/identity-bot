@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 )
 
 // SubmitToWitness sends one event to one witness and returns its receipt.
@@ -33,16 +34,17 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	}
 	// Checked, not assumed. A reply that does not carry a receipt covering this
 	// event is a witness that has not witnessed, whatever its status code said.
-	designated, _ := s.designationAfter(signerAID, ked)
-	// A rotation that leaves no witness in force leaves an empty list, which the hook reports as it reports a
-	// log it cannot read: nil. For a rotation the list is known, and the cut witness's receipt is not in it.
-	if t, _ := ked["t"].(string); designated == nil && s.DesignationAfter != nil && (t == "rot" || t == "drt") {
-		designated = []string{}
+	designated, _, derr := s.designationAfter(signerAID, ked)
+	if derr != nil {
+		// A list that cannot be read is not checked against, and not counted:
+		// the receipt is kept for when the log can be read.
+		log.Printf("[witness] the key log of %s cannot be read, so the receipt for %s is kept and not counted: %v", signerAID, said, derr)
+		designated = nil
 	}
 	sig, wit, err := receiptFromResponse(resp, rawEvent, said, designated)
 	if err != nil {
 		return nil, err
 	}
-	s.onReceipt(said, wit, sig, rawEvent, designated)
+	s.receive(said, wit, sig, rawEvent, designated, derr == nil)
 	return resp, nil
 }

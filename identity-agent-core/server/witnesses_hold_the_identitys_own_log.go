@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 	"identity-agent-core/witness"
@@ -209,13 +210,21 @@ func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
 // registry listed more witnesses keeps reaching, and counting receipts from,
 // every one it designates. ev may already be in the log, or be the next event
 // to go in; it is applied once either way. A nil ev reads the log as it stands.
-func (s *CoreServer) designationAfter(aid string, ev map[string]interface{}) ([]string, int) {
+//
+// A log that cannot be read is an error, never a shorter list: an event that
+// will not parse could be the rotation that cut a witness, so reading past it
+// would leave that witness in force. A log that is read and designates nobody
+// answers an empty list, not nil.
+func (s *CoreServer) designationAfter(aid string, ev map[string]interface{}) ([]string, int, error) {
 	if s.DataStore == nil {
-		return nil, 0
+		return nil, 0, fmt.Errorf("there is no key log to read for %s", aid)
 	}
-	events, _ := s.DataStore.GetEvents(aid)
+	events, err := s.DataStore.GetEvents(aid)
+	if err != nil {
+		return nil, 0, fmt.Errorf("the key log of %s cannot be read: %w", aid, err)
+	}
 	evD, _ := ev["d"].(string)
-	var current []string
+	current := []string{}
 	toad := 0
 	apply := func(parsed map[string]interface{}) {
 		if next, ok := witnessesAfter(current, parsed); ok {
@@ -223,11 +232,11 @@ func (s *CoreServer) designationAfter(aid string, ev map[string]interface{}) ([]
 			toad = thresholdOf(parsed["bt"])
 		}
 	}
-	for _, e := range events {
-		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
+	for i, e := range events {
+		raw, derr := base64.StdEncoding.DecodeString(e.RawBytesB64)
 		var parsed map[string]interface{}
-		if json.Unmarshal(raw, &parsed) != nil {
-			continue
+		if derr != nil || json.Unmarshal(raw, &parsed) != nil {
+			return nil, 0, fmt.Errorf("event %d of the key log of %s cannot be parsed", i, aid)
 		}
 		if d, _ := parsed["d"].(string); evD != "" && d == evD {
 			break
@@ -240,7 +249,7 @@ func (s *CoreServer) designationAfter(aid string, ev map[string]interface{}) ([]
 	if toad < 0 {
 		toad = 0
 	}
-	return current, toad
+	return current, toad, nil
 }
 
 // witnessOwnLog brings the identity's witnesses up to date with its own key

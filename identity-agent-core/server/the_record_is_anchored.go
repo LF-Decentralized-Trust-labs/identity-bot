@@ -169,7 +169,9 @@ func witnessesAfter(current []string, ev map[string]interface{}) (next []string,
 		for _, w := range stringsOf(ev["br"]) {
 			cut[w] = true
 		}
-		var kept []string
+		// Empty, not nil: a rotation that cuts every witness leaves a list that
+		// was read and has nobody in it, which nil would not say.
+		kept := []string{}
 		for _, w := range current {
 			if !cut[w] {
 				kept = append(kept, w)

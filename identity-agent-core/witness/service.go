@@ -119,13 +119,19 @@ type Service struct {
 
 	// DesignationAfter reports the witnesses an identity's key log designates,
 	// and the threshold it asks of them, once ev (an event of that log, or the
-	// next one) is in it. Nil, or an answer with no keys, means the log designates
-	// none this agent can read.
+	// next one) is in it.
+	//
+	// A log that was read and designates nobody (an inception with none, or a
+	// rotation that cuts every witness) answers an EMPTY, non-nil list and the
+	// log's own threshold. A log that could not be read answers an error, and
+	// then no receipt is counted: a list this agent cannot read is not an
+	// empty one, and not a list nobody checks either. A nil hook means this
+	// agent keeps no log to ask.
 	//
 	// It is what lets an identity founded when the registry listed more
 	// witnesses keep reaching all of them, and be finalized against its own
 	// threshold, whatever a NEW identity would be given today.
-	DesignationAfter func(aid string, ev map[string]interface{}) (keys []string, toad int)
+	DesignationAfter func(aid string, ev map[string]interface{}) (keys []string, toad int, err error)
 
 	// telMu serialises storing registry events, so two submissions that
 	// together complete a credential's chain are checked one after the other.
@@ -912,7 +918,17 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	designated, toad := s.designationAfter(signerAID, event)
+	designated, toad, derr := s.designationAfter(signerAID, event)
+	// A key log that cannot be read leaves the list in force unknown. The event
+	// still goes to the witnesses this agent has, and what comes back is kept,
+	// but nothing is counted until the log can be read: a damaged rotation
+	// must not leave the witnesses it cut in force.
+	settle := derr == nil
+	if derr != nil {
+		log.Printf("[witness] the key log of %s cannot be read, so receipts for %s are kept and not counted: %v",
+			signerAID, eventSAID(event), derr)
+		designated, toad = nil, 0
+	}
 	witnesses, err := s.witnessesToReach(kind, signerAID, designated)
 	if err != nil {
 		return err
@@ -921,16 +937,22 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	seq, _ := eventSeq(event)
 	// Finalized against the identity's own threshold: the receipts it asked
 	// for, not a floor that a smaller witness set can never reach.
+	// A list that was read, even an empty one, carries the log's own threshold.
+	// Only a list nobody read (nil) falls back to the floor.
 	threshold := s.Threshold()
-	if len(designated) > 0 && toad > 0 {
+	if designated != nil {
 		threshold = toad
+	}
+	if !settle {
+		// Nothing can be counted, so no count is waited for.
+		threshold = s.Threshold()
 	}
 	s.begin(said, signerAID, seq, threshold)
 
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
-		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, designated) })
+		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, designated, settle) })
 	}
 	s.background(func() { s.finalizeLoop(said, threshold) })
 	return nil
@@ -1175,7 +1197,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 		sent := s.sendBegun(signerAID)
 		if !s.background(func() {
 			defer sent()
-			s.postWithRetry(ctx, witnessEventURL(w), body, said, key, designated)
+			s.postWithRetry(ctx, witnessEventURL(w), body, said, key, designated, true)
 		}) {
 			sent()
 		}
@@ -1195,9 +1217,9 @@ type witnessTarget struct {
 }
 
 // designationAfter is DesignationAfter, safe when it is not set.
-func (s *Service) designationAfter(aid string, ev map[string]interface{}) ([]string, int) {
+func (s *Service) designationAfter(aid string, ev map[string]interface{}) ([]string, int, error) {
 	if s.DesignationAfter == nil {
-		return nil, 0
+		return nil, 0, nil
 	}
 	return s.DesignationAfter(aid, ev)
 }
@@ -1317,7 +1339,7 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 // some number of servers had responded — not that anybody had attested to
 // anything. A witness returning 200 and no receipt finalised an event just as
 // well as one that signed it.
-func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string, designated []string) {
+func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string, designated []string, settle bool) {
 	// Its own time, not the caller's: every caller starts this in the
 	// background and returns, and a caller that cancels its context on return
 	// cancelled the post before it reached the witness.
@@ -1371,7 +1393,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, sig, rawEventOf(body), designated)
+	s.receive(eventSAID, witnessAID, sig, rawEventOf(body), designated, settle)
 }
 
 // receiptFromResponse pulls a verified receipt out of a witness's reply.
@@ -1401,6 +1423,13 @@ func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID
 // one the key log check makes. Nil means the list is not known here, and the
 // index is then checked where the log is judged.
 func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []byte, designated []string) {
+	s.receive(eventSAID, witnessAID, cesrSig, rawEvent, designated, true)
+}
+
+// receive is onReceipt, which can also keep a receipt without counting it
+// (settle false): for an event whose witness list could not be read, so the
+// receipt is held for when it can be.
+func (s *Service) receive(eventSAID, witnessAID, cesrSig string, rawEvent []byte, designated []string, settle bool) {
 	// One witness is one receipt per event, however often it arrives: a
 	// retry, a replay, or a witness answering twice must never add to the
 	// count, or one witness could reach the threshold alone. Held under a lock
@@ -1430,6 +1459,9 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []by
 		EventSAID: eventSAID, WitnessAID: witnessAID, CesrSignature: cesrSig, Event: rawEvent,
 	}); err != nil {
 		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
+		return
+	}
+	if !settle {
 		return
 	}
 	s.settle(f)
@@ -1788,7 +1820,13 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	designated, _ := s.designationAfter(signerAID, nil)
+	designated, _, derr := s.designationAfter(signerAID, nil)
+	if derr != nil {
+		// Nothing is counted here, so the endpoint record still goes to the
+		// witnesses this agent has; it just cannot add the ones the log names.
+		log.Printf("[witness] the key log of %s cannot be read, so its endpoint record goes to enrolled witnesses only: %v", signerAID, derr)
+		designated = nil
+	}
 	witnesses, err := s.witnessesToReach(kind, signerAID, designated)
 	if err != nil {
 		return err
