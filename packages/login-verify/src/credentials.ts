@@ -8,6 +8,7 @@ import { blake3Qb64 } from "./canonical.js";
 
 const SAID_LEN = 44;
 const DUMMY = "#".repeat(SAID_LEN);
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /** base64, standard or URL alphabet, padded or not: the spellings the core reads.
  *  Anything else, a line break included, is not a credential's body. */
@@ -26,50 +27,101 @@ function decodeBase64(s: string): Uint8Array | null {
   }
 }
 
+/** Where the compact JSON value starting at `i` in `text` ends, or -1. Compact
+ *  means no whitespace anywhere outside a string, and the grammar is JSON's:
+ *  what Go's json.Compact leaves unchanged. */
+function valueEnd(text: string, i: number): number {
+  const c = text[i];
+  if (c === '"') {
+    let j = i + 1;
+    while (j < text.length) {
+      const d = text[j];
+      if (d === '"') return j + 1;
+      if (d < " ") return -1;
+      if (d === "\\") {
+        const e = text[j + 1];
+        if (e === "u") {
+          if (!/^[0-9a-fA-F]{4}$/.test(text.slice(j + 2, j + 6))) return -1;
+          j += 6;
+        } else if (e !== undefined && '"\\/bfnrt'.includes(e)) j += 2;
+        else return -1;
+      } else j++;
+    }
+    return -1;
+  }
+  if (c === "{" || c === "[") {
+    const close = c === "{" ? "}" : "]";
+    let j = i + 1;
+    if (text[j] === close) return j + 1;
+    for (;;) {
+      if (c === "{") {
+        if (text[j] !== '"') return -1;
+        const k = valueEnd(text, j);
+        if (k < 0 || text[k] !== ":") return -1;
+        j = k + 1;
+      }
+      const e = valueEnd(text, j);
+      if (e < 0) return -1;
+      j = e;
+      if (text[j] === ",") j++;
+      else return text[j] === close ? j + 1 : -1;
+    }
+  }
+  const lit = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(text.slice(i, i + 400));
+  if (!lit) return -1;
+  // A number longer than the window is read as far as the window: nothing in a
+  // credential is that long, and a longer one is refused below as not ending.
+  return i + lit[0].length;
+}
+
+/** The key as Go's encoder writes it (HTML escaping off), which is the only
+ *  spelling of a key the core reads back unchanged. */
+function canonicalKey(key: string): string {
+  let out = '"';
+  for (const ch of key) {
+    const n = ch.codePointAt(0)!;
+    if (ch === '"') out += '\\"';
+    else if (ch === "\\") out += "\\\\";
+    else if (ch === "\n") out += "\\n";
+    else if (ch === "\r") out += "\\r";
+    else if (ch === "\t") out += "\\t";
+    else if (ch === "\b") out += "\\b";
+    else if (ch === "\f") out += "\\f";
+    else if (n < 0x20 || n === 0x2028 || n === 0x2029) out += "\\u" + n.toString(16).padStart(4, "0");
+    else out += ch;
+  }
+  return out + '"';
+}
+
 /** The members of the JSON object `text` at its top level: each key with the
- *  span of its value. Compact JSON, as a credential is written; null on
- *  anything else. */
+ *  span of its value. The object must be in the one spelling the core reads
+ *  (compact, each key as the core writes it) and no key may repeat, since which
+ *  of two a reader sees would differ between readers. Null on anything else. */
 function topLevelMembers(text: string): Array<{ key: string; start: number; end: number }> | null {
   if (text[0] !== "{") return null;
   const out: Array<{ key: string; start: number; end: number }> = [];
+  const seen = new Set<string>();
   let i = 1;
-  const readString = (): string | null => {
-    if (text[i] !== '"') return null;
-    const from = i;
-    i++;
-    while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
-    if (i >= text.length) return null;
-    i++;
+  if (text[i] === "}") return text.length === 2 ? out : null;
+  for (;;) {
+    const kEnd = text[i] === '"' ? valueEnd(text, i) : -1;
+    if (kEnd < 0 || text[kEnd] !== ":") return null;
+    let key: string;
     try {
-      return JSON.parse(text.slice(from, i)) as string;
+      key = JSON.parse(text.slice(i, kEnd)) as string;
     } catch {
       return null;
     }
-  };
-  while (i < text.length) {
-    if (text[i] === "}") return i === text.length - 1 ? out : null;
-    const key = readString();
-    if (key === null || text[i] !== ":") return null;
-    i++;
-    const start = i;
-    let depth = 0;
-    while (i < text.length) {
-      const c = text[i];
-      if (c === '"') {
-        if (readString() === null) return null;
-        continue;
-      }
-      if (c === "{" || c === "[") depth++;
-      else if (c === "}" || c === "]") {
-        if (depth === 0) break;
-        depth--;
-      } else if (c === "," && depth === 0) break;
-      i++;
-    }
-    out.push({ key, start, end: i });
+    if (text.slice(i, kEnd) !== canonicalKey(key) || seen.has(key)) return null;
+    seen.add(key);
+    const start = kEnd + 1;
+    const end = valueEnd(text, start);
+    if (end < 0) return null;
+    out.push({ key, start, end });
+    i = end;
     if (text[i] === ",") i++;
+    else return text[i] === "}" && i === text.length - 1 ? out : null;
   }
-  return null;
 }
 
 /** `text` with the value of its member `d` blanked, and that value; null if `d`
@@ -99,13 +151,49 @@ export function credentialSaid(acdcJsonB64: string): string | null {
   } catch {
     return null;
   }
-  if (!/^\{"v":"ACDC[0-9a-zA-Z]+_","d":"/.test(text)) return null;
+  // The version string, which states the size, is one of the two spellings the
+  // core writes, and states the size the body is.
+  const v = /^\{"v":"ACDC(?:10JSON([0-9a-f]{6})_|CAAJSON([A-Za-z0-9_-]{4})\.)","/.exec(text);
+  if (!v) return null;
+  const declared =
+    v[1] !== undefined ? parseInt(v[1], 16) : [...v[2]].reduce((n, c) => n * 64 + B64.indexOf(c), 0);
+  if (declared !== raw.length) return null;
+  const members = topLevelMembers(text);
+  if (!members) return null;
+  // The core reads a credential that names its issuer and its schema, and
+  // nothing else.
+  const str = (key: string): string | null => {
+    const m = members.find((x) => x.key === key);
+    if (!m) return null;
+    try {
+      const x: unknown = JSON.parse(text.slice(m.start, m.end));
+      return typeof x === "string" && x !== "" ? x : null;
+    } catch {
+      return null;
+    }
+  };
+  if (str("i") === null || str("s") === null) return null;
   const whole = blankedD(text);
   if (!whole || blake3Qb64(new TextEncoder().encode(whole.blanked)) !== whole.said) return null;
-  const a = topLevelMembers(text)?.find((m) => m.key === "a");
+  const a = members.find((m) => m.key === "a");
   const block = a ? blankedD(text.slice(a.start, a.end)) : null;
   if (!block || blake3Qb64(new TextEncoder().encode(block.blanked)) !== block.said) return null;
   return whole.said;
+}
+
+/** The schema and the issuer a credential's body names: what the core reads
+ *  out of it, and what a site's server must read, never what a poster wrote
+ *  beside it. Null if the body is not one the core reads. */
+export function credentialFields(acdcJsonB64: string): { said: string; schema: string; issuer: string } | null {
+  const said = credentialSaid(acdcJsonB64);
+  if (said === null) return null;
+  const text = new TextDecoder().decode(decodeBase64(acdcJsonB64)!);
+  const members = topLevelMembers(text)!;
+  const read = (key: string): string => {
+    const m = members.find((x) => x.key === key)!;
+    return JSON.parse(text.slice(m.start, m.end)) as string;
+  };
+  return { said, schema: read("s"), issuer: read("i") };
 }
 
 function isMap(v: unknown): v is Record<string, unknown> {
@@ -126,9 +214,23 @@ export function boundCredentials(presented: unknown[], posted: unknown[]): unkno
     else out.push(p);
   }
   for (const c of posted ?? []) {
-    if (!isMap(c) || typeof c.said !== "string" || !named.has(c.said)) continue;
-    if (typeof c.acdc_json_b64 !== "string" || credentialSaid(c.acdc_json_b64) !== c.said) continue;
-    out.push(c);
+    if (!isMap(c) || typeof c.said !== "string" || !named.has(c.said) || typeof c.acdc_json_b64 !== "string") continue;
+    const body = credentialFields(c.acdc_json_b64);
+    if (body === null || body.said !== c.said) continue;
+    // The schema and the issuer come from the body, as the core reads them,
+    // never from what the poster wrote beside it.
+    const text = (k: string): string => (typeof c[k] === "string" ? (c[k] as string) : "");
+    out.push({
+      said: c.said,
+      schema_said: body.schema,
+      issuer_aid: body.issuer,
+      holder_aid: text("holder_aid"),
+      status: text("status"),
+      acdc_json_b64: c.acdc_json_b64,
+      pres_said_b64: text("pres_said_b64"),
+      cesr_sig: text("cesr_sig"),
+      holder_public_key: text("holder_public_key"),
+    });
   }
   return out;
 }

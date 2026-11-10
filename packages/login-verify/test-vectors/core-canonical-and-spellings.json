@@ -370,7 +370,9 @@
       "name": "a bare assertion that presented digests, no credentials posted",
       "post": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"EGZOghJZXvfE2zOpH9nByfy3guC51WO7bdTpZkNdY5mj\"],\"site_aid\":\"ESite\"}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "both credentials posted and named",
@@ -379,6 +381,14 @@
       "bound_saids": [
         "ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH",
         "EGZOghJZXvfE2zOpH9nByfy3guC51WO7bdTpZkNdY5mj"
+      ],
+      "bound_schema_saids": [
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM",
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"
+      ],
+      "bound_issuer_aids": [
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
       ]
     },
     {
@@ -387,13 +397,21 @@
       "go_reads": true,
       "bound_saids": [
         "ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH"
+      ],
+      "bound_schema_saids": [
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"
+      ],
+      "bound_issuer_aids": [
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
       ]
     },
     {
       "name": "a credential posted when the assertion presented nothing counts for nothing",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1NV8iLCJkIjoiRUQxSTEybTNMay1qX2xZVWtCdGh6em9ZWmZ5NjdBUXdvMVpNS3IxZUp4eUgiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QifX0=\"}]}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "a digest named with no credential posted presents nothing",
@@ -401,37 +419,53 @@
       "go_reads": true,
       "bound_saids": [
         "EGZOghJZXvfE2zOpH9nByfy3guC51WO7bdTpZkNdY5mj"
+      ],
+      "bound_schema_saids": [
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"
+      ],
+      "bound_issuer_aids": [
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
       ]
     },
     {
       "name": "a body whose attribute block was changed after the digest was signed",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1NV8iLCJkIjoiRUQxSTEybTNMay1qX2xZVWtCdGh6em9ZWmZ5NjdBUXdvMVpNS3IxZUp4eUgiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRm9yZ2VkIn19\"}]}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "a body whose own fields were changed after the digest was signed",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1NV8iLCJkIjoiRUQxSTEybTNMay1qX2xZVWtCdGh6em9ZWmZ5NjdBUXdvMVpNS3IxZUp4eUgiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVXIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QifX0=\"}]}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "a body whose attribute block does not match its own digest, under a digest of the whole that was recomputed",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EFPYeJPMr4HTiIiCmaXMavfFe77VRBRPe60cuCGaqEol\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EFPYeJPMr4HTiIiCmaXMavfFe77VRBRPe60cuCGaqEol\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1NV8iLCJkIjoiRUZQWWVKUE1yNEhUaUlpQ21hWE1hdmZGZTc3VlJCUlBlNjBjdUNHYXFFb2wiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRnJpc3QifX0=\"}]}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "a credential posted under the SAID of another body",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1Nl8iLCJkIjoiRUdaT2doSlpYdmZFMnpPcEg5bkJ5ZnkzZ3VDNTFXTzdiZFRwWmtOZFk1bWoiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRU1RMUptYzlPa09fNG4yeVpNa21jaENXZlFob21OUFBFRU54VTlPVjVpYWEiLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiU2Vjb25kIn19\"}]}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "a body that is not base64",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"not base64 !\"}]}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "a credential in the form before ADR-071, carried whole in the assertion",
@@ -439,25 +473,113 @@
       "go_reads": true,
       "bound_saids": [
         "ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH"
+      ],
+      "bound_schema_saids": [
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"
+      ],
+      "bound_issuer_aids": [
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
       ]
     },
     {
       "name": "an envelope with credentials null",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":null}",
       "go_reads": true,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "an envelope with credentials that are not a list",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":{}}",
       "go_reads": false,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
     },
     {
       "name": "an envelope with a key it does not have",
       "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[],\"extra\":1}",
       "go_reads": false,
-      "bound_saids": []
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential whose version string declares the wrong size",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EEVflZYEvWAwDIdGkd0LvLNE9JkJu_gomLE4_lFjUtw9\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EEVflZYEvWAwDIdGkd0LvLNE9JkJu_gomLE4_lFjUtw9\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1Nl8iLCJkIjoiRUVWZmxaWUV2V0F3RElkR2tkMEx2TE5FOUprSnVfZ29tTEU0X2xGalV0dzkiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QifX0=\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential with no schema field",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EBQoB7TMJoT_cbkr8pkypg9TLBC8WiWvKbdLtcNlnjEI\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EBQoB7TMJoT_cbkr8pkypg9TLBC8WiWvKbdLtcNlnjEI\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDEyMl8iLCJkIjoiRUJRb0I3VE1Kb1RfY2Jrcjhwa3lwZzlUTEJDOFdpV3ZLYmRMdGNObG5qRUkiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QifX0=\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential with no issuer field",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ENBmBjkvCcqMaYh1MA8uAZjn2ximSbNSZmNs7aF9ADQy\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ENBmBjkvCcqMaYh1MA8uAZjn2ximSbNSZmNs7aF9ADQy\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDEyNF8iLCJkIjoiRU5CbUJqa3ZDY3FNYVloMU1BOHVBWmpuMnhpbVNiTlNabU5zN2FGOUFEUXkiLCJzIjoiRUJkWHQzZ0lYT2YyQkJXTkhkU1hDSm5GSkw1T3VRUHlNNUswbmV1bmljY00iLCJhIjp7ImQiOiJFQ2dMV0Iza1A2SlNOU0pqZ3lWREYxQVM4cmpEUnN4RUVCM3dLU3ROOWdQTSIsImkiOiJFSG9sZGVyQWlkMDEyMzQ1Njc4OUFCQ0RFRkdISUpLTE1OT1BRUlNUVVYiLCJkdCI6IjIwMjYtMDYtMTdUMTI6MDA6MDAuMDAwMDAwKzAwOjAwIiwiZW1wbG95ZXIiOiJGaXJzdCJ9fQ==\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential with a space after a colon in the outer object",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EP5b6XKI6xjIwga2O6n-OacWbCnz974G8QsVA2gDSaqS\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EP5b6XKI6xjIwga2O6n-OacWbCnz974G8QsVA2gDSaqS\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1Nl8iLCJkIjoiRVA1YjZYS0k2eGpJd2dhMk82bi1PYWNXYkNuejk3NEc4UXNWQTJnRFNhcVMiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6ICJFQmRYdDNnSVhPZjJCQldOSGRTWENKbkZKTDVPdVFQeU01SzBuZXVuaWNjTSIsImEiOnsiZCI6IkVDZ0xXQjNrUDZKU05TSmpneVZERjFBUzhyakRSc3hFRUIzd0tTdE45Z1BNIiwiaSI6IkVIb2xkZXJBaWQwMTIzNDU2Nzg5QUJDREVGR0hJSktMTU5PUFFSU1RVViIsImR0IjoiMjAyNi0wNi0xN1QxMjowMDowMC4wMDAwMDArMDA6MDAiLCJlbXBsb3llciI6IkZpcnN0In19\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential with a space after a colon in the attribute block",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EG-zGzm8-Fgf83zXjwRjGHS9VhA6usC-U3zdg6D7CrTo\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EG-zGzm8-Fgf83zXjwRjGHS9VhA6usC-U3zdg6D7CrTo\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1Nl8iLCJkIjoiRUctekd6bTgtRmdmODN6WGp3UmpHSFM5VmhBNnVzQy1VM3pkZzZEN0NyVG8iLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUxmaDY2V0FqbGNTUTh0RUVrVTFtVXZWZnVOR1JsTy1EdlRCMWZubFJ4dG4iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjogIkZpcnN0In19\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential with a repeated key in the attribute block",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EFH00LP0rI28rJU4tro7DwWen5eH1srzngEvIgQeGeam\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"EFH00LP0rI28rJU4tro7DwWen5eH1srzngEvIgQeGeam\",\"schema_said\":\"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM\",\"issuer_aid\":\"EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE2OF8iLCJkIjoiRUZIMDBMUDBySTI4ckpVNHRybzdEd1dlbjVlSDFzcnpuZ0V2SWdRZUdlYW0iLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRU5ROHdDd3kxa3lnanZMeWFYUjhnVkpfbk9xeVh1MHJDbTVIMUg5RjJ3QXQiLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QiLCJlbXBsb3llciI6IkZpcnN0In19\"}]}",
+      "go_reads": true,
+      "bound_saids": [],
+      "bound_schema_saids": [],
+      "bound_issuer_aids": []
+    },
+    {
+      "name": "a credential posted with a schema and an issuer other than its body names",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"EForgedSchema00000000000000000000000000000\",\"issuer_aid\":\"EForgedIssuer00000000000000000000000000000\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1NV8iLCJkIjoiRUQxSTEybTNMay1qX2xZVWtCdGh6em9ZWmZ5NjdBUXdvMVpNS3IxZUp4eUgiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QifX0=\"}]}",
+      "go_reads": true,
+      "bound_saids": [
+        "ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH"
+      ],
+      "bound_schema_saids": [
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"
+      ],
+      "bound_issuer_aids": [
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    {
+      "name": "a credential posted with no schema or issuer beside it",
+      "post": "{\"assertion\":{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\"],\"site_aid\":\"ESite\"},\"credentials\":[{\"said\":\"ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH\",\"schema_said\":\"\",\"issuer_aid\":\"\",\"holder_aid\":\"EHolderAid0123456789ABCDEFGHIJKLMNOPQRSTUV\",\"status\":\"issued\",\"acdc_json_b64\":\"eyJ2IjoiQUNEQzEwSlNPTjAwMDE1NV8iLCJkIjoiRUQxSTEybTNMay1qX2xZVWtCdGh6em9ZWmZ5NjdBUXdvMVpNS3IxZUp4eUgiLCJpIjoiRUlzc3VlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwicyI6IkVCZFh0M2dJWE9mMkJCV05IZFNYQ0puRkpMNU91UVB5TTVLMG5ldW5pY2NNIiwiYSI6eyJkIjoiRUNnTFdCM2tQNkpTTlNKamd5VkRGMUFTOHJqRFJzeEVFQjN3S1N0TjlnUE0iLCJpIjoiRUhvbGRlckFpZDAxMjM0NTY3ODlBQkNERUZHSElKS0xNTk9QUVJTVFVWIiwiZHQiOiIyMDI2LTA2LTE3VDEyOjAwOjAwLjAwMDAwMCswMDowMCIsImVtcGxveWVyIjoiRmlyc3QifX0=\"}]}",
+      "go_reads": true,
+      "bound_saids": [
+        "ED1I12m3Lk-j_lYUkBthzzoYZfy67AQwo1ZMKr1eJxyH"
+      ],
+      "bound_schema_saids": [
+        "EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"
+      ],
+      "bound_issuer_aids": [
+        "EIssuerAid0123456789ABCDEFGHIJKLMNOPQRSTUV"
+      ]
     }
   ],
   "signed_assertion": {

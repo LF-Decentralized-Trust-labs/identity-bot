@@ -96,6 +96,10 @@ type signInPostCase struct {
 	Post       string   `json:"post"`
 	GoReads    bool     `json:"go_reads"`
 	BoundSaids []string `json:"bound_saids"`
+	// The schema and the issuer of each counted credential, as its body names
+	// them (never as the poster wrote them beside it), in the same order.
+	BoundSchemaSaids []string `json:"bound_schema_saids"`
+	BoundIssuerAids  []string `json:"bound_issuer_aids"`
 }
 
 type signatureCase struct {
@@ -229,7 +233,7 @@ func recomputeLoginVectors(file loginVectorFile) (loginVectorFile, error) {
 
 	out.SignInPosts = make([]signInPostCase, len(file.SignInPosts))
 	for i, c := range file.SignInPosts {
-		out.SignInPosts[i] = signInPostCase{Name: c.Name, Post: c.Post, BoundSaids: []string{}}
+		out.SignInPosts[i] = signInPostCase{Name: c.Name, Post: c.Post, BoundSaids: []string{}, BoundSchemaSaids: []string{}, BoundIssuerAids: []string{}}
 		_, a, posted, err := ReadSignInPost([]byte(c.Post))
 		if err != nil {
 			continue
@@ -239,6 +243,10 @@ func recomputeLoginVectors(file loginVectorFile) (loginVectorFile, error) {
 			if m, ok := b.(map[string]interface{}); ok {
 				if said, ok := m["said"].(string); ok {
 					out.SignInPosts[i].BoundSaids = append(out.SignInPosts[i].BoundSaids, said)
+					schema, _ := m["schema_said"].(string)
+					issuer, _ := m["issuer_aid"].(string)
+					out.SignInPosts[i].BoundSchemaSaids = append(out.SignInPosts[i].BoundSchemaSaids, schema)
+					out.SignInPosts[i].BoundIssuerAids = append(out.SignInPosts[i].BoundIssuerAids, issuer)
 				}
 			}
 		}

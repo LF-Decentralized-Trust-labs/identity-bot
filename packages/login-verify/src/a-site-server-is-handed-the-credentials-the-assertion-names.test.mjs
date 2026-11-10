@@ -63,7 +63,9 @@ async function signIn(presented, credentials) {
 // Named and posted: the site's server is handed it, and only it.
 let got = await signIn([first.said], [first, second]);
 assert.deepEqual(got.credentials.map((c) => c.said), [first.said]);
-assert.deepEqual(got.credentials[0], first);
+// In the shape the core hands a gate: every field, the schema and the issuer
+// from the body, the rest as posted and empty where the poster left them out.
+assert.deepEqual(got.credentials[0], { pres_said_b64: "", cesr_sig: "", holder_public_key: "", ...first });
 
 // A body changed after the digest was signed is not handed over.
 got = await signIn([first.said], [forged]);

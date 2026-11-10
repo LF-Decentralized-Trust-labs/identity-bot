@@ -67,14 +67,21 @@ for (const c of V.canonical_challenges) {
 for (const c of V.sign_in_posts) {
   let reads = true;
   let bound = [];
+  let schemas = [];
+  let issuers = [];
   try {
     const post = readSignInPost(c.post);
-    bound = boundCredentials(post.assertion.presented_acdcs, post.credentials).map((x) => x.said);
+    const counted = boundCredentials(post.assertion.presented_acdcs, post.credentials);
+    bound = counted.map((x) => x.said);
+    schemas = counted.map((x) => x.schema_said);
+    issuers = counted.map((x) => x.issuer_aid);
   } catch {
     reads = false;
   }
   check(reads === c.go_reads, `sign-in post "${c.name}": read ${reads}, the core ${c.go_reads}`);
   check(JSON.stringify(bound) === JSON.stringify(c.bound_saids), `sign-in post "${c.name}": counts ${bound}, the core ${c.bound_saids}`);
+  check(JSON.stringify(schemas) === JSON.stringify(c.bound_schema_saids), `sign-in post "${c.name}": schemas ${schemas}, the core ${c.bound_schema_saids}`);
+  check(JSON.stringify(issuers) === JSON.stringify(c.bound_issuer_aids), `sign-in post "${c.name}": issuers ${issuers}, the core ${c.bound_issuer_aids}`);
 }
 
 function decided(cases, decode, label) {
