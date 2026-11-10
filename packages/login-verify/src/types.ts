@@ -82,7 +82,10 @@ export interface LoginAssertion {
   nonce: string;
   dt: string;
   disclosures: Record<string, string>;
-  presented_acdcs: unknown[];
+  /** The credentials the person presented, each named by its digest (its
+   *  SAID), a string (ADR-069). An assertion from an Identity Agent that has
+   *  not updated carries the credential objects whole instead. */
+  presented_acdcs: Array<string | unknown>;
   custom_data?: Record<string, unknown>;
   p_kel?: string;
   /** The site whose signed challenge the person approved. A relying party

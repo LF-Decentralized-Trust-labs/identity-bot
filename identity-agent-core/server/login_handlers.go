@@ -216,7 +216,8 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "bad json", boundedread.Status(err))
 		return
 	}
-	a, err := login.ReadAssertion(body)
+	// The assertion, and beside it any credentials the person showed (ADR-069).
+	assertionText, a, posted, err := login.ReadSignInPost(body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -287,7 +288,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// The reason is kept in the challenge status, which the site's own sign-in
 	// page can read; only a uniform refusal leaves here. The owner is not shown
 	// it: a gate the core cannot check is refused when the policy is saved.
-	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
+	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, boundCredentials(a.PresentedACDCs, posted)); !allowed {
 		// For the organisation, which is entitled to know.
 		//
 		// This answer was authenticated, and it still leaves the sign-in
@@ -307,16 +308,20 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		"disclosures":  res.Disclosures,
 	}
 	if askedFromPage {
-		// The assertion as sent, so a page with no back end can check it
-		// itself. Kept only for a sign-in a page started: it carries the
-		// credentials the person showed, and nobody else is handed it.
-		// Released to the collector once with the rest, then forgotten.
 		st["asked_from_page"] = true
-		st["assertion"] = string(body)
-		// Kept with it, so they are released with it even if the challenge
-		// has been evicted by then.
-		st["nonce"] = bundle.Nonce
-		st["site_aid"] = bundle.SiteAID
+		// The assertion as sent, so a page with no back end can check it
+		// itself. Kept only for a sign-in a page started, and only when it
+		// names its credentials by digest (ADR-069): an assertion in the
+		// older form carries them whole, and a page's collector is any
+		// script in the page. The credentials posted beside it are never
+		// kept. Released to the collector once with the rest, then forgotten.
+		if login.DigestsOnly(a) {
+			st["assertion"] = string(assertionText)
+			// Kept with it, so they are released with it even if the
+			// challenge has been evicted by then.
+			st["nonce"] = bundle.Nonce
+			st["site_aid"] = bundle.SiteAID
+		}
 	}
 	// The browser key the verified assertion repeated (ADR-066), so whoever
 	// reads the result can check it is the one it asked for.
@@ -540,6 +545,47 @@ const (
 	refusalCredentialUnchecked  = "the credential could not be checked"
 	refusalCredentialNotAllowed = "the credential is not accepted here"
 )
+
+// boundCredentials are the credentials an assertion presents, as the policy
+// gate reads them (ADR-069). The assertion signs a digest for each; the
+// credentials arrive beside it, unsigned, so one counts only if its SAID is a
+// digest the assertion names and the body it carries has that SAID. A
+// credential posted but not named is left out, and a digest with no credential
+// posted presents nothing. An assertion in the older form carries the
+// credentials whole, and they are read as they always were.
+func boundCredentials(presented []interface{}, posted []login.PresentedCredential) []interface{} {
+	named := map[string]bool{}
+	var out []interface{}
+	for _, p := range presented {
+		switch v := p.(type) {
+		case string:
+			named[v] = true
+		default:
+			out = append(out, p)
+		}
+	}
+	for _, c := range posted {
+		if !named[c.SAID] {
+			continue
+		}
+		cred, err := readCredentialHere(c.AcdcJsonB64)
+		if err != nil || cred.SAID != c.SAID {
+			continue
+		}
+		out = append(out, map[string]interface{}{
+			"said":              c.SAID,
+			"schema_said":       cred.SchemaSAID,
+			"issuer_aid":        cred.Issuer,
+			"holder_aid":        c.HolderAID,
+			"status":            c.Status,
+			"acdc_json_b64":     c.AcdcJsonB64,
+			"pres_said_b64":     c.PresSaidB64,
+			"cesr_sig":          c.CesrSig,
+			"holder_public_key": c.HolderPublicKey,
+		})
+	}
+	return out
+}
 
 // credentialGateSatisfied returns true if the presented ACDCs include one that
 // satisfies the required schema (and issuer). When the refusal is false the

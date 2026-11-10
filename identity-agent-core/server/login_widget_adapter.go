@@ -270,10 +270,10 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			// What a page with no back end of its own checks the answer
 			// against: the assertion, and the nonce and site of the
 			// challenge it answers. Released with the identity, once, and
-			// only when the sign-in was started from a page. The assertion
-			// carries the credentials the person showed, and a collector that
-			// is a page is any script in it; a server that asked keeps what
-			// it always had.
+			// only when the sign-in was started from a page. A collector that
+			// is a page is any script in it, so the assertion is kept only if it
+			// names its credentials by digest (ADR-069, see handleLoginCallback);
+			// a server that asked keeps what it always had.
 			if a, ok := st["assertion"].(string); ok && held && st["asked_from_page"] == true {
 				resp["assertion"] = a
 				resp["nonce"] = st["nonce"]

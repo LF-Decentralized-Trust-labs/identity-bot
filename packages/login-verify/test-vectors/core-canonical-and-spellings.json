@@ -8,6 +8,27 @@
       "said": "EG_cHUI0SD-MBeGHZn2v4YklTwBkwLSQGOA459pZcwZ_"
     },
     {
+      "name": "credentials presented by digest (ADR-069)",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EDigestOfTheFirstCredential0123456789ABCDEFG\",\"EDigestOfTheSecondCredential012345678ABCDEFG\"],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EDigestOfTheFirstCredential0123456789ABCDEFG\",\"EDigestOfTheSecondCredential012345678ABCDEFG\"],\"site_aid\":\"ESite\"}",
+      "said": "ECqSY-J8D4KS5bmP8FBk4aYE_RteADACb_kA0yY9v-HU"
+    },
+    {
+      "name": "a credential presented whole is still read (the form before ADR-069)",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[{\"said\":\"ECredential\",\"schema_said\":\"ESchema\",\"acdc_json_b64\":\"e30=\"}],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[{\"acdc_json_b64\":\"e30=\",\"said\":\"ECredential\",\"schema_said\":\"ESchema\"}],\"site_aid\":\"ESite\"}",
+      "said": "EHbAtnq3exzMCqVyCxpe5YP-ScP2_G5TF2v3MXV0RzxV"
+    },
+    {
+      "name": "a digest and a whole credential in one list are both read",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EDigest\",{\"said\":\"ECredential\"}],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"email\":\"a@example.com\"},\"presented_acdcs\":[\"EDigest\",{\"said\":\"ECredential\"}],\"site_aid\":\"ESite\"}",
+      "said": "EGTWFB_qyXBQfCsdgH6ip3JnMuIIegkVtlHzUJR3i-BL"
+    },
+    {
       "name": "html characters and line separators",
       "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"https://a.example/?x=1\u0026y=\u003c2\u003e\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"A\u2028B\u2029C \u003cb\u003e\u0026amp;\u003c/b\u003e\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
       "go_reads": true,

@@ -36,23 +36,29 @@ type VPToken struct {
 }
 
 // BuildVPToken packages credentials + Grape Score per negotiated format.
-func BuildVPToken(format string, assertion *login.Assertion) (*VPToken, error) {
+// The assertion names its credentials by digest (ADR-069); credentials are the
+// full ones it names, which go into the token for the relying party that asked.
+func BuildVPToken(format string, assertion *login.Assertion, credentials []login.PresentedCredential) (*VPToken, error) {
+	shown := make([]interface{}, 0, len(credentials))
+	for _, c := range credentials {
+		shown = append(shown, c)
+	}
 	switch format {
 	case "", VPFormatSDJWT:
-		return buildSDJWTVPToken(assertion)
+		return buildSDJWTVPToken(assertion, shown)
 	case VPFormatACDC:
-		return buildACDCVPToken(assertion)
+		return buildACDCVPToken(assertion, shown)
 	default:
 		return nil, fmt.Errorf("unsupported vp_format: %s", format)
 	}
 }
 
-func buildACDCVPToken(assertion *login.Assertion) (*VPToken, error) {
+func buildACDCVPToken(assertion *login.Assertion, shown []interface{}) (*VPToken, error) {
 	payload := map[string]interface{}{
 		"@context":             []string{"https://identityagent.org/oidc4vp/acdc/v1"},
 		"type":                 []string{"VerifiablePresentation"},
 		"holder":               assertion.I,
-		"verifiableCredential": assertion.PresentedACDCs,
+		"verifiableCredential": shown,
 	}
 	if level := identityLevelFromAssertion(assertion); level.Level != "" {
 		payload["identity_level"] = map[string]interface{}{
@@ -63,7 +69,7 @@ func buildACDCVPToken(assertion *login.Assertion) (*VPToken, error) {
 	return &VPToken{Format: VPFormatACDC, Token: payload}, nil
 }
 
-func buildSDJWTVPToken(assertion *login.Assertion) (*VPToken, error) {
+func buildSDJWTVPToken(assertion *login.Assertion, shown []interface{}) (*VPToken, error) {
 	claims := map[string]interface{}{
 		"sub": assertion.I,
 		"iat": assertion.Dt,
@@ -77,8 +83,8 @@ func buildSDJWTVPToken(assertion *login.Assertion) (*VPToken, error) {
 			claims["identity_level_issuer"] = level.Issuer
 		}
 	}
-	if len(assertion.PresentedACDCs) > 0 {
-		claims["vc"] = assertion.PresentedACDCs
+	if len(shown) > 0 {
+		claims["vc"] = shown
 	}
 	payloadJSON, err := json.Marshal(claims)
 	if err != nil {

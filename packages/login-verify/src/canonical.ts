@@ -584,6 +584,34 @@ export function readAssertion(text: string): LoginAssertion {
   return a;
 }
 
+/** What a callback is posted (ADR-069): the assertion, which names each
+ *  credential it presents by digest, and the credentials themselves, which are
+ *  for the website owner's Identity Agent alone and are not signed. An
+ *  assertion that presented nothing is posted bare, as is every one from an
+ *  Identity Agent that has not updated; those read with no credentials. */
+export interface SignInPost {
+  assertion: LoginAssertion;
+  credentials: unknown[];
+}
+
+/** Reads a callback's body by the core's rules (`ReadSignInPost` in the
+ *  core's login package): a bare assertion, or `{assertion, credentials}`. */
+export function readSignInPost(text: string): SignInPost {
+  const v = parseStrictJson(text);
+  if (isMap(v) && Object.prototype.hasOwnProperty.call(v, "assertion")) {
+    exactly(v, new Set(["assertion", "credentials"]), "a sign-in");
+    if (v.credentials !== null && v.credentials !== undefined && !Array.isArray(v.credentials)) {
+      throw new CanonicalFormError("credentials must be a list");
+    }
+    const assertion = v.assertion as LoginAssertion;
+    canonicalAssertionBody(assertion);
+    return { assertion, credentials: (v.credentials as unknown[] | null | undefined) ?? [] };
+  }
+  const assertion = v as LoginAssertion;
+  canonicalAssertionBody(assertion);
+  return { assertion, credentials: [] };
+}
+
 /** Reads a site's challenge from its JSON text by the core's rules, its
  *  action and minimum score whole numbers written plainly. */
 export function readChallenge(text: string): LoginChallenge {

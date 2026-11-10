@@ -74,6 +74,27 @@ func (h *Handler) presentCredentials(bundle *ChallengeBundle) []interface{} {
 	return out
 }
 
+// presentedHeld is presentCredentials with each credential as its struct.
+func (h *Handler) presentedHeld(bundle *ChallengeBundle) []PresentedCredential {
+	var out []PresentedCredential
+	for _, c := range h.presentCredentials(bundle) {
+		if pc, ok := c.(PresentedCredential); ok {
+			out = append(out, pc)
+		}
+	}
+	return out
+}
+
+// credentialDigests are what an assertion signs of the credentials it presents
+// (ADR-069): the SAID of each, never the credential.
+func credentialDigests(creds []PresentedCredential) []interface{} {
+	out := make([]interface{}, 0, len(creds))
+	for _, c := range creds {
+		out = append(out, c.SAID)
+	}
+	return out
+}
+
 // isCredentialUsable treats an empty/issued/valid status as presentable; a
 // revoked/expired credential is never presented.
 func isCredentialUsable(status string) bool {
@@ -312,14 +333,29 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 }
 
 // BuildAssertion signs a login assertion (exported for OIDC adapter).
+// The assertion names the credentials it presents by digest only (ADR-069).
 func (h *Handler) BuildAssertion(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, error) {
-	return h.buildAssertion(rel, bundle, customData)
+	a, _, err := h.buildAssertionWithCredentials(rel, bundle, customData)
+	return a, err
+}
+
+// BuildAssertionWithCredentials is BuildAssertion that also returns the full
+// credentials the assertion names, for whoever is entitled to them: the
+// website owner's Identity Agent through the callback, or an OIDC relying
+// party through its token.
+func (h *Handler) BuildAssertionWithCredentials(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, []PresentedCredential, error) {
+	return h.buildAssertionWithCredentials(rel, bundle, customData)
 }
 
 func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, error) {
+	a, _, err := h.buildAssertionWithCredentials(rel, bundle, customData)
+	return a, err
+}
+
+func (h *Handler) buildAssertionWithCredentials(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, []PresentedCredential, error) {
 	seed, err := loadRelationshipSeed(h, rel)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	disclosures := map[string]string{}
 	for _, field := range bundle.RequestedDisclosures {
@@ -334,8 +370,9 @@ func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 	}
 	keyLog, err := h.relationshipKeyLog(rel, seed)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	held := h.presentedHeld(bundle)
 	a := Assertion{
 		V:                   "IALOGIN10JSON",
 		T:                   "login-assertion",
@@ -345,16 +382,16 @@ func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 		Nonce:               bundle.Nonce,
 		Dt:                  rfc3339UTC(time.Now()),
 		Disclosures:         disclosures,
-		PresentedACDCs:      h.presentCredentials(bundle),
+		PresentedACDCs:      credentialDigests(held),
 		CustomData:          customData,
 		PKEL:                keyLog,
 		SiteAID:             bundle.SiteAID,
 		BrowserKey:          bundle.BrowserKey,
 	}
 	if err := SignAssertion(&a, seed); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &a, nil
+	return &a, held, nil
 }
 
 // SignAssertion fills in an assertion's digest and signs its canonical body
@@ -424,8 +461,8 @@ func (h *Handler) relationshipKeyLog(rel *SiteRelationship, seed []byte) (string
 	return encoded, nil
 }
 
-func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Assertion) error {
-	b, err := json.Marshal(assertion)
+func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Assertion, creds []PresentedCredential) error {
+	b, err := SignInPostBody(assertion, creds)
 	if err != nil {
 		return err
 	}
@@ -715,12 +752,12 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 		}
 	}
 
-	assertion, err := h.buildAssertion(rel, bundle, customData)
+	assertion, creds, err := h.buildAssertionWithCredentials(rel, bundle, customData)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := h.postAssertion(bundle.CallbackURL, bundle.SessionToken, assertion); err != nil {
+	if err := h.postAssertion(bundle.CallbackURL, bundle.SessionToken, assertion, creds); err != nil {
 		return nil, err
 	}
 

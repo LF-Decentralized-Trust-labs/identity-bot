@@ -1,7 +1,7 @@
 import type { IRouter, Request, Response } from "express";
 import type { IdentityAgentVerifier } from "./verifier.js";
 import type { LoginAssertion } from "./types.js";
-import { readAssertion, utf8Text } from "./canonical.js";
+import { readSignInPost, utf8Text } from "./canonical.js";
 
 const MAX_BODY_BYTES = 1 << 20;
 
@@ -154,8 +154,11 @@ const RAW_BODY_GONE =
  *  from what a lenient parser left. */
 async function postedAssertion(req: Request): Promise<LoginAssertion> {
   const kept = (req as WithRawBody)[RAW_BODY];
-  if (kept) return readAssertion(utf8Text(await kept));
-  if (!alreadyRead(req)) return readAssertion(utf8Text(await readBody(req)));
+  // The credentials beside the assertion are for the website owner's Identity
+  // Agent. This route checks the assertion, which names them by digest, and
+  // keeps none of them.
+  if (kept) return readSignInPost(utf8Text(await kept)).assertion;
+  if (!alreadyRead(req)) return readSignInPost(utf8Text(await readBody(req))).assertion;
   throw new Error(RAW_BODY_GONE);
 }
 
