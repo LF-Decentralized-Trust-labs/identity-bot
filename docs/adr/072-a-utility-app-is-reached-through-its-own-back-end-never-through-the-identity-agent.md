@@ -1,6 +1,6 @@
 # ADR-072: A Utility App Is Reached Through Its Own Back End, Never Through the Identity Agent
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-09)
 **Date:** 2026-11-09
 **Deciders:** Rob Andersen
 **Amends:** ADR-066 (its implementation note "A signed-in person speaks to an AI agent from the app's page")
