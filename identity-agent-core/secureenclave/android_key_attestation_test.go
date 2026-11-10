@@ -200,6 +200,36 @@ func TestABuiltChainIsAcceptedOnlyWhereTheHardwareHoldsAGoodKey(t *testing.T) {
 		"oaep and also no padding":               {mod: func(s *chainSpec) { s.extraPadding = 1 }, pol: true},
 		"oaep and also pkcs1":                    {mod: func(s *chainSpec) { s.extraPadding = 4 }, pol: true},
 		"needs a person":                         {mod: func(s *chainSpec) { s.noAuth = false }, pol: true},
+		// The chain is judged as it stands now, not on the day the key says it was made.
+		"a key made just before its certificate, by the phone's clock": {mod: func(s *chainSpec) { s.caValidFrom = s.created.Add(20 * time.Minute) }},
+		"a key made just before its certificate, since lapsed": {mod: func(s *chainSpec) {
+			s.created = now.Add(-60 * 24 * time.Hour)
+			s.caValidFrom = s.created.Add(20 * time.Minute)
+		}},
+		"a key made a day and more before its certificate, since lapsed": {mod: func(s *chainSpec) {
+			s.created = now.Add(-60 * 24 * time.Hour)
+			s.caValidFrom = s.created.Add(25 * time.Hour)
+		}, fail: true},
+		"a key older than its attestation certificate": {mod: func(s *chainSpec) {
+			s.created = now.Add(-72 * time.Hour)
+			s.caValidFrom = now.Add(-30 * time.Minute)
+		}},
+		"a short-lived certificate that has since lapsed": {mod: func(s *chainSpec) {
+			s.created = now.Add(-60 * 24 * time.Hour)
+			s.caValidFrom = s.created.Add(-time.Hour)
+		}},
+		"a creation time nothing else agrees with": {mod: func(s *chainSpec) {
+			s.created = time.Date(1971, 1, 1, 0, 0, 0, 0, time.UTC)
+			s.caValidFrom = now.Add(-24 * time.Hour)
+		}},
+		"a certificate valid neither when the key was made nor now": {mod: func(s *chainSpec) {
+			s.created = now.Add(-10 * 24 * time.Hour)
+			s.caValidFrom = now.Add(-6 * 24 * time.Hour)
+		}, fail: true},
+		"an attestation certificate not yet valid": {mod: func(s *chainSpec) {
+			s.created = now.Add(-10 * 24 * time.Hour)
+			s.caValidFrom = now.Add(time.Hour)
+		}, fail: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := goodSpec(k)
