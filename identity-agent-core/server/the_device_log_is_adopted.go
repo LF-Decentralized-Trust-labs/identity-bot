@@ -36,9 +36,9 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
-	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/login"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"

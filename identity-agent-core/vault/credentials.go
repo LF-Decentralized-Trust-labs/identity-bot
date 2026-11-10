@@ -8,7 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"log"
 	"net"
 	"net/http"

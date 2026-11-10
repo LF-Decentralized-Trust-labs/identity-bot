@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 )

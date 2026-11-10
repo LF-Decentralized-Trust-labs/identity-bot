@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/enrolsecret"
-	"identity-agent-core/internal/atomicfile"
 )
 
 type Store struct {

@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/internal/coretypes"
 )
 

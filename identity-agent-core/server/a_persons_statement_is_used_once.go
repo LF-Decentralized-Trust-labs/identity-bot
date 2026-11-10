@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/authorisation"
-	"identity-agent-core/internal/atomicfile"
 )
 
 // A person's signed statement works once (an_app_speaks_for_a_person_who_signed.go).

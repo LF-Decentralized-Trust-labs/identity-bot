@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/drivers"
-	"identity-agent-core/internal/atomicfile"
 )
 
 type EventRecord struct {

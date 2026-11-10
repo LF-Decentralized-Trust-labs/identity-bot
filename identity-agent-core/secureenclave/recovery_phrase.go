@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // THE RECOVERY PHRASE IS THE ROOT SEED IN ANOTHER SPELLING.

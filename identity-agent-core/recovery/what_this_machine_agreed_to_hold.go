@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/backup"
-	"identity-agent-core/internal/atomicfile"
 )
 
 // What this machine agreed to hold for other identities.

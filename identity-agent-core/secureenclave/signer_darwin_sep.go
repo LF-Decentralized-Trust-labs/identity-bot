@@ -49,7 +49,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // sepEnvelope is how the wrapped key sits on disk.

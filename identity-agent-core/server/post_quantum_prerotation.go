@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"log"
 	"net/http"
 	"path/filepath"

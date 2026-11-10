@@ -1,11 +1,8 @@
 // Package atomicfile writes a file so that a crash leaves either the old file
-// or the new one, never part of either and never an empty one.
-//
-// Writing beside the target and renaming is not enough on its own. Without a
-// flush the rename can reach the disk before the bytes do, and a power cut then
-// leaves an empty file under the real name; without flushing the directory the
-// rename itself can be lost. Each copy of this routine got a different subset of
-// those steps right, so there is one, here.
+// or the new one, never part of either or an empty one: the bytes are flushed
+// before the rename and the directory after it. Create places a file only if
+// none is there, and where the filesystem cannot hard-link it holds a lock file
+// that a dead writer's stale lock does not block.
 package atomicfile
 
 import (
@@ -20,7 +17,10 @@ import (
 	"time"
 )
 
-// Write replaces path with data, readable as perm.
+// Write replaces path with data, readable as perm. Two writers of one path
+// race and the last to rename wins, whole: nothing is merged and neither is
+// told. What it promises is the package's crash guarantee, that a crash leaves
+// the old file or the new one, never part of either.
 func Write(path string, data []byte, perm fs.FileMode) error {
 	tmp, err := writeTemp(path, data, perm)
 	if err != nil {
@@ -46,6 +46,12 @@ var beforePlacing = func() error { return nil }
 // is, the error satisfies errors.Is(err, fs.ErrExist) and the existing file
 // is untouched: a caller racing another process for the same file adopts the
 // one that won rather than replacing it.
+//
+// Its limit: where the filesystem can hard-link, Create never replaces a file
+// that is there. Where it cannot, a lock file excludes only other Creates of
+// the path, and a Write takes no lock: a Write that lands between Create's
+// check and its rename is overwritten by Create's rename. A file that is both
+// Created and Written needs its writers to agree on who goes first.
 func Create(path string, data []byte, perm fs.FileMode) error {
 	tmp, err := writeTemp(path, data, perm)
 	if err != nil {

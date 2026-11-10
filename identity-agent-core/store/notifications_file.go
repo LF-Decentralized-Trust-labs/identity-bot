@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // The file-backed half of the notification store.

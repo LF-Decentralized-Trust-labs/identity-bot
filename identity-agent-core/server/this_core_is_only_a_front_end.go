@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"

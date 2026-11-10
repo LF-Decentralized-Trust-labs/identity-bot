@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // A recovery session has to survive being waited out.

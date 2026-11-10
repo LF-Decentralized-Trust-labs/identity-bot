@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/didcomm"
-	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"

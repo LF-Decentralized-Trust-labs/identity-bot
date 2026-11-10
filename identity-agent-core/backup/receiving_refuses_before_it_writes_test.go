@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // ReceiveArchive is reached by a PUBLIC route. These drive it the way a caller

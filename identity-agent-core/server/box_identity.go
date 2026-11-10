@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/atomicfile"
 
 	keri "github.com/grapeid/keri-go"
 )

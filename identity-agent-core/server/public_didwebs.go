@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/login"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"

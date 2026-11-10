@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"identity-agent-core/activitylog"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"

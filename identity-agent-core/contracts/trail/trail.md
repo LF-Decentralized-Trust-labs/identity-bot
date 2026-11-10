@@ -20,6 +20,12 @@ sender's proof, in place of `controller_proof`. Its `kind` is the statement's,
 statement's, and `body_hash` is the statement's `fingerprint`. Its id
 (`message_id`) is `e` and its `seq`: the id the app keeps the words under.
 
+On an app's request to `/api/mcp/agents/{asset id}/conversations...`, the
+statement's `to` is the AI agent's identifier (the one its entries are addressed
+to, the asset's `pairwise_aid`), never the asset id in the route. The Identity
+Agent resolves the route's asset id to that identifier and refuses a statement
+to any other.
+
 Three more things are entries of the same chain:
 
 | Entry | How it is written |

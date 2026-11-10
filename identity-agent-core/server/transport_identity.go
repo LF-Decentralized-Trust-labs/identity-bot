@@ -9,8 +9,8 @@ import (
 	"encoding/pem"
 	"fmt"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/atomicfile"
 	"math/big"
 	"os"
 	"path/filepath"

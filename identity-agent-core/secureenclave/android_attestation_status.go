@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // Google's attestation revocation list.

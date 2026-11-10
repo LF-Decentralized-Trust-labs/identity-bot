@@ -60,6 +60,12 @@ func (fixtureWrapper) AsThatMachineTo(t coretypes.TB, target string, aid string,
 func (fixtureWrapper) Awaiting(t coretypes.TB, s *CoreServer) (map[string]string, map[string]string) {
 	return awaiting(t, s)
 }
+func (fixtureWrapper) BrowserKeySignedIn(t coretypes.TB, s *CoreServer, assetID, person, thumbprint string, until time.Duration) {
+	t.Helper()
+	if err := s.browserKeys().Record(assetID, person, thumbprint, time.Now().Add(until), time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+}
 func (fixtureWrapper) ChainSays(t coretypes.TB, s *CoreServer) map[string]any { return chainSays(t, s) }
 func (fixtureWrapper) CheckAsTheDevice(t coretypes.TB, s *CoreServer, req store.SigningRequest) (map[string]interface{}, error) {
 	return checkAsTheDevice(t, s, req)

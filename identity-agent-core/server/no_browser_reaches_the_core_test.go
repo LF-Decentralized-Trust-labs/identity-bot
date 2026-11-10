@@ -34,7 +34,7 @@ import (
 const (
 	appPage   = "https://chat.example"
 	talkPath  = "/api/mcp/agents/agent-1/conversations"
-	talkWords = `{"to":"agent-1","body":"hello","nonce":"n-%d"}`
+	talkWords = `{"to":"Eagent1","body":"hello","nonce":"n-%d"}`
 )
 
 type ed25519Key struct{ priv ed25519.PrivateKey }
@@ -66,6 +66,11 @@ func newAnAppWorld(t *testing.T) *anAppWorld {
 	s := cw.s
 	st := s.assetHandler.Store
 	if err := st.UpsertAsset(asset.Asset{ID: "chat", DisplayName: "chat", AssetType: "app", Origin: appPage}); err != nil {
+		t.Fatal(err)
+	}
+	// agent-1 is an AI agent with the identifier its entries are addressed to,
+	// which is not its asset id.
+	if err := st.UpsertAsset(asset.Asset{ID: "agent-1", PairwiseAID: "Eagent1", DisplayName: "one", AssetType: "ai_agent"}); err != nil {
 		t.Fatal(err)
 	}
 	// The asset admits Ann and Bob, who are not the machine's signer: an app
@@ -169,6 +174,8 @@ type aSpokenRequest struct {
 	none bool
 	// path is the route it is sent on, the talk route of agent-1 when not said.
 	path string
+	// to is who the body and the statement are to, agent-1's identifier when not said.
+	to string
 }
 
 // say sends it as the app's back end does, and reports the answer.
@@ -193,9 +200,13 @@ func (w *anAppWorld) request(t *testing.T, q aSpokenRequest) *http.Request {
 	if convo == "" && !q.none {
 		convo = "c1"
 	}
-	body := fmt.Sprintf(`{"to":"agent-1","body":%q,"nonce":%q}`, sent, nonce)
+	to := q.to
+	if to == "" {
+		to = "Eagent1"
+	}
+	body := fmt.Sprintf(`{"to":%q,"body":%q,"nonce":%q}`, to, sent, nonce)
 	if convo != "" {
-		body = fmt.Sprintf(`{"conversation":%q,"to":"agent-1","body":%q,"nonce":%q}`, convo, sent, nonce)
+		body = fmt.Sprintf(`{"conversation":%q,"to":%q,"body":%q,"nonce":%q}`, convo, to, sent, nonce)
 	}
 	path := q.path
 	if path == "" {
@@ -207,7 +218,7 @@ func (w *anAppWorld) request(t *testing.T, q aSpokenRequest) *http.Request {
 	id, vk, _ := agentbody.Identity(q.key)
 	st := agentmessage.PersonStatement{
 		Agent: w.cw.s.thisIdentityAgentsIdentifier(), Conversation: "c1", MessageID: nonce,
-		Kind: agentmessage.PersonKindMessage, From: q.who, Signer: id, To: "agent-1",
+		Kind: agentmessage.PersonKindMessage, From: q.who, Signer: id, To: to,
 		Nonce: "nonce-0123456789abcdef" + nonce, Time: time.Now().UTC().Format(time.RFC3339),
 		FingerprintVersion: agentmessage.FingerprintV1, Fingerprint: fp,
 	}
@@ -341,6 +352,55 @@ func TestAValidStatementIsAdmittedAndLandsInTheTrail(t *testing.T) {
 	}
 	if err := trail.CheckFresh(tw.Statement, time.Now()); err != nil {
 		t.Fatalf("the trail's freshness check refused what the app carried: %v", err)
+	}
+}
+
+// A route names an AI agent by its asset id and a statement names it by the
+// identifier its entries are addressed to, which are not the same string for a
+// real AI agent: the statement is to the one the route's id belongs to.
+func TestAStatementNamesTheAIAgentByItsIdentifierNotItsAssetID(t *testing.T) {
+	w := newAnAppWorld(t)
+	if err := w.cw.s.assetHandler.Store.UpsertAsset(asset.Asset{ID: "agent-9", PairwiseAID: "Epairwise9", DisplayName: "nine", AssetType: "ai_agent"}); err != nil {
+		t.Fatal(err)
+	}
+	key := newBrowsersKey(t)
+	w.signedIn(t, "Eann", key, time.Hour)
+	route := "/api/mcp/agents/agent-9/conversations"
+	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hi", path: route, to: "Epairwise9"}); rec.Code != http.StatusOK {
+		t.Fatalf("a statement to the AI agent's identifier was refused on its route: %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hi", path: route, to: "agent-9"}); rec.Code == http.StatusOK {
+		t.Fatalf("a statement to the asset id, which is not who its entries are addressed to, was taken: %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hi", path: route, to: "Eother"}); rec.Code == http.StatusOK {
+		t.Fatalf("a statement to another AI agent was taken on this one's route: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A statement names the AI agent by its identifier, so a route that has none to
+// compare with is refused, whatever the statement says: the route's own asset
+// id is never a stand-in.
+func TestARouteThatNamesNoAIAgentWithAnIdentifierTakesNoStatement(t *testing.T) {
+	w := newAnAppWorld(t)
+	st := w.cw.s.assetHandler.Store
+	for _, a := range []asset.Asset{
+		{ID: "agent-nopair", DisplayName: "x", AssetType: "ai_agent"},
+		{ID: "not-an-agent", PairwiseAID: "Enotagent", DisplayName: "y", AssetType: "app"},
+	} {
+		if err := st.UpsertAsset(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := newBrowsersKey(t)
+	w.signedIn(t, "Eann", key, time.Hour)
+	for name, q := range map[string]aSpokenRequest{
+		"an id no asset has":                      {path: "/api/mcp/agents/agent-none/conversations", to: "agent-none"},
+		"an AI agent with no identifier":          {path: "/api/mcp/agents/agent-nopair/conversations", to: "agent-nopair"},
+		"an asset that is not an AI agent":        {path: "/api/mcp/agents/not-an-agent/conversations", to: "Enotagent"},
+		"the identifier in place of the asset id": {path: "/api/mcp/agents/Eagent1/conversations", to: "Eagent1"},
+	} {
+		q.who, q.key, q.words = "Eann", key, "hi"
+		w.mustBeRefused(t, name, q)
 	}
 }
 

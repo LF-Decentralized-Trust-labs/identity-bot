@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 
 	sqlite "modernc.org/sqlite"
 )

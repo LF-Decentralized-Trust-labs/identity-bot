@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/backup/remote"
-	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/enrolsecret"
-	"identity-agent-core/internal/atomicfile"
 )
 
 // Spreading control of an identity across more than one party.
