@@ -3,18 +3,14 @@ package server
 import (
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"math/rand/v2"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"identity-agent-core/limits"
-	"identity-agent-core/mediation"
-	"identity-agent-core/trail"
 )
 
 // An app is held to limits that protect the Identity Agent from it (ADR-069), at the one place an app's back end meets the routes people talk
@@ -23,23 +19,16 @@ import (
 //
 //   - a request rate per app, with a retry time that backs off while the app
 //     keeps asking (limits.Rate.Try);
-//   - the numbers the conversation trail is held to (forwarding timeout, read
-//     size, entries per conversation, messages an hour, turns): AppLimits, which
-//     an add-on passes to trail.New;
-//   - the delivery queue for sealed messages, kept in a file in the data
-//     directory so a restart does not lose a message the sender was told was
-//     queued: DeliveryQueue.
+//   - the numbers an add-on that keeps a conversation trail or a delivery queue
+//     holds an app to (forwarding timeout, read size, entries per conversation,
+//     messages an hour, turns, the queue's size and age): AppLimits. The core
+//     only names them; the trail and the queue are the add-on's (ADR-068,
+//     ADR-069).
 
-// deliveryQueueFile is where the delivery queue is kept, in the data directory.
-const deliveryQueueFile = "delivery-queue.json"
-
-// appLimitState is the rate limiter and the delivery queue, made the first time
-// either is asked for.
+// appLimitState is the rate limiter, made the first time it is asked for.
 type appLimitState struct {
-	once  sync.Once
-	rate  *limits.Rate
-	queue *mediation.Queue
-	qerr  error
+	once sync.Once
+	rate *limits.Rate
 }
 
 // SetLimits replaces the limits before the server serves. A phone passes
@@ -59,86 +48,8 @@ func (s *CoreServer) AppLimits() limits.Limits {
 
 func (s *CoreServer) appLimitState() *appLimitState {
 	st := &s.appLimits
-	st.once.Do(func() {
-		l := s.AppLimits()
-		st.rate = limits.NewRate(l, nil)
-		st.queue, st.qerr = mediation.Open(filepath.Join(s.DataDir, deliveryQueueFile), l, nil)
-	})
+	st.once.Do(func() { st.rate = limits.NewRate(s.AppLimits(), nil) })
 	return st
-}
-
-// DeliveryQueue is the queue of sealed messages held for a recipient that is
-// briefly offline, as it was when this server last stopped, for an add-on whose
-// conversation record is t. Naming the trail is the price of the queue: the core
-// marks an expired delivery in it, on every tick, so nothing can be held that the
-// core cannot expire. A nil trail is refused, and the queue given refuses a message for a
-// conversation that trail does not keep. Each add-on names its own trail;
-// the queue is one. A queue file that cannot be read is an error, and is left as
-// it is.
-func (s *CoreServer) DeliveryQueue(t *trail.Trail) (*mediation.Queue, error) {
-	if t == nil {
-		return nil, errors.New("the delivery queue needs the trail an expired delivery is marked in")
-	}
-	st := s.appLimitState()
-	if st.qerr != nil {
-		return nil, st.qerr
-	}
-	s.expiryMu.Lock()
-	known := false
-	for _, k := range s.expiryTrails {
-		known = known || k == t
-	}
-	if !known {
-		s.expiryTrails = append(s.expiryTrails, t)
-	}
-	s.expiryMu.Unlock()
-	return st.queue.Admitting(t.Keeps), nil
-}
-
-// theQueue is the queue without naming a trail, for the core's own tick, which
-// holds nothing in it.
-func (s *CoreServer) theQueue() (*mediation.Queue, error) {
-	st := s.appLimitState()
-	return st.queue, st.qerr
-}
-
-// refuseExpiredDeliveries is the core's part of each tick. Every message the
-// queue has held for its whole age is marked not delivered in the trail that
-// keeps its conversation, then deleted. A message whose conversation no trail
-// keeps, or more than one does, is left held and logged: it is never deleted
-// ahead of the record that explains it.
-func (s *CoreServer) refuseExpiredDeliveries() {
-	s.expiryMu.Lock()
-	trails := append([]*trail.Trail(nil), s.expiryTrails...)
-	s.expiryMu.Unlock()
-	if len(trails) == 0 {
-		return
-	}
-	q, err := s.theQueue()
-	if err != nil {
-		log.Printf("[delivery] queue: %v", err)
-		return
-	}
-	for _, d := range q.Due() {
-		var owner *trail.Trail
-		n := 0
-		for _, t := range trails {
-			if t.Keeps(d.Conversation) {
-				owner, n = t, n+1
-			}
-		}
-		if n != 1 {
-			log.Printf("[delivery] %s is past its age and %d trails keep its conversation: left held", d.ID, n)
-			continue
-		}
-		told, err := owner.RefuseExpired(q, d.ID)
-		if err != nil {
-			log.Printf("[delivery] expiring: %v", err)
-		}
-		for _, x := range told {
-			log.Printf("[delivery] %s was not delivered in time and is refused", x.ID)
-		}
-	}
 }
 
 // AppOverItsRate is what a request from an app's back end is refused with when

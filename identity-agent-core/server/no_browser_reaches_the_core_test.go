@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -22,11 +21,8 @@ import (
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
-	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
-	"identity-agent-core/limits"
 	"identity-agent-core/login"
-	"identity-agent-core/mediation"
 	"identity-agent-core/trail"
 )
 
@@ -329,104 +325,24 @@ func TestAValidStatementIsAdmittedAndLandsInTheTrail(t *testing.T) {
 		}
 	}
 
-	// What the request carries is what trail.Write takes, and it keeps it.
+	// What the request carries is what trail.Write takes, and the one check of
+	// a person's statement accepts it, against the core's own record of whose
+	// the key is.
 	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "again", conversation: "c1"}); rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	proof := w.proof
-	pp, gotSalt, ok := ThePersonStatementThatSpoke(proof)
+	pp, gotSalt, ok := ThePersonStatementThatSpoke(w.proof)
 	if !ok {
 		t.Fatal("the statement did not reach the proof")
 	}
-	keys, err := didcomm.GenerateKeySet(w.cw.s.thisIdentityAgentsIdentifier())
-	if err != nil {
-		t.Fatal(err)
+	tw := trail.Write{Statement: pp.Statement, Verkey: pp.Verkey, Signature: pp.Signature, Salt: gotSalt, Words: []byte("again")}
+	if err := trail.CheckAuthor(tw, w.cw.s.thisIdentityAgentsIdentifier(), keysSpeakingAt{s: w.cw.s, asset: "chat"}); err != nil {
+		t.Fatalf("the trail's author check refused what the app carried: %v", err)
 	}
-	// The trail asks the core's own record whose the key is.
-	tr := trail.New(permissiveRoster{keysSpeakingAt{s: w.cw.s, asset: "chat"}}, &keepingApp{}, trail.Options{
-		Agent:       w.cw.s.thisIdentityAgentsIdentifier(),
-		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) },
-	})
-	if err := tr.Open("c1", "Eann", false); err != nil {
-		t.Fatal(err)
-	}
-	res, err := tr.Write(context.Background(), trail.Write{
-		Statement: pp.Statement, Verkey: pp.Verkey, Signature: pp.Signature, Salt: gotSalt, Words: []byte("again"),
-	})
-	if err != nil || res.State != trail.Committed {
-		t.Fatalf("the trail did not keep what the app carried: %+v %v", res, err)
+	if err := trail.CheckFresh(tw.Statement, time.Now()); err != nil {
+		t.Fatalf("the trail's freshness check refused what the app carried: %v", err)
 	}
 }
-
-// The core expires a held delivery on its own tick, which the add-on named
-// when it took the queue: the entry is marked not delivered, the sealed copy is
-// gone, and an add-on did nothing to make it so.
-func TestTheCoresTickExpiresADeliveryAndMarksItsEntry(t *testing.T) {
-	w := newAnAppWorld(t)
-	l := limits.Defaults()
-	l.QueueMaxAge = 30 * time.Millisecond
-	w.cw.s.SetLimits(l)
-	keys, err := didcomm.GenerateKeySet(w.cw.s.thisIdentityAgentsIdentifier())
-	if err != nil {
-		t.Fatal(err)
-	}
-	tr := trail.New(permissiveRoster{keysSpeakingAt{s: w.cw.s, asset: "chat"}}, &keepingApp{}, trail.Options{
-		Agent:       w.cw.s.thisIdentityAgentsIdentifier(),
-		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) },
-	})
-	key := newBrowsersKey(t)
-	w.signedIn(t, "Eann", key, time.Hour)
-	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hello", conversation: "c1"}); rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	pp, salt, ok := ThePersonStatementThatSpoke(w.proof)
-	if !ok {
-		t.Fatal("no statement")
-	}
-	if err := tr.Open("c1", "Eann", false); err != nil {
-		t.Fatal(err)
-	}
-	res, err := tr.Write(context.Background(), trail.Write{Statement: pp.Statement, Verkey: pp.Verkey, Signature: pp.Signature, Salt: salt, Words: []byte("hello")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	q, err := w.cw.s.DeliveryQueue(tr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := q.Enqueue(mediation.Message{ID: trail.QueueID("c1", res.EntryID), Conversation: "c1", Sender: "Eann", Recipient: "r", Sealed: []byte("x")}); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(60 * time.Millisecond)
-
-	w.cw.s.tick()
-	if q.Len() != 0 {
-		t.Fatal("the core's tick left an expired copy held")
-	}
-	if es := tr.Entries("c1"); len(es) != 1 || es[0].NotDelivered == nil {
-		t.Fatalf("the entry was not marked not delivered: %+v", es)
-	}
-}
-
-// permissiveRoster says every rule but whose a key is allows: this test is
-// about the key, which is the core's own record.
-type permissiveRoster struct{ trail.KeyRoster }
-
-func (permissiveRoster) IsAIAgent(string) bool             { return true }
-func (permissiveRoster) MayUseAgent(_, _ string) bool      { return true }
-func (permissiveRoster) AgentGrantAllows(_, _ string) bool { return true }
-func (permissiveRoster) ActiveEmployee(string) bool        { return true }
-func (permissiveRoster) IsSigner(string) bool              { return false }
-
-// keepingApp keeps the words and confirms their fingerprint.
-type keepingApp struct{}
-
-func (keepingApp) Reachable(context.Context) error { return nil }
-func (keepingApp) Keep(_ context.Context, f trail.Forward) (trail.Receipt, error) {
-	fp, err := agentmessage.Fingerprint(f.Salt, f.Words)
-	return trail.Receipt{Fingerprint: fp}, err
-}
-func (keepingApp) Discard(context.Context, string, string) error { return nil }
 
 func TestAnAppCannotSpeakForAPersonWhoDidNotSign(t *testing.T) {
 	w := newAnAppWorld(t)
