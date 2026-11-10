@@ -86,7 +86,8 @@ type Message struct {
 	From      string `json:"from"`
 	To        string `json:"to"`
 	// Sender is whose own signature the entry carries: "body" for an AI
-	// agent's machine, "controller" for the app a person spoke from,
+	// agent's machine, "controller" for the machine a signer spoke from, "app" for the
+	// back end of the app a person spoke through,
 	// "statement" for a device or session that signed a fingerprint of a
 	// person's words, and "identity agent" for an outcome, which only the
 	// Identity Agent speaks.
@@ -96,10 +97,12 @@ type Message struct {
 	Grade string `json:"grade,omitempty"`
 	// Person is the person a controller acted for, as its grant names them.
 	Person string `json:"person,omitempty"`
-	// App is the app asset whose back end carried a person's own statement, as
-	// the machine's Controller Grant (1.2.0) names it. Empty where the grant
-	// names none, which a bundle cannot tell from the Identity Agent's word.
-	App      string `json:"app_asset,omitempty"`
+	// AppAID is the identifier of the app whose back end carried a person's own
+	// statement: the holder of the App Body credential whose key signed the
+	// request (ADR-072). Empty for an entry a controller signed. It was once
+	// `app_asset`, the asset id a Controller Grant named; it is a different thing
+	// now, so it has a different name.
+	AppAID   string `json:"app_aid,omitempty"`
 	Anchored bool   `json:"anchored"`
 	Holds    bool   `json:"holds"`
 }
@@ -794,6 +797,10 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		once = append(once, "signature "+rec.PersonProof.Signature)
 	} else if rec.Statement != nil {
 		once = append(once, "signature "+rec.HostSignature, "nonce "+rec.Statement.Host+" "+rec.Statement.HostNonce)
+	} else if rec.ControllerProof.StatementOnly() {
+		// The app's own signature is not kept: the person's statement is the one
+		// signed thing the entry carries, and it is used once.
+		once = append(once, "signature "+rec.ControllerProof.PersonStatement.Signature)
 	} else {
 		once = append(once, "signature "+rec.ControllerProof.Signature)
 	}
@@ -953,6 +960,9 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 	p := rec.ControllerProof
 	m.Sender = "controller"
 	aid, person := agentmessage.IsPerson(rec.From)
+	if p.AppBody != "" {
+		m.Sender = "app"
+	}
 	switch {
 	case !person:
 		v.fault(where, "an AI agent's entry carries a controller's request instead of its body's signature")
@@ -966,7 +976,9 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 	// is one, and the message it answers, which must have been addressed to
 	// them: so a request signed for one place cannot be recorded in another.
 	var req agentmessage.PersonMessage
-	if signed, err := p.SignedRequest(); err == nil {
+	if p.StatementOnly() && p.PersonStatement != nil {
+		req.Conversation = p.PersonStatement.Statement.Conversation
+	} else if signed, err := p.SignedRequest(); err == nil {
 		_ = json.Unmarshal(signed, &req)
 	}
 	if rec.Seq > 1 && req.Conversation != rec.Conversation {
@@ -976,6 +988,10 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		if prompt, ok := v.entries[rec.InReplyTo]; !ok || prompt.MessageID == rec.MessageID || prompt.To != rec.From {
 			v.fault(where, "it answers message %s, which is not an earlier message addressed to this person", rec.InReplyTo)
 		}
+	}
+	if p.AppBody != "" {
+		v.checkAppSpoke(where, rec, at, m)
+		return
 	}
 	cr, err := authorisation.ReadControllerRequest(p.SignedString)
 	if err != nil || cr.Controller != p.Controller || cr.Method != "POST" || !strings.HasSuffix(cr.Path, "/conversations") {
@@ -1017,38 +1033,80 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		if why := g.liveBetween(issuedBy, at); why != "" {
 			v.fault(where, "the app's Controller Grant was not in force when the request was signed: %s", why)
 		}
-		app := g.attr("app_asset")
-		m.App = app
 		switch signer := g.attr("signer"); {
-		case app != "" && signer != "":
-			v.fault(where, "the machine's Controller Grant names both an app, %s, and a signer, %s, but a machine is one or the other", app, signer)
-		case app != "" && p.PersonStatement == nil:
-			v.fault(where, "the machine's Controller Grant names it the back end of app %s, which speaks only with a person's own statement, and the entry carries none", app)
-		case p.PersonStatement != nil && signer != "":
-			v.fault(where, "the entry carries a person's own statement, which an app's back end carries, but the machine's Controller Grant names %s as the person it acts as", signer)
+		// A machine granted as an app's back end, the path before an app signed
+		// as the app (ADR-072 Amendment 1), is a controller no longer, and an entry
+		// made through one is a fault, not a plain controller's entry.
+		case g.attr("app_asset") != "":
+			v.fault(where, "the machine's Controller Grant names it the back end of an app, which is no longer a controller: an app's back end signs as the app with its App Body key")
 		case p.PersonStatement != nil:
-			// An app's back end spoke for the person with their own signed
-			// statement. What the bundle can show is that the statement is
-			// theirs to the key that signed it, is for this entry, this
-			// organisation and this time, and, from a Controller Grant of the
-			// version that names it, which app's back end carried it. That the
-			// key is the person's is not in any credential.
-			if st := p.PersonStatement.Statement; st.Agent != v.b.Root {
-				v.fault(where, "the person signed it for Identity Agent %q, not for this organisation %s", st.Agent, v.b.Root)
-			} else if stAt, err := time.Parse(time.RFC3339, st.Time); err != nil || absDuration(at.Sub(stAt)) > authorisation.Skew {
-				v.fault(where, "the person's statement was not signed within %s of when the Identity Agent took it", authorisation.Skew)
-			}
-			if app == "" {
-				v.cannotRuleOut("Which app's back end carried a person's own statement is the Identity Agent's word where the machine's Controller Grant names no app (it is in version 1.2.0 of the grant), and which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's.")
-			} else {
-				v.cannotRuleOut("Which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's.")
-			}
+			v.fault(where, "the entry carries a person's own statement, which only an app's back end signed as the app carries")
 		case signer == "":
 			v.cannotRuleOut("Some apps' Controller Grants name no signer, so which person spoke from them is the Identity Agent's word.")
 		case signer != aid:
 			v.fault(where, "the app's Controller Grant names %s as the person it acts for, not %s", signer, aid)
 		}
 	}
+}
+
+// checkAppSpoke checks an entry a person sent through an app whose back end
+// signed as the app (ADR-072): the entry is the person's own statement alone,
+// for this organisation and this time, and the key is the one an App Body
+// credential in the bundle names, in force when the statement was signed.
+func (v *verifier) checkAppSpoke(where string, rec agentmessage.Record, at time.Time, m *Message) {
+	p := rec.ControllerProof
+	// An entry for a person keeps their statement and not the app's signed
+	// request, which holds their words, so the app's signature was checked when
+	// the Identity Agent took the request and cannot be checked here; the
+	// statement's own time stands for when it was. An entry that keeps the
+	// request is not a form anything writes, and is refused.
+	if !p.StatementOnly() || len(p.RequestBytes) > 0 || len(p.Request) > 0 {
+		v.fault(where, "an app's entry keeps the person's statement alone, and this one carries the app's signed request")
+		return
+	}
+	if p.PersonStatement == nil {
+		v.fault(where, "an app's back end speaks only with a person's own statement, and the entry carries none")
+		return
+	}
+	signedAt, err := time.Parse(time.RFC3339, p.PersonStatement.Statement.Time)
+	if err != nil {
+		v.fault(where, "the person's statement carries no readable time")
+		return
+	}
+	v.cannotRuleOut("An app's signature over a request that carries a person's words is not kept, so that the app's key signed this request is the Identity Agent's word; the person's own statement is what the entry shows.")
+	body, ok := v.creds[p.AppBody]
+	switch {
+	case !ok:
+		v.fault(where, "the bundle does not carry the App Body %s of the app it was sent from", p.AppBody)
+		return
+	case body.schema != schemas.AppBody.Schema.SAID:
+		v.fault(where, "%s is not an App Body", p.AppBody)
+		return
+	case body.attr("host") != p.Controller || body.attr("verkey") != strings.TrimSpace(p.PublicKey):
+		v.fault(where, "the request is signed by a key the App Body does not name")
+		return
+	}
+	// The request's time is to the second, so the credential may be issued up to
+	// authorisation.Skew after it; it must not have been revoked by the time the
+	// Identity Agent took the request.
+	issuedBy := signedAt.Add(authorisation.Skew)
+	if at.Before(issuedBy) {
+		issuedBy = at
+	}
+	if why := body.liveBetween(issuedBy, at); why != "" {
+		v.fault(where, "the app's App Body was not in force when the statement was signed: %s", why)
+	}
+	m.AppAID = body.holder
+	if p.PersonStatement == nil {
+		v.fault(where, "an app's back end speaks only with a person's own statement, and the entry carries none")
+		return
+	}
+	if st := p.PersonStatement.Statement; st.Agent != v.b.Root {
+		v.fault(where, "the person signed it for Identity Agent %q, not for this organisation %s", st.Agent, v.b.Root)
+	} else if stAt, err := time.Parse(time.RFC3339, st.Time); err != nil || absDuration(at.Sub(stAt)) > authorisation.Skew {
+		v.fault(where, "the person's statement was not signed within %s of when the Identity Agent took it", authorisation.Skew)
+	}
+	v.cannotRuleOut("Which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's. Whether the app's grant held the capability to speak is the Identity Agent's decision when it took the request.")
 }
 
 func absDuration(d time.Duration) time.Duration {

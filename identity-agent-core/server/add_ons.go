@@ -128,6 +128,16 @@ type Addon struct {
 	ControllerOwnerOnly    map[string]string
 	ControllerMinimumScore map[string]int
 
+	// AppRoutes are the add-on's routes an app's back end may use, signed as the
+	// app (an_app_signs_as_the_app.go), each with the capability the app's App
+	// Grant must hold, and which {param} of the route gives each argument of
+	// that capability, so the grant's limits are held to what the route is asked
+	// for (AppRoute). Keyed "METHOD /chi/pattern". This opens a route, so an
+	// add-on may list only routes it mounts itself, and one the core lists
+	// (coreAppRoutes) keeps the core's entry. An app is held to its rate on
+	// each.
+	AppRoutes map[string]AppRoute
+
 	// GrantKinds are the kinds of grant the add-on issues, by schema, with
 	// what the core's grant engine asks about each one. A grant of a kind no
 	// add-on here issues is not appended when its signature comes back.
@@ -664,6 +674,7 @@ func (s *CoreServer) addonEntriesNotItsOwn(served chi.Routes, loosening bool) []
 		}
 		check("PublicRoutes", keysOf(a.PublicRoutes))
 		check("ScopedRoutes", keysOf(a.ScopedRoutes))
+		check("AppRoutes", keysOf(a.AppRoutes))
 		for _, p := range a.ScopedPrefixes {
 			found, foreign := false, false
 			for _, route := range all {
@@ -694,7 +705,7 @@ func (s *CoreServer) addonEntriesNotItsOwn(served chi.Routes, loosening bool) []
 }
 
 // keysOf are m's keys.
-func keysOf(m map[string]string) []string {
+func keysOf[V any](m map[string]V) []string {
 	var ks []string
 	for k := range m {
 		ks = append(ks, k)

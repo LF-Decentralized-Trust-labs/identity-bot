@@ -153,7 +153,7 @@
       }
     },
     "controller_proof": {
-      "description": "A person's own statement: the request their controller signed, kept as the exact string signed. Its second line is the controller and its last line the Blake3-256 (CESR) of the request's bytes, which request_bytes carries. The signature is the controller's machine key's, encoded as for a body (see contracts/agent-body). A proof carries exactly one of request_bytes and request.",
+      "description": "A person's own statement: the request their controller signed, kept as the exact string signed. For a controller's request its second line is the controller and its last line the Blake3-256 (CESR) of the request's bytes, which request_bytes carries; for an app's back end see app_body. The signature is the controller's machine key's, encoded as for a body (see contracts/agent-body). A controller's proof carries exactly one of request_bytes and request; an app's proof for a person carries neither.",
       "type": "object",
       "required": [
         "controller",
@@ -201,6 +201,10 @@
         "controller_grant": {
           "type": "string",
           "description": "the controller's Controller Grant credential, when it has one"
+        },
+        "app_body": {
+          "type": "string",
+          "description": "When an app's back end spoke for a person (ADR-072): the App Body credential that names the key that signed. Then controller is that key's identifier (the body's host) and public_key its verkey, and the proof is the person's statement alone: person_statement is present, and signed_string, signature, request_bytes and request are all absent, because the app's signed request holds the person's words. A proof that has app_body and carries any of them is refused. Absent for a controller's request."
         },
         "person_statement": {
           "description": "When the controller was an app's back end speaking for a person: that person's own signed statement over a fingerprint of their words, as the app carried it. Absent when the controller spoke as the signer it belongs to. The salt of the fingerprint is not here.",

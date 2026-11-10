@@ -23,6 +23,8 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
+	"identity-agent-core/schemas"
+	"identity-agent-core/store"
 	"identity-agent-core/trail"
 )
 
@@ -50,13 +52,95 @@ func aPersonsKey(b byte) ed25519Key {
 	return ed25519Key{ed25519.NewKeyFromSeed(seed)}
 }
 
+// appAID is the identifier of the chat app, which holds its App Body and App Grant.
+const appAID = "Eapp"
+
 type anAppWorld struct {
-	cw     *controllerWorld
-	h      http.Handler
-	target string
-	served *int
-	calls  int
-	proof  *coretypes.ControllerProof
+	appKey   ed25519Key
+	lastBody string
+	cw       *controllerWorld
+	h        http.Handler
+	target   string
+	served   *int
+	calls    int
+	proof    *coretypes.ControllerProof
+	app      AppCaller
+}
+
+// enrolApp stores what the core's issuance would: the App Body credential that
+// names the app back end's key, and the App Grant that holds caps.
+func (w *anAppWorld) enrolApp(t *testing.T, s *CoreServer, caps []string) {
+	t.Helper()
+	w.enrolAppLimited(t, s, caps, nil)
+}
+
+// enrolAppLimited is enrolApp with the grant's resource_constraints, per
+// capability, the values of each argument the app may use.
+func (w *anAppWorld) enrolAppLimited(t *testing.T, s *CoreServer, caps []string, limits map[string]map[string][]string) {
+	t.Helper()
+	if limits == nil {
+		w.enrolAppWithConstraints(t, s, caps, nil)
+		return
+	}
+	w.enrolAppWithConstraints(t, s, caps, limits)
+}
+
+// enrolAppWithConstraints puts constraints in the grant as given, whatever form
+// they are in, when they are not nil.
+func (w *anAppWorld) enrolAppWithConstraints(t *testing.T, s *CoreServer, caps []string, limits any) {
+	t.Helper()
+	host, vk, err := agentbody.Identity(w.appKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := s.OwnerRootAID()
+	keep := func(said, schema string, attrs map[string]any) {
+		raw, _ := json.Marshal(map[string]any{"a": attrs})
+		err := s.DataStore.SaveCredential(store.CredentialRecord{SAID: said, IssuerAID: owner, HolderAID: appAID,
+			SchemaSAID: schema, AcdcJson: base64.StdEncoding.EncodeToString(raw), Status: "issued"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep("Ebody", schemas.AppBody.Schema.SAID, map[string]any{"i": appAID, "host": host, "verkey": vk})
+	grant := map[string]any{"i": appAID, "capabilities": caps}
+	if limits != nil {
+		grant["resource_constraints"] = limits
+	}
+	keep("Egrant", schemas.AppGrant.Schema.SAID, grant)
+}
+
+// copyOf is the request sent again, byte for byte: what a captured one is.
+func (w *anAppWorld) copyOf(r *http.Request) *http.Request {
+	body := w.lastBody
+	c := httptest.NewRequest(r.Method, r.URL.RequestURI(), strings.NewReader(body))
+	c.RemoteAddr = r.RemoteAddr
+	c.Header = r.Header.Clone()
+	return c
+}
+
+// signedAsTheApp is a request signed by the app back end's App Body key, as
+// agentbody.SignedRequest says, not yet sent.
+func (w *anAppWorld) signedAsTheApp(t *testing.T, method, target, body string) *http.Request {
+	t.Helper()
+	host, _, _ := agentbody.Identity(w.appKey)
+	w.calls++
+	w.lastBody = body
+	r := httptest.NewRequest(method, target, strings.NewReader(body))
+	r.RemoteAddr = "203.0.113.9:51000"
+	ts, nonce := time.Now().UTC().Format(time.RFC3339), fmt.Sprintf("app-nonce-%016d", w.calls)
+	msg := agentbody.SignedRequest{For: w.target, Host: host, Method: method, Target: r.URL.RequestURI(),
+		Timestamp: ts, Nonce: nonce, Body: []byte(body)}.Bytes()
+	sig, err := agentbody.Sign(w.appKey, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set(agentbody.HeaderHost, host)
+	r.Header.Set(agentbody.HeaderFor, w.target)
+	r.Header.Set(agentbody.HeaderTimestamp, ts)
+	r.Header.Set(agentbody.HeaderNonce, nonce)
+	r.Header.Set(agentbody.HeaderSignature, sig)
+	return r
 }
 
 func newAnAppWorld(t *testing.T) *anAppWorld {
@@ -65,13 +149,15 @@ func newAnAppWorld(t *testing.T) *anAppWorld {
 	cw := newControllerWorld(t)
 	s := cw.s
 	st := s.assetHandler.Store
-	if err := st.UpsertAsset(asset.Asset{ID: "chat", DisplayName: "chat", AssetType: "app", Origin: appPage}); err != nil {
+	if err := st.UpsertAsset(asset.Asset{ID: "chat", DisplayName: "chat", AssetType: "app", Origin: appPage, PairwiseAID: appAID}); err != nil {
 		t.Fatal(err)
 	}
 	// agent-1 is an AI agent with the identifier its entries are addressed to,
 	// which is not its asset id.
-	if err := st.UpsertAsset(asset.Asset{ID: "agent-1", PairwiseAID: "Eagent1", DisplayName: "one", AssetType: "ai_agent"}); err != nil {
-		t.Fatal(err)
+	for id, aid := range map[string]string{"agent-1": "Eagent1", "agent-2": "Eagent2"} {
+		if err := st.UpsertAsset(asset.Asset{ID: id, PairwiseAID: aid, DisplayName: id, AssetType: "ai_agent"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// The asset admits Ann and Bob, who are not the machine's signer: an app
 	// speaks for whoever its asset admits, not for one person.
@@ -80,14 +166,16 @@ func newAnAppWorld(t *testing.T) *anAppWorld {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.controllers().BindAppAsset(cw.ctlAID, "chat"); err != nil {
-		t.Fatal(err)
-	}
 	served := 0
 	aw := &anAppWorld{}
+	aw.appKey = aPersonsKey(40)
+	aw.enrolApp(t, cw.s, []string{"agent.message.send", "agent.message.read"})
 	say := func(w http.ResponseWriter, r *http.Request) {
-		person, proof, err := s.thePersonAsking(r)
+		// Through the host an add-on is handed, as an add-on reads them.
+		host := hostWrapper{s: s}
+		person, proof, err := host.ThePersonAsking(r)
 		aw.proof = proof
+		aw.app, _ = host.TheAppThatAsked(r)
 		if err != nil {
 			if RefuseAnAppOverItsRate(w, err) {
 				return
@@ -172,10 +260,11 @@ type aSpokenRequest struct {
 	conversation string
 	// none sends a body that names no conversation.
 	none bool
+	// to is who the body and the statement are to, agent-1's identifier when not said;
+	// path should name the same AI agent, by its asset id.
+	to string
 	// path is the route it is sent on, the talk route of agent-1 when not said.
 	path string
-	// to is who the body and the statement are to, agent-1's identifier when not said.
-	to string
 }
 
 // say sends it as the app's back end does, and reports the answer.
@@ -212,7 +301,7 @@ func (w *anAppWorld) request(t *testing.T, q aSpokenRequest) *http.Request {
 	if path == "" {
 		path = talkPath
 	}
-	r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, path, body, w.cw.ctlSeed, authprovider.Level(""), time.Now())
+	r := w.signedAsTheApp(t, http.MethodPost, path, body)
 	salt, _ := agentmessage.NewSalt()
 	fp, _ := agentmessage.Fingerprint(salt, []byte(q.words))
 	id, vk, _ := agentbody.Identity(q.key)
@@ -355,6 +444,49 @@ func TestAValidStatementIsAdmittedAndLandsInTheTrail(t *testing.T) {
 	}
 }
 
+// The words of a conversation live only in the app: what the core keeps of a
+// request an app signed for a person, and hands to an add-on, is the person's
+// statement and its salt, never the request that holds the words.
+func TestWhatAnAppSpeakingForAPersonLeavesTheCoreHoldsNoWords(t *testing.T) {
+	w := newAnAppWorld(t)
+	key := newBrowsersKey(t)
+	w.signedIn(t, "Eann", key, time.Hour)
+	words := "a secret sentence"
+	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: words}); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	p := w.proof
+	if p == nil || len(p.PersonStatement) == 0 || len(p.PersonSalt) == 0 {
+		t.Fatalf("the proof does not carry the person's statement and salt: %+v", p)
+	}
+	if len(p.RequestBytes) != 0 || p.SignedString != "" || p.Signature != "" {
+		t.Fatalf("the proof kept the request or the app's signature over it: %+v", p)
+	}
+	if p.AppBody == "" || p.Controller == "" || p.PublicKey == "" {
+		t.Fatalf("the proof does not name the app's key and body: %+v", p)
+	}
+	if len(w.app.AID) == 0 {
+		t.Fatal("TheAppThatAsked named no app")
+	}
+	// Nothing the add-on is handed, in any field, holds the words.
+	for name, v := range map[string]string{
+		"proof": fmt.Sprintf("%q", fmt.Sprintf("%+v", *p)), "app": fmt.Sprintf("%+v", w.app),
+	} {
+		if strings.Contains(v, words) || strings.Contains(v, "secret") {
+			t.Errorf("the %s handed to an add-on holds the words: %s", name, v)
+		}
+	}
+	// And what is kept still shows the person said it: the salt opens the
+	// statement's fingerprint over the words, which the app that keeps them has.
+	pp, salt, ok := ThePersonStatementThatSpoke(p)
+	if !ok {
+		t.Fatal("no statement")
+	}
+	if err := agentmessage.CheckFingerprint(pp.Statement.FingerprintVersion, salt, []byte(words), pp.Statement.Fingerprint, false); err != nil {
+		t.Fatalf("the kept statement and salt do not open over the words: %v", err)
+	}
+}
+
 // A route names an AI agent by its asset id and a statement names it by the
 // identifier its entries are addressed to, which are not the same string for a
 // real AI agent: the statement is to the one the route's id belongs to.
@@ -494,45 +626,29 @@ func TestAPersonsStatementIsUsedOnce(t *testing.T) {
 	key := newBrowsersKey(t)
 	w.signedIn(t, "Eann", key, time.Hour)
 	r := w.request(t, aSpokenRequest{who: "Eann", key: key, words: "hello"})
-	grant, _, err := w.cw.s.controllers().Get(w.cw.ctlAID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := AppCaller{Asset: "chat", AID: appAID, Params: map[string]string{"id": "agent-1"}}
 	body, _ := readSignedBody(r)
-	if _, _, _, _, err := w.cw.s.thePersonAnAppSpeaksFor(r, grant, body); err != nil {
+	if _, _, _, err := w.cw.s.thePersonAnAppSpeaksFor(r, app, body); err != nil {
 		t.Fatalf("first use: %v", err)
 	}
-	if _, _, _, _, err := w.cw.s.thePersonAnAppSpeaksFor(r, grant, body); err == nil {
+	if _, _, _, err := w.cw.s.thePersonAnAppSpeaksFor(r, app, body); err == nil {
 		t.Fatal("the same statement was admitted twice")
 	}
 }
 
-func TestAMachineBoundToAnAppSpeaksForNoOneWithoutAStatement(t *testing.T) {
+func TestAnAppSpeaksForNoOneWithoutAStatement(t *testing.T) {
 	w := newAnAppWorld(t)
 	w.calls++
-	r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, talkPath, fmt.Sprintf(talkWords, w.calls), w.cw.ctlSeed, authprovider.Level(""), time.Now())
+	r := w.signedAsTheApp(t, http.MethodPost, talkPath, fmt.Sprintf(talkWords, w.calls))
 	rec := httptest.NewRecorder()
 	w.h.ServeHTTP(rec, r)
 	if rec.Code == http.StatusOK || *w.served != 0 {
-		t.Fatalf("an app machine with no statement was served: %d %s", rec.Code, rec.Body)
+		t.Fatalf("an app with no statement was served: %d %s", rec.Code, rec.Body)
 	}
 }
 
-func TestAMachineBoundToNoAppStillSpeaksAsItsSigner(t *testing.T) {
+func TestAControllerStillSpeaksAsItsSignerAndForNoOneElse(t *testing.T) {
 	w := newAnAppWorld(t)
-	c := w.cw.s.controllers()
-	grantsLock.Lock()
-	all, err := c.load()
-	if err == nil {
-		g := all[w.cw.ctlAID]
-		g.AppAsset = ""
-		all[w.cw.ctlAID] = g
-		err = c.save(all)
-	}
-	grantsLock.Unlock()
-	if err != nil {
-		t.Fatal(err)
-	}
 	w.calls++
 	r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, talkPath, fmt.Sprintf(talkWords, w.calls), w.cw.ctlSeed, authprovider.Level(""), time.Now())
 	rec := httptest.NewRecorder()
@@ -554,8 +670,9 @@ func TestAMachineBoundToNoAppStillSpeaksAsItsSigner(t *testing.T) {
 }
 
 func TestAnAppCannotKeepAPersonSpeakingAfterTheyAreSignedOut(t *testing.T) {
-	w := newAnAppWorld(t)
-	s := w.cw.s
+	// The route an app signs a person out by is an add-on's, listed in its
+	// AppRoutes: the core's own table is not touched.
+	var s *CoreServer
 	end := func(w http.ResponseWriter, r *http.Request) {
 		body, _ := readSignedBody(r)
 		var q struct{ Key, Person string }
@@ -567,12 +684,16 @@ func TestAnAppCannotKeepAPersonSpeakingAfterTheyAreSignedOut(t *testing.T) {
 		}
 		fmt.Fprint(w, n)
 	}
-	s.MountExtraRoutes(func(r chi.Router) { r.Post("/mcp/browser-keys/end", end) })
-	s.router = s.buildRouter()
-	w.h = s.router
+	onlyAddons(t, Addon{
+		ID: "sign-out", Name: "sign-out",
+		Routes:    func(_ *CoreServer, r chi.Router) { r.Post("/mcp/browser-keys/end", end) },
+		AppRoutes: map[string]AppRoute{"POST /api/mcp/browser-keys/end": {Capability: "agent.message.send"}},
+	})
+	w := newAnAppWorld(t)
+	s = w.cw.s
 	ends := func(body string) *httptest.ResponseRecorder {
 		w.calls++
-		r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, "/api/mcp/browser-keys/end", body, w.cw.ctlSeed, authprovider.Level(""), time.Now())
+		r := w.signedAsTheApp(t, http.MethodPost, "/api/mcp/browser-keys/end", body)
 		rec := httptest.NewRecorder()
 		w.h.ServeHTTP(rec, r)
 		return rec
@@ -627,17 +748,12 @@ func TestAnAppCannotKeepAPersonSpeakingAfterTheyAreSignedOut(t *testing.T) {
 	if _, ok := s.browserKeys().Whose("other-asset", tpOf(bob), time.Now()); !ok {
 		t.Fatal("an app ended a sign-in at an asset that is not its own")
 	}
-	// A machine that is not an app's back end ends nothing.
-	grantsLock.Lock()
-	c := s.controllers()
-	all, _ := c.load()
-	g := all[w.cw.ctlAID]
-	g.AppAsset = ""
-	all[w.cw.ctlAID] = g
-	_ = c.save(all)
-	grantsLock.Unlock()
-	if rec := ends(`{"person":"Ebob"}`); rec.Code == http.StatusOK {
-		t.Fatal("a machine bound to no app ended a sign-in")
+	// A controller is not an app's back end, and ends nothing.
+	cr := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, "/api/mcp/browser-keys/end", `{"person":"Ebob"}`, w.cw.ctlSeed, authprovider.Level(""), time.Now())
+	crec := httptest.NewRecorder()
+	w.h.ServeHTTP(crec, cr)
+	if crec.Code == http.StatusOK {
+		t.Fatal("a controller ended a sign-in")
 	}
 }
 
@@ -686,32 +802,57 @@ func TestAUsedStatementStaysUsedAcrossARestart(t *testing.T) {
 	}
 }
 
-func TestAMachineBoundToASignerCannotBecomeAnAppsBackEnd(t *testing.T) {
+func TestAMachineBoundToAnAppAsAControllerNeverStands(t *testing.T) {
 	w := newAnAppWorld(t)
 	s := w.cw.s
-	grantsLock.Lock()
 	c := s.controllers()
+	grantsLock.Lock()
 	all, _ := c.load()
 	g := all[w.cw.ctlAID]
-	g.AppAsset, g.Signer = "", talkSigner
+	g.AppAsset = "chat" // how a machine was bound to an app before an app signed as itself
 	all[w.cw.ctlAID] = g
 	_ = c.save(all)
 	grantsLock.Unlock()
-	if _, err := c.BindAppAsset(w.cw.ctlAID, "chat"); err == nil {
-		t.Fatal("a machine that speaks as a signer was bound to an app")
+	w.calls++
+	r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, talkPath, fmt.Sprintf(talkWords, w.calls), w.cw.ctlSeed, authprovider.Level(""), time.Now())
+	rec := httptest.NewRecorder()
+	w.h.ServeHTTP(rec, r)
+	if rec.Code == http.StatusOK || *w.served != 0 {
+		t.Fatalf("a machine bound to an app as a controller was served: %d %s", rec.Code, rec.Body)
 	}
-	g.Signer = ""
-	grantsLock.Lock()
-	all[w.cw.ctlAID] = g
-	_ = c.save(all)
-	grantsLock.Unlock()
-	if _, err := c.BindAppAsset(w.cw.ctlAID, "chat"); err != nil {
+}
+
+// A machine granted as an app's back end is withdrawn once at start-up: its row
+// goes, and the Controller Grant it was issued stops being in force, so nobody
+// who checks the credential finds it standing. A machine that was never one is
+// left alone.
+func TestTheGrantOfAMachineBoundToAnAppIsWithdrawnOnce(t *testing.T) {
+	w := newAnAppWorld(t)
+	s := w.cw.s
+	g, had, err := s.controllers().Get(w.cw.ctlAID)
+	if err != nil || !had || g.CredentialSAID == "" {
+		t.Fatalf("the machine has no grant credential to withdraw: %+v %v %v", g, had, err)
+	}
+	if n := s.withdrawTheGrantsOfRetiredAppBackEnds(); n != 0 {
+		t.Fatalf("a machine bound to no app was withdrawn (%d)", n)
+	}
+	if rec, _ := s.DataStore.GetCredential(g.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) {
+		t.Fatalf("a plain controller's grant was touched: %+v", rec)
+	}
+	g.AppAsset = "chat"
+	if err := s.controllers().Put(g); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.BindAppAsset(w.cw.ctlAID, "another"); err == nil {
-		t.Fatal("an app's machine was rebound to another app")
+	if n := s.withdrawTheGrantsOfRetiredAppBackEnds(); n != 1 {
+		t.Fatalf("withdrew %d grants, want 1", n)
 	}
-	if _, err := s.bindSigner(w.cw.ctlAID, talkSigner); err == nil {
-		t.Fatal("an app's machine was given a signer")
+	if rec, _ := s.DataStore.GetCredential(g.CredentialSAID); rec == nil || isUsableStatus(rec.Status) {
+		t.Fatalf("the Controller Grant of a machine bound to an app is still in force: %+v", rec)
+	}
+	if _, had, _ := s.controllers().Get(w.cw.ctlAID); had {
+		t.Fatal("the machine's row stayed")
+	}
+	if n := s.withdrawTheGrantsOfRetiredAppBackEnds(); n != 0 {
+		t.Fatalf("a second start withdrew %d more", n)
 	}
 }

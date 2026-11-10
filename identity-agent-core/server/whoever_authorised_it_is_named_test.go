@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"identity-agent-core/asset"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 
@@ -314,47 +313,5 @@ func TestAMachineSpeaksOnlyForAnActiveSigner(t *testing.T) {
 	g.Signer = signers[0].AID
 	if _, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{}); err != nil {
 		t.Fatalf("a machine speaking for an active signer: %v", err)
-	}
-}
-
-// When a machine is made the back end of an app after it was granted, its grant
-// is re-issued as a Controller Grant 1.2.0 that names the app, and the earlier
-// one is withdrawn; a machine that already has it, or cannot be re-issued,
-// changes nothing.
-func TestBindingAMachineToAnAppReissuesItsGrantNamingTheApp(t *testing.T) {
-	w := newControllerWorld(t)
-	if err := w.s.assetHandler.Store.UpsertAsset(asset.Asset{ID: "chat", DisplayName: "chat", AssetType: "app", Origin: appPage}); err != nil {
-		t.Fatal(err)
-	}
-	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bound, err := w.s.bindAppAsset(g.ControllerAID, "chat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bound.AppAsset != "chat" || bound.CredentialSAID == "" || bound.CredentialSAID == granted.CredentialSAID {
-		t.Fatalf("the grant was not re-issued when the machine was bound to its app: %+v", bound)
-	}
-	rec, _ := w.s.DataStore.GetCredential(bound.CredentialSAID)
-	if rec == nil || rec.SchemaSAID != schemas.ControllerGrant.Schema.SAID {
-		t.Fatalf("the re-issued grant is not a Controller Grant 1.2.0: %+v", rec)
-	}
-	if attrs, _ := acdcOf(t, w.s, bound.CredentialSAID)["a"].(map[string]interface{}); attrs["app_asset"] != "chat" {
-		t.Fatalf("the re-issued grant does not name the app: %v", attrs["app_asset"])
-	}
-	if got := statusOf(t, w.s, granted.CredentialSAID); got != keri.StatusRevoked {
-		t.Fatalf("the grant that named no app still stands: %q", got)
-	}
-	if err := w.s.rowIsItsGrant(bound); err != nil {
-		t.Fatalf("the row no longer matches its re-issued grant: %v", err)
-	}
-	if again, err := w.s.bindAppAsset(g.ControllerAID, "chat"); err != nil || again.CredentialSAID != bound.CredentialSAID {
-		t.Fatalf("binding to the same app again re-issued the grant: %+v %v", again, err)
-	}
-	if _, err := w.s.bindAppAsset(g.ControllerAID, "another"); err == nil {
-		t.Fatal("an app's machine was rebound to another app")
 	}
 }

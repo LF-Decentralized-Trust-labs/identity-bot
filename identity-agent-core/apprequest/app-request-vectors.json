@@ -1,0 +1,625 @@
+{
+  "about": "A request an app's back end signs as the app, with its App Body key (ADR-072), read as apprequest.Check reads it: the string the key signs is IA-BODY-REQ-V3 (agentbody.SignedRequest), the time is `now`, and a vector is admitted, with the string signed, or refused with the first reason that applies. A vector's request is the header values and the body; its admission is what the Identity Agent holds. The key is Ed25519 from the 32-byte seed seed_hex; the vectors are reproducible from it.",
+  "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+  "verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+  "identity_agent": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "now": "2026-11-10T12:00:00Z",
+  "vectors": [
+    {
+      "name": "a person's words to an AI agent",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nPOST\n/api/mcp/agents/agent-1/conversations\n2026-11-10T12:00:00Z\nnonce-0123456789ab\nEKab01t44GGrv5zpuf3-pvrXbEI0DF1PdSTz-GeHmZr5\n\n\n"
+    },
+    {
+      "name": "a read, no body, with a query, a work item, a reason and a session",
+      "request": {
+        "method": "GET",
+        "target": "/api/mcp/agents/agent-1/conversations?limit=20\u0026after=m-4",
+        "body_hex": "",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BC1VKF0IyUnrRP-xGntwJHP8ct9qbWgcojPiGEGUqziIujr3YeDxaALtCrMw6fTOznMXbQE_DYX5SH9UQj_Q58N",
+        "work_item": "item-1",
+        "reason": "show the chat",
+        "session": "run-7"
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.read"
+      },
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nGET\n/api/mcp/agents/agent-1/conversations?limit=20\u0026after=m-4\n2026-11-10T12:00:00Z\nnonce-0123456789ab\nEK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi\nitem-1\nshow the chat\nrun-7"
+    },
+    {
+      "name": "a body and a grant that never end are in force",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nPOST\n/api/mcp/agents/agent-1/conversations\n2026-11-10T12:00:00Z\nnonce-0123456789ab\nEKab01t44GGrv5zpuf3-pvrXbEI0DF1PdSTz-GeHmZr5\n\n\n"
+    },
+    {
+      "name": "a grant that ends later is in force",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "2026-11-10T13:00:00Z",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nPOST\n/api/mcp/agents/agent-1/conversations\n2026-11-10T12:00:00Z\nnonce-0123456789ab\nEKab01t44GGrv5zpuf3-pvrXbEI0DF1PdSTz-GeHmZr5\n\n\n"
+    },
+    {
+      "name": "names no Identity Agent",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BDyGkC-4Bsdm6bho3nthvpRocOO2khbJ4rIaCUsl83NNEpaPOrcIChyG7ClBYf6Ok10csd6EtCBSPCaVcgZvwMG",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "names_no_identity_agent"
+    },
+    {
+      "name": "signed for another Identity Agent",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EAnotherIdentityAgentAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBEPRvsEjke1EgmOI91GjpGyinU9QbGPTMN8w2iiCdrckMsd733pcBAaFy7ofH0t3MdbNNs7gr2htuCblHDt8cA",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "other_identity_agent"
+    },
+    {
+      "name": "an unreadable time",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "yesterday",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BDCUefqjQMlH8fxIck4Ufid9vZ_4gBpVgGgIJQSFU4-UwQn9T9f70hDX-Diql6NFPyKhS_M9KUkgAXmXzsOOsIM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "unreadable_time"
+    },
+    {
+      "name": "signed three minutes ago",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T11:57:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBSUsIlDXCbzdy8U1BKwSp_ZeGEZ64GDP6FMgLHAndLlOK3086iyuy6_LlXorY9mE4_EEXTYgX2VVrwKQGYOL0I",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "outside_window"
+    },
+    {
+      "name": "signed three minutes ahead",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:03:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBN0sw0ntvNmVvLPjEbBf7FZTvqKh_Jgl16bd9rDIV7lR4DD0zVwAcGx_umHSXbu2_AFhadkPcuU4iWMWxmCNUM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "outside_window"
+    },
+    {
+      "name": "a nonce that is too short",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "short",
+        "signature": "0BCVgMYdDJ-7EqcZ_70cNSzL140ZzDGGVC5MRdN7zjf_xXr1DT9WW_Uor-bQtzex18AactAS6_zYn-P0DLhkvoMC",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "bad_nonce"
+    },
+    {
+      "name": "a key the App Body does not name",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BMmeKzfekwAt9oMmp4VJPNSqSH0aRfohF6oQUEiSO_eB",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BCR6EQ6i-4VRFxSVl15WWtU_c_415Y8xuDbaHMUx9m-tzKT3GMckYGR9dV4FmCwwJvFkXxXSkv-Rk_5_bVSnYsH",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "key_is_not_the_app_bodys"
+    },
+    {
+      "name": "a signature by another key under the app's name",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBVjd0AKYxodtK-dxy70WetZhwzDrRwU4gi3NiU4GLD-TUkfHfQRy_FkIqqMvLzKKJt-FrSacv694X1TertPAAP",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "bad_signature"
+    },
+    {
+      "name": "a body changed after it was signed",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d32222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "bad_signature"
+    },
+    {
+      "name": "a route changed in transit",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-2/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "bad_signature"
+    },
+    {
+      "name": "a stated reason changed in transit",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "something else",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "bad_signature"
+    },
+    {
+      "name": "an App Body that has ended",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "2026-11-10T11:59:59Z",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "app_body_lapsed"
+    },
+    {
+      "name": "an App Grant that ends this second",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "2026-11-10T12:00:00Z",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "app_grant_lapsed"
+    },
+    {
+      "name": "an App Grant that does not hold the capability",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send"
+      },
+      "refused": "capability_not_held"
+    },
+    {
+      "name": "a grant limited to this AI agent admits it",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send",
+        "grant_constraints": {
+          "to": [
+            "Eagent2",
+            "Eagent1"
+          ]
+        },
+        "route_arguments": {
+          "to": "Eagent1"
+        }
+      },
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nPOST\n/api/mcp/agents/agent-1/conversations\n2026-11-10T12:00:00Z\nnonce-0123456789ab\nEKab01t44GGrv5zpuf3-pvrXbEI0DF1PdSTz-GeHmZr5\n\n\n"
+    },
+    {
+      "name": "a grant limited to another AI agent refuses this one",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send",
+        "grant_constraints": {
+          "to": [
+            "Eagent2"
+          ]
+        },
+        "route_arguments": {
+          "to": "Eagent1"
+        }
+      },
+      "refused": "outside_the_grants_limit"
+    },
+    {
+      "name": "a limit on an argument the route does not give",
+      "request": {
+        "method": "POST",
+        "target": "/api/mcp/agents/agent-1/conversations",
+        "body_hex": "7b22746f223a226167656e742d31222c22626f6479223a2268656c6c6f222c226e6f6e6365223a226d2d31227d",
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "for": "EIdentityAgentAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "timestamp": "2026-11-10T12:00:00Z",
+        "nonce": "nonce-0123456789ab",
+        "signature": "0BBgLYwZqXuQI5N6zLRpUmQCorvnh8GlHcb4CCuY8aHoeAHKewgEnhu-yccPcvfGDyvWgzKIFzc-rnsy4OerBVwM",
+        "work_item": "",
+        "reason": "",
+        "session": ""
+      },
+      "admission": {
+        "body_host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "body_valid_until": "",
+        "grant_capabilities": [
+          "agent.message.send",
+          "agent.message.read"
+        ],
+        "grant_valid_until": "",
+        "capability_the_route_needs": "agent.message.send",
+        "grant_constraints": {
+          "to": [
+            "Eagent1"
+          ],
+          "topic": [
+            "billing"
+          ]
+        },
+        "route_arguments": {
+          "to": "Eagent1"
+        }
+      },
+      "refused": "limit_the_route_cannot_check"
+    }
+  ]
+}

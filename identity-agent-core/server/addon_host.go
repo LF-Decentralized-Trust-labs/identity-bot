@@ -62,9 +62,6 @@ func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, err
 func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
 	return h.s.endBrowserKeys(r, thumbprint, person)
 }
-func (h hostWrapper) BindAppAsset(aid string, assetID string) (ControllerGrant, error) {
-	return h.s.bindAppAsset(aid, assetID)
-}
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
 }
@@ -167,8 +164,9 @@ func (h hostWrapper) TheOwner() (string, bool) { return h.s.theOwner() }
 func (h hostWrapper) ThePersonAsking(r *http.Request) (coretypes.Signer, *coretypes.ControllerProof, error) {
 	return h.s.thePersonAsking(r)
 }
-func (h hostWrapper) ThisIdentityAgentsIdentifier() string       { return h.s.thisIdentityAgentsIdentifier() }
-func (h hostWrapper) VerifyOwnerSignature(r *http.Request) error { return h.s.verifyOwnerSignature(r) }
+func (h hostWrapper) TheAppThatAsked(r *http.Request) (AppCaller, bool) { return TheAppThatAsked(r) }
+func (h hostWrapper) ThisIdentityAgentsIdentifier() string              { return h.s.thisIdentityAgentsIdentifier() }
+func (h hostWrapper) VerifyOwnerSignature(r *http.Request) error        { return h.s.verifyOwnerSignature(r) }
 func (h hostWrapper) VerifyRequestEnvelope(r *http.Request, method string, params []byte, caller *permission.CallerContext) error {
 	return h.s.verifyRequestEnvelope(r, method, params, caller)
 }

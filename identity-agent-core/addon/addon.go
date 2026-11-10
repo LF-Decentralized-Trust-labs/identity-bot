@@ -57,6 +57,8 @@ type (
 	// ControllerProof is a controller's signature over a request, as proof
 	// of what the person behind it asked.
 	ControllerProof = coretypes.ControllerProof
+	// AppCaller is the app behind a request its back end signed as the app.
+	AppCaller = server.AppCaller
 	// AgentRef is an AI agent an identity holds, as its asset names it.
 	AgentRef = coretypes.AgentRef
 	// GrantRef is a grant an identity issued, by its SAID.
@@ -108,14 +110,10 @@ type Host interface {
 	// EndBrowserKeys ends, before its twelve hours are up, what a sign-in let a
 	// browser's key say: the key with this thumbprint, or, when thumbprint is
 	// empty, every key the person (by their identifier at the asset) holds. r is
-	// the request the app's back end signed, and the asset is the one that
-	// machine is bound to, never one the caller names. It returns how many
+	// the request the app's back end signed, and the asset is that app's own,
+	// never one the caller names. It returns how many
 	// records ended. An app calls it when it signs a person out.
 	EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error)
-	// BindAppAsset binds a machine to the app asset it is the back end of, once.
-	// It then speaks only for the people that asset admits, each with their own
-	// signed statement, and as no signer of its own.
-	BindAppAsset(aid string, assetID string) (server.ControllerGrant, error)
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error
 	EngineSigns()
@@ -185,6 +183,10 @@ type Host interface {
 	StoredKelForVerifying(aid string) ([]map[string]interface{}, error)
 	TheOwner() (string, bool)
 	ThePersonAsking(r *http.Request) (Signer, *ControllerProof, error)
+	// TheAppThatAsked is the app whose back end signed r as the app, with its
+	// App Body key, after the core checked its credentials and that the route
+	// is one an app may use (Addon.AppRoutes). False for any other request.
+	TheAppThatAsked(r *http.Request) (AppCaller, bool)
 	ThisIdentityAgentsIdentifier() string
 	VerifyOwnerSignature(r *http.Request) error
 	VerifyRequestEnvelope(r *http.Request, method string, params []byte, caller *permission.CallerContext) error

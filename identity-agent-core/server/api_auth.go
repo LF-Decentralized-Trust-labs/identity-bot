@@ -352,7 +352,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				return
 			}
 
-			pattern := matchedRoutePattern(routes, r)
+			pattern, params := matchedRoute(routes, r)
 			if pattern == "" {
 				// No route matched HERE. That is normally a 404 waiting to
 				// happen, and letting the router answer it avoids telling an
@@ -387,6 +387,11 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 			case accessPublic:
 				next.ServeHTTP(w, r)
 			case accessScoped:
+				// An app's back end signs as the app, with its App Body key, and
+				// is never judged as the owner or a controller (ADR-072).
+				if s.appActsAsTheApp(w, r, pattern, params, next) {
+					return
+				}
 				how, proofErr := s.theProofOfTheOwner(r)
 				if refuseTheBody(w, proofErr) {
 					return
@@ -422,6 +427,9 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				}
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
+				if s.appActsAsTheApp(w, r, pattern, params, next) {
+					return
+				}
 				how, proofErr := s.theProofOfTheOwner(r)
 				if refuseTheBody(w, proofErr) {
 					return
@@ -448,6 +456,14 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 
 // matchedRoutePattern resolves which registered route would serve this request.
 func matchedRoutePattern(routes chi.Routes, r *http.Request) string {
+	pattern, _ := matchedRoute(routes, r)
+	return pattern
+}
+
+// matchedRoute is matchedRoutePattern and the values chi reads from the path
+// for the pattern's {params}, from the same string chi will route on, so a
+// check on a param is a check on what the handler will be given.
+func matchedRoute(routes chi.Routes, r *http.Request) (string, map[string]string) {
 	// MATCH THE STRING CHI WILL ROUTE ON, NOT A DIFFERENT ONE.
 	//
 	// chi dispatches on RawPath when the URL carries escaped characters, and on
@@ -457,17 +473,28 @@ func matchedRoutePattern(routes chi.Routes, r *http.Request) string {
 	// unauthenticated way in.
 	//
 	// Raw first, because that is what chi prefers when it is set.
-	if raw := r.URL.EscapedPath(); raw != "" && raw != r.URL.Path {
+	try := func(path string) (string, map[string]string, bool) {
 		rctx := chi.NewRouteContext()
-		if routes.Match(rctx, r.Method, raw) {
-			return rctx.RoutePattern()
+		if !routes.Match(rctx, r.Method, path) {
+			return "", nil, false
+		}
+		params := map[string]string{}
+		for i, k := range rctx.URLParams.Keys {
+			if i < len(rctx.URLParams.Values) {
+				params[k] = rctx.URLParams.Values[i]
+			}
+		}
+		return rctx.RoutePattern(), params, true
+	}
+	if raw := r.URL.EscapedPath(); raw != "" && raw != r.URL.Path {
+		if p, params, ok := try(raw); ok {
+			return p, params
 		}
 	}
-	rctx := chi.NewRouteContext()
-	if !routes.Match(rctx, r.Method, r.URL.Path) {
-		return ""
+	if p, params, ok := try(r.URL.Path); ok {
+		return p, params
 	}
-	return rctx.RoutePattern()
+	return "", nil
 }
 
 func denyAuthorization(w http.ResponseWriter, detail string) {
