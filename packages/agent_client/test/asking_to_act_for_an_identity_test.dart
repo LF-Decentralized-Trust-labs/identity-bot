@@ -521,6 +521,101 @@ void main() {
           throwsA(isA<AnAgentCouldNotBeProved>()));
     });
 
+    MockClient theAgentGrantingWhileTheProofSays(
+        List<Map<String, dynamic>> answers, List<Map<String, dynamic>> asked) {
+      var n = 0;
+      return MockClient((req) async {
+        if (req.url.path == '/api/controller/sign') {
+          return http.Response(
+              jsonEncode({
+                'controller_aid': 'BTHISMACHINE',
+                'signature': '0BSIG',
+                'timestamp': '2026-09-01T00:00:00Z',
+              }),
+              200);
+        }
+        if (req.url.path == '/api/verify/agent-at-address') {
+          asked.add(jsonDecode(req.body) as Map<String, dynamic>);
+          return http.Response(
+              jsonEncode(answers[n < answers.length ? n++ : n - 1]), 200);
+        }
+        return http.Response(
+            jsonEncode({'aid': 'EMYIDENTITY', 'your_grade': 'enrolled'}), 200);
+      });
+    }
+
+    const proved = {'verified': true, 'aid': 'EMYIDENTITY', 'public_key': 'DK'};
+
+    test('is proved against what was proved first, so a rollback in between '
+        'is refused', () async {
+      final asked = <Map<String, dynamic>>[];
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: theAgentGrantingWhileTheProofSays([proved], asked),
+      );
+      await asking.waitUntilGranted(agent,
+          agentAid: 'EMYIDENTITY',
+          knownSequence: 4,
+          knownKey: 'DK',
+          every: const Duration(milliseconds: 1));
+      expect(asked.single['known_sequence'], 4);
+      expect(asked.single['known_key'], 'DK');
+    });
+
+    test('a passing network blip while proving it is asked again, not '
+        'a verdict', () async {
+      final asked = <Map<String, dynamic>>[];
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: theAgentGrantingWhileTheProofSays([
+          {'verified': false, 'kind': 'no-answer'},
+          {'verified': false, 'kind': 'could-not-tell'},
+          proved,
+        ], asked),
+      );
+      final told = await asking.waitUntilGranted(agent,
+          agentAid: 'EMYIDENTITY',
+          every: const Duration(milliseconds: 1),
+          blipPause: const Duration(milliseconds: 1));
+      expect(told!.agentAid, 'EMYIDENTITY');
+      expect(asked, hasLength(3));
+    });
+
+    test('a blip that does not pass is thrown as what it is', () async {
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: theAgentGrantingWhileTheProofSays([
+          {'verified': false, 'kind': 'no-answer'},
+        ], []),
+      );
+      await expectLater(
+          asking.waitUntilGranted(agent,
+              agentAid: 'EMYIDENTITY',
+              every: const Duration(milliseconds: 1),
+              blipPause: const Duration(milliseconds: 1)),
+          throwsA(isA<AnAgentCouldNotBeProved>()
+              .having((e) => e.kind, 'kind', NotProved.noAnswer)));
+    });
+
+    test('a verdict is never asked again', () async {
+      final asked = <Map<String, dynamic>>[];
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: theAgentGrantingWhileTheProofSays([
+          {'verified': false, 'kind': 'different', 'why': 'older history'},
+          proved,
+        ], asked),
+      );
+      await expectLater(
+          asking.waitUntilGranted(agent,
+              agentAid: 'EMYIDENTITY',
+              every: const Duration(milliseconds: 1),
+              blipPause: const Duration(milliseconds: 1)),
+          throwsA(isA<AnAgentCouldNotBeProved>()
+              .having((e) => e.kind, 'kind', NotProved.somethingElse)));
+      expect(asked, hasLength(1));
+    });
+
     test('naming another identifier than the one proved is refused', () async {
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,

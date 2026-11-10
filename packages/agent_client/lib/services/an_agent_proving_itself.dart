@@ -178,3 +178,36 @@ Future<ProvedAgent> proveTheAgentAt(
     if (own) c.close();
   }
 }
+
+/// [proveTheAgentAt], asked again when the failure is a blip: nothing answered,
+/// or this computer could not run the check. Those say nothing about who is at
+/// the address, so one passing network failure must not throw away what a
+/// person has done. Anything that IS a verdict (something else answers, the
+/// history went backwards, the address is not encrypted) is thrown at once, and
+/// a blip that lasts [attempts] asks in a row is thrown as it is.
+Future<ProvedAgent> proveTheAgentAtThroughABlip(
+  String agentOrigin, {
+  String? aid,
+  int? knownSequence,
+  String? knownKey,
+  String? localCoreOrigin,
+  http.Client? client,
+  int attempts = 4,
+  Duration pause = const Duration(seconds: 2),
+}) async {
+  for (var asked = 1;; asked++) {
+    try {
+      return await proveTheAgentAt(agentOrigin,
+          aid: aid,
+          knownSequence: knownSequence,
+          knownKey: knownKey,
+          localCoreOrigin: localCoreOrigin,
+          client: client);
+    } on AnAgentCouldNotBeProved catch (e) {
+      final blip =
+          e.kind == NotProved.noAnswer || e.kind == NotProved.couldNotTell;
+      if (!blip || asked >= attempts) rethrow;
+      await Future<void>.delayed(pause);
+    }
+  }
+}

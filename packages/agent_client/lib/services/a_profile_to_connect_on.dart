@@ -4,6 +4,15 @@ import 'core_service.dart';
 import 'identity_profiles.dart';
 import 'the_core_is_settled.dart';
 
+/// For widget tests, which have no core beside them to ask: replaces the
+/// question "does the open profile hold an identity". Never set outside a test:
+/// it is honoured only in a debug build, so a release build ignores it.
+@visibleForTesting
+Future<bool> Function()? theOpenProfileHoldsAnIdentityForTests;
+
+Future<bool> Function()? _theTestsAnswerIfDebug() =>
+    kDebugMode ? theOpenProfileHoldsAnIdentityForTests : null;
+
 /// Making room, before this app founds an identity or is connected to an
 /// Identity Agent elsewhere,
 /// so that what is recorded lands on a profile of its own.
@@ -23,16 +32,11 @@ import 'the_core_is_settled.dart';
 /// Returns whether a new profile was begun. Throws when one was needed and could
 /// not be, and the caller must NOT go on to connect: the connection would land
 /// on the profile that holds the identity.
-/// For widget tests, which have no core beside them to ask: replaces the
-/// question "does the open profile hold an identity". Never set outside a test.
-@visibleForTesting
-Future<bool> Function()? theOpenProfileHoldsAnIdentityForTests;
-
 Future<bool> makeRoomOnAProfile({
   Future<bool> Function()? holdsAnIdentity,
   Future<void> Function()? beginAProfile,
 }) async {
-  if (!await (holdsAnIdentity ?? theOpenProfileHoldsAnIdentityForTests ?? _theOpenProfileHoldsAnIdentity)()) {
+  if (!await (holdsAnIdentity ?? _theTestsAnswerIfDebug() ?? _theOpenProfileHoldsAnIdentity)()) {
     return false;
   }
   await TheCoreIsSettled.during(

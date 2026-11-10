@@ -200,7 +200,10 @@ class AskingToActForAnIdentity {
   /// allocating, on a machine that may still be starting — and none of those is
   /// distinguishable from "nobody has approved you", nor should they be. A
   /// failure to PROVE is not that: something is answering and it is not the
-  /// agent, so [AnAgentCouldNotBeProved] is thrown at once.
+  /// agent, so [AnAgentCouldNotBeProved] is thrown at once. The one exception
+  /// is a blip in that proof (nothing answered, or the check could not run),
+  /// which is asked again a few times first. [knownSequence] and [knownKey] are
+  /// what [proveWhoIsAt] showed, so a rollback in between is refused.
   ///
   /// Returns null on running out, which the screen says as "nothing yet" rather
   /// than as a failure, because the usual reason is that nobody has picked up
@@ -208,8 +211,11 @@ class AskingToActForAnIdentity {
   Future<WhatThisMachineWasTold?> waitUntilGranted(
     String agentOrigin, {
     required String agentAid,
+    int? knownSequence,
+    String? knownKey,
     Duration every = const Duration(seconds: 2),
     Duration until = const Duration(minutes: 10),
+    Duration blipPause = const Duration(seconds: 2),
   }) async {
     // Established once, before waiting on anything. A machine that cannot sign
     // will never be recognised no matter how long it waits, and every minute
@@ -228,8 +234,16 @@ class AskingToActForAnIdentity {
       if (told != null) {
         // Proved AFTER the grant arrived, so a grant is taken from an agent
         // that has just shown it holds the keys, not one that did a minute ago.
-        final proved = await proveTheAgentAt(agentOrigin,
-            aid: agentAid, localCoreOrigin: _localCore, client: _plain);
+        // With what this computer proved before, so a history that went back
+        // during the first connection is refused; and through a blip, so a
+        // network that drops for a moment does not undo the approval.
+        final proved = await proveTheAgentAtThroughABlip(agentOrigin,
+            aid: agentAid,
+            knownSequence: knownSequence,
+            knownKey: knownKey,
+            localCoreOrigin: _localCore,
+            client: _plain,
+            pause: blipPause);
         if (proved.aid != told.agentAid) {
           throw const AnAgentCouldNotBeProved(
               NotProved.somethingElse,

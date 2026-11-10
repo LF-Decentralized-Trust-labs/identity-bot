@@ -72,11 +72,21 @@ class WhatAnAgentCallsItself {
 Future<WhatAnAgentCallsItself> readWhatAnAgentCallsItself({
   required String agentOrigin,
   required String agentAid,
+  int? knownSequence,
+  String? knownKey,
   String? localCoreOrigin,
   http.Client? inner,
+  Duration blipPause = const Duration(seconds: 2),
 }) async {
-  await proveTheAgentAt(agentOrigin,
-      aid: agentAid, localCoreOrigin: localCoreOrigin, client: inner);
+  // With what was proved before, so a history that went back since is refused,
+  // and through a blip, so a passing network failure is not a verdict.
+  await proveTheAgentAtThroughABlip(agentOrigin,
+      aid: agentAid,
+      knownSequence: knownSequence,
+      knownKey: knownKey,
+      localCoreOrigin: localCoreOrigin,
+      client: inner,
+      pause: blipPause);
   final client = ControllerSigningClient(
     agentOrigin: agentOrigin,
     // The key that signs is in THIS machine's hardware; the agent cannot reach it.

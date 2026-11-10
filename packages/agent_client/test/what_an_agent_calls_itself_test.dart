@@ -1,6 +1,9 @@
 import 'dart:convert';
 
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:test/test.dart';
+import 'package:agent_client/services/an_agent_proving_itself.dart';
 import 'package:agent_client/services/what_an_agent_calls_itself.dart';
 
 /// What somebody is shown before an agent elsewhere is remembered: a name and
@@ -47,5 +50,76 @@ void main() {
     final calls = WhatAnAgentCallsItself.fromProfileJson('{}');
     expect(calls.name, isEmpty);
     expect(calls.picture, isNull);
+  });
+
+  group('reading it, after proving it', () {
+    const localCore = 'http://127.0.0.1:5050';
+    const agent = 'https://box.example.test';
+    const proved = {'verified': true, 'aid': 'EMYIDENTITY', 'public_key': 'DK'};
+
+    MockClient core(List<Map<String, dynamic>> answers,
+        List<Map<String, dynamic>> asked) {
+      var n = 0;
+      return MockClient((req) async {
+        if (req.url.path == '/api/verify/agent-at-address') {
+          asked.add(jsonDecode(req.body) as Map<String, dynamic>);
+          return http.Response(
+              jsonEncode(answers[n < answers.length ? n++ : n - 1]), 200);
+        }
+        if (req.url.path == '/api/controller/sign') {
+          return http.Response(
+              jsonEncode({
+                'controller_aid': 'BTHISMACHINE',
+                'signature': '0BSIG',
+                'timestamp': '2026-09-01T00:00:00Z',
+              }),
+              200);
+        }
+        return http.Response(jsonEncode({'org_name': 'America Ascent'}), 200);
+      });
+    }
+
+    test('the proof is held to what was proved first', () async {
+      final asked = <Map<String, dynamic>>[];
+      final calls = await readWhatAnAgentCallsItself(
+          agentOrigin: agent,
+          agentAid: 'EMYIDENTITY',
+          knownSequence: 7,
+          knownKey: 'DK',
+          localCoreOrigin: localCore,
+          inner: core([proved], asked));
+      expect(calls.name, 'America Ascent');
+      expect(asked.single['known_sequence'], 7);
+      expect(asked.single['known_key'], 'DK');
+    });
+
+    test('a passing blip is asked again, and a verdict is not', () async {
+      final asked = <Map<String, dynamic>>[];
+      final calls = await readWhatAnAgentCallsItself(
+          agentOrigin: agent,
+          agentAid: 'EMYIDENTITY',
+          localCoreOrigin: localCore,
+          blipPause: const Duration(milliseconds: 1),
+          inner: core([
+            {'verified': false, 'kind': 'no-answer'},
+            proved
+          ], asked));
+      expect(calls.name, 'America Ascent');
+      expect(asked, hasLength(2));
+
+      final again = <Map<String, dynamic>>[];
+      await expectLater(
+          readWhatAnAgentCallsItself(
+              agentOrigin: agent,
+              agentAid: 'EMYIDENTITY',
+              localCoreOrigin: localCore,
+              blipPause: const Duration(milliseconds: 1),
+              inner: core([
+                {'verified': false, 'kind': 'different'},
+                proved
+              ], again)),
+          throwsA(isA<AnAgentCouldNotBeProved>()));
+      expect(again, hasLength(1));
+    });
   });
 }
