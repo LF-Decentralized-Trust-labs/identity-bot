@@ -1,6 +1,8 @@
 package trail
 
 import (
+	"identity-agent-core/agentmessage"
+	"identity-agent-core/didcomm"
 	"os"
 	"path/filepath"
 	"testing"
@@ -140,4 +142,69 @@ func TestAnAgentsExpiredEntryIsMarkedOnceInTheChain(t *testing.T) {
 	if err := f.tr.markNotDeliveredIfNot("c1", "e99", mediation.ReasonExpired); err != nil || len(f.tr.Chain("c1")) != n+1 {
 		t.Fatalf("an entry that is not there was marked: %v", err)
 	}
+}
+
+// A trail rebuilt from the record that holds the chain takes the not-delivered
+// mark back in as the Identity Agent's own note, so the entry is not marked a
+// second time and later entries still follow it. Any other entry that carries
+// an outcome is still refused.
+func TestARebuiltTrailTakesTheNotDeliveredMarkBackIn(t *testing.T) {
+	f := newFixture(t)
+	if err := f.tr.AppendAgent("c1", f.agentEntry(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.tr.markNotDeliveredIfNot("c1", "e1", mediation.ReasonExpired); err != nil {
+		t.Fatal(err)
+	}
+	chain := f.tr.Chain("c1")
+	if len(chain) != 2 {
+		t.Fatalf("setup: chain of %d", len(chain))
+	}
+
+	again := New(f.roster, f.app, Options{Agent: testAgent, Now: func() time.Time { return f.now },
+		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(f.keys, r) }})
+	if err := again.Open("c1", alice, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range chain {
+		if err := again.AppendAgent("c1", e); err != nil {
+			t.Fatalf("entry %d of the record was not taken back in: %v", e.Seq, err)
+		}
+	}
+	if err := again.markNotDeliveredIfNot("c1", "e1", mediation.ReasonExpired); err != nil || len(again.Chain("c1")) != 2 {
+		t.Fatalf("the entry was marked a second time: %v, chain %d", err, len(again.Chain("c1")))
+	}
+	if err := again.AppendAgent("c1", f.agentEntryOn(again, 2)); err != nil {
+		t.Fatalf("an entry after the mark did not follow it: %v", err)
+	}
+
+	// Another party's outcome is not taken in this way.
+	other := agentmessage.Record{
+		MessageID: "x1", Conversation: "c1", Seq: 4, PrevHash: again.Head("c1"), IATime: "2026-11-06T12:00:00Z",
+		Kind: agentmessage.KindOutcome, From: "ESOMEONEELSE", InReplyTo: "e1", BodyHash: agentmessage.HashBody(nil),
+		Outcome: &agentmessage.Outcome{Entry: "e1", State: agentmessage.OutcomeNotDelivered, Reason: "x"}, OpenedBy: agentmessage.Person(alice),
+	}
+	env, err := agentmessage.Countersign(f.keys, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := again.AppendAgent("c1", agentmessage.Entry{Conversation: "c1", Seq: 4, MessageID: "x1", Envelope: env, Hash: agentmessage.Hash(env)}); err == nil {
+		t.Fatal("an outcome from another sender was appended")
+	}
+}
+
+// agentEntryOn is agentEntry for the end of another trail's chain.
+func (f *fixture) agentEntryOn(tr *Trail, i int) agentmessage.Entry {
+	f.t.Helper()
+	seq := len(tr.Chain("c1")) + 1
+	rec := agentmessage.Record{
+		MessageID: "b" + time.Duration(i).String(), Conversation: "c1", Seq: seq, PrevHash: tr.Head("c1"),
+		IATime: "2026-11-06T12:00:00Z", Kind: agentmessage.KindReply, From: bot, To: agentmessage.Person(alice),
+		InReplyTo: "e1", BodyHash: agentmessage.HashBody([]byte("r")), OpenedBy: agentmessage.Person(alice),
+	}
+	env, err := agentmessage.Countersign(f.keys, rec)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return agentmessage.Entry{Conversation: "c1", Seq: seq, MessageID: rec.MessageID, Envelope: env, Hash: agentmessage.Hash(env)}
 }

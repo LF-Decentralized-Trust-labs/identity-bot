@@ -335,6 +335,18 @@ func (t *Trail) AppendAgent(conversation string, e agentmessage.Entry) error {
 		e.Seq != rec.Seq || e.Hash != agentmessage.Hash(e.Envelope) {
 		return errors.New("the entry does not follow the end of this conversation's chain")
 	}
+	if rec.Outcome != nil && rec.Outcome.State == agentmessage.OutcomeNotDelivered && rec.Kind == agentmessage.KindOutcome &&
+		rec.From == t.agent && rec.PersonProof == nil && rec.Refusal == "" {
+		// The Identity Agent's own not-delivered mark, which the record that
+		// holds the chain wrote before the sealed copy was deleted. A trail
+		// rebuilt from that record takes it back in, so it does not mark the
+		// entry a second time. It is a note, not a turn.
+		if err := rec.CheckSenderProof(); err != nil {
+			return err
+		}
+		c.chain = append(c.chain, e)
+		return nil
+	}
 	if rec.PersonProof != nil || rec.Outcome != nil || rec.Refusal != "" {
 		return errors.New("a person's entry is written by Write, not appended")
 	}
