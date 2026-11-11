@@ -388,6 +388,26 @@ func (s *SQLiteStore) SaveFinalization(f FinalizationState) error {
 	return err
 }
 
+func (s *SQLiteStore) ListUnfinalized() ([]FinalizationState, error) {
+	rows, err := s.db.Query(`
+		SELECT event_said, signer_aid, sequence_num, state, receipt_count, threshold, started_at, updated_at
+		FROM witness_finalization WHERE state != ?`, FinalizeFinalized)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FinalizationState
+	for rows.Next() {
+		var f FinalizationState
+		if err := rows.Scan(&f.EventSAID, &f.SignerAID, &f.SequenceNum, &f.State, &f.ReceiptCount,
+			&f.Threshold, &f.StartedAt, &f.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) CountWitnessingFor() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM witness_contact_meta WHERE witnessing_for = 1`).Scan(&n)

@@ -31,7 +31,7 @@ func TestADefaultThreeWitnessInstallFinalizesWithTwoReceipts(t *testing.T) {
 	old := finalizeWait
 	finalizeWait = time.Millisecond
 	defer func() { finalizeWait = old }()
-	s.finalizeLoop(said, s.Threshold())
+	s.finalizeLoop(said)
 	if f, _ := s.Store.GetFinalization(said); f.State != FinalizeFinalized {
 		t.Fatalf("state %s after the wait, want finalized", f.State)
 	}
@@ -51,7 +51,7 @@ func TestOneReceiptOfTwoRequiredStillTimesOut(t *testing.T) {
 	old := finalizeWait
 	finalizeWait = time.Millisecond
 	defer func() { finalizeWait = old }()
-	s.finalizeLoop(said, 5)
+	s.finalizeLoop(said)
 	if f, _ := s.Store.GetFinalization(said); f.State != FinalizeTimeout {
 		t.Fatalf("state %s, want timeout", f.State)
 	}

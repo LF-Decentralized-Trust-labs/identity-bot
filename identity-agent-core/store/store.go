@@ -524,19 +524,7 @@ func saidOfRecord(rec map[string]interface{}) string {
 // saidAndIlkOfRecord is the event identifier (d) and type (t) of one log
 // record, read from its raw bytes alone, as saidOfRecord is.
 func saidAndIlkOfRecord(rec map[string]interface{}) (said, ilk string) {
-	rawB64, _ := rec["raw_bytes_b64"].(string)
-	raw, err := drivers.DecodeRawBytes(rawB64)
-	if err != nil || len(raw) == 0 {
-		return "", ""
-	}
-	var ev struct {
-		D string `json:"d"`
-		T string `json:"t"`
-	}
-	if json.Unmarshal(raw, &ev) != nil {
-		return "", ""
-	}
-	return ev.D, ev.T
+	return drivers.EventIDOfRecord(rec)
 }
 
 // ErrKeyNotEstablished is returned when a verified record states a current key

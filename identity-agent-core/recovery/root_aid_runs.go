@@ -1,7 +1,6 @@
 package recovery
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,9 +10,8 @@ import (
 	"sync"
 
 	"identity-agent-core/atomicfile"
+	"identity-agent-core/drivers"
 	"identity-agent-core/store"
-
-	keri "github.com/grapeid/keri-go"
 )
 
 // A break-glass run stopped part way is finished by sending the same signed
@@ -162,15 +160,8 @@ func (run RunningRootAIDRotation) RotationLanded(events []store.EventRecord) boo
 }
 
 func saidOfB64(b64 string) (string, bool) {
-	raw, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil || len(raw) == 0 {
-		return "", false
-	}
-	ev, err := keri.ParseEvent(raw)
-	if err != nil || ev.SAID == "" {
-		return "", false
-	}
-	return ev.SAID, true
+	said, _ := drivers.EventIDOfRawB64(b64)
+	return said, said != ""
 }
 
 // DropUnfinishedRootAIDRotation forgets a run whose rotation has not landed.

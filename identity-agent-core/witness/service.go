@@ -518,27 +518,43 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 	return out, nil
 }
 
-// Threshold is the receipt count this agent's configuration asks of a set of
-// witnesses as large as the cap allows. It describes the configuration, for
-// the status report; it is not what any one event is finalized against, which
-// is the toad the event's own key log carries (see thresholdFor).
+// Threshold is the configured receipt count, as thresholdFor reads it: the value
+// stored, not lifted to a floor. It describes the configuration and is not what
+// any one event is finalized against, which is the toad the event's own key log
+// carries (see thresholdFor). The shipped value (DefaultThreshold, the cap's
+// majority) is stored as 5 on every install, so a 5 cannot be told from "never
+// set" and is read as unset by configuredRaise; any other value is a raise.
 func (s *Service) Threshold() int {
 	v, _ := s.Store.GetConfig("threshold")
 	n, _ := strconvAtoi(v, DefaultThreshold)
-	floor := MajorityThreshold(s.MaxWitnesses())
-	if n < floor {
-		return floor
-	}
 	return n
+}
+
+// ownThreshold is the receipt count the identity's own key log asks for, or
+// false when it cannot be read.
+func (s *Service) ownThreshold() (int, bool) {
+	if s.OurAID == nil {
+		return 0, false
+	}
+	aid := s.OurAID()
+	if aid == "" {
+		return 0, false
+	}
+	row, err := s.witnessing(aid, "", nil)
+	if err != nil {
+		return 0, false
+	}
+	return s.thresholdFor(row), true
 }
 
 // configuredRaise is a threshold the owner set explicitly above the shipped
 // default, or 0 when none was set. The default itself is a majority of the cap,
-// which no smaller witness set can reach, so it is never a raise.
+// which no smaller witness set can reach, so it is never a raise. Below the
+// default it is honoured (a lower value does lower what is asked), exactly as
+// Threshold reports it.
 func (s *Service) configuredRaise() int {
-	v, _ := s.Store.GetConfig("threshold")
-	n, ok := strconvAtoi(v, DefaultThreshold)
-	if ok != nil || n == DefaultThreshold {
+	n := s.Threshold()
+	if n == DefaultThreshold {
 		return 0
 	}
 	return n
@@ -972,8 +988,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	seq, _ := eventSeq(event)
 	// Finalized against the identity's own threshold: the receipts it asked
 	// for, not a floor that a smaller witness set can never reach. A log that
-	// was read and designates nobody has its own threshold, 0; only a log that
-	// could not be read falls back to the floor.
+	// was read and designates nobody has its own threshold, 0.
 	// While the log cannot be read nothing is counted and no toad is known, so
 	// the threshold is the least that is ever met (one receipt); settle replaces
 	// it with the log's own once the log can be read.
@@ -988,7 +1003,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		url := witnessEventURL(w)
 		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, designated) })
 	}
-	s.background(func() { s.finalizeLoop(said, threshold) })
+	s.background(func() { s.finalizeLoop(said) })
 	return nil
 }
 
@@ -1251,7 +1266,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 			sent()
 		}
 	}
-	s.background(func() { s.finalizeLoop(said, threshold) })
+	s.background(func() { s.finalizeLoop(said) })
 	return nil
 }
 
@@ -1696,35 +1711,59 @@ func rawEventOf(body []byte) []byte {
 // finalizeWait is FinalizeWaitDuration; a variable so a test need not wait it out.
 var finalizeWait = FinalizeWaitDuration
 
-func (s *Service) finalizeLoop(eventSAID string, threshold int) {
+func (s *Service) finalizeLoop(eventSAID string) {
 	select {
 	case <-time.After(finalizeWait):
 	case <-s.stopping():
 		// Stopping: the timeout is not recorded, so the finalization stays
-		// pending in the store. It is NOT re-read on the next start: nothing
-		// at start looks for pending finalizations, and GetFinalization is
-		// called only here, in onReceipt when a receipt arrives, and by a
-		// broadcast checking whether its event already has one. So it stays
-		// pending until a receipt for that event comes in.
+		// pending in the store. SettleUnfinalized picks it up at the next start.
 		return
 	}
+	// Re-settled before deciding: the log may have become readable, or its
+	// toad changed, since the receipts were kept, and the count and threshold
+	// stored are only as fresh as the last settle.
+	s.receiptMu.Lock()
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil || f.State == FinalizeFinalized {
+		s.receiptMu.Unlock()
 		return
 	}
-	// The threshold the finalization holds now, which settle keeps at the log's
-	// own toad, not the one passed when the wait began.
-	threshold = f.Threshold
-	if f.ReceiptCount < threshold {
+	s.settle(f, nil)
+	if f.State != FinalizeFinalized {
 		f.State = FinalizeTimeout
-		f.UpdatedAt = NowRFC3339()
-		_ = s.Store.SaveFinalization(*f)
-		if s.OnEvent != nil {
-			s.OnEvent("witness_finalize_timeout", map[string]interface{}{
-				"event_said": eventSAID, "receipt_count": f.ReceiptCount, "threshold": threshold,
-			})
-		}
 	}
+	_ = s.Store.SaveFinalization(*f)
+	s.receiptMu.Unlock()
+	if f.State == FinalizeTimeout && s.OnEvent != nil {
+		s.OnEvent("witness_finalize_timeout", map[string]interface{}{
+			"event_said": eventSAID, "receipt_count": f.ReceiptCount, "threshold": f.Threshold,
+		})
+	}
+}
+
+// SettleUnfinalized re-settles, once at startup, every finalization that never
+// finalized. Rows stored before the threshold came from the log hold the cap's
+// majority and stay wrong for good otherwise: nothing re-reads them, and a
+// broadcast skips an event that already has a row. Returns how many were
+// settled.
+func (s *Service) SettleUnfinalized() int {
+	rows, err := s.Store.ListUnfinalized()
+	if err != nil {
+		log.Printf("[witness] could not list unfinalized events: %v", err)
+		return 0
+	}
+	n := 0
+	for _, f := range rows {
+		s.receiptMu.Lock()
+		cur, _ := s.Store.GetFinalization(f.EventSAID)
+		if cur != nil && cur.State != FinalizeFinalized {
+			s.settle(cur, nil)
+			_ = s.Store.SaveFinalization(*cur)
+			n++
+		}
+		s.receiptMu.Unlock()
+	}
+	return n
 }
 
 // EvaluateRequest implements C7 inbound witness request handling.
@@ -1882,6 +1921,12 @@ func (s *Service) BuildStatus() (*StatusResponse, error) {
 		MaxWitnesses: s.MaxWitnesses(), OutgoingCapacity: MaxOutgoingWitnessing,
 		OutgoingUsed: outgoing, BackendType: s.BackendType,
 		WitnessCapacityOK: outgoing < MaxOutgoingWitnessing,
+	}
+	// The identity's own threshold, from its log: what it asked its witnesses
+	// for, which is what a verifier holds it to. The configured value is only
+	// reported when the log cannot be read.
+	if own, ok := s.ownThreshold(); ok {
+		resp.Threshold = own
 	}
 	for _, c := range contacts {
 		if c.IsWitness {

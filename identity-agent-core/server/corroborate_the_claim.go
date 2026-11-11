@@ -1,13 +1,13 @@
 package server
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
 )
@@ -106,11 +106,17 @@ func eventCountIn(kel []map[string]interface{}) int { return len(kel) }
 // about it. Conflating the two would make every network fault look like an
 // attack, and would make a machine with no internet unable to be set up at all.
 func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]interface{}) corroboration {
+	// Rebuilt from the bytes the verdict on the claim covers, so nothing served
+	// beside them (a top-level "d", event_json) can say what the claim shows. A
+	// log that cannot be rebuilt was not verified by its bytes and cannot be
+	// corroborated.
+	rebuilt, ok := drivers.RecordsFromVerifiedBytes(presented)
 	keys := witnessKeysIn(presented)
 	out := corroboration{Designated: len(keys)}
-	if len(keys) == 0 {
+	if len(keys) == 0 || !ok {
 		return out
 	}
+	presented = rebuilt
 
 	// A designated key is not an address. Resolve it through the registry this
 	// agent already uses; a key it does not recognise cannot be asked.
@@ -169,29 +175,24 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 	return out
 }
 
-// claimedEventDigest is the said of an event as a log carries it: the event itself, its
-// event_json text, or its raw bytes. Empty when it cannot be read.
-func claimedEventDigest(entry map[string]interface{}) string {
-	if d, _ := entry["d"].(string); d != "" {
-		return d
+// eventDigestOf is the event identifier of one record on either side. From the raw
+// bytes when the record carries them; otherwise from its top-level "d", which
+// is what a witness serves (it keeps the event's parsed fields, not its bytes).
+// The presented log has been rebuilt from its verified bytes before this is
+// asked of it, so on that side "d" can only be what the bytes say.
+func eventDigestOf(rec map[string]interface{}) string {
+	if said, _ := drivers.EventIDOfRecord(rec); said != "" {
+		return said
 	}
-	var parsed map[string]interface{}
-	if b64, _ := entry["raw_bytes_b64"].(string); b64 != "" {
-		if raw, err := base64.StdEncoding.DecodeString(b64); err == nil {
-			_ = json.Unmarshal(raw, &parsed)
-		}
-	} else if body, _ := entry["event_json"].(string); body != "" {
-		_ = json.Unmarshal([]byte(body), &parsed)
-	}
-	d, _ := parsed["d"].(string)
+	d, _ := rec["d"].(string)
 	return d
 }
 
-// firstDigestMismatch finds an event where both sides give a digest and they
-// differ.
+// firstDigestMismatch finds an event where both sides give a readable digest
+// and they differ. Digests are read from raw bytes alone (eventDigestOf).
 func firstDigestMismatch(presented, replica []map[string]interface{}) (int, bool) {
 	for i := 0; i < len(presented) && i < len(replica); i++ {
-		a, b := claimedEventDigest(presented[i]), claimedEventDigest(replica[i])
+		a, b := eventDigestOf(presented[i]), eventDigestOf(replica[i])
 		if a != "" && b != "" && a != b {
 			return i, true
 		}
@@ -199,11 +200,16 @@ func firstDigestMismatch(presented, replica []map[string]interface{}) (int, bool
 	return 0, false
 }
 
-// holdsDigests reports whether the witness gives, for each event the claim
-// shows with a digest, the same digest at the same place.
+// holdsDigests reports whether the witness gives, for EVERY event the claim
+// shows, the same readable digest at the same place. An event whose digest
+// cannot be read on either side is not held: unreadable is not confirming.
 func holdsDigests(presented, replica []map[string]interface{}) bool {
+	if len(replica) < len(presented) {
+		return false
+	}
 	for i, p := range presented {
-		if want := claimedEventDigest(p); want != "" && claimedEventDigest(replica[i]) != want {
+		want, got := eventDigestOf(p), eventDigestOf(replica[i])
+		if want == "" || got == "" || got != want {
 			return false
 		}
 	}
