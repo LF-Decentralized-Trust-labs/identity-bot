@@ -1018,7 +1018,7 @@ func (s *CoreServer) IsRunning() bool {
 // corsPolicy is the router's cross-origin policy, in one place so a test can
 // exercise the same value the router uses rather than a copy of it.
 func corsPolicy() func(http.Handler) http.Handler {
-	return cors.Handler(cors.Options{
+	deny := cors.Handler(cors.Options{
 		AllowOriginFunc: func(*http.Request, string) bool { return false },
 		AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{
@@ -1029,6 +1029,28 @@ func corsPolicy() func(http.Handler) http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300,
 	})
+	return func(next http.Handler) http.Handler {
+		denied := deny(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The library answers every preflight itself, so a route that
+			// grants cross-origin access next to its handler (corsPreflight)
+			// would never be reached and a browser's sign-in from a website
+			// would be refused. Those routes' preflights go to their own
+			// handler; every other route stays denied.
+			if r.Method == http.MethodOptions && grantsCrossOriginItself(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			denied.ServeHTTP(w, r)
+		})
+	}
+}
+
+// grantsCrossOriginItself names the routes that set their own cross-origin
+// headers beside their handlers (corsHeaders): the sign-in widget's session
+// routes and the page key route a page with only the SDK calls.
+func grantsCrossOriginItself(path string) bool {
+	return strings.HasPrefix(path, "/api/login/session/") || path == "/public/login/key"
 }
 
 func (s *CoreServer) buildRouter() chi.Router {

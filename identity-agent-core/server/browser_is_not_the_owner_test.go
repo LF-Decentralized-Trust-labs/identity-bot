@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // A web page is not the owner, however local its connection looks.
@@ -157,3 +159,33 @@ func TestForeignOriginGetsNoCrossOriginGrant(t *testing.T) {
 }
 
 func corsMiddlewareForTest() func(http.Handler) http.Handler { return corsPolicy() }
+
+// A website's page starts a sign-in with a JSON POST, which a browser sends
+// only after a preflight. The global denial answered that preflight itself, so
+// the sign-in routes' own grant was never reached and every website sign-in was
+// refused by the browser. Their preflight is granted; every other route's is not.
+func TestASignInRoutesPreflightIsGrantedAndNoOtherIs(t *testing.T) {
+	r := chi.NewRouter()
+	r.Use(corsPolicy())
+	r.Options("/api/login/session/{asset_id}", corsPreflight)
+	r.Options("/api/login/session/{asset_id}/{token}", corsPreflight)
+	r.Options("/public/login/key", corsPreflight)
+	r.Post("/api/employees", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	preflight := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodOptions, path, nil)
+		req.Header.Set("Origin", "https://a-website.example")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "content-type")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	for _, path := range []string{"/api/login/session/asset1", "/api/login/session/asset1/token1", "/public/login/key"} {
+		if got := preflight(path).Header().Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Errorf("preflight of %s: Access-Control-Allow-Origin = %q, want *", path, got)
+		}
+	}
+	if got := preflight("/api/employees").Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("preflight of an owner route: Access-Control-Allow-Origin = %q, want it absent", got)
+	}
+}
