@@ -56,9 +56,12 @@ needs. This one lists the route that carries a person's words (ADR-066, ADR-067)
 | Route | Capability | Limit it is held to |
 |---|---|---|
 | `POST /api/mcp/agents/{id}/conversations` | `agent.message.send` | `to` is the AI agent's `pairwise_aid`, not the `{id}` the path carries |
+| `GET /api/conversations/{id}/head` | `conversation.head.read` | none: the route gives no argument, so a grant that limits this capability is refused on it. Served only for a conversation this app keeps |
 
-Reads of a conversation are not listed: they carry no person's statement, so an
-add-on lists them only once it scopes a read to a person.
+Reads of a conversation's entries are not listed: they carry no person's
+statement, so an add-on lists them only once it scopes a read to a person. The
+head and count of a conversation carry no words and name no person, and are
+served to the app that keeps the conversation.
 
 An add-on lists its own with the same meaning: the capability, and which part of the route gives each argument a grant may limit. An app is held to its request rate on every one. **Every other route refuses the
 key**: a route a controller may use, and a route only the owner's own keys may

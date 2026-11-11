@@ -7,6 +7,7 @@
 **Extends:** ADR-047 (AI agents talk through the Identity Agent that holds them) — its countersigned, chained conversation record, which this ADR makes the trail rather than sitting beside it
 **Amended:** 2026-11-10 — what keeps the trail is an add-on's, not the core's (see "Where the store lives", below)
 **Amended:** 2026-11-10 — the proof kept for a person's message carries the statement, never the words (see "What the core keeps of an app's request", below)
+**Amended:** 2026-11-11 — the app keeps the entries and the words, and the Identity Agent keeps the head and the count (see "Where the trail is kept", below)
 
 ---
 
@@ -65,6 +66,102 @@ where the controller is an app's
 back end speaking for a person. For a paired machine speaking as the signer it
 belongs to, the proof is unchanged.
 
+## Where the trail is kept
+
+*Amendment, 2026-11-11.* **What has to be proven is kept in the Identity Agent
+only as a fingerprint; the rest is kept by the app.** For a conversation an app
+keeps (a utility app, reached through its own back end, ADR-072), the store of
+record is that app: it keeps the countersigned entries and the words. The
+Identity Agent keeps, per conversation:
+
+- the **head**, the hash (`agentmessage.Hash`) of the newest committed entry, or
+  empty when there is none;
+- the **count**, the number of committed entries, which is also the newest
+  entry's `seq`: there are no gaps;
+- what it needs to decide a write: the opener's person reference, the parties
+  and the open asks (message id, the party asked, answered or not).
+
+The chain is the one below and nothing new: entry n has `seq` n and `prev_hash`
+the hash of entry n-1, empty for the first.
+
+**Every entry is kept by the app before it is committed.** The Identity
+Agent countersigns an entry at `seq` count+1 and hands it, with the words it
+holds in passing, to the app. The app keeps it and confirms the fingerprint it
+stored. Only then does the Identity Agent move the head and the count, in one
+step, and only if the head is still the one the entry was countersigned for;
+otherwise it tells the app to discard that entry, named by its hash, not by its `seq`: two writes racing for one place are both kept by the app until the loser is discarded, so for a while the app may hold more than one entry at a place. The Identity Agent's own copy
+of an entry is **transitory**: held until the app confirms, then deleted. An
+entry the app never confirmed is never committed, so a person is told a message
+was sent only once the app holds it, and a message the Identity Agent did not
+accept leaves nothing in the trail except a refusal. This holds for an AI agent's
+entry and for a person's.
+
+**The exception.** A conversation no app keeps (an AI agent speaking to another
+AI agent, with no app named on it) keeps its whole trail in the Identity Agent,
+because nothing else holds it.
+
+**What a countersignature covers.** The whole record: its id, conversation,
+`seq`, `prev_hash`, the Identity Agent's time, kind, sender, recipient, what it
+answers, depth, `body_hash`, the sender's proof, the grant and body credential
+it rests on, the person reference, who opened the conversation, and any refusal
+or outcome. `Hash` also covers the two signatures. The words are not covered,
+only their fingerprint. The signer is the Identity Agent for a person's entry
+and for its own, and the AI agent for the AI agent's. Because `prev_hash` is
+inside what is signed, nobody without a key can insert, remove or reorder an
+entry without breaking a signature or the chain.
+
+**How a copy is checked.** A reader takes the entries from the app and the head
+and count from the Identity Agent (`conversationbundle.CheckCopy`, with `Verify`
+for the signatures and each entry). Entries beyond the count are uncommitted:
+left out, and never shown as part of the conversation. The copy may hold more
+than one entry at a place (a write that lost the race, not yet discarded), in any
+order. The committed entry at each place is chosen from the head back: the one
+whose hash is the head, then the one whose hash the entry after it names as its
+`prev_hash`; never by its position in the copy or by its `seq` alone. The others
+are *ignored* and reported, and never make the copy fail. Every place must then
+hold a committed entry, each linked to the one before it, the last hashing to
+the head. It then shows one of four things: *removed from the end* (fewer than
+the count, nothing missing inside), *removed or reordered inside* (a gap or a
+broken link: an entry inside the chain replaced by another shows here too,
+because the entry after it no longer follows from it), *substituted* (every
+place held and chained, but none ends at the head, which is how a replaced last
+entry shows) or *matches*. Only the head catches the first and the third, as of
+the head's time; the rest needs no Identity Agent. This one check is the open
+format's: an add-on that keeps conversations calls it rather than carrying its
+own copy.
+
+**Where the head comes from.**
+
+- *Live:* `GET /api/conversations/{id}/head`, answering `{conversation, count,
+  head}`. The owner and the owner's controllers may ask it, and so may the app that keeps the conversation,
+  signing as the app (ADR-072) with an App Grant holding
+  `conversation.head.read`. An app that does not keep the conversation, and any
+  other caller, is refused, and the answer to the two refusals is the same words,
+  so the route does not tell a stranger which conversations exist.
+- *Offline:* an export carries a **head statement**
+  (`conversationbundle.HeadStatement`, `Bundle.Head`): `{conversation, count,
+  head, ia_time}` signed by the Identity Agent's messaging key, the one that
+  countersigns a person's entries. `Verify` checks the signature, that it names
+  this conversation, that it is not dated after the export, and holds the entries
+  to it as `CheckCopy` does. A bundle without one says it cannot rule out an
+  entry cut off the end after the last anchor, when a person spoke in it through an app that may keep it. A head statement shows the end as
+  it was at its time only: an entry committed after it is not shown missing.
+  Recording the head in the key history (below) is still the way to a check that
+  needs no statement. That is a later change.
+
+**What this replaces.** For a conversation an app keeps: a person's entry is no
+longer *pending* and never *not kept*, because the app has it before it is
+committed, so step 6 of the order of a write and the *pending* and *not kept*
+states no longer apply to it. The Identity Agent no longer holds the chain and
+serves `Trail.Read`: the read is the app's, checked against the head. The
+*not-delivered* outcome to an AI agent stays. A refusal still joins the trail.
+
+**Not done here.** `conversationbundle.Verify` and the entry format still read a
+person's *pending* entry and a *not kept* outcome, which nothing is to write; the
+format keeps them until a change removes them. Whether a reply that was not kept
+is written into the trail at all is still open. The store of the head and count
+is the add-on's: the core serves the route by asking it (`Addon.ConversationHead`).
+
 ## One record, not two
 
 ADR-067 defines what is *signed*: the fingerprint and the person's statement.
@@ -122,6 +219,8 @@ entry follows it; a refusal never has one. The state of an entry is therefore
 read from the chain itself.
 
 ### Four states
+
+*For a conversation an app keeps, a person's entry no longer passes through *pending* or *not kept*: see "Where the trail is kept", above.*
 
 | State | Meaning |
 |---|---|

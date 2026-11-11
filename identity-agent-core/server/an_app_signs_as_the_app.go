@@ -55,16 +55,20 @@ type AppRoute struct {
 // "METHOD /chi/pattern" as the core's other route tables are. A route in
 // neither this nor an add-on's AppRoutes is not an app's.
 //
-// Only the route that carries a person's words is here: it is accepted only
+// Two routes are here. The first carries a person's words: it is accepted only
 // with the person's own statement beside the app's signature
 // (an_app_speaks_for_a_person_who_signed.go), and a grant that limits whom the
 // app may message ("to") is held to the AI agent the path names, by the
-// identifier its entries are addressed to. The reads of a
-// conversation are not here, because the core has no per-person check on a read
+// identifier its entries are addressed to. The second answers the head and count
+// of a conversation the app keeps. The reads of a
+// conversation's entries are not here, because the core has no per-person check on a read
 // an app makes; an add-on lists them in AppRoutes once it enforces one.
 func coreAppRoutes() map[string]AppRoute {
 	return map[string]AppRoute{
 		"POST /api/mcp/agents/{id}/conversations": {Capability: "agent.message.send", Arguments: map[string]string{"to": "id"}},
+		// The head and count carry no words and name no person; the handler
+		// serves an app only the conversations it keeps.
+		"GET /api/conversations/{id}/head": {Capability: CapabilityConversationHeadRead},
 	}
 }
 

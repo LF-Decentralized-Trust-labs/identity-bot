@@ -108,6 +108,10 @@
           "items": {
             "$ref": "#/$defs/anchor"
           }
+        },
+        "head": {
+          "$ref": "../agent-message/agent-message.schema.json#/$defs/envelope",
+          "description": "the Identity Agent's signed head statement, for a conversation an app keeps (ADR-068, contracts/trail): an envelope of type trail-head, signed with the messaging key that countersigns a person's entries, whose body is {conversation, count, head, ia_time} and whose id is trail-head:<conversation>:<count>. A reader holds the entries to it; absent, a bundle cannot rule out an end cut off"
         }
       }
     },

@@ -62,6 +62,10 @@ type Report struct {
 	// fixes; UnanchoredEntries are the entries after it.
 	AnchoredThrough   int   `json:"anchored_through"`
 	UnanchoredEntries []int `json:"unanchored_entries,omitempty"`
+	// UncommittedEntries is how many entries the bundle carries past the count
+	// its head statement signs. They are not part of the conversation, so they
+	// are not in Messages.
+	UncommittedEntries int `json:"uncommitted_entries,omitempty"`
 	// LogRows is how many rows of the governance log the bundle carries;
 	// UnanchoredRows are those no anchor fixes yet.
 	LogRows        int     `json:"log_rows"`
@@ -167,15 +171,24 @@ func (c *credential) liveBetween(asked, taken time.Time) string {
 }
 
 type verifier struct {
-	b       *Bundle
-	r       *Report
-	kels    map[string]*keyLog
-	regs    map[string]bool
-	creds   map[string]*credential
-	dids    map[string]*didcomm.DID
-	entries map[string]agentmessage.Record
-	hashes  map[int]string
-	notes   map[string]bool
+	b *Bundle
+	// head is the head statement, when the bundle carries one that was read: its
+	// count is how many entries make the conversation.
+	head *HeadStatement
+	// copyRes and copyErr are what CheckCopy found of the entries against head
+	// (holdCopy); committed is its chosen entries, in order, once they match.
+	copyRes       CopyResult
+	copyErr       error
+	committed     []Entry
+	haveCommitted bool
+	r             *Report
+	kels          map[string]*keyLog
+	regs          map[string]bool
+	creds         map[string]*credential
+	dids          map[string]*didcomm.DID
+	entries       map[string]agentmessage.Record
+	hashes        map[int]string
+	notes         map[string]bool
 	// signedOnce is every sender's signature seen, by the entry it is in: a
 	// signed statement or request stands for one entry, never two.
 	signedOnce map[string]int
@@ -223,7 +236,12 @@ func VerifyAgainst(b *Bundle, root string) Report {
 }
 
 // Verify checks a bundle with nothing but what is in it.
-func Verify(b *Bundle) Report {
+func Verify(b *Bundle) Report { return verify(b, nil) }
+
+// verify is Verify. A test may give it messaging keys to read the head statement
+// with when it cannot sign for the keys a published bundle's key logs name;
+// Verify gives none.
+func verify(b *Bundle, headKeys map[string]*didcomm.DID) Report {
 	r := Report{}
 	if b == nil {
 		r.Faults = []Fault{{Where: "bundle", Why: "there is no bundle"}}
@@ -248,9 +266,14 @@ func Verify(b *Bundle) Report {
 	v.checkRegistries()
 	v.checkCredentials()
 	v.checkCountersigners()
+	for aid, d := range headKeys {
+		v.dids[aid] = d
+	}
+	v.openHead()
 	v.checkEntries()
 	rows := v.checkLog()
 	v.checkAnchors(rows)
+	v.checkHead()
 	v.cannotRuleOut("The Identity Agent holds every AI agent's identity key, so a compromised Identity Agent could countersign words nobody sent. It cannot make the signature of a machine key it does not hold. An entry whose sender's own signature holds is the strong claim, and every entry here is checked for one, but that claim rests on the body credential or Controller Grant naming that key having been issued honestly: whoever holds the root key can issue one to a key of its own.")
 	// An entry holds when nothing found anywhere in the bundle is about it.
 	for i := range r.Messages {
@@ -671,13 +694,13 @@ func (v *verifier) checkCountersigners() {
 // ── Entries ────────────────────────────────────────────────────────────────
 
 func (v *verifier) checkEntries() {
-	if len(v.b.Entries) == 0 {
+	if len(v.kept()) == 0 {
 		v.fault("conversation", "the bundle carries no entries")
 		return
 	}
 	prev := ""
 	opener := ""
-	for i, e := range v.b.Entries {
+	for i, e := range v.kept() {
 		seq := i + 1
 		where := fmt.Sprintf("entry %d", seq)
 		m := Message{Seq: seq}
@@ -1281,7 +1304,7 @@ func (v *verifier) checkAnchors(rowHashes map[int64]string) {
 			if c.ID != v.b.Conversation {
 				continue
 			}
-			if h, ok := v.hashes[c.Seq]; !ok || c.Seq > len(v.b.Entries) || h != c.Head {
+			if h, ok := v.hashes[c.Seq]; !ok || c.Seq > len(v.kept()) || h != c.Head {
 				v.fault(aw, "it fixes entry %d of this conversation, which the bundle does not carry unchanged", c.Seq)
 				continue
 			}
@@ -1365,6 +1388,9 @@ func (r Report) Text() string {
 	fmt.Fprintf(&b, "\nAnchored through entry %d of %d.", r.AnchoredThrough, len(r.Messages))
 	if len(r.UnanchoredEntries) > 0 {
 		fmt.Fprintf(&b, " Entries after the last anchor: %s.", joinInts(r.UnanchoredEntries))
+	}
+	if r.UncommittedEntries > 0 {
+		fmt.Fprintf(&b, "\n%d entry(ies) past the head's count are not committed and are not shown as part of the conversation.", r.UncommittedEntries)
 	}
 	fmt.Fprintf(&b, "\nGovernance log: %d row(s) carried, %d after the last anchor.\n", r.LogRows, len(r.UnanchoredRows))
 	b.WriteString("\nThis result trusts:\n")

@@ -89,6 +89,12 @@ type Addon struct {
 	// for one of its parties.
 	ConversationParty func(s *CoreServer, id, party string) (held, isParty bool, err error)
 
+	// ConversationHead is the head and count of conversation id and the app
+	// that keeps it, when it is held here (ADR-068). The core serves them on
+	// GET /api/conversations/{id}/head and signs them into an export's head
+	// statement; the add-on that keeps the trail owns what they are.
+	ConversationHead func(s *CoreServer, id string) (h ConversationHead, held bool, err error)
+
 	// Who is calling. The core detects that a caller presented a bearer
 	// token or a body's signature, and asks the add-ons, in the order they
 	// registered, who that is. A credential no add-on recognises is refused
