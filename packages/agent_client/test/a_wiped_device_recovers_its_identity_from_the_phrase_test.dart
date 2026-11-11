@@ -1,3 +1,8 @@
+/// Each test here runs a real core and signs with post-quantum keys, so it
+/// takes longer than the default 30 seconds.
+@Timeout(Duration(minutes: 3))
+library;
+
 import 'dart:typed_data';
 import 'dart:convert';
 
