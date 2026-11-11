@@ -114,13 +114,50 @@ func (v *verifier) openHead() {
 		v.fault("head statement", "it is dated after the export")
 	}
 	v.head = &h
+	v.holdCopy()
+}
+
+// holdCopy checks the bundle's entries against the head statement with
+// CheckCopy, once, so that the entries read as the conversation are the ones it
+// chose by place, from the head back, whatever order the bundle lists them in.
+// A copy it cannot read or that does not match is left to checkHead to fault,
+// and the entries are then read by position so the rest of the bundle is still
+// checked.
+func (v *verifier) holdCopy() {
+	if v.head == nil {
+		return
+	}
+	byEnvelope := make(map[*didcomm.Envelope]Entry, len(v.b.Entries))
+	envs := make([]*didcomm.Envelope, 0, len(v.b.Entries))
+	for _, e := range v.b.Entries {
+		if e.Envelope == nil {
+			return // checkHead names the missing entry
+		}
+		byEnvelope[e.Envelope] = e
+		envs = append(envs, e.Envelope)
+	}
+	v.copyRes, v.copyErr = CheckCopy(v.b.Conversation, envs, v.head.Count, v.head.Head, nil)
+	if v.copyRes.Outcome != CopyMatches {
+		return
+	}
+	v.committed = make([]Entry, 0, len(v.copyRes.Committed))
+	for _, env := range v.copyRes.Committed {
+		v.committed = append(v.committed, byEnvelope[env])
+	}
+	v.haveCommitted = true
 }
 
 // kept is the entries of the bundle that are the conversation: all of them,
-// or, with a head statement, the first count. Entries past the count were never
+// or, with a head statement the entries match, the ones CheckCopy chose as
+// committed, one for each place in order. Entries past the count were never
 // committed (ADR-068): they are not read, not listed in the report as messages,
-// and only counted (Report.UncommittedEntries).
+// and only counted (Report.UncommittedEntries). With a head statement the
+// entries do not match, the first count by position are read so the rest is
+// still checked, and checkHead faults the mismatch.
 func (v *verifier) kept() []Entry {
+	if v.haveCommitted {
+		return v.committed
+	}
 	if v.head != nil && v.head.Count < len(v.b.Entries) {
 		return v.b.Entries[:v.head.Count]
 	}
@@ -148,16 +185,14 @@ func (v *verifier) checkHead() {
 		return // the statement was faulted in openHead
 	}
 	h := *v.head
-	envs := make([]*didcomm.Envelope, 0, len(v.b.Entries))
 	for i, e := range v.b.Entries {
 		if e.Envelope == nil {
 			v.fault("head statement", "entry %d is missing, so the chain cannot be held to the head", i+1)
 			return
 		}
-		envs = append(envs, e.Envelope)
 	}
-	v.r.UncommittedEntries = len(envs) - len(v.kept())
-	res, err := CheckCopy(v.b.Conversation, envs, h.Count, h.Head, nil)
+	v.r.UncommittedEntries = len(v.b.Entries) - len(v.kept())
+	res, err := v.copyRes, v.copyErr
 	switch {
 	case res.Outcome == CopyMatches:
 		v.cannotRuleOut(fmt.Sprintf("Whether the conversation went on after %s, when the Identity Agent signed its head: the end is shown as of that time, and an entry committed later is not in it.", h.IATime))

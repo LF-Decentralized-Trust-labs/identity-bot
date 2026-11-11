@@ -174,15 +174,21 @@ type verifier struct {
 	b *Bundle
 	// head is the head statement, when the bundle carries one that was read: its
 	// count is how many entries make the conversation.
-	head    *HeadStatement
-	r       *Report
-	kels    map[string]*keyLog
-	regs    map[string]bool
-	creds   map[string]*credential
-	dids    map[string]*didcomm.DID
-	entries map[string]agentmessage.Record
-	hashes  map[int]string
-	notes   map[string]bool
+	head *HeadStatement
+	// copyRes and copyErr are what CheckCopy found of the entries against head
+	// (holdCopy); committed is its chosen entries, in order, once they match.
+	copyRes       CopyResult
+	copyErr       error
+	committed     []Entry
+	haveCommitted bool
+	r             *Report
+	kels          map[string]*keyLog
+	regs          map[string]bool
+	creds         map[string]*credential
+	dids          map[string]*didcomm.DID
+	entries       map[string]agentmessage.Record
+	hashes        map[int]string
+	notes         map[string]bool
 	// signedOnce is every sender's signature seen, by the entry it is in: a
 	// signed statement or request stands for one entry, never two.
 	signedOnce map[string]int
@@ -230,7 +236,12 @@ func VerifyAgainst(b *Bundle, root string) Report {
 }
 
 // Verify checks a bundle with nothing but what is in it.
-func Verify(b *Bundle) Report {
+func Verify(b *Bundle) Report { return verify(b, nil) }
+
+// verify is Verify. A test may give it messaging keys to read the head statement
+// with when it cannot sign for the keys a published bundle's key logs name;
+// Verify gives none.
+func verify(b *Bundle, headKeys map[string]*didcomm.DID) Report {
 	r := Report{}
 	if b == nil {
 		r.Faults = []Fault{{Where: "bundle", Why: "there is no bundle"}}
@@ -255,6 +266,9 @@ func Verify(b *Bundle) Report {
 	v.checkRegistries()
 	v.checkCredentials()
 	v.checkCountersigners()
+	for aid, d := range headKeys {
+		v.dids[aid] = d
+	}
 	v.openHead()
 	v.checkEntries()
 	rows := v.checkLog()

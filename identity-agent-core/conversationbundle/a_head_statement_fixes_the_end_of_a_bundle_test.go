@@ -224,3 +224,67 @@ func TestOpenHeadRefusesAnotherMessageTypeAndAnotherId(t *testing.T) {
 		t.Error("a head statement with an id that is not the one its body gives was accepted")
 	}
 }
+
+// Verify itself holds the entries to a valid head statement: over a copy whose
+// last entry is cut off the statement is read, and the report faults the copy,
+// not the statement. Removing the head check from Verify fails this.
+func TestVerifyFaultsACopyCutOffBeforeTheHeadAValidStatementNames(t *testing.T) {
+	_, b := theVector(t)
+	keys, err := didcomm.GenerateKeySet(b.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	did, err := keys.DID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := len(b.Entries)
+	head := agentmessage.Hash(b.Entries[n-1].Envelope)
+	signed := func(c *Bundle) *Bundle {
+		var err error
+		c.Head, err = SignHead(b.Root, func(m *didcomm.JWM) (*didcomm.Envelope, error) { return didcomm.PackSigned(keys, m) },
+			HeadStatement{Conversation: c.Conversation, Count: n, Head: head, IATime: c.ExportedAt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	headFaults := func(c *Bundle) (faults []string) {
+		for _, f := range verify(c, map[string]*didcomm.DID{b.Root: did}).Faults {
+			if f.Where == "head statement" {
+				faults = append(faults, f.Why)
+			}
+		}
+		return
+	}
+
+	if got := headFaults(signed(copyOf(t, b))); len(got) != 0 {
+		t.Fatalf("the whole copy was faulted against its own head: %q", got)
+	}
+	cut := copyOf(t, b)
+	cut.Entries = cut.Entries[:n-1]
+	got := headFaults(signed(cut))
+	if len(got) != 1 || !strings.Contains(got[0], string(CopyRemovedFromTheEnd)) {
+		t.Fatalf("a copy with its last entry cut off was not faulted as removed from the end: %q", got)
+	}
+}
+
+// The entries read as the conversation are the ones CheckCopy chose by place,
+// so a bundle that lists them out of order is read in order, not by position.
+func TestEntriesAreReadByPlaceNotByPositionInTheBundle(t *testing.T) {
+	c := newConversation(t)
+	writeMixed(c)
+	n := len(c.chain)
+	b := c.bundle(false)
+	b.Head = c.signHead(t, "c1", n, c.chain[n-1].Hash, c.now)
+	b.Entries[0], b.Entries[1] = b.Entries[1], b.Entries[0]
+	v := c.checkHead(b)
+	if len(v.r.Faults) != 0 || len(v.r.Messages) != n {
+		t.Fatalf("faults %q, %d messages (want %d)", openingFaults(v), len(v.r.Messages), n)
+	}
+	for i, m := range v.r.Messages {
+		if m.Seq != i+1 {
+			t.Fatalf("message %d is at place %d", i+1, m.Seq)
+		}
+	}
+}

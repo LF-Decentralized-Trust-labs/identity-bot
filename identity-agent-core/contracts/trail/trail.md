@@ -89,6 +89,16 @@ checks are `conversationbundle.Verify`'s, over the same entries):
 | matches | all of the above hold |
 | ignored | not an outcome: the entries held at a place that are not the committed one, reported beside any outcome that reaches the choice |
 
+The outcome names are exactly as the table spells them, in lower case with
+spaces (`CopyOutcome` in `conversationbundle`): "removed from the end", "removed
+or reordered inside", "substituted", "matches" and "not countersigned". An app
+that reports an outcome in its own words, or a reader of what an app reports
+(an AI agent's tool, a UI), maps from these and does not assume another
+spelling: an app that spells them with hyphens, as `removed-from-the-end`, is
+translating, and that is its own. An export is read by place, not by the order
+its entries are listed: the entries the verifier reads as the conversation are
+the ones this check chose as committed, one for each place in order.
+
 Steps 2 and 3 need no Identity Agent; step 4 needs the head, and shows the end as
 of the head's time. There is one implementation of this check,
 `conversationbundle.CheckCopy`; an add-on that keeps conversations calls it, with
