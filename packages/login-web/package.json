@@ -1,7 +1,7 @@
 {
   "name": "@identity-agent/login-web",
   "version": "0.1.5",
-  "description": "Sign In with Identity Agent — React widget + server-side session confirmation",
+  "description": "Sign In with Identity Agent \u2014 React widget + server-side session confirmation",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,6 +21,10 @@
     "./page": {
       "types": "./dist/page.d.ts",
       "import": "./dist/page.js"
+    },
+    "./app": {
+      "types": "./dist/app.d.ts",
+      "import": "./dist/app.js"
     }
   },
   "publishConfig": {
@@ -34,12 +38,13 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs && node src/the-page-shows-why-an-answer-was-refused.test.mjs && node src/start-and-confirm-vectors.test.mjs",
+    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs && node src/the-page-shows-why-an-answer-was-refused.test.mjs && node src/start-and-confirm-vectors.test.mjs && node src/a-utility-apps-page-trusts-only-its-app.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
-    "react": "^18.0.0"
+    "react": "^18.0.0",
+    "@identity-agent/login-verify": "^0.1.1"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",

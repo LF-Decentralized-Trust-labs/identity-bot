@@ -16,6 +16,8 @@ export interface SessionPollOptions {
    *  Agent reports the state but withholds who signed in, so a bystander who
    *  photographed the QR code learns nothing about the person. */
   collectorSecret?: string | null;
+  /** The fetch to read the session with; a utility app's page passes the one `appFetch` makes. */
+  fetchFn?: typeof fetch;
 }
 
 export function useSessionPoll(
@@ -23,7 +25,7 @@ export function useSessionPoll(
   sessionToken: string | null,
   opts: number | SessionPollOptions = 1500,
 ): { state: PollState; appSessionToken?: string; result?: PageSessionRead; error?: string; lastRefusal?: string } {
-  const { intervalMs = 1500, collectorSecret = null } =
+  const { intervalMs = 1500, collectorSecret = null, fetchFn } =
     typeof opts === "number" ? { intervalMs: opts } : opts;
   const [state, setState] = useState<PollState>("idle");
   const [appSessionToken, setAppSessionToken] = useState<string | undefined>();
@@ -35,7 +37,7 @@ export function useSessionPoll(
   const poll = useCallback(async () => {
     if (!sessionToken) return;
     try {
-      const data = await readPageSession({ sessionEndpoint, sessionToken, collectorSecret });
+      const data = await readPageSession({ sessionEndpoint, sessionToken, collectorSecret, fetchFn });
       const s = data.state;
       setLastRefusal(data.lastRefusal);
       if (s === "verified") {
@@ -58,7 +60,7 @@ export function useSessionPoll(
       setState("error");
       setError((e as Error).message);
     }
-  }, [sessionEndpoint, sessionToken, collectorSecret]);
+  }, [sessionEndpoint, sessionToken, collectorSecret, fetchFn]);
 
   useEffect(() => {
     if (!sessionToken) return;

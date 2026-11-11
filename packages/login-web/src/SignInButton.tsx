@@ -14,6 +14,10 @@ export interface SignInButtonProps {
   /** The kind of front end this page is. A utility app's page passes "browser"
    *  (ADR-072); a website asset needs none. */
   frontEnd?: "browser" | "installed_app";
+  /** The fetch every call goes through. A utility app's page passes the one
+   *  `appFetch` (`@identity-agent/login-web/app`) makes, which checks each answer
+   *  is the app's and signs each request with the browser's key. */
+  fetchFn?: typeof fetch;
   requestScore?: { minBand?: "red" | "amber" | "green"; minScore?: number; required?: boolean };
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
@@ -53,6 +57,7 @@ export function SignInButton({
   requestScore,
   browserKey,
   frontEnd,
+  fetchFn,
   theme = "auto",
   size = "medium",
   qrFallback = true,
@@ -66,7 +71,7 @@ export function SignInButton({
   const [busy, setBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const dims = SIZES[size];
-  const poll = useSessionPoll(sessionEndpoint, sessionToken, { collectorSecret });
+  const poll = useSessionPoll(sessionEndpoint, sessionToken, { collectorSecret, fetchFn });
 
   React.useEffect(() => {
     if (poll.state === "verified" && sessionToken) {
@@ -82,6 +87,7 @@ export function SignInButton({
     try {
       const data = await startPageSession({
         sessionEndpoint,
+        fetchFn,
         body: {
           requestDisclosures,
           requestCredentials: requestCredentials.map((c) => ({
@@ -129,7 +135,7 @@ export function SignInButton({
     } finally {
       setBusy(false);
     }
-  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, frontEnd, qrFallback, onError]);
+  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, frontEnd, fetchFn, qrFallback, onError]);
 
   const isDark =
     theme === "dark" ||

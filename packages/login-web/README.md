@@ -78,3 +78,27 @@ the page's own), and the key log is checked by the same Identity Agent that hand
 cannot keep a secret from a person who reads it. If the Identity Agent hands the
 result over and the page's check then fails to complete (for example the key
 check could not be reached), the result is gone: start the sign-in again.
+
+## A utility app's page
+
+A utility app opens no port: its page is loaded from a fixed address and reaches
+the app's back end through a relay nobody trusts (ADR-072). `@identity-agent/login-web/app`
+holds what such a page checks and keeps, once, so the page is the button and
+this module:
+
+```tsx
+import { SignInButton } from "@identity-agent/login-web";
+import { appFetch, readAppLink } from "@identity-agent/login-web/app";
+
+// The link the person opened carries #aid=…&kel=…&rid=…&api=… (a fragment, sent to no server).
+const app = await appFetch(readAppLink(location.hash));
+<SignInButton sessionEndpoint={app.sessionEndpoint} fetchFn={app.fetchFn}
+  browserKey={app.browserKey} frontEnd="browser" requestDisclosures={[]}
+  onSuccess={({ appSessionToken }) => keepSession(appSessionToken)} />
+```
+
+`appFetch` refuses a key log that does not derive the app's identifier, makes
+the key the browser cannot export, believes an answer only if the app signed it
+for that call, and shows the code only if the challenge is the app's, for this
+browser's key and the browser kind, and not lapsed. Every call after the start
+carries a proof made with the key. The back end's half is `packages/login-go`.
