@@ -355,6 +355,27 @@ class IdentityProfiles {
     }
   }
 
+  /// What the list of identities says above itself: who is asked to
+  /// authenticate and why when any listed one is locked, and that the device
+  /// has no screen lock when it has none. Null when there is nothing to say.
+  /// One place, so both apps say the same thing.
+  static String? listNotice({
+    required List<String> lockedNames,
+    required bool noScreenLock,
+    String what = 'identity',
+    UnlockMethod? method,
+  }) {
+    final parts = <String>[
+      if (lockedNames.isNotEmpty)
+        lockScreenExplanation(
+            lockedNames.length == 1 ? lockedNames.first : 'Each owner',
+            method: method,
+            what: what),
+      if (noScreenLock) noScreenLockMessage(),
+    ];
+    return parts.isEmpty ? null : parts.join(' ');
+  }
+
   /// Whether [m] is a measurement that opens an identity: measured, fresh,
   /// at least [minimumScore], and on a computer vouched for. Pure, so it can be
   /// tested without a provider.

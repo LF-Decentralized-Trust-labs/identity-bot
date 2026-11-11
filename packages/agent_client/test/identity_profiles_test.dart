@@ -150,6 +150,20 @@ void main() {
           reason: 'any logout locks every identity on the device');
     });
 
+    test('the list says who is asked and why only when something is locked',
+        () {
+      expect(IdentityProfiles.listNotice(lockedNames: [], noScreenLock: false),
+          isNull);
+      final one = IdentityProfiles.listNotice(
+          lockedNames: ['Ada'], noScreenLock: false)!;
+      expect(one, startsWith('Logging out locked everything'));
+      expect(one, contains('Ada is asked to authenticate'));
+      final two = IdentityProfiles.listNotice(
+          lockedNames: ['Ada', 'Ben'], noScreenLock: true)!;
+      expect(two, contains('Each owner is asked'));
+      expect(two, contains('has no screen lock'));
+    });
+
     group('getting back in', () {
       final now = DateTime.now().toUtc();
       test('80 opens, 79 does not, an unmeasured or stale one does not', () {
