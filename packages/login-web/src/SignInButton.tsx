@@ -3,6 +3,7 @@ import { detectLocalAgent, openDesktopLoginDeepLink, triggerLocalLogin } from ".
 import { useSessionPoll } from "./useSessionPoll.js";
 import { startPageSession, type PageSessionRead } from "./pageSession.js";
 import { LoginQrCode } from "./LoginQrCode.js";
+import { signInProblem } from "./signInProblem.js";
 
 export interface SignInButtonProps {
   sessionEndpoint: string;
@@ -78,7 +79,7 @@ export function SignInButton({
       onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken, collectorSecret, signIn: poll.result });
     }
     if (poll.state === "declined" || poll.state === "expired" || poll.state === "error") {
-      onError?.(new Error(poll.error ?? poll.state));
+      onError?.(new Error(signInProblem(poll.state, poll.error)));
     }
   }, [poll.state, poll.appSessionToken, poll.result, poll.error, sessionToken, collectorSecret, onSuccess, onError]);
 
@@ -131,7 +132,7 @@ export function SignInButton({
         }
       }
     } catch (e) {
-      onError?.(e as Error);
+      onError?.(new Error(signInProblem("error", (e as Error).message)));
     } finally {
       setBusy(false);
     }

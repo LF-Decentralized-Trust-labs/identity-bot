@@ -368,3 +368,112 @@ export async function appFetch(
   }) as typeof fetch;
   return { fetchFn, sessionEndpoint, browserKey: mine.thumbprint, link };
 }
+
+// ---- the signed-in page --------------------------------------------------
+
+/** The app ended the session (or never knew it): the person has to sign in
+ *  again. The message is a sentence a person can read and act on. */
+export class SessionEnded extends Error {
+  constructor() {
+    super("Your session with this app has ended, so you have been signed out. Sign in again to carry on.");
+    this.name = "SessionEnded";
+  }
+}
+
+/** One answer from the app, already shown to be the app's. */
+export interface AppCall {
+  status: number;
+  bytes: Uint8Array;
+  /** The body read as JSON; `{}` when it has none. */
+  json<T = Record<string, unknown>>(): T;
+}
+
+export interface AppSession {
+  link: AppLink;
+  /** The session this browser holds for the app, if it holds one. */
+  held(): string | null;
+  /** Keeps the session a sign-in handed over. */
+  keep(token: string): void;
+  /** A call to the app's back end as the person signed in: carries the session
+   *  and a proof made with the browser's key, and is believed only if the
+   *  app's signed answer holds for it. Throws `SessionEnded` on a 401, after
+   *  forgetting the session. */
+  call(method: string, path: string, body?: string): Promise<AppCall>;
+  /** Who the app says is signed in (`GET /session/whoami`). */
+  whoami(): Promise<{ pairwise_aid: string; browser_key: string; server_time: string }>;
+  /** Ends the session at the app, as far as the app can be reached, and forgets it here. */
+  signOut(): Promise<void>;
+  /** The browser's key, for a page that must sign more with it (never exportable). */
+  key(): Promise<BrowserKey>;
+  /** The app's clock less this device's, ms; known after the first call. */
+  skewMs(): number;
+}
+
+/** The signed-in half of a utility app's page, from the link it was opened
+ *  with: the one place a page makes signed calls, checks each answer is the
+ *  app's, keeps its session and ends it. A page has no copy of any of it. */
+export function appSession(
+  link: AppLink,
+  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (aid: string) => Promise<BrowserKey> } = {},
+): AppSession {
+  const storage = opts.storage ?? sessionStorage;
+  const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+  const slot = "session:" + link.aid;
+  let skew = 0;
+  let synced = false;
+  let mine: Promise<BrowserKey> | undefined;
+  const key = () => (mine ??= (opts.browserKey ?? appBrowserKey)(link.aid));
+  const sha256b64u = async (t: string) => b64uEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(t))));
+
+  async function raw(method: string, path: string, body: string): Promise<AppCall> {
+    const token = storage.getItem(slot);
+    if (!token) throw new SessionEnded();
+    const k = await key();
+    const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
+    const proof = await proofHeaders(k.privateKey, method, path, await sha256b64u(token), body, skew);
+    const headers: Record<string, string> = { Authorization: "Bearer " + token, "X-Browser-Answer-Nonce": nonce, ...proof };
+    if (method !== "GET") headers["Content-Type"] = "application/json";
+    const r = await underlying(link.api + path, { method, cache: "no-store", headers, ...(method === "GET" ? {} : { body }) });
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
+      inception: r.headers.get(ANSWER_INCEPTION), sig: r.headers.get(ANSWER_SIG) });
+    if (r.status === 401) {
+      storage.removeItem(slot);
+      throw new SessionEnded();
+    }
+    return { status: r.status, bytes, json: <T,>() => JSON.parse(new TextDecoder().decode(bytes) || "{}") as T };
+  }
+
+  const session: AppSession = {
+    link,
+    held: () => storage.getItem(slot),
+    keep: (token) => storage.setItem(slot, token),
+    key,
+    skewMs: () => skew,
+    async whoami() {
+      const r = await raw("GET", "/session/whoami", "");
+      if (r.status !== 200) throw new Error("The app would not say who is signed in.");
+      const w = r.json<{ pairwise_aid: string; browser_key: string; server_time: string }>();
+      skew = serverSkew(w.server_time);
+      synced = true;
+      return w;
+    },
+    async call(method, path, body = "") {
+      // A reload has lost the app's clock: ask for it first, so the proof is dated as the app counts.
+      if (!synced) await session.whoami();
+      return raw(method.toUpperCase(), path, body);
+    },
+    async signOut() {
+      try {
+        if (storage.getItem(slot)) await session.call("POST", "/session/signout", "{}");
+      } catch {
+        // The app could not be reached or had already ended it: either way this browser forgets it.
+      } finally {
+        storage.removeItem(slot);
+      }
+    },
+  };
+  return session;
+}
+
+export { signInProblem } from "./signInProblem.js";

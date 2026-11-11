@@ -7,6 +7,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "bundle",
     "README.md"
   ],
   "exports": {
@@ -25,7 +26,8 @@
     "./app": {
       "types": "./dist/app.d.ts",
       "import": "./dist/app.js"
-    }
+    },
+    "./bundle": "./bundle/identity-agent-app.js"
   },
   "publishConfig": {
     "access": "public",
@@ -38,8 +40,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs && node src/the-page-shows-why-an-answer-was-refused.test.mjs && node src/start-and-confirm-vectors.test.mjs && node src/a-utility-apps-page-trusts-only-its-app.test.mjs && node src/app-check-vectors.test.mjs",
-    "prepublishOnly": "npm run build"
+    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs && node src/the-page-shows-why-an-answer-was-refused.test.mjs && node src/start-and-confirm-vectors.test.mjs && node src/a-utility-apps-page-trusts-only-its-app.test.mjs && node src/app-check-vectors.test.mjs && node src/the-bundle-is-what-the-sources-build.test.mjs && node src/a-signed-in-page-calls-and-signs-out.test.mjs",
+    "prepublishOnly": "npm run build",
+    "bundle": "esbuild src/bundle.tsx --bundle --minify --format=iife --global-name=IdentityAgentApp --target=es2022 --define:process.env.NODE_ENV='\"production\"' --legal-comments=none --outfile=bundle/identity-agent-app.js"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
@@ -49,6 +52,9 @@
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "esbuild": "0.25.12",
+    "react-dom": "18.3.1",
     "typescript": "^5.6.3"
   },
   "peerDependencies": {

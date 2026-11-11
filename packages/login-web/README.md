@@ -102,3 +102,15 @@ the key the browser cannot export, believes an answer only if the app signed it
 for that call, and shows the code only if the challenge is the app's, for this
 browser's key and the browser kind, and not lapsed. Every call after the start
 carries a proof made with the key. The back end's half is `packages/login-go`.
+
+Once signed in, `appSession(link)` makes every later call: it carries the
+session and a proof, believes an answer only if the app signed it for that call,
+throws `SessionEnded` (a sentence a person can act on) when the app says 401, and
+`signOut()` ends the session at the app and here. `signInProblem` is the one
+wording for a sign-in that was declined, ran out of time or could not reach the
+app; `SignInButton` already hands it to `onError`.
+
+A page that wants none of React or a build step loads the ready-built
+`bundle/identity-agent-app.js` (`@identity-agent/login-web/bundle`, global
+`IdentityAgentApp`: `readAppLink`, `appSession`, `mountSignIn`, `SessionEnded`).
+`npm run bundle` makes it; a test fails if it is not what the sources build.

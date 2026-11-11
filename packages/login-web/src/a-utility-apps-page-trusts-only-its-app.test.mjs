@@ -3,29 +3,14 @@
 // signed it for this page's own key, an answer only if the app signed it for
 // this call, and a sign-in only through `appFetch`, which holds all three.
 import assert from "node:assert";
-import { createHash, generateKeyPairSync, sign as edSign, webcrypto } from "node:crypto";
-import { blake3Qb64, ed25519SigQb64, ed25519VerkeyQb64 } from "../../login-verify/dist/browser.js";
+import { webcrypto } from "node:crypto";
+import { ed25519SigQb64 } from "../../login-verify/dist/browser.js";
+import { b64u, enc, identity } from "./app-test-support.mjs";
 import {
   ANSWER_INCEPTION, ANSWER_SIG, answerText, appFetch, browserKeyThumbprint, checkAppAnswer, checkAppChallenge,
   checkAppKeyLog, proofHeaders, proofText, readAppLink, serverSkew,
 } from "../dist/app.js";
 
-const enc = new TextEncoder();
-const b64u = (b) => Buffer.from(b).toString("base64url");
-
-// An identity with a one-event key log, made the way a core makes one.
-function identity() {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const pub = Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url");
-  const key = ed25519VerkeyQb64(new Uint8Array(pub));
-  const blank = "#".repeat(44);
-  const ev = (d) => `{"v":"KERI10JSON000000_","t":"icp","d":"${d}","i":"${d}","s":"0","kt":"1","k":["${key}"],"nt":"1","n":[],"bt":"0","b":[],"c":[],"a":[]}`;
-  const aid = blake3Qb64(enc.encode(ev(blank)));
-  const text = ev(aid);
-  const sign = (bytes) => edSign(null, Buffer.from(bytes), privateKey);
-  const log = (over = {}) => b64u(JSON.stringify({ raw_events_b64: [Buffer.from(text).toString("base64")], cesr_signatures: [ed25519SigQb64(new Uint8Array(sign(enc.encode(text))))], ...over }));
-  return { aid, key: new Uint8Array(pub), text, sign, log };
-}
 const app = identity();
 const relay = identity();
 const refuses = (p, re, what) => assert.rejects(p, (e) => re.test(e.message), what);
