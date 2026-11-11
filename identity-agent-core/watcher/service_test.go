@@ -64,7 +64,7 @@ func TestVerifyKelFirstContactAndRepeat(t *testing.T) {
 	}
 }
 
-func TestPublicDigestAndKelCheck(t *testing.T) {
+func TestAPublicWatcherServiceAnswersItsDigest(t *testing.T) {
 	dir := t.TempDir()
 	db, _ := sql.Open("sqlite", filepath.Join(dir, "w.db"))
 	defer db.Close()
@@ -77,19 +77,16 @@ func TestPublicDigestAndKelCheck(t *testing.T) {
 		SourceType: SourceOOBI,
 	})
 
+	if err := ws.Store.SetConfig(configPublicWatcher, "true"); err != nil {
+		t.Fatal(err)
+	}
 	resp, err := ws.GetPublicDigest("EAlice", 2)
 	if err != nil || resp.Digest == nil || *resp.Digest != "Edigest123" {
 		t.Fatalf("GetPublicDigest: %+v err=%v", resp, err)
 	}
 
-	check, err := ws.KelCheck(KelCheckRequest{AID: "EAlice", Seq: 2, Digest: "Edigest123"})
-	if err != nil || !check.Match {
-		t.Fatalf("KelCheck match: %+v", check)
-	}
-	check2, _ := ws.KelCheck(KelCheckRequest{AID: "EAlice", Seq: 2, Digest: "Ewrong"})
-	if check2.Match {
-		t.Fatal("expected mismatch")
-	}
+	// Nobody has opted this watcher in as a public service, so it answers as for
+	// an identity never seen (see the_public_digest_is_for_public_watchers_test.go).
 }
 
 func applyWatcherTables(t *testing.T, db *sql.DB) {

@@ -2,8 +2,11 @@ package watcher
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
@@ -25,6 +28,21 @@ type Service struct {
 	// watcher key and names that key. Unset, answers go out unsigned, which no
 	// verifier accepts.
 	SignDigest func(statement string) (signerAID, cesrSig string, err error)
+	// SignRequest signs a cross-check request to one contact, as the identifier
+	// that contact knows this agent by, and names it. Unset, no peer is asked.
+	// It is deliberately not the witness key: a signature by that key, which a
+	// verifier can carry to others, would tell the contact (and anyone it showed)
+	// that this agent asked about an identity, and the contact has no other reason
+	// to know that key. The key a contact already knows us by says nothing new.
+	SignRequest func(peerAID, statement string) (requesterAID, cesrSig string, err error)
+	// VerifyRequester says whether requester is an accepted contact of this
+	// agent and sig is its signature over statement. Unset, no cross-check is
+	// answered with anything but "no match".
+	VerifyRequester func(requester, statement, sig string) bool
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+
+	replays replayCache
 }
 
 func NewService(store Store) *Service {
@@ -215,14 +233,6 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		})
 	}
 
-	// L3 — the peers this agent already knows.
-	//
-	// The layer that makes duplicity a network property rather than one agent's
-	// opinion. L1 is this agent's own memory and L2 is a service, so without
-	// peers the whole pipeline rests on one operator agreeing with itself.
-	peerOutcomes, _, peersDisagreed := s.crossCheckPeers(ctx, in.AID, seq, digest)
-	result.sourcesQueried = append(result.sourcesQueried, peerOutcomes...)
-
 	// Blocking: repeat L1 mismatch, or first-contact L1+L2-standing conflict (≥2 sources).
 	shouldBlock := false
 	blockReason := ""
@@ -232,13 +242,23 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	} else if firstContact && l2Outcome == "mismatch" {
 		shouldBlock = true
 		blockReason = "first-contact L1 vs L2-standing digest conflict"
-	} else if peersDisagreed > 0 && (l1Outcome == "mismatch" || l2Outcome == "mismatch") {
-		// A peer alone never blocks — a single peer can be wrong, offline or
-		// hostile, and one stranger's disagreement must not be able to freeze
-		// somebody out. Two independent sources disagreeing is a different
-		// claim, and that is the standard the rest of this pipeline holds to.
-		shouldBlock = true
-		blockReason = "peer and standing source both disagree with this history"
+	}
+
+	// The hosted watcher disagrees with a record this agent holds and agrees
+	// with, on a repeat contact. That is one operator against this agent's own
+	// memory: not proof of anything, so it blocks nothing, but the owner is told.
+	escalate := !shouldBlock && !firstContact && l1Outcome == "match" && l2Outcome == "mismatch"
+
+	// L3 — the contacts the owner chose, when the owner turned peer checks on.
+	//
+	// Asking tells a contact whom this agent is dealing with, so it is done only
+	// where the answer is worth that. The answer is context: it is recorded and
+	// never quiets or changes the escalation, because the contact able to answer
+	// is the identity's own controller, which is also the party that showed this
+	// agent the branch in question.
+	if escalate {
+		peerOutcomes, _ := s.crossCheckPeers(ctx, in.AID, seq, digest, in.SourceURL)
+		result.sourcesQueried = append(result.sourcesQueried, peerOutcomes...)
 	}
 
 	if shouldBlock {
@@ -265,6 +285,13 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 
 	result.OK = true
 	result.OverallOutcome = "confirmed"
+	if escalate {
+		// Not a block: this agent's own record agrees with what it was just shown.
+		// But the hosted watcher holds a different digest, so the owner is told
+		// rather than left to find out, whatever a contact says.
+		result.OverallOutcome = "escalated"
+		s.escalate(in.AID, seq)
+	}
 	s.emit("kel_verification", map[string]interface{}{
 		"aid": in.AID, "sequence_num": seq, "sources": result.sourcesQueried,
 		"overall_outcome": result.OverallOutcome,
@@ -284,7 +311,7 @@ func (s *Service) recordDuplicity(aid string, seq int, ourDigest, sourceURL stri
 	alert := DuplicityAlert{
 		AID: aid, SequenceNum: seq,
 		OurDigest: ourDigest, TheirDigest: their,
-		SourceURL: sourceURL, DetectedAt: time.Now().UTC(),
+		SourceURL: sourceURL, DetectedAt: s.now().UTC(),
 	}
 	id, err := s.Store.InsertDuplicityAlert(alert)
 	if err != nil {
@@ -334,10 +361,20 @@ func disclose[T any](s *Service, aid string, read func() (T, error)) (T, error) 
 }
 
 // GetPublicDigest serves this agent's L1 observation for /public/kel-digest.
+//
+// Only an Identity Agent whose owner has opted in as a public watcher service
+// (PublicWatcherService) answers truthfully: the digest and the time it was first
+// seen, for every identity held, would otherwise let anyone list whom this agent
+// has dealt with and when. Everyone else gets the signed "never seen" answer,
+// which is a valid DigestStatement, so a client cannot tell it from a watcher
+// that has not met the identity. The read runs either way, so it costs the same.
 func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) {
 	rec, err := s.Disclosable(aid, seq)
 	if err != nil {
 		return nil, err
+	}
+	if !s.PublicWatcherService() {
+		rec = nil
 	}
 	resp := DigestResponse{AID: aid, SequenceNumber: seq}
 	if rec == nil {
@@ -371,39 +408,71 @@ func (s *Service) signDigest(r *DigestResponse) {
 }
 
 // KelCheck handles POST /public/kel-check (L3 peer cross-check).
-func (s *Service) KelCheck(req KelCheckRequest) (*KelCheckResponse, error) {
-	// An opted-out identity is answered as one never seen (see Disclosable).
-	rec, err := s.Disclosable(req.AID, req.Seq)
+//
+// It answers only a contact of this agent's, who signed the request, and only
+// about an identity whose log this agent serves at its own address (the set
+// GET /public/oobi/{aid} answers), comparing the digest with its own copy of
+// that log. A contact cannot ask whether the owner has met some third party
+// whose log it can fetch. And only with whether the digest it gave is the one
+// held. Never the digest, never when it was first seen. Everything else, a request that is unsigned, signed by
+// anybody who is not an accepted contact, for another address, outside the
+// window, repeated, or about an identity not held, never seen, or opted out, gets
+// the same "no match". That is what closes the oracle: anybody who can fetch an
+// identity's key log can compute its digest, so a yes/no to a stranger would say
+// whether this agent has met that identity.
+//
+// to is this agent's own public base URL, which the request must name. The
+// second result says whether the request was from a contact, so the caller can
+// hold only strangers to the shared limit.
+// served gives the log this agent serves for an identifier, if it serves it.
+func (s *Service) KelCheck(req KelCheckRequest, to string, served func(aid string) ([]map[string]interface{}, bool)) (*KelCheckResponse, bool, error) {
+	noMatch := &KelCheckResponse{Match: false}
+	if s.VerifyRequester == nil || to == "" || req.Requester == "" || req.Signature == "" || req.At == 0 || req.Digest == "" {
+		return noMatch, false, nil
+	}
+	now := s.now()
+	if d := now.Unix() - req.At; d > int64(kelCheckWindow/time.Second) || d < -int64(kelCheckWindow/time.Second) {
+		return noMatch, false, nil
+	}
+	if !s.VerifyRequester(req.Requester, KelCheckRequestStatement(req.AID, req.Seq, req.Digest, strings.TrimRight(to, "/"), req.At), req.Signature) {
+		return noMatch, false, nil
+	}
+	if !s.replays.first(fmt.Sprintf("%s\n%d\n%s\n%d", req.Requester, req.At, req.AID, req.Seq), now) {
+		return noMatch, false, nil
+	}
+	// Both reads run whatever the answer, so an identity that is not served or
+	// opted out costs what one served does.
+	opted, err := s.Store.IsOptedOut(req.AID)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
-	if rec == nil {
-		return &KelCheckResponse{Match: false}, nil
+	var kel []map[string]interface{}
+	ok := false
+	if served != nil {
+		kel, ok = served(req.AID)
 	}
-	match := rec.KelDigest == req.Digest
-	d := rec.KelDigest
-	fs := rec.FirstSeenAt.UTC().Format(time.RFC3339)
-	return &KelCheckResponse{Match: match, OurDigest: &d, OurFirstSeen: &fs}, nil
+	ours, derr := witnessproto.KelDigestAtSeq(kel, req.Seq)
+	if !ok || opted || derr != nil {
+		return noMatch, true, nil
+	}
+	return &KelCheckResponse{Match: subtle.ConstantTimeCompare([]byte(ours), []byte(req.Digest)) == 1}, true, nil
 }
 
-// CrossCheck queries a peer's /public/kel-check; L3 mismatch escalates only (never blocks alone).
-func (s *Service) CrossCheck(ctx context.Context, peerURL string, aid string, seq int, digest string) error {
-	// Refused before the request is made, so a peer of the wrong kind is not
-	// even told which identity is being asked about.
-	if err := s.checkPeerAllowed(peerURL); err != nil {
-		return err
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
 	}
-	resp, err := s.L3.CrossCheck(ctx, peerURL, KelCheckRequest{AID: aid, Seq: seq, Digest: digest})
-	if err != nil {
-		return err
-	}
-	if !resp.Match {
-		s.emit("kel_l3_escalation", map[string]interface{}{
-			"aid": aid, "seq": seq, "peer": peerURL,
-		})
-		_, _, _ = s.L2.QueryDigest(ctx, s.DefaultL2URL(), aid, seq)
-	}
-	return nil
+	return time.Now()
+}
+
+// escalate tells the owner that the hosted watcher disagrees with this agent's
+// own record on a repeat contact. It is a broadcast event and nothing more:
+// no duplicity alert is stored, because every open alert blocks the next check
+// of that identity, and a disagreement that is not proof of anything must not.
+func (s *Service) escalate(aid string, seq int) {
+	s.emit("kel_l3_escalation", map[string]interface{}{
+		"aid": aid, "seq": seq, "reason": "the hosted watcher disagrees with this agent's record",
+	})
 }
 
 // AnchorAlertToKEL anchors a duplicity alert SAID to the verifier KEL (D12 default-on).

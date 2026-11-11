@@ -3,7 +3,6 @@ package server
 import (
 	"strings"
 
-	"identity-agent-core/provider"
 	"identity-agent-core/watcher"
 	"identity-agent-core/witness"
 )
@@ -22,28 +21,28 @@ import (
 // activity, and an individual watching for an organization is drawn into
 // business it has no standing in.
 //
-// Registered watcher services are included and marked as services. They are
-// exempt from the same-kind rule for the reason that exemption exists at all:
-// one serves a large population, so asking it discloses little.
+// Which contacts are asked is the owner's choice (watcher.ChosenPeers, at most
+// watcher.MaxChosenPeers), and the owner can turn peer checks off altogether
+// (watcher.PeerWatchEnabled, applied where peers are used). A contact is further
+// asked only about identities it plausibly knows (watcher.peerMayKnow), and the
+// request is signed. See peer_settings.go.
+//
+// Registered watcher services are not peers here: they are consulted for their
+// digest (L2), and a cross-check is answered only for a contact.
 func (s *CoreServer) peerWatchers() []watcher.PeerWatcher {
 	var out []watcher.PeerWatcher
 	seen := map[string]bool{}
 
-	// Registered watcher services first — they are the ones that answer
-	// reliably, and they are available before anybody has contacts.
-	if s.Providers != nil {
-		for _, p := range s.Providers.Offering(provider.CapabilityWatcher) {
-			for _, e := range p.EndpointsFor(provider.CapabilityWatcher) {
-				if e.URL == "" || seen[e.URL] {
-					continue
-				}
-				seen[e.URL] = true
-				out = append(out, watcher.PeerWatcher{AID: e.AID, URL: e.URL, Service: true})
-			}
-		}
+	if s.DataStore == nil || s.WitnessService == nil || s.WatcherService == nil {
+		return out
 	}
-
-	if s.DataStore == nil || s.WitnessService == nil {
+	// Only contacts the owner chose, and never more than a handful: every one
+	// asked learns whom this agent is checking on.
+	chosen := map[string]bool{}
+	for _, aid := range s.WatcherService.ChosenPeers() {
+		chosen[aid] = true
+	}
+	if len(chosen) == 0 {
 		return out
 	}
 	ours := witness.NormaliseEntityType(s.ourEntityType())
@@ -52,7 +51,7 @@ func (s *CoreServer) peerWatchers() []watcher.PeerWatcher {
 		return out
 	}
 	for _, c := range contacts {
-		if c.Status != "accepted" || c.OobiURL == "" {
+		if c.Status != "accepted" || c.OobiURL == "" || !chosen[c.AID] {
 			continue
 		}
 		base := peerBaseURL(c.OobiURL)

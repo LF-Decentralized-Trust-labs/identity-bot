@@ -56,7 +56,9 @@ opens them to a controller. They are:
 - speaking as the identity to another Identity Agent by a sealed request, and
   installing software on this computer;
 - what this agent's watcher tells peers: opting an identity out of, or back
-  into, being discussed (`PUT /api/watcher/opt-out`).
+  into, being discussed (`PUT /api/watcher/opt-out`), and which contacts it
+  cross-checks with (`PUT /api/watcher/peers`; reading the list, `GET`, is open
+  to the owner's own controllers, like the opt-out read).
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line

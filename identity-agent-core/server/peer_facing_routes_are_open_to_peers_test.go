@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"fmt"
 	"io"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/endpoint"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 	"identity-agent-core/watcher"
 	"identity-agent-core/witness"
@@ -53,6 +57,7 @@ func watcherAgent(t *testing.T, aid string, seq int, digest string) *CoreServer 
 	s := newAuthTestServer(t)
 	s.WatcherService = ws
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(db), ds, nil, witness.BackendDesktop)
+	s.DataStore = ds
 	return s
 }
 
@@ -112,33 +117,63 @@ func TestEveryWitnessProtocolRouteIsDeclaredPublic(t *testing.T) {
 	}
 }
 
-// Two agents complete the watcher cross-check over the network, and a peer is
-// told the truth about a digest that does not match.
+// Two agents complete the watcher cross-check over the network, through the
+// real router: alice signs as the identifier bob knows her by, bob checks it
+// against the key in his contact record and answers match or no match only.
 func TestTwoWatchersCrossCheckEachOtherOverTheNetwork(t *testing.T) {
-	bob := watcherAgent(t, "EAID", 1, "Edigest")
+	eaidDigest := serveLog("EAID")
+	bob := watcherAgent(t, "EAID", 1, eaidDigest)
 	srv := httptest.NewServer(bob.buildRouter())
 	defer srv.Close()
+	// Bob's address as he reports it to himself, which is what a request must name.
+	bob.EndpointService = endpoint.New(nil, 0)
+	bob.EndpointService.SetOverrideURL(srv.URL)
+	bobAt := srv.URL
 
-	// Alice's watcher asks bob's. The default HTTP client reaches bob from
-	// loopback without the owner secret, i.e. as a peer.
+	aliceSeed := make([]byte, 32)
+	for i := range aliceSeed {
+		aliceSeed[i] = byte(i) + 3
+	}
+	alicePub := ed25519.NewKeyFromSeed(aliceSeed).Public().(ed25519.PublicKey)
+	if err := bob.DataStore.SaveContact(store.ContactRecord{
+		AID: "EAliceToBob", Status: "accepted", OobiURL: "http://test/public/oobi/EAliceToBob", PublicKey: iacrypto.VerkeyQB64(alicePub),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bob.WatcherService.VerifyRequester = bob.verifyContactRequest
+
 	alice := watcher.NewService(nil)
+	alice.SignRequest = func(peerAID, st string) (string, string, error) {
+		sig, err := login.SignString(st, aliceSeed)
+		return "EAliceToBob", sig, err
+	}
 	alice.L3.AllowLocal = func(string) bool { return true } // bob is on this machine, which the owner's own agent would have recorded
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-
+	ask := func(digest string, at int64, to string) *watcher.KelCheckResponse {
+		t.Helper()
+		sig, _ := login.SignString(watcher.KelCheckRequestStatement("EAID", 1, digest, to, at), aliceSeed)
+		resp, err := alice.L3.CrossCheck(ctx, srv.URL, watcher.KelCheckRequest{
+			AID: "EAID", Seq: 1, Digest: digest, Requester: "EAliceToBob", At: at, Signature: sig})
+		if err != nil {
+			t.Fatalf("a contact's cross-check was refused: %v", err)
+		}
+		return resp
+	}
+	now := time.Now().Unix()
+	if !ask(eaidDigest, now, bobAt).Match {
+		t.Fatal("a contact's matching digest was not reported as a match")
+	}
+	if ask("Eother", now+1, bobAt).Match {
+		t.Fatal("a different digest was reported as a match")
+	}
+	if ask(eaidDigest, now+2, "https://someone-else.example").Match {
+		t.Fatal("a request signed for another address was answered")
+	}
+	// An unsigned one, the shape every caller used before, is a stranger's.
 	resp, err := alice.L3.CrossCheck(ctx, srv.URL, watcher.KelCheckRequest{AID: "EAID", Seq: 1, Digest: "Edigest"})
-	if err != nil {
-		t.Fatalf("a peer's cross-check was refused: %v", err)
-	}
-	if !resp.Match || resp.OurDigest == nil {
-		t.Fatalf("matching digest reported as %+v", resp)
-	}
-	resp, err = alice.L3.CrossCheck(ctx, srv.URL, watcher.KelCheckRequest{AID: "EAID", Seq: 1, Digest: "Eother"})
 	if err != nil || resp.Match {
-		t.Fatalf("a different digest was reported as a match: %+v, %v", resp, err)
-	}
-	if err := alice.CrossCheck(ctx, srv.URL, "EAID", 1, "Edigest"); err != nil {
-		t.Fatalf("Service.CrossCheck against a peer: %v", err)
+		t.Fatalf("an unsigned request was answered: %+v, %v", resp, err)
 	}
 
 	get, err := http.Get(srv.URL + "/public/kel-digest?aid=EAID&seq=1")

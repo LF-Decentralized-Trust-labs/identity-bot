@@ -11,6 +11,7 @@ import (
 func TestOwnerSetsAndClearsAWatcherOptOut(t *testing.T) {
 	const aid = "EOptAID"
 	s := watcherAgent(t, aid, 1, "Esecretdigest")
+	asAPublicWatcherWithAContact(t, s)
 	router := s.buildRouter()
 	serve := func(m, p, b string, own bool) (int, string) {
 		req := remote(m, p, b)

@@ -10,21 +10,17 @@ import (
 // told which identity was being asked about, which is the thing worth
 // protecting. A watcher learns the verifier's interests simply by being asked.
 func TestARefusedPeerIsNeverContacted(t *testing.T) {
-	contacted := false
-	s := &Service{
-		PeerAllowed: func(peerURL string) bool { return false },
+	var asked int32
+	var got KelCheckRequest
+	p := recordingPeer(t, &asked, &got)
+	s := contactService(t, p.URL)
+	s.PeerAllowed = func(peerURL string) bool { return false }
+	outcomes, _ := s.crossCheckPeers(context.Background(), "EAlice", 0, "Edigest", p.URL+"/public/oobi/EAlice")
+	if asked != 0 || len(outcomes) != 0 {
+		t.Fatalf("a peer the boundary refuses was contacted: asked=%d outcomes=%+v", asked, outcomes)
 	}
-	// If the boundary let this through it would attempt an HTTP request to an
-	// address that does not exist, and fail differently.
-	err := s.CrossCheck(context.Background(), "https://an-organization.example", "EAlice", 0, "Edigest")
-	if err == nil {
-		t.Fatal("a cross-check with a refused peer went ahead")
-	}
-	if !strings.Contains(err.Error(), "do not watch for one another") {
+	if err := s.checkPeerAllowed(p.URL); err == nil || !strings.Contains(err.Error(), "do not watch for one another") {
 		t.Fatalf("the refusal does not explain itself: %v", err)
-	}
-	if contacted {
-		t.Fatal("the refused peer was contacted anyway")
 	}
 }
 
