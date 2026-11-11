@@ -251,6 +251,7 @@ func Verify(b *Bundle) Report {
 	v.checkEntries()
 	rows := v.checkLog()
 	v.checkAnchors(rows)
+	v.checkHead()
 	v.cannotRuleOut("The Identity Agent holds every AI agent's identity key, so a compromised Identity Agent could countersign words nobody sent. It cannot make the signature of a machine key it does not hold. An entry whose sender's own signature holds is the strong claim, and every entry here is checked for one, but that claim rests on the body credential or Controller Grant naming that key having been issued honestly: whoever holds the root key can issue one to a key of its own.")
 	// An entry holds when nothing found anywhere in the bundle is about it.
 	for i := range r.Messages {

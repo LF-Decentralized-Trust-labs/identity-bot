@@ -70,6 +70,11 @@ type Bundle struct {
 	// Anchors are the statements the record identity's interactions seal: one
 	// for every interaction in its key log, so none can be withheld.
 	Anchors []Anchor `json:"anchors"`
+	// Head is the Identity Agent's signed head statement for the conversation
+	// (SignHead): how many entries it had committed and the hash of the newest,
+	// when the export was made. Present for a conversation an app keeps, which
+	// is what lets a reader see an end that was cut off (ADR-068).
+	Head *didcomm.Envelope `json:"head,omitempty"`
 }
 
 // Entry is one conversation entry: the envelope the Identity Agent

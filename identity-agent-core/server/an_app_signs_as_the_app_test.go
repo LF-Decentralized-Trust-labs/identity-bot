@@ -47,6 +47,7 @@ func anAddOnWithAnAppRoute() Addon {
 // AppRoutes, changes this set and is read here before it ships.
 var theAppRoutes = []string{
 	"GET /api/app-reads/{id}",
+	"GET /api/conversations/{id}/head",
 	"POST /api/mcp/agents/{id}/conversations",
 }
 

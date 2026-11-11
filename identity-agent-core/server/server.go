@@ -1063,6 +1063,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
+		s.conversationHeadRoutes(r)
 		// The core proves it holds the local owner secret before an app sends
 		// it (the_owner_at_this_computer.go).
 		r.Get("/local-owner/proof", s.handleLocalOwnerProof)
