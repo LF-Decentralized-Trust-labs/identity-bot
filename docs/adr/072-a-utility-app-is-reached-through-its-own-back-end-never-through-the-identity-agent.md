@@ -15,6 +15,22 @@ Two different kinds of software serve one person or organisation, and they must 
 - **The Identity Agent** is the identity. Its core holds the keys and makes every decision about the identity, on a phone or on a machine that can prove what software it runs. It is controlled only from an installed Identity Agent app: the device holding the root identity, or a controller, as ADR-006 defines both. Never from a browser (ADR-006, amended 2026-11-07).
 - **A utility app** gives the person a use of their identity. This ADR uses the name for what ADR-012 Amendment 5 calls an *app beside an Identity Agent*: a chat app with AI agents, a task tracker, calling, messages, email, or anything anyone writes. It runs on a machine of its own or a shared one, never inside the Identity Agent. It is an asset of an Identity Agent, its **owner's**, with its own identifier, an App Grant, and an App Body: the machine key it runs under (ADR-045 Amendment 1).
 
+### The parts of a utility app, and the configurations it runs in
+
+A utility app has two kinds of part, and this ADR uses these names for them throughout.
+
+- **The back end** holds the app's data and does its work, on the machine the app runs on. It is the part that is enrolled as the app and holds the App Body key.
+- **A front end** is the part a person uses. It comes in two kinds:
+  - **A browser front end** is a page loaded in a browser.
+  - **An installed front end** is the app's own installed app on the person's device. It may also work in the background, for example to ring or notify, when it is not open on screen.
+
+Where the parts run gives four configurations. The protocol in this ADR is the same in all four; only who runs each part differs.
+
+1. **A browser front end hosted by another party.** A page served from a fixed address by someone other than the back end's operator, talking to a back end run by someone else.
+2. **A browser front end and back end run by one operator.** The same operator serves the page and runs the back end.
+3. **An installed front end with the back end elsewhere.** The installed app is on the person's device and the back end runs on another machine.
+4. **An installed front end and back end on one device.** Both run on the person's own device.
+
 A utility app needs a front end a person can use. ADR-012 Amendment 5 already lets an app declare its front ends (`device_front_ends`: `browser` and/or `installed_app`) and where a browser page is served from (`static_front_end_url`). What no ADR has said is how a front end reaches its app, what it may talk to, and who decides which front ends a person may use.
 
 Without that, the shortcut is for the front end to call the Identity Agent core directly. One path does that today. ADR-066's implementation note "A signed-in person speaks to an AI agent from the app's page" lets a page call the core's talk routes with a browser key. The core answers CORS for that app's origin on those routes. ADR-006's 2026-11-07 amendment lists it as one of three places that do not conform yet, "being reworked so that the app asks from its own server". This ADR is the shape it is reworked to.
@@ -23,7 +39,7 @@ Without that, the shortcut is for the front end to call the Identity Agent core 
 
 ### 1. A front end talks only to its own app's back end
 
-A utility app's front end, whether a page in a browser or the app's own installed app, sends its requests to that app's back end and to nothing else. **It never calls an Identity Agent core, and no core answers a utility app's browser origin.** The back end talks to its owner's Identity Agent as an enrolled app, signed by its App Body key over its own connection.
+A utility app's front end, whether a browser front end or an installed front end, sends its requests to that app's back end and to nothing else. **It never calls an Identity Agent core, and no core answers a utility app's browser origin.** The back end talks to its owner's Identity Agent as an enrolled app, signed by its App Body key over its own connection.
 
 **Where the core keeps a record as the person's own** (for example, a message the person sends an AI agent), the back end passes the front end's signed request on inside its own signed call, and the core checks both signatures: the app's, and the key the person's sign-in approved. The request reaches the core only through the back end.
 
@@ -33,10 +49,10 @@ A utility app's front end, whether a page in a browser or the app's own installe
 
 The same steps for every utility app, whoever wrote it, for an individual or an organisation:
 
-1. **The page comes from a fixed address.** A browser front end is loaded from the app's `static_front_end_url` (ADR-012 Amendment 5), never through a relay (ADR-048 §12) and never from a core. An installed front end is the app's own installed app.
+1. **The page comes from a fixed address.** A browser front end is loaded from the app's `static_front_end_url` (ADR-012 Amendment 5), never through a relay (ADR-048 §12) and never from a core. An installed front end is the app's own installed app, which may also work in the background.
 2. **The link names the app.** A person opens the app from a link or code carrying the app's identifier. The front end fetches that identifier's key log and the app's App Body credential, checks that the credential has not been revoked, and from then on accepts answers only when they are signed by the machine key that credential names. Whoever carries the traffic cannot substitute another app.
 3. **The front end makes a key it cannot export.** A browser makes one per ADR-066. An installed app makes one in the device's secure hardware.
-4. **Sign-in is the Ask** (ADR-021). The owner's Identity Agent issues the challenge for the app, naming the front end's key (as ADR-066's `browser_key` does) and its kind, `browser` or `installed_app`. The person approves on their own Identity Agent app, and the signed assertion repeats the key. The back end then binds the person to that key: a **session** for a browser, or an **app-key grant** for an installed app, the installed counterpart of a session, which lasts until it is revoked.
+4. **Sign-in is the Ask** (ADR-021). The owner's Identity Agent issues the challenge for the app, naming the front end's key (as ADR-066's `browser_key` does) and its kind: `browser` for a browser front end, `installed_app` for an installed front end. The person approves on their own Identity Agent app, and the signed assertion repeats the key. The back end then binds the person to that key: a **session** for a browser, or an **app-key grant** for an installed app, the installed counterpart of a session, which lasts until it is revoked.
 5. **Every request after that is signed by the front end's key** over its method, target, a hash of its body, the app's identifier, the session, a timestamp and a nonce. It is **sealed for the app's back end**, and every answer is signed by the App Body key and sealed for the front end's key. The app's machine opens no port, so the traffic passes through a relay (ADR-048), which carries ciphertext only.
 
 ### 3. Which front ends an app may be reached by is a setting per app
@@ -63,7 +79,7 @@ When the owner revokes an app, or one front end of it, the owner's Identity Agen
 sequenceDiagram
   autonumber
   actor P as The person
-  participant FE as Utility app front end - a browser page or the app's own installed app
+  participant FE as Utility app front end - a browser front end or an installed front end
   participant R as Relay, a provider treated as untrusted
   participant B as Utility app back end, on its own machine
   participant OIA as The app owner's Identity Agent core
