@@ -1,9 +1,6 @@
 import 'dart:io';
 
-import 'package:agent_client/services/controller_signing_client.dart'
-    show VouchedAuthentication;
 import 'package:agent_client/services/identity_profiles.dart';
-import 'package:agent_client/services/local_auth_service.dart';
 import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/profile_scope.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -76,6 +73,7 @@ void main() {
   group('logging out locks an identity and a new one gets its own profile', () {
     late Directory root;
     late List<String> started;
+    late _FakeDevice device;
     var stopped = 0;
 
     setUp(() async {
@@ -85,18 +83,24 @@ void main() {
       IdentityProfiles.rootOverride = root.path;
       started = [];
       stopped = 0;
-      IdentityProfiles.coreStarter = (dir) async => started.add(dir);
-      IdentityProfiles.coreStopper = () async => stopped++;
+      device = _FakeDevice();
+      IdentityProfiles.coreStarter = (dir) async {
+        started.add(dir);
+        await device.start(dir);
+      };
+      IdentityProfiles.coreStopper = () async {
+        stopped++;
+        await device.stop();
+      };
       IdentityProfiles.openOneHoldsAnIdentity = () async => true;
-      IdentityProfiles.authenticateOwner = (_) async => true;
+      IdentityProfiles.loginProvider = LoginProvider.fixedMinimum();
     });
 
     tearDown(() {
       IdentityProfiles.rootOverride = null;
       IdentityProfiles.coreStarter = null;
       IdentityProfiles.coreStopper = null;
-      IdentityProfiles.providerOnThisDevice = null;
-      IdentityProfiles.vouchedByThePersonsDevice = null;
+      IdentityProfiles.loginProvider = LoginProvider.fixedMinimum();
       root.deleteSync(recursive: true);
     });
 
@@ -121,22 +125,22 @@ void main() {
       final offered = await IdentityProfiles.all();
       expect(offered.map((p) => p.name), ['Ada']);
 
-      IdentityProfiles.authenticateOwner = (_) async => false;
+      IdentityProfiles.loginProvider = _providerAnswering(79);
       expect(await IdentityProfiles.openAfterAuthenticating(id), isFalse);
       expect(await IdentityProfiles.isLocked(id), isTrue);
       expect(started, isEmpty);
 
-      IdentityProfiles.authenticateOwner = (_) async => true;
+      IdentityProfiles.loginProvider = LoginProvider.fixedMinimum();
       expect(await IdentityProfiles.openAfterAuthenticating(id), isTrue);
       expect(await IdentityProfiles.isLocked(id), isFalse);
       expect(started, hasLength(1));
     });
 
-    test('logging out locks EVERY identity on the device, and each needs its '
+    test(
+        'logging out locks EVERY identity on the device, and each needs its '
         'own person', () async {
       final first = await ProfileScope.activeId();
       await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
-      IdentityProfiles.authenticateOwner = (_) async => true;
       await IdentityProfiles.openAfterAuthenticating(first);
       final second = await IdentityProfiles.beginANewOne();
       await IdentityProfiles.remember(aid: 'Bchild', name: 'Ben');
@@ -150,102 +154,229 @@ void main() {
           reason: 'any logout locks every identity on the device');
     });
 
-    test('the list says who is asked and why only when something is locked',
-        () {
-      expect(IdentityProfiles.listNotice(lockedNames: [], noScreenLock: false),
-          isNull);
-      final one = IdentityProfiles.listNotice(
-          lockedNames: ['Ada'], noScreenLock: false)!;
-      expect(one, startsWith('Logging out locked everything'));
-      expect(one, contains('Ada is asked to authenticate'));
-      final two = IdentityProfiles.listNotice(
-          lockedNames: ['Ada', 'Ben'], noScreenLock: true)!;
-      expect(two, contains('Each owner is asked'));
-      expect(two, contains('has no screen lock'));
+    test(
+        'the list says who logs in, and always that nothing measures them', () {
+      expect(IdentityProfiles.listNotice(lockedNames: []),
+          IdentityProfiles.placeholderProviderNotice,
+          reason: 'the placeholder is named even when nobody is logged out');
       expect(
           IdentityProfiles.listNotice(
-              lockedNames: [], noScreenLock: true, what: 'organisation'),
-          contains('this organisation'));
+              lockedNames: [], method: UnlockMethod.provider),
+          isNull);
+      final one = IdentityProfiles.listNotice(lockedNames: ['Ada'])!;
+      expect(one, contains('Only one identity is logged in on this device'));
+      expect(one, contains('Choosing it logs Ada in'));
+      expect(one, contains('No authentication provider is built yet'));
+      expect(one, contains('nothing measures who you are'));
+      expect(IdentityProfiles.listNotice(lockedNames: ['Ada', 'Ben']),
+          contains('logs a person in'));
+      expect(
+          IdentityProfiles.listNotice(
+              lockedNames: ['Acme'], what: 'organisation'),
+          contains('Only one organisation is logged in'));
+    });
+
+    test(
+        'with three identities on one phone, choosing each logs that one in '
+        'and the others out', () async {
+      final a = await ProfileScope.activeId();
+      await IdentityProfiles.remember(aid: 'Aada', name: 'Ada');
+      final b = await IdentityProfiles.beginANewOne();
+      await IdentityProfiles.remember(aid: 'Bben', name: 'Ben');
+      final c = await IdentityProfiles.beginANewOne();
+      await IdentityProfiles.remember(aid: 'Ccat', name: 'Cat');
+      // Everyone has been logged out, as a log-out does.
+      await IdentityProfiles.lockTheOpenOne(aid: 'Ccat', name: 'Cat');
+
+      Future<List<bool>> loggedIn() async => [
+            for (final id in [a, b, c]) !await IdentityProfiles.isLocked(id)
+          ];
+      expect(await loggedIn(), [false, false, false]);
+
+      for (final (i, id) in [a, b, c, a, c, b].indexed) {
+        started.clear();
+        expect(await IdentityProfiles.openAfterAuthenticating(id), isTrue,
+            reason: 'tapping the profile logs that person in');
+        final want = [
+          for (final x in [a, b, c]) x == id
+        ];
+        expect(await loggedIn(), want,
+            reason: 'step $i: only the chosen identity is logged in');
+        expect(await ProfileScope.activeId(), id);
+        expect(started.single, contains(id));
+        expect(device.serving, {await IdentityProfiles.dataDirectoryFor(id)},
+            reason: 'step $i: exactly the chosen profile\'s directory is '
+                'served, so the previous core really stopped');
+      }
+    });
+
+    test(
+        'two identities opened at once leave only one unlocked and only that '
+        'one served', () async {
+      final a = await ProfileScope.activeId();
+      await IdentityProfiles.remember(aid: 'Aada', name: 'Ada');
+      final b = await IdentityProfiles.beginANewOne();
+      await IdentityProfiles.remember(aid: 'Bben', name: 'Ben');
+      await IdentityProfiles.lockTheOpenOne(aid: 'Bben', name: 'Ben');
+      expect(await IdentityProfiles.isLocked(a), isTrue);
+      expect(await IdentityProfiles.isLocked(b), isTrue);
+
+      final both = await Future.wait([
+        IdentityProfiles.openAfterAuthenticating(a),
+        IdentityProfiles.openAfterAuthenticating(b),
+      ]);
+      expect(both, [true, true]);
+
+      final active = await ProfileScope.activeId();
+      final unlocked = [
+        for (final id in [a, b])
+          if (!await IdentityProfiles.isLocked(id)) id
+      ];
+      expect(unlocked, [active],
+          reason: 'the one that is open is the only one not locked');
+      expect(device.serving, {await IdentityProfiles.dataDirectoryFor(active)},
+          reason: 'nothing locked is being served');
+    });
+
+    test('every identity is marked locked even when one cannot be marked',
+        () async {
+      final a = await ProfileScope.activeId();
+      await IdentityProfiles.remember(aid: 'Aada', name: 'Ada');
+      final b = await IdentityProfiles.beginANewOne();
+      final c = await IdentityProfiles.beginANewOne();
+      // b's marker cannot be written: a folder is where the file must go.
+      Directory('${await IdentityProfiles.directoryFor(b)}/locked')
+          .createSync(recursive: true);
+
+      final said = <String>[];
+      final went = await IdentityProfiles.logOutAndTell(
+          logOut: () => IdentityProfiles.lockTheOpenOne(aid: 'Ccat', name: 'C'),
+          say: (title, body) async => said.add(body));
+      expect(went, isFalse);
+      expect(await IdentityProfiles.isLocked(a), isTrue);
+      expect(await IdentityProfiles.isLocked(c), isTrue,
+          reason: 'one that cannot be marked does not stop the rest');
+      expect(said.single, contains('could not be marked as logged out'));
+      expect(said.single, isNot(contains('could not be stopped')));
+    });
+
+    test('an id that cannot name a directory counts as one not marked',
+        () async {
+      await ProfileScope.setActive('not a profile id');
+      await expectLater(
+          IdentityProfiles.lockTheOpenOne(),
+          throwsA(isA<TheCoreDidNotStop>()
+              .having((e) => e.notMarked, 'notMarked', isTrue)));
+    });
+
+    test('starting an identity on a locked device asks about the device\'s '
+        'person, not about the locked profile', () async {
+      await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
+      IdentityProfiles.openOneHoldsAnIdentity = () async => false;
+      final asked = <String?>[];
+      IdentityProfiles.loginProvider = LoginProvider(
+          name: 'test',
+          isPlaceholder: false,
+          measure: (id) async {
+            asked.add(id);
+            return MeasuredScore(
+                measured: true, score: 90, at: DateTime.now().toUtc());
+          });
+      expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
+      expect(asked, [null]);
+    });
+
+    test('the words say what is true', () {
+      final ada = IdentityProfiles.lockScreenExplanation('Ada',
+          anotherIsOpen: false);
+      expect(ada, isNot(contains('logs out the one that is open')));
+      expect(IdentityProfiles.lockScreenExplanation('Ada'),
+          contains('logs out the one that is open'));
+      expect(IdentityProfiles.placeholderProviderNotice,
+          contains('Anyone who taps a profile is logged in as that person'));
+      expect(IdentityProfiles.placeholderProviderNotice,
+          isNot(contains('minimum score')));
+      expect(const NotAuthenticated().toString(),
+          isNot(contains('You were not authenticated')));
+      expect(const NotAuthenticated('organisation').toString(),
+          contains('starting a new organisation'));
+    });
+
+    test('choosing a profile while another is logged in logs the other out',
+        () async {
+      final a = await ProfileScope.activeId();
+      expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
+      final b = await ProfileScope.activeId();
+      // b is open and a was left behind: a is locked, b is not.
+      expect(await IdentityProfiles.isLocked(a), isTrue);
+      expect(await IdentityProfiles.isLocked(b), isFalse);
+      expect(await IdentityProfiles.openAfterAuthenticating(a), isTrue);
+      expect(await IdentityProfiles.isLocked(b), isTrue);
+      expect(await IdentityProfiles.isLocked(a), isFalse);
+    });
+
+    test('the login provider is the placeholder and the screens say so', () {
+      expect(IdentityProfiles.loginProvider.name, 'fixed-minimum');
+      expect(IdentityProfiles.howItWillBeChecked(),
+          UnlockMethod.placeholderProvider);
     });
 
     group('getting back in', () {
       final now = DateTime.now().toUtc();
       test('80 opens, 79 does not, an unmeasured or stale one does not', () {
-        bool opens(int score,
-                {bool measured = true,
-                DateTime? at,
-                bool vouching = false,
-                String by = ''}) =>
+        bool opens(int score, {bool measured = true, DateTime? at}) =>
             IdentityProfiles.scoreOpens(
-                measured: measured,
-                score: score,
-                at: at ?? now,
-                needsVouching: vouching,
-                vouchedBy: by,
-                now: now);
+                measured: measured, score: score, at: at ?? now, now: now);
         expect(opens(80), isTrue);
         expect(opens(79), isFalse);
         expect(opens(100, measured: false), isFalse);
-        expect(opens(100, at: now.subtract(const Duration(minutes: 5))),
-            isFalse);
+        expect(
+            opens(100, at: now.subtract(const Duration(minutes: 5))), isFalse);
         expect(opens(100, at: now.add(const Duration(minutes: 5))), isFalse);
         expect(opens(100, at: now.add(const Duration(seconds: 10))), isTrue,
-            reason: 'a phone a few seconds fast is not refused');
-        // A computer may not score itself.
-        expect(opens(100, vouching: true), isFalse);
-        expect(opens(100, vouching: true, by: 'sig'), isTrue);
+            reason: 'a clock a few seconds fast is not refused');
       });
 
-      test('with a provider, a failed score is not rescued by the screen lock',
+      test('a score under 80 does not log in, and nothing else rescues it',
           () async {
         final id = await ProfileScope.activeId();
         await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
-        var screenLockAsked = false;
-        IdentityProfiles.authenticateOwner = (_) async {
-          screenLockAsked = true;
-          return true;
-        };
-        IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
-            measured: true, score: 79, at: DateTime.now().toUtc());
-        IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
-            VouchedAuthentication(
-                level: 'verified',
-                at: DateTime.now().toUtc(),
-                score: 79,
-                vouchedBy: 'sig');
-        addTearDown(() {
-          IdentityProfiles.providerOnThisDevice = null;
-          IdentityProfiles.vouchedByThePersonsDevice = null;
-        });
+        IdentityProfiles.loginProvider = _providerAnswering(79);
         expect(await IdentityProfiles.openAfterAuthenticating(id), isFalse);
-        expect(screenLockAsked, isFalse);
         expect(await IdentityProfiles.isLocked(id), isTrue);
-
-        IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
-            measured: true, score: 85, at: DateTime.now().toUtc());
-        IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
-            VouchedAuthentication(
-                level: 'verified',
-                at: DateTime.now().toUtc(),
-                score: 85,
-                vouchedBy: 'sig');
+        IdentityProfiles.loginProvider = _providerAnswering(85);
         expect(await IdentityProfiles.openAfterAuthenticating(id), isTrue);
       });
 
-      test('with no provider the screen lock stands in, and the lock screen '
-          'says nothing measured the person', () {
+      test('a provider that errors or says nothing does not log in', () async {
+        final id = await ProfileScope.activeId();
+        await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
+        IdentityProfiles.loginProvider = LoginProvider(
+            name: 'x',
+            isPlaceholder: false,
+            measure: (_) async => throw Exception('unreachable'));
+        expect(await IdentityProfiles.openAfterAuthenticating(id), isFalse);
+        IdentityProfiles.loginProvider = LoginProvider(
+            name: 'x', isPlaceholder: false, measure: (_) async => null);
+        expect(await IdentityProfiles.openAfterAuthenticating(id), isFalse);
+        expect(await IdentityProfiles.isLocked(id), isTrue);
+      });
+
+      test('the lock screen says the provider is a placeholder', () {
         expect(IdentityProfiles.howItWillBeChecked(),
-            UnlockMethod.deviceScreenLockNoProvider);
+            UnlockMethod.placeholderProvider);
         final text = IdentityProfiles.lockScreenExplanation('Ada');
         expect(text, contains('Ada'));
-        expect(text, contains('nothing has measured who you are'));
-        expect(text, contains('locked everything on this device'));
-        expect(IdentityProfiles.lockScreenExplanation('Acme', what: 'organisation'),
-            contains('this organisation can only'));
+        expect(text, contains('No authentication provider is built yet'));
+        expect(text, contains('Only one identity is logged in'));
+        expect(
+            IdentityProfiles.lockScreenExplanation('Acme',
+                what: 'organisation'),
+            contains('Only one organisation is logged in'));
         expect(
             IdentityProfiles.lockScreenExplanation('Ada',
-                method: UnlockMethod.providerVouchedByAnotherDevice),
-            contains('phone or black box'));
+                method: UnlockMethod.provider),
+            contains('score of 80 or more logs in'));
       });
     });
 
@@ -275,45 +406,31 @@ void main() {
       expect(await IdentityProfiles.isLocked(second), isFalse);
     });
 
-    test('a new identity on a locked device needs the same check, and begins '
+    test(
+        'a new identity on a locked device needs the same check, and begins '
         'nothing without it', () async {
       final first = await ProfileScope.activeId();
       await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
       IdentityProfiles.openOneHoldsAnIdentity = () async => false;
       started.clear();
 
-      // Screen-lock fallback (no provider): refused.
-      IdentityProfiles.authenticateOwner = (_) async => false;
+      IdentityProfiles.loginProvider = _providerAnswering(79);
       await expectLater(IdentityProfiles.makeRoomForANewOne(),
           throwsA(isA<NotAuthenticated>()));
       expect(await ProfileScope.activeId(), first);
       expect(started, isEmpty);
 
-      // With a provider, a score of 79 is refused and the screen lock is not
-      // asked in its place.
-      var screenLockAsked = false;
-      IdentityProfiles.authenticateOwner = (_) async {
-        screenLockAsked = true;
-        return true;
-      };
-      IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
-          measured: true, score: 79, at: DateTime.now().toUtc());
-      IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
-          VouchedAuthentication(
-              level: 'x', at: DateTime.now().toUtc(), score: 79, vouchedBy: 's');
-      await expectLater(IdentityProfiles.makeRoomForANewOne(),
-          throwsA(isA<NotAuthenticated>()));
-      expect(screenLockAsked, isFalse);
-      expect(started, isEmpty);
-
-      // Passing it begins the new identity.
-      IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
-          measured: true, score: 80, at: DateTime.now().toUtc());
-      IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
-          VouchedAuthentication(
-              level: 'x', at: DateTime.now().toUtc(), score: 80, vouchedBy: 's');
+      IdentityProfiles.loginProvider = _providerAnswering(80);
       expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
       expect(await ProfileScope.activeId(), isNot(first));
+    });
+
+    test('a new identity logs out the one that was open', () async {
+      final first = await ProfileScope.activeId();
+      expect(await IdentityProfiles.isLocked(first), isFalse);
+      expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
+      expect(await IdentityProfiles.isLocked(first), isTrue,
+          reason: 'two identities are never open at once');
     });
 
     test('an empty profile is reused, and one holding an identity is not',
@@ -371,7 +488,8 @@ void main() {
         await SecureKeyStore.saveMnemonic(['abandon', 'about']);
         expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
       });
-      test('a data directory with an identity in it means it is, with no card, '
+      test(
+          'a data directory with an identity in it means it is, with no card, '
           'lock or phrase', () async {
         // A desktop controller profile, or one founded before cards existed
         // and never logged out: nothing but the core's own files says so.
@@ -381,7 +499,8 @@ void main() {
         expect(await IdentityProfiles.openOneHoldsAnIdentity(), isFalse,
             reason: 'the files that only say where a core listens are not an '
                 'identity');
-        File('$data${Platform.pathSeparator}identity.db').writeAsStringSync('x');
+        File('$data${Platform.pathSeparator}identity.db')
+            .writeAsStringSync('x');
         expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
         expect(await IdentityProfiles.makeRoomForANewOne(), isTrue,
             reason: 'Create must not found where an identity already is');
@@ -437,46 +556,14 @@ void main() {
     });
   });
 
-  group('no screen lock', () {
-    test('local_auth\'s not-enrolled and passcode-not-set are no lock', () {
-      for (final c in ['NotEnrolled', 'PasscodeNotSet', 'passcodeNotSet']) {
-        expect(LocalAuthService.isNoScreenLockCode(c), isTrue, reason: c);
-      }
-      expect(LocalAuthService.isNoScreenLockCode('LockedOut'), isFalse);
-      expect(LocalAuthService.isNoScreenLockCode('auth_in_progress'), isFalse);
-    });
-
-    test('the message says so plainly and where to set one, per platform', () {
-      final where = {
-        'android': 'Android Settings > Security > Screen lock',
-        'ios': 'iOS Settings > Face ID & Passcode',
-        'windows': 'Windows Settings > Accounts > Sign-in options',
-        'macos': 'macOS System Settings > Lock Screen / Touch ID & Password',
-      };
-      where.forEach((os, text) {
-        final m = IdentityProfiles.noScreenLockMessage(platform: os);
-        expect(m, contains('no screen lock'));
-        final computer = os == 'windows' || os == 'macos';
-        expect(m, contains(computer ? 'anyone using it can open this identity'
-            : 'anyone holding it can open this identity'));
-        expect(m, contains(text));
-      });
-    });
-
-    test('an organisation says "this organisation", never "this identity"', () {
-      final m = IdentityProfiles.noScreenLockMessage(
-          platform: 'macos', what: 'organisation');
-      expect(m, contains('can open this organisation'));
-      expect(m, isNot(contains('this identity')));
-    });
-
+  group('log-out', () {
     test('a log-out that failed says so in plain words, not the exception',
         () async {
       final said = <String>[];
       final went = await IdentityProfiles.logOutAndTell(
           what: 'organisation',
-          logOut: () async =>
-              throw const TheCoreDidNotStop('SocketException: connection reset by 127.0.0.1:5050'),
+          logOut: () async => throw const TheCoreDidNotStop(
+              'SocketException: connection reset by 127.0.0.1:5050'),
           say: (title, body) async => said.add('$title|$body'));
       expect(went, isFalse);
       expect(said.single, startsWith('Not logged out|'));
@@ -486,6 +573,27 @@ void main() {
     });
   });
 }
+
+/// What the device is serving: the data directories whose Identity Agent is
+/// answering. Starting a second while one answers is what a switch that did not
+/// stop the first would do.
+class _FakeDevice {
+  final serving = <String>{};
+  Future<void> start(String dir) async {
+    if (serving.isNotEmpty) {
+      throw StateError('started $dir while $serving still answers');
+    }
+    serving.add(dir);
+  }
+
+  Future<void> stop() async => serving.clear();
+}
+
+LoginProvider _providerAnswering(int score) => LoginProvider(
+    name: 'test',
+    isPlaceholder: false,
+    measure: (_) async => MeasuredScore(
+        measured: true, score: score, at: DateTime.now().toUtc()));
 
 class _ARefusingHolder implements PhraseHolder {
   @override

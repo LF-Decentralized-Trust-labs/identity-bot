@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
 )
 
@@ -82,5 +83,20 @@ func TestRetrieveFromCloudStub(t *testing.T) {
 	_, err := svc.Retrieve(RetrieveRequest{Source: SourceCloud, CloudRef: "s3://bucket/key"})
 	if err == nil {
 		t.Fatal("cloud retrieve stub must error")
+	}
+}
+
+// The placeholder that logs a person in on a device (the apps', while no real
+// provider exists) is for that and nothing else. A recovery must still see an
+// unmeasured result, or it would shorten a waiting period and satisfy a
+// recovery's required level.
+func TestRecoveryStillSeesAnUnmeasuredAuthenticator(t *testing.T) {
+	svc := NewService(t.TempDir(), nil, nil)
+	got := authprovider.Of(svc.Authenticator)
+	if got.Measured || got.Level != authprovider.LevelUnknown || got.Score != 0 {
+		t.Fatalf("recovery's authenticator answered %+v, want unmeasured", got)
+	}
+	if g, ok := svc.AuthProvider.(FromAuthProvider); ok && authprovider.Of(g.Provider).Measured {
+		t.Fatal("the recovery waiting-period gate was measured")
 	}
 }
