@@ -7,9 +7,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'backend_process_service.dart';
+import 'core_service.dart';
+import 'local_auth_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
 import 'point_this_app_at_its_agent.dart';
+import 'the_core_is_settled.dart';
 
 /// One identity this installation holds, as it can be described while its
 /// Identity Agent is not running.
@@ -70,6 +73,16 @@ class IdentityProfiles {
   /// that question wrongly. On desktop it stays null and is never consulted.
   static MobileCoreService? mobileCore;
 
+  /// Replace starting and stopping the core, for tests, which cannot run one.
+  @visibleForTesting
+  static Future<void> Function(String dataDir)? coreStarter;
+  @visibleForTesting
+  static Future<void> Function()? coreStopper;
+
+  /// Replace where this installation keeps everything, for tests.
+  @visibleForTesting
+  static String? rootOverride;
+
   static const _cardFile = 'card.json';
   static const _openedKey = 'opened_aid';
   static const _leftKey = 'left_aid';
@@ -103,7 +116,17 @@ class IdentityProfiles {
   /// handed to the embedded core when it starts. Either way the core reads it
   /// once, at start — which is why moving between identities means restarting.
   static Future<void> startTheActiveOne() async {
+    // A locked profile is not started. Logging out stopped its Identity Agent;
+    // starting it again here — on launch, or when the app resumes — would put
+    // the identity back within reach of anything on this device that can open
+    // a local port, without its owner having done anything. It starts when
+    // [openAfterAuthenticating] has been through.
+    if (await activeIsLocked()) return;
+
     final dir = await dataDirectoryForActive();
+
+    final starter = coreStarter;
+    if (starter != null) return starter(dir);
 
     if (BackendProcessService.isDesktopPlatform) {
       BackendProcessService.dataDirOverride = dir;
@@ -195,7 +218,128 @@ class IdentityProfiles {
     return id;
   }
 
+  // ── locking ──────────────────────────────────────────────────────────────
+
+  static const _lockedFile = 'locked';
+
+  /// How the owner is asked to prove it is them, before a locked identity is
+  /// opened. The device's own authentication — Face ID, a fingerprint, Windows
+  /// Hello, Touch ID, or the device passcode. A seam for tests.
+  @visibleForTesting
+  static Future<bool> Function(String reason) authenticateOwner =
+      _authenticateOnThisDevice;
+
+  static Future<bool> _authenticateOnThisDevice(String reason) async {
+    // A device with no screen lock and no biometrics has nothing to ask. There
+    // is no second secret anywhere in this app to fall back to, and refusing
+    // would lock an owner out of their own identity for good, so it opens.
+    // The lock is as strong as the device's own.
+    if (!await LocalAuthService.isSupported()) return true;
+    return LocalAuthService.authenticate(reason: reason);
+  }
+
+  static Future<File> _lockedMarker(String profileId) async =>
+      File('${await directoryFor(profileId)}${Platform.pathSeparator}$_lockedFile');
+
+  /// Whether [profileId] was logged out of and has not been opened since.
+  static Future<bool> isLocked(String profileId) async =>
+      (await _lockedMarker(profileId)).existsSync();
+
+  static Future<bool> activeIsLocked() async =>
+      isLocked(await ProfileScope.activeId());
+
+  /// Log out of the open identity: stop its Identity Agent and mark it locked.
+  ///
+  /// Nothing of it is reachable afterwards — its core is not running, and
+  /// nothing here starts it again — until [openAfterAuthenticating] succeeds.
+  /// Nothing is deleted.
+  ///
+  /// The card is written first, from what the running agent says, so the
+  /// identity can still be offered by name while nothing is running. The
+  /// marker is written BEFORE the core is stopped: the other order leaves a
+  /// window in which an interruption has stopped the agent but left the
+  /// identity looking open.
+  static Future<void> lockTheOpenOne({
+    String? aid,
+    String? name,
+    Uint8List? picture,
+  }) async {
+    if (aid != null && aid.isNotEmpty) {
+      await remember(aid: aid, name: name ?? '', picture: picture);
+      await rememberWeLeft(aid);
+    }
+    final marker = await _lockedMarker(await ProfileScope.activeId());
+    await marker.parent.create(recursive: true);
+    await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+    await _stopWhateverIsRunning();
+  }
+
+  /// Open [profileId], first making its owner authenticate if it is locked.
+  /// Held inside [TheCoreIsSettled.during], like every switch.
+  ///
+  /// Returns false, and changes nothing, when authentication did not succeed.
+  /// A profile that fails to start is locked again rather than left open.
+  static Future<bool> openAfterAuthenticating(String profileId) async {
+    final locked = await isLocked(profileId);
+    if (locked &&
+        !await authenticateOwner('Unlock this identity on this device')) {
+      return false;
+    }
+    final marker = await _lockedMarker(profileId);
+    if (locked) marker.deleteSync();
+    try {
+      await TheCoreIsSettled.during(() => switchTo(profileId));
+    } catch (_) {
+      if (locked) {
+        await marker.parent.create(recursive: true);
+        await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+      }
+      rethrow;
+    }
+    return true;
+  }
+
+  /// What says whether the open profile already holds an identity. A seam for
+  /// tests.
+  @visibleForTesting
+  static Future<bool> Function() openOneHoldsAnIdentity = () async {
+    final core = CoreService();
+    try {
+      final identity = await core.getIdentity();
+      return identity.initialized && (identity.aid ?? '').isNotEmpty;
+    } catch (_) {
+      // Nothing answering is not a reason to abandon this profile: the core may
+      // simply not be up yet, and beginning another would strand the first.
+      return false;
+    } finally {
+      core.dispose();
+    }
+  };
+
+  /// Make room for an identity about to be created, on every platform.
+  ///
+  /// The core keeps one identity per data directory, so a second cannot be
+  /// founded in the directory that holds the first: it comes back "already
+  /// exists", and an app that treats that as an interrupted founding opens the
+  /// identity that is there. So when the open profile holds one, or is a
+  /// locked one, a new profile is begun and opened.
+  ///
+  /// An empty profile is used as it is — beginning a fresh one on every Create
+  /// press would leave an empty directory behind each abandoned attempt.
+  /// Returns whether a new profile was begun.
+  static Future<bool> makeRoomForANewOne() async {
+    if (!await activeIsLocked() && !await openOneHoldsAnIdentity()) {
+      return false;
+    }
+    // Held shut while the core moves to the new profile's data, as for any other
+    // switch: a request in between would be signed by the old core.
+    await TheCoreIsSettled.during(beginANewOne);
+    return true;
+  }
+
   static Future<void> _stopWhateverIsRunning() async {
+    final stopper = coreStopper;
+    if (stopper != null) return stopper();
     if (BackendProcessService.isDesktopPlatform) {
       await BackendProcessService.instance.stop();
     } else {
@@ -408,6 +552,8 @@ class IdentityProfiles {
   /// is to find what that produced. Deriving it differently would look for an
   /// existing identity where it never was, find nothing, and start empty.
   static Future<String> _root() async {
+    final over = rootOverride;
+    if (over != null) return over;
     if (!BackendProcessService.isDesktopPlatform) {
       return (await getApplicationSupportDirectory()).path;
     }
