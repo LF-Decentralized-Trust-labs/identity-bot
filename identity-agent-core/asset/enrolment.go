@@ -58,6 +58,9 @@ type Enrolment struct {
 	// rather than accepted at enrolment, so a machine cannot claim an address
 	// the owner did not intend.
 	Origin string `json:"origin,omitempty"`
+	// DeviceFrontEnds are the front ends the app offers, set by the owner who
+	// issues the token and never by the machine that enrols (see Asset).
+	DeviceFrontEnds []string `json:"device_front_ends,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	// ExpiresAt bounds the window. A token that never expires is a permanent

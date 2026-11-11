@@ -114,6 +114,10 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		Audience             string   `json:"audience"`
 		RequestedDisclosures []string `json:"requested_disclosures"`
 		BrowserKey           string   `json:"browser_key"`
+		// FrontEnd is the kind of front end signing in, "browser" or
+		// "installed_app". A utility app refuses a kind it does not offer or
+		// its owner has switched off.
+		FrontEnd string `json:"front_end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -124,7 +128,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, "", body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, "", body.RequestedDisclosures, body.BrowserKey, body.FrontEnd, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return

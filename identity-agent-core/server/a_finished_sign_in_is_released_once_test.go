@@ -93,7 +93,7 @@ func TestASignInTheAgentCannotRecordIsNotStarted(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(w.org.challenges)
-	token, _, code, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, aBrowserKey, w.srv.URL)
+	token, _, code, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, aBrowserKey, "", w.srv.URL)
 	if code != http.StatusInternalServerError || token != "" {
 		t.Fatalf("a sign-in that could not be recorded was started: token=%q code=%d", token, code)
 	}

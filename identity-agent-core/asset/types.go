@@ -101,6 +101,15 @@ type Asset struct {
 	// until its approval is appended.
 	ApprovalPending bool             `json:"approval_pending,omitempty"`
 	Policy          EnrollmentPolicy `json:"policy"`
+	// DeviceFrontEnds are the front ends a utility app offers, from its
+	// manifest's device_front_ends (ADR-012 Amendment 5): "browser" and/or
+	// "installed_app". Nil for an app that has declared none, which offers none.
+	// Only the app's owner sets it, when the app is made or enrolled; a
+	// front-end switch can never add to it (ADR-072 §3).
+	DeviceFrontEnds []string `json:"device_front_ends,omitempty"`
+	// FrontEndsOff are the offered front ends the owner has switched off. Always
+	// a subset of DeviceFrontEnds.
+	FrontEndsOff []string `json:"front_ends_off,omitempty"`
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
 	// raw private key is never persisted. >0 means the asset can sign login challenges.

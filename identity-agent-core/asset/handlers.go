@@ -149,9 +149,15 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		AssetType       string           `json:"asset_type"`
 		DelegationModel string           `json:"delegation_model"`
 		Policy          EnrollmentPolicy `json:"policy"`
+		// DeviceFrontEnds: for an app, the front ends its manifest offers.
+		DeviceFrontEnds []string `json:"device_front_ends"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeJSON(w, map[string]string{"error": "bad request"}, http.StatusBadRequest)
+		return
+	}
+	if err := CheckOfferedFrontEnds(body.AssetType, body.DeviceFrontEnds); err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
 		return
 	}
 	if body.DisplayName == "" || body.Origin == "" || body.AssetType == "" {
@@ -266,6 +272,7 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		DelegatorAID:    delegator,
 		ApprovalPending: approvalPending,
 		Policy:          body.Policy,
+		DeviceFrontEnds: body.DeviceFrontEnds,
 		SigningIndex:    signingIndex,
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
@@ -336,6 +343,62 @@ func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	a.UpdatedAt = time.Now().UTC()
 	h.Store.UpsertAsset(a)
 	h.writeJSON(w, a.ForDisplay(h.VaultHas), http.StatusOK)
+}
+
+// HandleGetFrontEnds answers which front ends an app offers and which of them
+// its owner has switched off. GET /api/assets/{id}/front-ends. Owner only.
+func (h *Handler) HandleGetFrontEnds(w http.ResponseWriter, r *http.Request) {
+	a, ok, status, msg := h.appForFrontEnds(chi.URLParam(r, "id"))
+	if !ok {
+		h.writeJSON(w, map[string]string{"error": msg}, status)
+		return
+	}
+	h.writeJSON(w, frontEndsOf(a), http.StatusOK)
+}
+
+// HandlePutFrontEnds sets which offered front ends are switched off.
+// PUT /api/assets/{id}/front-ends {"switched_off": ["browser"]}. Owner only.
+// The list replaces the last one; a kind the app does not offer is refused,
+// because the owner can switch off what an app offers and cannot switch on
+// what it does not (ADR-072 §3).
+func (h *Handler) HandlePutFrontEnds(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SwitchedOff *[]string `json:"switched_off"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SwitchedOff == nil {
+		h.writeJSON(w, map[string]string{"error": "bad request: switched_off is required (an empty list switches everything on)"}, http.StatusBadRequest)
+		return
+	}
+	a, ok, status, msg := h.appForFrontEnds(chi.URLParam(r, "id"))
+	if !ok {
+		h.writeJSON(w, map[string]string{"error": msg}, status)
+		return
+	}
+	off, err := SwitchOff(a.DeviceFrontEnds, *body.SwitchedOff)
+	if err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
+	a.FrontEndsOff = off
+	a.UpdatedAt = time.Now().UTC()
+	if err := h.Store.UpsertAsset(a); err != nil {
+		h.writeJSON(w, map[string]string{"error": "the setting could not be saved"}, http.StatusInternalServerError)
+		return
+	}
+	h.writeJSON(w, frontEndsOf(a), http.StatusOK)
+}
+
+func (h *Handler) appForFrontEnds(id string) (a Asset, ok bool, status int, msg string) {
+	a, found, err := h.Store.GetAsset(id)
+	switch {
+	case err != nil:
+		return a, false, http.StatusInternalServerError, err.Error()
+	case !found:
+		return a, false, http.StatusNotFound, "not found"
+	case a.AssetType != "app":
+		return a, false, http.StatusBadRequest, "only a utility app has front ends"
+	}
+	return a, true, 0, ""
 }
 
 func (h *Handler) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {

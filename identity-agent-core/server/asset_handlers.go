@@ -101,6 +101,8 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Post("/", s.assetHandler.HandleCreateAsset)
 		r.Get("/{id}", s.assetHandler.HandleGetAsset)
 		r.Put("/{id}/policy", s.assetHandler.HandleUpdatePolicy)
+		r.Get("/{id}/front-ends", s.assetHandler.HandleGetFrontEnds)
+		r.Put("/{id}/front-ends", s.assetHandler.HandlePutFrontEnds)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
 		r.Post("/{id}/invites", s.assetHandler.HandleCreateInvite)
 		r.Delete("/{id}/invites/{invite}", s.assetHandler.HandleRevokeInvite)

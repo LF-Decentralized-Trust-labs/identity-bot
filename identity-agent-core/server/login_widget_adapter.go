@@ -29,7 +29,7 @@ import (
 // it is the audience: a sign-in asked for from a page is for that page and no
 // other, and an asset that names the origin of its website is not signed in to
 // from any other page.
-func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
+func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
@@ -66,6 +66,22 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		if found.Origin != "" && !sameOrigin(found.Origin, askedFrom) {
 			return "", "", http.StatusForbidden, "this website asset is not for this page"
 		}
+	}
+
+	// A utility app is reached only by a front end it offers and its owner has
+	// not switched off; this is the owner's Identity Agent's to enforce, and
+	// the app's back end is never asked (ADR-072 §3). A sign-in for a browser's
+	// key is a browser front end's.
+	// A browser's key signs in only as a browser, whatever kind was named, so
+	// naming another kind cannot get round a switched-off browser.
+	if browserKey != "" {
+		if frontEnd != "" && frontEnd != asset.FrontEndBrowser {
+			return "", "", http.StatusForbidden, "a sign-in for a browser's key is a browser front end's"
+		}
+		frontEnd = asset.FrontEndBrowser
+	}
+	if why := found.FrontEndRefusal(frontEnd); why != "" {
+		return "", "", http.StatusForbidden, why
 	}
 
 	// A sign-in for a browser's key names its thumbprint in the signed
@@ -187,9 +203,10 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		RequestDisclosures []string `json:"requestDisclosures"`
 		Audience           string   `json:"audience"`
 		BrowserKey         string   `json:"browserKey"`
+		FrontEnd           string   `json:"frontEnd"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body) // tolerate empty body
-	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, body.FrontEnd, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return

@@ -25,6 +25,8 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		ExpiresInS  int    `json:"expires_in_seconds"`
 		// Replaces is the ID of an unused enrolment this one stands in for.
 		Replaces string `json:"replaces"`
+		// DeviceFrontEnds: for an app, the front ends its manifest offers.
+		DeviceFrontEnds []string `json:"device_front_ends"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeJSON(w, map[string]string{"error": "bad request"}, http.StatusBadRequest)
@@ -37,6 +39,11 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		Origin:      strings.TrimSpace(body.Origin),
 		Replaces:    strings.TrimSpace(body.Replaces),
 	}
+	if err := CheckOfferedFrontEnds(e.AssetType, body.DeviceFrontEnds); err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
+	e.DeviceFrontEnds = body.DeviceFrontEnds
 	if body.ExpiresInS > 0 {
 		e.ExpiresAt = time.Now().UTC().Add(time.Duration(body.ExpiresInS) * time.Second)
 	}
@@ -192,6 +199,8 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 		// tell the owner where it lives.
 		Origin:      enrolment.Origin,
 		PairwiseAID: resp.AID,
+		// Also the owner's, from the token.
+		DeviceFrontEnds: enrolment.DeviceFrontEnds,
 		// Recorded so this machine's later requests can be verified. Without it
 		// the enrolment produces an identity nothing can check a signature
 		// against, which is most of the point of having enrolled.
