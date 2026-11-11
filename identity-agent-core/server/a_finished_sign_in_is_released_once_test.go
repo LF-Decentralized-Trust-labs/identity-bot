@@ -29,11 +29,11 @@ func TestAFinishedSignInIsReleasedOnceAndThenForgotten(t *testing.T) {
 	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
 	in := aSettledSignIn(t, w)
 
-	res, err := w.org.browserKeySignInResult(in.Session, in.Collector)
+	res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector)
 	if err != nil || res.State != "verified" || res.Pairwise == "" {
 		t.Fatalf("the first read: %+v %v", res, err)
 	}
-	if _, err := w.org.browserKeySignInResult(in.Session, in.Collector); err == nil {
+	if _, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err == nil {
 		t.Fatal("a sign-in already collected was released a second time")
 	}
 	st, _, _, _ := w.org.collectSignIn(in.Session, in.Collector, time.Now())
@@ -66,7 +66,7 @@ func TestAFinishedSignInIsNotReleasedAfterItsWindow(t *testing.T) {
 		t.Fatalf("a result past its window was released: %v", st)
 	}
 	// Reading it on time afterwards does not bring it back.
-	if _, err := w.org.browserKeySignInResult(in.Session, in.Collector); err == nil {
+	if _, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err == nil {
 		t.Fatal("a result forgotten past its window was released later")
 	}
 }
@@ -79,7 +79,7 @@ func TestReadingWithoutTheSecretDoesNotSpendTheResult(t *testing.T) {
 	if _, _, held, _ := w.org.collectSignIn(in.Session, "not-the-secret", time.Now()); held {
 		t.Fatal("a wrong secret was accepted")
 	}
-	if res, err := w.org.browserKeySignInResult(in.Session, in.Collector); err != nil || res.Pairwise == "" {
+	if res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err != nil || res.Pairwise == "" {
 		t.Fatalf("the holder lost the result to a stranger's read: %+v %v", res, err)
 	}
 }
@@ -177,7 +177,7 @@ func TestAFailedForgettingReleasesNothingAndLosesNothing(t *testing.T) {
 		t.Fatalf("the status was left forgotten in memory after the save failed: %v", cur)
 	}
 	mend()
-	if res, err := w.org.browserKeySignInResult(in.Session, in.Collector); err != nil || res.Pairwise == "" {
+	if res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err != nil || res.Pairwise == "" {
 		t.Fatalf("the holder could not collect after the agent could write again: %+v %v", res, err)
 	}
 }
@@ -229,7 +229,28 @@ func TestAnUncollectedResultIsForgottenAfterItsWindow(t *testing.T) {
 			t.Fatalf("%s: a pending sign-in was disturbed", name)
 		}
 	}
-	if _, err := w.org.browserKeySignInResult(old.Session, old.Collector); err == nil {
+	if _, err := w.org.browserKeySignInResult(siteOf(w.org, old.Session), old.Session, old.Collector); err == nil {
 		t.Fatal("a result forgotten unread was released later")
+	}
+}
+
+// siteOf is the asset a started sign-in was for, as its challenge was signed.
+func siteOf(s *CoreServer, session string) string {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	return s.challenges[session].SiteAID
+}
+
+// A finished sign-in read by an asker that is not the asset it was for gets
+// nothing, and does not use the result up: the asset it was for still has it.
+func TestAnotherAssetsReadOfAFinishedSignInDoesNotSpendIt(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	in := aSettledSignIn(t, w)
+
+	if _, err := w.org.browserKeySignInResult("EAnotherAppsAID", in.Session, in.Collector); err == nil {
+		t.Fatal("a sign-in was given to an asset it was not for")
+	}
+	if res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err != nil || res.State != "verified" || res.Pairwise == "" {
+		t.Fatalf("the wrong asset's read used up the real asset's result: %+v %v", res, err)
 	}
 }

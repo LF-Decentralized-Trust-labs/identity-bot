@@ -1,0 +1,291 @@
+{
+  "about": "What a utility app's page believes (packages/login-web/src/app.ts), as cases a port in another language must hold alike. Made by make-app-checks.mjs; the TypeScript test makes it again and compares. A case with `refuse` must be refused with a message containing that text; otherwise it must give `expect`.",
+  "links": [
+    {
+      "name": "a complete link",
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/",
+      "expect": {
+        "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+        "kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
+        "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+        "api": "https://tasks.example"
+      }
+    },
+    {
+      "name": "no relay identifier",
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&api=https://a.example",
+      "refuse": "no relay identifier"
+    },
+    {
+      "name": "a back end that is not https or local",
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=http://evil.example",
+      "refuse": "no back end"
+    },
+    {
+      "name": "a local back end",
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=http://127.0.0.1:9",
+      "expect": {
+        "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+        "kel": "x",
+        "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+        "api": "http://127.0.0.1:9"
+      }
+    }
+  ],
+  "key_logs": [
+    {
+      "name": "the app's own log",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
+      "expect_key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5"
+    },
+    {
+      "name": "another identifier's log",
+      "aid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
+      "refuse": "not the app's identifier"
+    },
+    {
+      "name": "a wrong signature",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIl19",
+      "refuse": "not signed by the key"
+    },
+    {
+      "name": "fields it should not have",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6W10sImNlc3Jfc2lnbmF0dXJlcyI6W10sImV4dHJhIjoxfQ",
+      "refuse": "fields it should not"
+    },
+    {
+      "name": "a self-signed event under another's identifier",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUkxia2wwYzFvMFNtOWhZMWh6TWs5U04zRXRUVTVJZDNGcVVWaGpVMFV6Ymt0WU1FMWZWRXBOWTI1TklsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkJBX1BtNFJWd1lDeFVDb3FfVkVJWHFXdUtMbERJVjFZRzBURDBvYWpLRGxEQmRHU0pMSWRQSkJ2T2tKVnJZdy1KYnE1NUxocjJIalRERGNKZVU3SzhHIl19",
+      "refuse": "does not derive the identifier"
+    }
+  ],
+  "challenges": [
+    {
+      "name": "the app's challenge for this key",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\"}",
+      "sig": "0BBVuk_4NuN3rqWkomFgzwxetMFpbdJcedo-l69YDnDxUaWyBm5MzJNCrn6L2P2GwyGSk76g3IG9lFdF6tKURaoL",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "expect": {
+        "session_token": "tok",
+        "expiry": "2026-11-11T12:10:00Z"
+      }
+    },
+    {
+      "name": "a challenge naming the browser kind",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\",\"front_end\":\"browser\"}",
+      "sig": "0BBq16kMkfD8TMAg3cyf2eZFYI27eJq59FEZZIE80kVu50OvcHCtF0MzXqX7JjISV4fAKcWhUrS0vjtJhxuAPjAB",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "expect": {
+        "session_token": "tok",
+        "expiry": "2026-11-11T12:10:00Z",
+        "front_end": "browser"
+      }
+    },
+    {
+      "name": "an installed-app challenge",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\",\"front_end\":\"installed_app\"}",
+      "sig": "0BC-g1vEKo18JkvMb0e3JUNkWzusd3W5IH7I2xMj9DTTftpHYGOIz0Onl-JwZioujIOaiFmqdxnYWJFjTiTH8QAN",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "another kind of front end"
+    },
+    {
+      "name": "another browser's key",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\"}",
+      "sig": "0BCv8eQ7RXJHALeloCxR33Y7TmYotY9iPBFftlTM1COmGf2UoNMqf84LtJItXMongWTMB90FW6gJZYmnXCEebvED",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "this page's own key"
+    },
+    {
+      "name": "another app's challenge",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\"}",
+      "sig": "0BCMvSxMG0DmYEkRqC_BuquVQY3Y0ZzZaUMLS7bp8CT9LcBDsTrkng92b4jqN6kKtEQQc1yjndWh43TA7a_emn8N",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "another app"
+    },
+    {
+      "name": "a lapsed challenge",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T11:59:59Z\",\"session_token\":\"tok\"}",
+      "sig": "0BATF66WhuSs5ABc10hMAN-5gKXtJlctXcwT2lT9wCSOtJmRD3gK3yy5DDUZjmYGmGD0MFcGg9jkh8fuuhfjzv8A",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "lapsed"
+    },
+    {
+      "name": "signed by another key",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\"}",
+      "sig": "0BDcBdMmY_dOhFw__l7jiuG9dP-815dkUPjwZ2bEqYVrsnfrssbSz-dyKzaT_JURc5-2oDo9YTIcF9Aw4bHVUUEJ",
+      "pointer": "https://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "not signed by the app"
+    },
+    {
+      "name": "another challenge's code",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\"}",
+      "sig": "0BBVuk_4NuN3rqWkomFgzwxetMFpbdJcedo-l69YDnDxUaWyBm5MzJNCrn6L2P2GwyGSk76g3IG9lFdF6tKURaoL",
+      "pointer": "https://ia.example/i/other",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "not this challenge's"
+    },
+    {
+      "name": "a code that is not https",
+      "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "key_hex": "c1cf6dcfec3731262d3b46836ae1d28a506e7475554fbc85dc7172f854d7f5a5",
+      "body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd\",\"browser_key\":\"kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0\",\"expiry\":\"2026-11-11T12:10:00Z\",\"session_token\":\"tok\"}",
+      "sig": "0BBVuk_4NuN3rqWkomFgzwxetMFpbdJcedo-l69YDnDxUaWyBm5MzJNCrn6L2P2GwyGSk76g3IG9lFdF6tKURaoL",
+      "pointer": "http://ia.example/i/tok",
+      "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
+      "now_ms": 1794398400000,
+      "refuse": "not this challenge's"
+    }
+  ],
+  "answers": [
+    {
+      "name": "the app's answer to this call",
+      "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "nonce": "n1",
+      "status": 200,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6dHJ1ZX0=",
+      "inception": "eyJ2IjoiS0VSSTEwSlNPTjAwMDAwMF8iLCJ0IjoiaWNwIiwiZCI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwiaSI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHRnVKTHVvRE5Ia1lRc2VyQ3R6UVpESmVJTEREWHM3MXBYaTQtNElncGVkIl0sIm50IjoiMSIsIm4iOltdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ",
+      "sig": "825XjW5MkTr_COi7dOm4UXbhTV5yqQwFFAUKJYjz4g9Ynory6816C4HolseWkx_31FzOcMEcO9o8rFwZekbWDg"
+    },
+    {
+      "name": "an answer to another call",
+      "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "nonce": "n2",
+      "status": 200,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6dHJ1ZX0=",
+      "inception": "eyJ2IjoiS0VSSTEwSlNPTjAwMDAwMF8iLCJ0IjoiaWNwIiwiZCI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwiaSI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHRnVKTHVvRE5Ia1lRc2VyQ3R6UVpESmVJTEREWHM3MXBYaTQtNElncGVkIl0sIm50IjoiMSIsIm4iOltdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ",
+      "sig": "825XjW5MkTr_COi7dOm4UXbhTV5yqQwFFAUKJYjz4g9Ynory6816C4HolseWkx_31FzOcMEcO9o8rFwZekbWDg",
+      "refuse": "does not hold for this call"
+    },
+    {
+      "name": "a changed body",
+      "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "nonce": "n1",
+      "status": 200,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6ZmFsc2V9",
+      "inception": "eyJ2IjoiS0VSSTEwSlNPTjAwMDAwMF8iLCJ0IjoiaWNwIiwiZCI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwiaSI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHRnVKTHVvRE5Ia1lRc2VyQ3R6UVpESmVJTEREWHM3MXBYaTQtNElncGVkIl0sIm50IjoiMSIsIm4iOltdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ",
+      "sig": "825XjW5MkTr_COi7dOm4UXbhTV5yqQwFFAUKJYjz4g9Ynory6816C4HolseWkx_31FzOcMEcO9o8rFwZekbWDg",
+      "refuse": "does not hold for this call"
+    },
+    {
+      "name": "a changed status",
+      "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "nonce": "n1",
+      "status": 500,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6dHJ1ZX0=",
+      "inception": "eyJ2IjoiS0VSSTEwSlNPTjAwMDAwMF8iLCJ0IjoiaWNwIiwiZCI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwiaSI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHRnVKTHVvRE5Ia1lRc2VyQ3R6UVpESmVJTEREWHM3MXBYaTQtNElncGVkIl0sIm50IjoiMSIsIm4iOltdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ",
+      "sig": "825XjW5MkTr_COi7dOm4UXbhTV5yqQwFFAUKJYjz4g9Ynory6816C4HolseWkx_31FzOcMEcO9o8rFwZekbWDg",
+      "refuse": "does not hold for this call"
+    },
+    {
+      "name": "an unsigned answer",
+      "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "nonce": "n1",
+      "status": 200,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6dHJ1ZX0=",
+      "inception": "eyJ2IjoiS0VSSTEwSlNPTjAwMDAwMF8iLCJ0IjoiaWNwIiwiZCI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwiaSI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHRnVKTHVvRE5Ia1lRc2VyQ3R6UVpESmVJTEREWHM3MXBYaTQtNElncGVkIl0sIm50IjoiMSIsIm4iOltdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ",
+      "sig": null,
+      "refuse": "not signed"
+    },
+    {
+      "name": "another identifier",
+      "rid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+      "nonce": "n1",
+      "status": 200,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6dHJ1ZX0=",
+      "inception": "eyJ2IjoiS0VSSTEwSlNPTjAwMDAwMF8iLCJ0IjoiaWNwIiwiZCI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwiaSI6IkVQSzc5VGt1ckY4UzJyZXpHM1o4ZFVpVVlrRXVZeV85X2taT1NCaTVIU3FJIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRHRnVKTHVvRE5Ia1lRc2VyQ3R6UVpESmVJTEREWHM3MXBYaTQtNElncGVkIl0sIm50IjoiMSIsIm4iOltdLCJidCI6IjAiLCJiIjpbXSwiYyI6W10sImEiOltdfQ",
+      "sig": "825XjW5MkTr_COi7dOm4UXbhTV5yqQwFFAUKJYjz4g9Ynory6816C4HolseWkx_31FzOcMEcO9o8rFwZekbWDg",
+      "refuse": "not the identifier the link names"
+    }
+  ],
+  "proofs": [
+    {
+      "method": "GET",
+      "target": "/signin/session/abc?x=1",
+      "ts": "2026-11-11T12:00:05Z",
+      "nonce": "nonce1",
+      "binding": "abc",
+      "body": "",
+      "expect": "IABK1\nGET\n/signin/session/abc?x=1\n2026-11-11T12:00:05Z\nnonce1\nabc\n47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
+    },
+    {
+      "method": "POST",
+      "target": "/session/chat/send",
+      "ts": "2026-11-11T12:00:06Z",
+      "nonce": "nonce2",
+      "binding": "bindingvalue",
+      "body": "{\"words\":\"héllo\"}",
+      "expect": "IABK1\nPOST\n/session/chat/send\n2026-11-11T12:00:06Z\nnonce2\nbindingvalue\n1s9TfhYcpEA4LOE_eNUfWXZZ4pgPLKqRwqucoArMO_A"
+    }
+  ],
+  "answer_texts": [
+    {
+      "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+      "nonce": "n1",
+      "status": 200,
+      "content_type": "application/json",
+      "body_b64": "eyJvayI6dHJ1ZX0=",
+      "expect": "APP-ANSWER-V1\nEPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI\nbrowser\nn1\n200\napplication/json\n4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93"
+    }
+  ],
+  "thumbprints": [
+    {
+      "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "expect": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0"
+    }
+  ],
+  "skews": [
+    {
+      "server_time": "2026-11-11T12:00:10Z",
+      "now_ms": 1794398400000,
+      "expect_ms": 10000
+    },
+    {
+      "server_time": "tomorrow",
+      "now_ms": 1794398400000,
+      "refuse": "no time"
+    }
+  ]
+}

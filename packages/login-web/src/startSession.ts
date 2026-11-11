@@ -24,6 +24,11 @@ export interface StartSessionOptions {
   /** The thumbprint of a key the person's browser holds, when the sign-in is
    *  for that key (ADR-066). */
   browserKey?: string;
+  /** The kind of front end signing in, `browser` or `installed_app` (ADR-072
+   *  section 2). The person's Identity Agent names it in the signed challenge. A
+   *  utility app's owner can switch a kind off, and the Identity Agent refuses a
+   *  sign-in for it with the reason. Leave it out for a website asset. */
+  frontEnd?: "browser" | "installed_app";
   fetchFn?: typeof fetch;
 }
 
@@ -46,6 +51,7 @@ export async function startLoginSession(opts: StartSessionOptions): Promise<Star
       audience: opts.audience,
       requestDisclosures: opts.requestDisclosures ?? [],
       ...(opts.browserKey ? { browserKey: opts.browserKey } : {}),
+      ...(opts.frontEnd ? { frontEnd: opts.frontEnd } : {}),
     }),
   });
   if (!resp.ok) {

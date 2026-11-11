@@ -133,10 +133,11 @@ type Host interface {
 	// since can be signed out. It does not re-check a required credential
 	// (RequiredCredSchema), which needs what the person presented.
 	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
-	// BrowserKeySignInResult is how that sign-in stands, given the session and
+	// BrowserKeySignInResult is how that sign-in stands, given the asset the asker
+	// is (siteAID, the asset's own identifier, as the challenge was signed as), and the session and
 	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key
 	// the person's signed assertion repeated.
-	BrowserKeySignInResult(session, collector string) (server.BrowserKeySignInResult, error)
+	BrowserKeySignInResult(siteAID, session, collector string) (server.BrowserKeySignInResult, error)
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
 	HoldTheRecord() (string, bool, bool, func(), error)

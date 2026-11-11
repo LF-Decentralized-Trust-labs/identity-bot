@@ -3,6 +3,7 @@ import { detectLocalAgent, openDesktopLoginDeepLink, triggerLocalLogin } from ".
 import { useSessionPoll } from "./useSessionPoll.js";
 import { startPageSession, type PageSessionRead } from "./pageSession.js";
 import { LoginQrCode } from "./LoginQrCode.js";
+import { signInProblem } from "./signInProblem.js";
 
 export interface SignInButtonProps {
   sessionEndpoint: string;
@@ -11,6 +12,13 @@ export interface SignInButtonProps {
   /** Thumbprint of a key this browser holds and cannot export (ADR-066). The
    *  challenge names it and the person's approval is for that key. */
   browserKey?: string;
+  /** The kind of front end this page is. A utility app's page passes "browser"
+   *  (ADR-072); a website asset needs none. */
+  frontEnd?: "browser" | "installed_app";
+  /** The fetch every call goes through. A utility app's page passes the one
+   *  `appFetch` (`@identity-agent/login-web/app`) makes, which checks each answer
+   *  is the app's and signs each request with the browser's key. */
+  fetchFn?: typeof fetch;
   requestScore?: { minBand?: "red" | "amber" | "green"; minScore?: number; required?: boolean };
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
@@ -49,6 +57,8 @@ export function SignInButton({
   requestCredentials = [],
   requestScore,
   browserKey,
+  frontEnd,
+  fetchFn,
   theme = "auto",
   size = "medium",
   qrFallback = true,
@@ -62,14 +72,14 @@ export function SignInButton({
   const [busy, setBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const dims = SIZES[size];
-  const poll = useSessionPoll(sessionEndpoint, sessionToken, { collectorSecret });
+  const poll = useSessionPoll(sessionEndpoint, sessionToken, { collectorSecret, fetchFn });
 
   React.useEffect(() => {
     if (poll.state === "verified" && sessionToken) {
       onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken, collectorSecret, signIn: poll.result });
     }
     if (poll.state === "declined" || poll.state === "expired" || poll.state === "error") {
-      onError?.(new Error(poll.error ?? poll.state));
+      onError?.(new Error(signInProblem(poll.state, poll.error)));
     }
   }, [poll.state, poll.appSessionToken, poll.result, poll.error, sessionToken, collectorSecret, onSuccess, onError]);
 
@@ -78,6 +88,7 @@ export function SignInButton({
     try {
       const data = await startPageSession({
         sessionEndpoint,
+        fetchFn,
         body: {
           requestDisclosures,
           requestCredentials: requestCredentials.map((c) => ({
@@ -85,6 +96,7 @@ export function SignInButton({
             required: c.required ?? false,
           })),
           browserKey,
+          frontEnd,
           requestScore: requestScore
             ? {
                 min_band: requestScore.minBand,
@@ -120,11 +132,11 @@ export function SignInButton({
         }
       }
     } catch (e) {
-      onError?.(e as Error);
+      onError?.(new Error(signInProblem("error", (e as Error).message)));
     } finally {
       setBusy(false);
     }
-  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, qrFallback, onError]);
+  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, frontEnd, fetchFn, qrFallback, onError]);
 
   const isDark =
     theme === "dark" ||

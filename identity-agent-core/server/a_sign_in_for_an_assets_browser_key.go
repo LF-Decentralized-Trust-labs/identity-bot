@@ -52,6 +52,10 @@ type BrowserKeySignInResult struct {
 	// thumbprint the verified assertion repeated; both only when verified.
 	Pairwise, BrowserKey string
 	Disclosures          map[string]string
+	// SiteAID is the asset the challenge was signed as, and FrontEnd the kind of
+	// front end it named, both from the challenge itself: so whoever asks can
+	// check the sign-in was started for it, and for the kind it expects.
+	SiteAID, FrontEnd string
 }
 
 // startBrowserKeySignIn is the core's signed challenge for the asset, naming
@@ -78,9 +82,10 @@ func (s *CoreServer) startBrowserKeySignIn(assetID, audience, browserKey, public
 }
 
 // browserKeySignInResult is how the sign-in stands, given its collector
-// secret. A wrong secret and an unknown sign-in are the same error, and so is
-// a sign-in that was not for a browser's key.
-func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserKeySignInResult, error) {
+// secret and the asset asking (siteAID). A wrong secret and an unknown sign-in
+// are the same error, and so is a sign-in that was not for a browser's key or
+// not for the asking asset.
+func (s *CoreServer) browserKeySignInResult(siteAID, session, collector string) (BrowserKeySignInResult, error) {
 	errUnknown := errors.New("no such sign-in")
 	if bound, held := s.collectorHeld(session, collector); !bound || !held {
 		return BrowserKeySignInResult{}, errUnknown
@@ -88,7 +93,10 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 	s.challengeMu.Lock()
 	b, ok := s.challenges[session]
 	s.challengeMu.Unlock()
-	if !ok || b.BrowserKey == "" {
+	if !ok || b.BrowserKey == "" || b.SiteAID != siteAID {
+		// Another asset's sign-in is, to this one, no sign-in. This is decided
+		// before anything is read, because reading a finished sign-in releases
+		// it: an asker that is not the asset it was for must not use it up.
 		return BrowserKeySignInResult{}, errUnknown
 	}
 	st, _, _, cerr := s.collectSignIn(session, collector, time.Now())
@@ -104,7 +112,7 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 		// pairwise identifier and a map[string]string of disclosures. Anything
 		// else is not read as "verified with nothing disclosed", which would
 		// quietly drop what the person chose to show: it is an error.
-		out := BrowserKeySignInResult{State: "verified", BrowserKey: fmt.Sprint(st["browser_key"])}
+		out := BrowserKeySignInResult{State: "verified", BrowserKey: fmt.Sprint(st["browser_key"]), SiteAID: b.SiteAID, FrontEnd: b.FrontEnd}
 		pairwise, ok := st["pairwise_aid"].(string)
 		if !ok || pairwise == "" {
 			return BrowserKeySignInResult{}, errors.New("the verified sign-in carries no identifier for the person")
@@ -119,9 +127,9 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 		}
 		return out, nil
 	case "denied":
-		return BrowserKeySignInResult{State: "declined"}, nil
+		return BrowserKeySignInResult{State: "declined", SiteAID: b.SiteAID, FrontEnd: b.FrontEnd}, nil
 	}
-	return BrowserKeySignInResult{State: "pending"}, nil
+	return BrowserKeySignInResult{State: "pending", SiteAID: b.SiteAID, FrontEnd: b.FrontEnd}, nil
 }
 
 // assetStillAdmits says whether the asset's enrolment policy lets this person
