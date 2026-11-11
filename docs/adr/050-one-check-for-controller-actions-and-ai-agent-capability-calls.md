@@ -55,10 +55,13 @@ opens them to a controller. They are:
   witness or watcher provider, and importing, enabling or deleting a capability;
 - speaking as the identity to another Identity Agent by a sealed request, and
   installing software on this computer;
-- what this agent's watcher tells peers: opting an identity out of, or back
-  into, being discussed (`PUT /api/watcher/opt-out`), and which contacts it
-  cross-checks with (`PUT /api/watcher/peers`; reading the list, `GET`, is open
-  to the owner's own controllers, like the opt-out read).
+- what this agent's watcher tells peers and whom it believes: opting an identity
+  out of, or back into, being discussed (`PUT /api/watcher/opt-out`), which
+  contacts it cross-checks with (`PUT /api/watcher/peers`), setting the watchers
+  it trusts and the hints it follows (`PUT /api/watcher/trusted`,
+  `PUT /api/watcher/hints`), and acknowledging or resolving a duplicity alert
+  (`POST /api/watcher/alerts/{id}/acknowledge`, `POST /api/watcher/alerts/{id}/resolve`).
+  Reading any of these is open to the owner's own controllers.
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line

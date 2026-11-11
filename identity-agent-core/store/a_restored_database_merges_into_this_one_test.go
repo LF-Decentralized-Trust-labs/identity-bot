@@ -729,3 +729,61 @@ func TestABackupThatResolvedAnAlertResolvesItHere(t *testing.T) {
 		t.Fatalf("%d alert rows, want 1", n)
 	}
 }
+
+// The backup's alert 1 was seen; here, alert 1 is a different alert and an
+// unrelated one is 2. The acknowledgement must land on the alert it was about.
+func TestARestoredAcknowledgementLandsOnTheSameAlertNotTheSameNumber(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(`INSERT INTO duplicity_alerts (id, aid, sequence_num, our_digest, their_digest, detected_at) VALUES (1,'AB',1,'o','t','d1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.db.Exec(`INSERT INTO watcher_alert_ack (alert_id, acknowledged_at) VALUES (1,'2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(`INSERT INTO duplicity_alerts (id, aid, sequence_num, our_digest, their_digest, detected_at) VALUES (1,'AL',1,'o','t','d1')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	var local, restored int
+	into.db.QueryRow(`SELECT count(*) FROM watcher_alert_ack a JOIN duplicity_alerts d ON d.id = a.alert_id WHERE d.aid='AL'`).Scan(&local)
+	into.db.QueryRow(`SELECT count(*) FROM watcher_alert_ack a JOIN duplicity_alerts d ON d.id = a.alert_id WHERE d.aid='AB'`).Scan(&restored)
+	if local != 0 || restored != 1 {
+		t.Fatalf("local alert acknowledged=%d, restored alert acknowledged=%d; want 0 and 1", local, restored)
+	}
+	var total int
+	into.db.QueryRow(`SELECT count(*) FROM watcher_alert_ack`).Scan(&total)
+	if total != 1 {
+		t.Fatalf("%d acknowledgements, want 1", total)
+	}
+}
+
+// An older backup's "confirmed" must not replace a local duplicity verdict, and
+// an identity only the backup checked is still restored.
+func TestAnOlderBackupDoesNotReplaceALocalDuplicityVerdict(t *testing.T) {
+	_, from := openStore(t)
+	for _, a := range []string{"AL", "AB"} {
+		if _, err := from.db.Exec(`INSERT INTO watcher_contact_check (aid, checked_at, verdict) VALUES (?, '2026-01-01', 'confirmed')`, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(`INSERT INTO watcher_contact_check (aid, checked_at, verdict) VALUES ('AL', '2026-06-01', 'duplicity')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	var al, ab string
+	into.db.QueryRow(`SELECT verdict FROM watcher_contact_check WHERE aid='AL'`).Scan(&al)
+	into.db.QueryRow(`SELECT verdict FROM watcher_contact_check WHERE aid='AB'`).Scan(&ab)
+	if al != "duplicity" || ab != "confirmed" {
+		t.Fatalf("AL=%q AB=%q; want duplicity kept and the backup-only check restored", al, ab)
+	}
+}

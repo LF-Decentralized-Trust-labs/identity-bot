@@ -14,6 +14,15 @@ type Store interface {
 	listFirstSeen(aid string) ([]FirstSeenRecord, error)
 	InsertDuplicityAlert(alert DuplicityAlert) (int64, error)
 	listDuplicityAlerts(aid string) ([]DuplicityAlert, error)
+	// getAlert, listAllAlerts and getContactCheck are unexported for the same
+	// reason as the reads above.
+	getAlert(id int64) (*DuplicityAlert, error)
+	listAllAlerts() ([]DuplicityAlert, error)
+	AcknowledgeAlert(id int64, at time.Time) error
+	ResolveAlert(id int64, note string, at time.Time) error
+	SaveContactCheck(c ContactCheck) error
+	getContactCheck(aid string) (*ContactCheck, error)
+	listContactChecks() ([]ContactCheck, error)
 	IsOptedOut(aid string) (bool, error)
 	SetOptOut(aid string, optedOut bool) error
 	GetConfig(key string) (string, error)

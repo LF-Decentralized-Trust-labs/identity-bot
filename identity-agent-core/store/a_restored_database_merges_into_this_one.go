@@ -452,15 +452,33 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string, isS
 	if err != nil {
 		return err
 	}
-	var shared []string
-	for _, c := range backed {
-		for _, l := range live {
-			if c == l {
-				shared = append(shared, `"`+c+`"`)
-				break
-			}
-		}
+	// Two watcher tables are not merged by the generic rule, and why matters:
+	//
+	// watcher_alert_ack is keyed by an alert's row number, which means nothing
+	// outside the database that issued it, so copying it attaches one machine's
+	// "seen" to a different alert here. It is carried inside mergeDuplicityAlerts,
+	// matched on the alert's identity instead.
+	//
+	// watcher_contact_check is the newest check of each identity and is
+	// replaceable, so it is only filled where this database has none. Replacing
+	// would let an older backup's "confirmed" overwrite a local duplicity verdict
+	// whose alert is still open.
+	if name == "watcher_alert_ack" {
+		return nil
 	}
+	if name == "watcher_contact_check" {
+		cols := strings.Join(sharedColumns(backed, live), ", ")
+		if cols == "" {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, fmt.Sprintf(
+			`INSERT OR IGNORE INTO main.watcher_contact_check (%s) SELECT %s FROM restored.watcher_contact_check`, cols, cols))
+		if err != nil {
+			return fmt.Errorf("restore the watcher_contact_check table: %w", err)
+		}
+		return nil
+	}
+	shared := sharedColumns(backed, live)
 	if len(shared) == 0 {
 		return nil
 	}
@@ -739,6 +757,46 @@ func mergeDuplicityAlerts(ctx context.Context, tx *sql.Tx, shared []string) erro
 		`INSERT OR IGNORE INTO main.duplicity_alerts (%s) SELECT %s FROM restored.duplicity_alerts`,
 		cols, cols)); err != nil {
 		return fmt.Errorf("restore the duplicity_alerts table: %w", err)
+	}
+	return carryAlertAcknowledgements(ctx, tx)
+}
+
+// sharedColumns lists the quoted columns present in both.
+func sharedColumns(backed, live []string) []string {
+	var out []string
+	for _, c := range backed {
+		for _, l := range live {
+			if c == l {
+				out = append(out, `"`+c+`"`)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// carryAlertAcknowledgements copies the backup's "owner has seen this" onto the
+// matching alert here, matched on the alert's identity, never on its row number.
+// An alert already acknowledged here keeps its own time.
+func carryAlertAcknowledgements(ctx context.Context, tx *sql.Tx) error {
+	var n int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM restored.sqlite_master WHERE type='table' AND name='watcher_alert_ack'`).Scan(&n); err != nil {
+		return fmt.Errorf("restore alert acknowledgements: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO main.watcher_alert_ack (alert_id, acknowledged_at)
+		SELECT m.id, k.acknowledged_at
+		  FROM restored.watcher_alert_ack k
+		  JOIN restored.duplicity_alerts r ON r.id = k.alert_id
+		  JOIN main.duplicity_alerts m
+		    ON m.aid = r.aid AND m.sequence_num = r.sequence_num
+		   AND m.our_digest = r.our_digest AND m.their_digest = r.their_digest
+		   AND m.detected_at = r.detected_at`); err != nil {
+		return fmt.Errorf("restore alert acknowledgements: %w", err)
 	}
 	return nil
 }

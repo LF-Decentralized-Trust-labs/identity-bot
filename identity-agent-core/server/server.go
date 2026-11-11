@@ -1073,6 +1073,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// Which contacts it cross-checks with. Any controller may read; PUT is owner-only.
 		r.Get("/watcher/peers", s.handleWatcherPeersGet)
 		r.Put("/watcher/peers", s.handleWatcherPeersSet)
+		// What the watcher found, for the owner to read and act on
+		// (watcher_owner_handlers.go).
+		s.mountWatcherOwnerRoutes(r)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
 		// Everything this agent's trust rests on, assembled into one answer for
@@ -4056,7 +4059,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 
 	if kelCount > 0 {
 		if wRes := s.runWatcherOnKel(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers); wRes != nil && wRes.Blocked {
-			writeError(w, http.StatusConflict, "KEL duplicity detected", wRes.Reason)
+			writeDuplicity(w, oobiData.AID, wRes.Reason)
 			return
 		}
 	}
@@ -4132,6 +4135,8 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		// "prod" or "dev", or absent on an agent built before the tag. Refused
 		// below before anything is recorded, the same as the other resolve paths.
 		Realm string `json:"realm,omitempty"`
+		// Watchers the contact names for itself (advisory).
+		Watchers []string `json:"watchers,omitempty"`
 	}
 	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.OOBI)).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
@@ -4195,6 +4200,16 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+		}
+	}
+
+	// The same check the resolve path makes, because this is the path that keeps
+	// the contact: a log that forks must not become a contact because the person
+	// went straight to adding it.
+	if len(oobiData.KEL) > 0 {
+		if wRes := s.runWatcherOnKel(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers); wRes != nil && wRes.Blocked {
+			writeDuplicity(w, oobiData.AID, wRes.Reason)
+			return
 		}
 	}
 

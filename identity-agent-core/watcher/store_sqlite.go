@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -64,15 +65,18 @@ func (s *SQLiteStore) listFirstSeen(aid string) ([]FirstSeenRecord, error) {
 
 func (s *SQLiteStore) InsertDuplicityAlert(alert DuplicityAlert) (int64, error) {
 	detectedAt := alert.DetectedAt.UTC().Format(time.RFC3339)
+	if alert.Kind == "" {
+		alert.Kind = AlertKindDuplicity
+	}
 	// An alert is identified by what it says and when (migration 46), so the
 	// same one seen again within the same second is the same alert.
 	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO duplicity_alerts (
-			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note, kind
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		alert.AID, alert.SequenceNum, alert.OurDigest, alert.TheirDigest,
 		alert.SourceURL, detectedAt,
-		boolToInt(alert.Resolved), alert.ResolutionNote,
+		boolToInt(alert.Resolved), alert.ResolutionNote, alert.Kind,
 	)
 	if err != nil {
 		return 0, err
@@ -90,25 +94,139 @@ func (s *SQLiteStore) InsertDuplicityAlert(alert DuplicityAlert) (int64, error) 
 
 func (s *SQLiteStore) listDuplicityAlerts(aid string) ([]DuplicityAlert, error) {
 	rows, err := s.db.Query(`
-		SELECT id, aid, sequence_num, our_digest, their_digest, source_url,
-		       detected_at, resolved, resolution_note
-		FROM duplicity_alerts WHERE aid = ? ORDER BY detected_at DESC`, aid)
+		`+alertColumns+`
+		FROM duplicity_alerts WHERE aid = ? ORDER BY detected_at DESC, id DESC`, aid)
 	if err != nil {
 		return nil, err
 	}
+	return scanAlerts(rows)
+}
+
+const alertColumns = `SELECT id, aid, sequence_num, our_digest, their_digest, COALESCE(source_url, ''),
+		       detected_at, COALESCE(resolved, 0), COALESCE(resolution_note, ''), COALESCE(kind, 'duplicity'),
+		       COALESCE((SELECT acknowledged_at FROM watcher_alert_ack WHERE alert_id = duplicity_alerts.id), '')`
+
+func (s *SQLiteStore) listAllAlerts() ([]DuplicityAlert, error) {
+	rows, err := s.db.Query(alertColumns + ` FROM duplicity_alerts ORDER BY detected_at DESC, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	return scanAlerts(rows)
+}
+
+func (s *SQLiteStore) getAlert(id int64) (*DuplicityAlert, error) {
+	rows, err := s.db.Query(alertColumns+` FROM duplicity_alerts WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	found, err := scanAlerts(rows)
+	if err != nil || len(found) == 0 {
+		return nil, err
+	}
+	return &found[0], nil
+}
+
+func scanAlerts(rows *sql.Rows) ([]DuplicityAlert, error) {
 	defer rows.Close()
 	var out []DuplicityAlert
 	for rows.Next() {
 		var a DuplicityAlert
-		var detected string
+		var detected, acked string
 		var resolved int
 		if err := rows.Scan(&a.ID, &a.AID, &a.SequenceNum, &a.OurDigest, &a.TheirDigest,
-			&a.SourceURL, &detected, &resolved, &a.ResolutionNote); err != nil {
+			&a.SourceURL, &detected, &resolved, &a.ResolutionNote, &a.Kind, &acked); err != nil {
 			return nil, err
 		}
 		a.DetectedAt, _ = time.Parse(time.RFC3339, detected)
+		a.AcknowledgedAt, _ = time.Parse(time.RFC3339, acked)
 		a.Resolved = resolved != 0
 		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// AcknowledgeAlert records that the owner has seen an alert. The first time
+// stands: acknowledging again does not move it.
+func (s *SQLiteStore) AcknowledgeAlert(id int64, at time.Time) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO watcher_alert_ack (alert_id, acknowledged_at) VALUES (?, ?)`,
+		id, at.UTC().Format(time.RFC3339))
+	return err
+}
+
+// ResolveAlert closes an alert with the owner's note. It also counts as seen.
+// It returns ErrAlertAlreadyResolved when no open alert has that id.
+func (s *SQLiteStore) ResolveAlert(id int64, note string, at time.Time) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// One statement decides: of two resolves at once, only one changes a row.
+	res, err := tx.Exec(`UPDATE duplicity_alerts SET resolved = 1, resolution_note = ?
+		 WHERE id = ? AND COALESCE(resolved, 0) = 0`, note, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrAlertAlreadyResolved
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO watcher_alert_ack (alert_id, acknowledged_at) VALUES (?, ?)`,
+		id, at.UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) SaveContactCheck(c ContactCheck) error {
+	if c.Sources == nil {
+		c.Sources = []CheckSource{}
+	}
+	src, err := json.Marshal(c.Sources)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO watcher_contact_check (aid, checked_at, verdict, reason, sources_json)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(aid) DO UPDATE SET checked_at = excluded.checked_at, verdict = excluded.verdict,
+		    reason = excluded.reason, sources_json = excluded.sources_json`,
+		c.AID, c.CheckedAt, c.Verdict, c.Reason, string(src))
+	return err
+}
+
+func (s *SQLiteStore) getContactCheck(aid string) (*ContactCheck, error) {
+	rows, err := s.db.Query(`SELECT aid, checked_at, verdict, reason, sources_json FROM watcher_contact_check WHERE aid = ?`, aid)
+	if err != nil {
+		return nil, err
+	}
+	found, err := scanChecks(rows)
+	if err != nil || len(found) == 0 {
+		return nil, err
+	}
+	return &found[0], nil
+}
+
+func (s *SQLiteStore) listContactChecks() ([]ContactCheck, error) {
+	rows, err := s.db.Query(`SELECT aid, checked_at, verdict, reason, sources_json FROM watcher_contact_check ORDER BY aid`)
+	if err != nil {
+		return nil, err
+	}
+	return scanChecks(rows)
+}
+
+func scanChecks(rows *sql.Rows) ([]ContactCheck, error) {
+	defer rows.Close()
+	var out []ContactCheck
+	for rows.Next() {
+		var c ContactCheck
+		var src string
+		if err := rows.Scan(&c.AID, &c.CheckedAt, &c.Verdict, &c.Reason, &src); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(src), &c.Sources); err != nil || c.Sources == nil {
+			c.Sources = []CheckSource{}
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

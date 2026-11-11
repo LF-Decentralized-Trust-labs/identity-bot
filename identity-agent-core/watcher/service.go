@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -197,6 +198,9 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	l2Outcome := "unknown"
 	if l2Err != nil {
 		l2Outcome = "unavailable"
+		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
+			Type: "L2_standing", URL: l2URL, Outcome: "unavailable",
+		})
 		s.emit("kel_l2_query_latency", map[string]interface{}{
 			"url": l2URL, "error": l2Err.Error(), "latency_ms": latency.Milliseconds(),
 		})
@@ -221,7 +225,9 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		}
 		resp, _, err := s.L2.QueryDigest(ctx, hint, in.AID, seq)
 		outcome := "unknown"
-		if err == nil && resp.Digest != nil {
+		if err != nil {
+			outcome = "unavailable"
+		} else if resp.Digest != nil {
 			if *resp.Digest == digest {
 				outcome = "match"
 			} else {
@@ -236,11 +242,27 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// Blocking: repeat L1 mismatch, or first-contact L1+L2-standing conflict (≥2 sources).
 	shouldBlock := false
 	blockReason := ""
+	var heldAlert *DuplicityAlert
 	if l1Outcome == "mismatch" {
 		shouldBlock = true
 		blockReason = "L1 digest mismatch at same sequence"
 	} else if firstContact && l2Outcome == "mismatch" {
 		shouldBlock = true
+		blockReason = "first-contact L1 vs L2-standing digest conflict"
+	} else if held := s.forkedByOpenAlert(ctx, in, l2URL, seq, l2Outcome); held != nil {
+		// Not only the first time: the first sighting is recorded before this
+		// verdict, so a second try finds this agent's own record agreeing and
+		// would pass a log the standing watcher disagrees with. And not only the
+		// same log: the same fork one event longer has a new tip and no first
+		// sighting, but it still carries the history an open alert is about. So
+		// for every open alert, the presented log's digest at the alert's own
+		// sequence number is compared with the alert's; where it is the same
+		// history, the log stays blocked unless the standing watcher now
+		// positively answers match at that sequence. An unreachable watcher
+		// cannot be used to wait the block out, and neither can one more event.
+		// The owner resolving the alert ends it.
+		shouldBlock = true
+		heldAlert = held
 		blockReason = "first-contact L1 vs L2-standing digest conflict"
 	}
 
@@ -262,16 +284,20 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	}
 
 	if shouldBlock {
-		alertID, alert, err := s.recordDuplicity(in.AID, seq, digest, l2URL, existing, l2Resp)
-		if err != nil {
-			return nil, err
+		// Blocked by an alert that is already open: that alert is the record,
+		// and no second one is added for the same history.
+		alert := heldAlert
+		if alert == nil {
+			var err error
+			if _, alert, err = s.recordDuplicity(in.AID, seq, digest, l2URL, existing, l2Resp); err != nil {
+				return nil, err
+			}
 		}
 		result.Blocked = true
 		result.OK = false
 		result.Reason = blockReason
 		result.OverallOutcome = "duplicity"
 		result.duplicityAlert = alert
-		_ = alertID
 		s.emit("kel_duplicity_detected", map[string]interface{}{
 			"aid": in.AID, "seq": seq, "reason": blockReason,
 		})
@@ -300,7 +326,81 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	return result, nil
 }
 
+// openAlertFor says whether an alert about this exact log (aid, seq, digest)
+// is still open.
+// Only duplicity alerts count: an escalation never blocks.
+func (s *Service) openAlertFor(aid string, seq int, digest string) bool {
+	return s.openAlert(aid, seq, digest) != nil
+}
+
+func (s *Service) openAlert(aid string, seq int, digest string) *DuplicityAlert {
+	alerts, err := s.Store.listDuplicityAlerts(aid)
+	if err != nil {
+		return nil
+	}
+	for _, a := range alerts {
+		if a.SequenceNum == seq && a.OurDigest == digest && !a.Resolved && isDuplicity(a) {
+			a := a
+			return &a
+		}
+	}
+	return nil
+}
+
+func isDuplicity(a DuplicityAlert) bool { return a.Kind == "" || a.Kind == AlertKindDuplicity }
+
+// forkedByOpenAlert returns an open duplicity alert that holds the presented log,
+// or nil when there is none or the standing watcher clears the log.
+//
+// While any duplicity alert is open for the identity, every presented log is
+// blocked unless the standing watcher answers match at the log's tip, and also,
+// for each open alert, at that alert's own sequence number when the log reaches
+// that far. Nothing is inferred from the log alone: a fork that split before the
+// tip it was first blocked at, or is cut shorter than it, has no first sighting
+// and may not be able to compute the alerted digest, so only a positive answer
+// from the standing watcher lets it through. An unreachable watcher cannot be
+// used to wait the block out.
+func (s *Service) forkedByOpenAlert(ctx context.Context, in VerifyKelInput, l2URL string, seq int, l2Outcome string) *DuplicityAlert {
+	alerts, err := s.Store.listDuplicityAlerts(in.AID)
+	if err != nil {
+		return nil
+	}
+	var open []DuplicityAlert
+	for _, a := range alerts {
+		if !a.Resolved && isDuplicity(a) {
+			open = append(open, a)
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	if l2Outcome != "match" {
+		a := open[0]
+		return &a
+	}
+	for _, a := range open {
+		if a.SequenceNum == seq {
+			continue // the tip, already confirmed above
+		}
+		d, err := witnessproto.KelDigestAtSeq(in.KEL, a.SequenceNum)
+		if err != nil {
+			continue // the log does not reach that far
+		}
+		if resp, _, err := s.L2.QueryDigest(ctx, l2URL, in.AID, a.SequenceNum); err != nil ||
+			resp == nil || resp.Digest == nil || *resp.Digest != d {
+			a := a
+			return &a
+		}
+	}
+	return nil
+}
+
 func (s *Service) recordDuplicity(aid string, seq int, ourDigest, sourceURL string, existing *FirstSeenRecord, l2 *DigestResponse) (int64, *DuplicityAlert, error) {
+	// A retry of a log already alerted is the same alert, not another one to
+	// resolve: the owner closes it once and the log passes.
+	if open := s.openAlert(aid, seq, ourDigest); open != nil {
+		return open.ID, open, nil
+	}
 	their := ""
 	if existing != nil && existing.KelDigest != ourDigest {
 		their = existing.KelDigest
@@ -358,6 +458,139 @@ func disclose[T any](s *Service, aid string, read func() (T, error)) (T, error) 
 		return none, err
 	}
 	return found, nil
+}
+
+// DisclosableAllAlerts is DisclosableAlerts for every identity: every alert this
+// watcher holds except those about an identity that opted out.
+func (s *Service) DisclosableAllAlerts() ([]DuplicityAlert, error) {
+	all, err := s.Store.listAllAlerts()
+	if err != nil {
+		return nil, err
+	}
+	out := []DuplicityAlert{}
+	opted := map[string]bool{}
+	for _, a := range all {
+		o, seen := opted[a.AID]
+		if !seen {
+			if o, err = s.Store.IsOptedOut(a.AID); err != nil {
+				return nil, err
+			}
+			opted[a.AID] = o
+		}
+		if !o {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+// DisclosableCheck is Disclosable for the newest check of aid: nil when there is
+// none or the identity opted out.
+func (s *Service) DisclosableCheck(aid string) (*ContactCheck, error) {
+	return disclose(s, aid, func() (*ContactCheck, error) { return s.Store.getContactCheck(aid) })
+}
+
+// DisclosableChecks is DisclosableCheck for every identity checked.
+func (s *Service) DisclosableChecks() ([]ContactCheck, error) {
+	all, err := s.Store.listContactChecks()
+	if err != nil {
+		return nil, err
+	}
+	out := []ContactCheck{}
+	for _, c := range all {
+		opted, err := s.Store.IsOptedOut(c.AID)
+		if err != nil {
+			return nil, err
+		}
+		if !opted {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// ErrNoSuchAlert is returned for an alert that does not exist or is about an
+// identity that opted out, which an owner cannot tell apart.
+var ErrNoSuchAlert = errors.New("no such alert")
+
+// ErrAlertAlreadyResolved is returned when an alert is resolved a second time:
+// the alert is an audit record and its first note stands.
+var ErrAlertAlreadyResolved = errors.New("alert already resolved")
+
+// AcknowledgeAlert records that the owner has seen alert id.
+func (s *Service) AcknowledgeAlert(id int64) error {
+	if err := s.alertVisible(id); err != nil {
+		return err
+	}
+	return s.Store.AcknowledgeAlert(id, time.Now())
+}
+
+// ResolveAlert closes alert id with the owner's note. The alert is kept, marked
+// resolved: it is an audit record and is never deleted.
+func (s *Service) ResolveAlert(id int64, note string) error {
+	if err := s.alertVisible(id); err != nil {
+		return err
+	}
+	return s.Store.ResolveAlert(id, note, time.Now())
+}
+
+func (s *Service) alertVisible(id int64) error {
+	a, err := s.Store.getAlert(id)
+	if err != nil {
+		return err
+	}
+	if a == nil {
+		return ErrNoSuchAlert
+	}
+	opted, err := s.Store.IsOptedOut(a.AID)
+	if err != nil {
+		return err
+	}
+	if opted {
+		return ErrNoSuchAlert
+	}
+	return nil
+}
+
+// SetTrustedL2Signers replaces the watchers the owner trusts, on top of the
+// shipped list. The shipped list is never replaced.
+func (s *Service) SetTrustedL2Signers(aids []string) error {
+	b, err := json.Marshal(aids)
+	if err != nil {
+		return err
+	}
+	return s.Store.SetConfig("l2_signer_aids", string(b))
+}
+
+// OwnerTrustedL2Signers is only the watchers the owner added.
+func (s *Service) OwnerTrustedL2Signers() []string {
+	out := []string{}
+	if raw, _ := s.Store.GetConfig("l2_signer_aids"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &out)
+	}
+	return out
+}
+
+// RecordCheck keeps the newest check of the identity a result is about.
+func (s *Service) RecordCheck(res *VerifyKelResult) error {
+	if res == nil || res.AID == "" {
+		return nil
+	}
+	c := res.Check()
+	// A duplicity verdict stands while its alert is open: a later check that
+	// found nothing new must not show "confirmed" beside an alert nobody closed.
+	if c.Verdict != VerdictDuplicity {
+		if prev, err := s.Store.getContactCheck(res.AID); err == nil && prev != nil && prev.Verdict == VerdictDuplicity {
+			if alerts, err := s.Store.listDuplicityAlerts(res.AID); err == nil {
+				for _, a := range alerts {
+					if !a.Resolved && isDuplicity(a) {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return s.Store.SaveContactCheck(c)
 }
 
 // GetPublicDigest serves this agent's L1 observation for /public/kel-digest.

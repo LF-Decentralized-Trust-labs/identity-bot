@@ -1179,6 +1179,89 @@ DELETE FROM watcher_config
    AND value IN ('https://watcher.grapeid.org/public/kel-digest',
                  'https://watcher.grapeid.org/public/kel-digest/');
 `},
+	{
+		Version:     54,
+		Description: "The owner can acknowledge a duplicity alert, and the last check of each contact is kept",
+		SQL: `
+-- When the owner saw an alert. An alert stays an alert until it is resolved:
+-- acknowledging only records it was read. A table of its own rather than a
+-- column, so this migration can be run again without failing.
+CREATE TABLE IF NOT EXISTS watcher_alert_ack (
+    alert_id        INTEGER PRIMARY KEY,
+    acknowledged_at TEXT NOT NULL
+);
+
+-- The newest watcher check of each identity, kept so a screen can say what was
+-- found and when without running the check again. One row per identity, and it
+-- carries per-source outcomes only: never a digest.
+CREATE TABLE IF NOT EXISTS watcher_contact_check (
+    aid          TEXT PRIMARY KEY,
+    checked_at   TEXT NOT NULL,
+    verdict      TEXT NOT NULL,
+    reason       TEXT NOT NULL DEFAULT '',
+    sources_json TEXT NOT NULL DEFAULT '[]'
+);
+`},
+	{
+		Version:     55,
+		Description: "An alert has a kind: duplicity blocks, escalation never does",
+		SQL: `
+-- 'duplicity' (the default, so every alert already stored keeps blocking) or
+-- 'escalation' (a peer disagreed: shown to the owner, never blocks). This is
+-- the only statement here, because SQLite cannot add a column only if it is
+-- missing; execMigration accepts "duplicate column name" for a migration that
+-- is one ADD COLUMN, so it can be run again.
+ALTER TABLE duplicity_alerts ADD COLUMN kind TEXT NOT NULL DEFAULT 'duplicity';
+`},
+}
+
+// execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD
+// COLUMN and nothing else is safe to run twice: SQLite cannot add a column only
+// if it is missing, so "duplicate column name" for the very column being added
+// is taken to mean it was already done. Any other statement, one alongside
+// others, or an error naming a different column keeps its error.
+func execMigration(x interface {
+	Exec(string, ...any) (sql.Result, error)
+}, body string) error {
+	_, err := x.Exec(body)
+	if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+		if col, ok := oneAddColumn(body); ok && namesColumn(err.Error(), col) {
+			return nil
+		}
+	}
+	return err
+}
+
+// namesColumn says whether a SQLite "duplicate column name: <col>" error, which
+// may end in a code such as " (1)", is about exactly col.
+func namesColumn(msg, col string) bool {
+	i := strings.LastIndex(msg, "duplicate column name: ")
+	if i < 0 {
+		return false
+	}
+	rest := msg[i+len("duplicate column name: "):]
+	return rest == col || strings.HasPrefix(rest, col+" (")
+}
+
+// oneAddColumn returns the column added when body is exactly one
+// ALTER TABLE <t> ADD COLUMN <c> ...; statement.
+func oneAddColumn(body string) (string, bool) {
+	var stmt []string
+	for _, line := range strings.Split(body, "\n") {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "--") {
+			stmt = append(stmt, t)
+		}
+	}
+	one := strings.Join(stmt, " ")
+	if strings.Count(one, ";") != 1 || !strings.HasSuffix(one, ";") {
+		return "", false
+	}
+	f := strings.Fields(one)
+	if len(f) < 6 || !strings.EqualFold(f[0], "ALTER") || !strings.EqualFold(f[1], "TABLE") ||
+		!strings.EqualFold(f[3], "ADD") || !strings.EqualFold(f[4], "COLUMN") {
+		return "", false
+	}
+	return strings.Trim(f[5], "\"`[]"), true
 }
 
 // ReapplyIdentityMigration runs one identity migration's SQL again, for a test
@@ -1187,8 +1270,7 @@ DELETE FROM watcher_config
 func ReapplyIdentityMigration(db *sql.DB, version int) error {
 	for _, m := range identityMigrations {
 		if m.Version == version {
-			_, err := db.Exec(m.SQL)
-			return err
+			return execMigration(db, m.SQL)
 		}
 	}
 	return fmt.Errorf("there is no identity migration %d", version)
@@ -1221,7 +1303,7 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 			return fmt.Errorf("failed to begin transaction for identity migration %d: %w", m.Version, err)
 		}
 
-		if _, err := tx.Exec(m.SQL); err != nil {
+		if err := execMigration(tx, m.SQL); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to apply identity migration %d: %w", m.Version, err)
 		}
