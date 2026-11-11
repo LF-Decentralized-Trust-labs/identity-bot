@@ -268,15 +268,23 @@ function idb<T>(mode: IDBTransactionMode, f: (s: IDBObjectStore) => IDBRequest<T
   );
 }
 
-/** This browser's key for the app `aid`: the one it already holds, else a new
- *  one it cannot export. */
-export async function appBrowserKey(aid: string): Promise<BrowserKey> {
-  const held = await idb<{ privateKey: CryptoKey; jwk: BrowserKey["jwk"] } | undefined>("readonly", (s) => s.get(aid));
+/** What this browser keeps a link's session and key under: the app, the relay
+ *  that carries its calls and the address they go to, all three. A link that
+ *  names the same app with another relay or address is another place, so a
+ *  crafted one never reaches what was kept for the real one. */
+export function linkSlot(link: Pick<AppLink, "aid" | "rid" | "api">): string {
+  return JSON.stringify([link.aid, link.rid, link.api]);
+}
+
+/** This browser's key for a link (`linkSlot`): the one it already holds, else a
+ *  new one it cannot export. */
+export async function appBrowserKey(slot: string): Promise<BrowserKey> {
+  const held = await idb<{ privateKey: CryptoKey; jwk: BrowserKey["jwk"] } | undefined>("readonly", (s) => s.get(slot));
   if (held) return { ...held, thumbprint: browserKeyThumbprint(held.jwk) };
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const j = await crypto.subtle.exportKey("jwk", pair.publicKey);
   const jwk = { kty: j.kty!, crv: j.crv!, x: j.x!, y: j.y! };
-  await idb("readwrite", (s) => s.put({ privateKey: pair.privateKey, jwk }, aid));
+  await idb("readwrite", (s) => s.put({ privateKey: pair.privateKey, jwk }, slot));
   return { privateKey: pair.privateKey, jwk, thumbprint: browserKeyThumbprint(jwk) };
 }
 
@@ -332,11 +340,11 @@ export interface AppFetch {
  *  a proof made with the key. A refusal is an Error the button shows. */
 export async function appFetch(
   link: AppLink,
-  opts: { fetchFn?: typeof fetch; browserKey?: (aid: string) => Promise<BrowserKey> } = {},
+  opts: { fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey> } = {},
 ): Promise<AppFetch> {
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const appKey = await checkAppKeyLog(link.aid, link.kel);
-  const mine = await (opts.browserKey ?? appBrowserKey)(link.aid);
+  const mine = await (opts.browserKey ?? appBrowserKey)(linkSlot(link));
   const sessionEndpoint = `${link.api}/signin/session`;
   let skew = 0;
   let started: { token: string; expiry: number } | undefined;
@@ -414,15 +422,15 @@ export interface AppSession {
  *  app's, keeps its session and ends it. A page has no copy of any of it. */
 export function appSession(
   link: AppLink,
-  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (aid: string) => Promise<BrowserKey> } = {},
+  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey> } = {},
 ): AppSession {
   const storage = opts.storage ?? sessionStorage;
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
-  const slot = "session:" + link.aid;
+  const slot = "session:" + linkSlot(link);
   let skew = 0;
   let synced = false;
   let mine: Promise<BrowserKey> | undefined;
-  const key = () => (mine ??= (opts.browserKey ?? appBrowserKey)(link.aid));
+  const key = () => (mine ??= (opts.browserKey ?? appBrowserKey)(linkSlot(link)));
   const sha256b64u = async (t: string) => b64uEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(t))));
 
   async function raw(method: string, path: string, body: string): Promise<AppCall> {
