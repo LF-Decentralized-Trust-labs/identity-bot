@@ -71,6 +71,16 @@ enum UnlockMethod {
   deviceScreenLockNoProvider,
 }
 
+/// The person did not pass the check that a locked device asks before
+/// something is begun on it.
+class NotAuthenticated implements Exception {
+  const NotAuthenticated();
+  @override
+  String toString() => 'You were not authenticated, so nothing was started. '
+      'This device is locked, and starting a new identity on it needs the '
+      'same check as opening one.';
+}
+
 /// Logging out could not be confirmed: a core may still answer for the
 /// identity. The marker is set, but the person must be told, not shown the
 /// next screen as though it were done.
@@ -743,8 +753,19 @@ class IdentityProfiles {
   /// An empty profile is used as it is — beginning a fresh one on every Create
   /// press would leave an empty directory behind each abandoned attempt.
   /// Returns whether a new profile was begun.
+  ///
+  /// When the open profile is locked, a new identity is begun only after the
+  /// person passes the same check as for opening a locked one
+  /// ([proveItIsThem]: the provider's score, or the screen lock while none is
+  /// configured). Otherwise anyone holding a locked device could start one.
+  /// Throws [NotAuthenticated] when they do not, and nothing is begun.
   static Future<bool> makeRoomForANewOne() async {
-    if (!await activeIsLocked()) {
+    if (await activeIsLocked()) {
+      if (!await proveItIsThem(await ProfileScope.activeId(),
+          'Start a new identity on this device')) {
+        throw const NotAuthenticated();
+      }
+    } else {
       if (await foundingWasStarted()) return false;
       if (!await openOneHoldsAnIdentity()) return false;
     }

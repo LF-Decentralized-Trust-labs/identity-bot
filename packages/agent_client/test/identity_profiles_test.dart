@@ -275,6 +275,47 @@ void main() {
       expect(await IdentityProfiles.isLocked(second), isFalse);
     });
 
+    test('a new identity on a locked device needs the same check, and begins '
+        'nothing without it', () async {
+      final first = await ProfileScope.activeId();
+      await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
+      IdentityProfiles.openOneHoldsAnIdentity = () async => false;
+      started.clear();
+
+      // Screen-lock fallback (no provider): refused.
+      IdentityProfiles.authenticateOwner = (_) async => false;
+      await expectLater(IdentityProfiles.makeRoomForANewOne(),
+          throwsA(isA<NotAuthenticated>()));
+      expect(await ProfileScope.activeId(), first);
+      expect(started, isEmpty);
+
+      // With a provider, a score of 79 is refused and the screen lock is not
+      // asked in its place.
+      var screenLockAsked = false;
+      IdentityProfiles.authenticateOwner = (_) async {
+        screenLockAsked = true;
+        return true;
+      };
+      IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
+          measured: true, score: 79, at: DateTime.now().toUtc());
+      IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
+          VouchedAuthentication(
+              level: 'x', at: DateTime.now().toUtc(), score: 79, vouchedBy: 's');
+      await expectLater(IdentityProfiles.makeRoomForANewOne(),
+          throwsA(isA<NotAuthenticated>()));
+      expect(screenLockAsked, isFalse);
+      expect(started, isEmpty);
+
+      // Passing it begins the new identity.
+      IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
+          measured: true, score: 80, at: DateTime.now().toUtc());
+      IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
+          VouchedAuthentication(
+              level: 'x', at: DateTime.now().toUtc(), score: 80, vouchedBy: 's');
+      expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
+      expect(await ProfileScope.activeId(), isNot(first));
+    });
+
     test('an empty profile is reused, and one holding an identity is not',
         () async {
       IdentityProfiles.openOneHoldsAnIdentity = () async => false;
