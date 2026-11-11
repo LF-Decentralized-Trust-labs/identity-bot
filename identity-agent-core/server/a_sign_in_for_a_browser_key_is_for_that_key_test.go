@@ -128,6 +128,9 @@ func TestAnAddOnStartsASignInForABrowserKeyAndReadsItsResultWithTheSecret(t *tes
 	}
 	if res, err := w.org.browserKeySignInResult(in.Session, in.Collector); err != nil || res.State != "pending" {
 		t.Fatalf("before the person answers: %+v %v", res, err)
+	} else if res.SiteAID != c.SiteAID || res.SiteAID == "" || res.FrontEnd != c.FrontEnd {
+		// Whoever asks can tell which asset the sign-in was started for, and its kind.
+		t.Fatalf("the result names asset %q and kind %q, want the challenge's %q and %q", res.SiteAID, res.FrontEnd, c.SiteAID, c.FrontEnd)
 	}
 	for _, wrong := range []string{"", "not-the-secret"} {
 		if _, err := w.org.browserKeySignInResult(in.Session, wrong); err == nil {
