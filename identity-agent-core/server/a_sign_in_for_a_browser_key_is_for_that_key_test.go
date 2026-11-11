@@ -126,21 +126,21 @@ func TestAnAddOnStartsASignInForABrowserKeyAndReadsItsResultWithTheSecret(t *tes
 	if in.Pointer != w.srv.URL+"/i/"+in.Session {
 		t.Fatalf("the pointer is %q", in.Pointer)
 	}
-	if res, err := w.org.browserKeySignInResult(in.Session, in.Collector); err != nil || res.State != "pending" {
+	if res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err != nil || res.State != "pending" {
 		t.Fatalf("before the person answers: %+v %v", res, err)
 	} else if res.SiteAID != c.SiteAID || res.SiteAID == "" || res.FrontEnd != c.FrontEnd {
 		// Whoever asks can tell which asset the sign-in was started for, and its kind.
 		t.Fatalf("the result names asset %q and kind %q, want the challenge's %q and %q", res.SiteAID, res.FrontEnd, c.SiteAID, c.FrontEnd)
 	}
 	for _, wrong := range []string{"", "not-the-secret"} {
-		if _, err := w.org.browserKeySignInResult(in.Session, wrong); err == nil {
+		if _, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, wrong); err == nil {
 			t.Fatalf("the result was given for the secret %q", wrong)
 		}
 	}
 	if _, err := h.Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: w.srv.URL}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := w.org.browserKeySignInResult(in.Session, in.Collector)
+	res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector)
 	if err != nil || res.State != "verified" || res.BrowserKey != aBrowserKey || res.Pairwise == "" {
 		t.Fatalf("after the person approved: %+v %v", res, err)
 	}
@@ -150,7 +150,7 @@ func TestAnAddOnStartsASignInForABrowserKeyAndReadsItsResultWithTheSecret(t *tes
 		t.Fatal(msg)
 	}
 	secret, _ := w.org.mintCollectorSecret(token)
-	if _, err := w.org.browserKeySignInResult(token, secret); err == nil {
+	if _, err := w.org.browserKeySignInResult(siteOf(w.org, token), token, secret); err == nil {
 		t.Fatal("a sign-in with no browser key was read as one")
 	}
 	// An unknown asset and a malformed key are refused as the core's route refuses them.
@@ -189,7 +189,7 @@ func TestAPersonRemovedFromTheRosterIsNoLongerAdmitted(t *testing.T) {
 type browserKeyHost interface {
 	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error)
 	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
-	BrowserKeySignInResult(session, collector string) (BrowserKeySignInResult, error)
+	BrowserKeySignInResult(siteAID, session, collector string) (BrowserKeySignInResult, error)
 }
 
 // The three methods an add-on calls, reached through the host wrapper
@@ -205,13 +205,13 @@ func TestAnAddOnReachesTheBrowserKeySignInThroughTheHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := host.BrowserKeySignInResult(req.SessionToken, "wrong"); err == nil {
+	if _, err := host.BrowserKeySignInResult(siteOf(w.org, req.SessionToken), req.SessionToken, "wrong"); err == nil {
 		t.Fatal("the host gave a result for a wrong secret")
 	}
 	if _, err := h.Approve(req); err != nil {
 		t.Fatal(err)
 	}
-	res, err := host.BrowserKeySignInResult(req.SessionToken, secret)
+	res, err := host.BrowserKeySignInResult(siteOf(w.org, req.SessionToken), req.SessionToken, secret)
 	if err != nil || res.State != "verified" || res.BrowserKey != aBrowserKey {
 		t.Fatalf("through the host: %+v %v", res, err)
 	}
@@ -249,7 +249,7 @@ func TestAVerifiedResultWithDisclosuresOfTheWrongTypeIsAnError(t *testing.T) {
 		w.org.setChallengeStatus(in.Session, map[string]interface{}{
 			"status": "complete", "pairwise_aid": "Epat", "browser_key": aBrowserKey, "disclosures": d,
 		})
-		res, err := w.org.browserKeySignInResult(in.Session, in.Collector)
+		res, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector)
 		switch name {
 		case "right type":
 			if err != nil || res.Disclosures["email"] != "a@example.com" {
@@ -266,7 +266,7 @@ func TestAVerifiedResultWithDisclosuresOfTheWrongTypeIsAnError(t *testing.T) {
 		}
 	}
 	w.org.setChallengeStatus(in.Session, map[string]interface{}{"status": "complete", "browser_key": aBrowserKey})
-	if _, err := w.org.browserKeySignInResult(in.Session, in.Collector); err == nil {
+	if _, err := w.org.browserKeySignInResult(siteOf(w.org, in.Session), in.Session, in.Collector); err == nil {
 		t.Fatal("a verified sign-in with no identifier for the person was read")
 	}
 }
