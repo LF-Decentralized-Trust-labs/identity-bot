@@ -219,7 +219,9 @@ void main() {
         final text = IdentityProfiles.lockScreenExplanation('Ada');
         expect(text, contains('Ada'));
         expect(text, contains('nothing has measured who you are'));
-        expect(text, contains('every identity on this device'));
+        expect(text, contains('locked everything on this device'));
+        expect(IdentityProfiles.lockScreenExplanation('Acme', what: 'organisation'),
+            contains('this organisation can only'));
         expect(
             IdentityProfiles.lockScreenExplanation('Ada',
                 method: UnlockMethod.providerVouchedByAnotherDevice),

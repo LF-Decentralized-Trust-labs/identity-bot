@@ -332,12 +332,12 @@ class IdentityProfiles {
   /// and how it will be checked — including, when it is true, that nothing
   /// measured the person. One place, for both apps.
   static String lockScreenExplanation(String name,
-      {UnlockMethod? method}) {
+      {UnlockMethod? method, String what = 'identity'}) {
     final who = name.isEmpty ? 'the owner of this identity' : name;
     final m = method ?? howItWillBeChecked();
-    final why = 'Logging out locked every identity on this device, so that '
+    final why = 'Logging out locked everything on this device, so that '
         'nobody can open one that is not theirs. $who is asked to '
-        'authenticate because this identity can only be opened by its own '
+        'authenticate because this $what can only be opened by its own '
         'person.';
     switch (m) {
       case UnlockMethod.providerOnThisDevice:
