@@ -732,6 +732,12 @@ func (s *CoreServer) Start() error {
 	} else if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", s.Port)), 0644); err != nil {
 		log.Printf("[identity-agent-core] Warning: could not write .port file: %v", err)
 	}
+	// The process id, beside .port, so an app that did not start this core can
+	// still end it by its data directory (after the core has proved it holds the
+	// owner secret). Owner-only: it names a process to be signalled.
+	if err := os.WriteFile(filepath.Join(s.DataDir, ".pid"), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
+		log.Printf("[identity-agent-core] Warning: could not write .pid file: %v", err)
+	}
 
 	s.retireTunnelHubSettings()
 	s.noticeMissingPublicName()
@@ -888,6 +894,13 @@ func (s *CoreServer) Stop() {
 	// Clean up .port file
 	portFilePath := filepath.Join(s.DataDir, ".port")
 	os.Remove(portFilePath)
+	os.Remove(filepath.Join(s.DataDir, ".pid"))
+
+	// What this core published about identities it minted is this core's, and
+	// does not outlive it: the embedded core is stopped and started against
+	// another identity's data in the same process, and a later core must not
+	// answer /public/{aid}/did.json or an OOBI for the earlier one.
+	forgetPublishedPairwise()
 
 	// Tell everything that runs on its own to stop, before anything waits,
 	// and start no more background work: a request finishing while the

@@ -2,15 +2,17 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'backend_process_service.dart';
-import 'core_service.dart';
 import 'local_auth_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
+import 'secure_key_store.dart';
 import 'point_this_app_at_its_agent.dart';
 import 'the_core_is_settled.dart';
 
@@ -64,6 +66,18 @@ class IdentityProfile {
 /// Desktop and mobile run the core differently — a spawned process against
 /// AGENT_DATA_DIR, or an embedded one told its directory when it starts — so
 /// both are handled here rather than in every app that has the problem.
+/// Logging out could not be confirmed: a core may still answer for the
+/// identity. The marker is set, but the person must be told, not shown the
+/// next screen as though it were done.
+class TheCoreDidNotStop implements Exception {
+  const TheCoreDidNotStop([this.detail]);
+  final String? detail;
+  @override
+  String toString() => 'The Identity Agent for this identity could not be '
+      'stopped${detail == null ? '' : ' ($detail)'}, so it is not logged out. '
+      'Quit the app and open it again.';
+}
+
 class IdentityProfiles {
   /// The embedded core, on mobile. Set once at start-up, before anything else
   /// here is called.
@@ -92,8 +106,26 @@ class IdentityProfiles {
   /// The directory belonging to [profileId] — the profile itself, not the data
   /// inside it. Anything ABOUT a profile lives here; anything its Identity
   /// Agent owns lives under [dataDirectoryFor].
-  static Future<String> directoryFor(String profileId) async =>
-      '${await _profilesRoot()}${Platform.pathSeparator}$profileId';
+  ///
+  /// Refuses anything but a minted id ([isAProfileId]) or an id this
+  /// installation already knows from before minting, so a value from outside can never name a path above or beside
+  /// the profiles directory.
+  static Future<String> directoryFor(String profileId) async {
+    if (!isAProfileId(profileId) &&
+        !(_safeEarlierForm.hasMatch(profileId) &&
+            (await ProfileScope.knownIds()).contains(profileId))) {
+      throw ArgumentError.value(profileId, 'profileId',
+          'neither a minted profile id nor one this installation already knows');
+    }
+    return '${await _profilesRoot()}${Platform.pathSeparator}$profileId';
+  }
+
+  static final _mintedForm = RegExp(r'^[a-z0-9]{12}$');
+
+  /// Whether [id] is the form this class mints.
+  static bool isAProfileId(String id) => _mintedForm.hasMatch(id);
+
+  static final _safeEarlierForm = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
   /// Where [profileId]'s Identity Agent keeps its data, created if absent.
   static Future<String> dataDirectoryFor(String profileId) async {
@@ -121,7 +153,10 @@ class IdentityProfiles {
     // the identity back within reach of anything on this device that can open
     // a local port, without its owner having done anything. It starts when
     // [openAfterAuthenticating] has been through.
-    if (await activeIsLocked()) return;
+    if (await activeIsLocked()) {
+      await stopALeftoverCoreOfTheLockedOne();
+      return;
+    }
 
     final dir = await dataDirectoryForActive();
 
@@ -201,7 +236,7 @@ class IdentityProfiles {
   /// identity being left is exactly where it was, and can be returned to.
   static Future<void> switchTo(String profileId) async {
     await ProfileScope.setActive(profileId);
-    await _stopWhateverIsRunning();
+    await _stopAndVerify();
     await startTheActiveOne();
     debugPrint('[profiles] now on $profileId');
   }
@@ -230,12 +265,40 @@ class IdentityProfiles {
       _authenticateOnThisDevice;
 
   static Future<bool> _authenticateOnThisDevice(String reason) async {
-    // A device with no screen lock and no biometrics has nothing to ask. There
-    // is no second secret anywhere in this app to fall back to, and refusing
-    // would lock an owner out of their own identity for good, so it opens.
-    // The lock is as strong as the device's own.
-    if (!await LocalAuthService.isSupported()) return true;
-    return LocalAuthService.authenticate(reason: reason);
+    // A device with no screen lock has nothing to ask. There is no second
+    // secret anywhere in this app to fall back to, and refusing would lock an
+    // owner out of their own identity for good, so it opens — and
+    // [deviceHasNoScreenLock] is how the screens say so, plainly, before and
+    // after. local_auth reports "not enrolled" and "passcode not set" as
+    // errors; they mean the same thing, not a failed attempt.
+    final check = await LocalAuthService.checkOwner(reason: reason);
+    return check != OwnerCheck.notUnlocked;
+  }
+
+  /// Whether this device has no screen lock, so anyone holding it can open a
+  /// locked identity. A seam for tests.
+  static Future<bool> Function() deviceHasNoScreenLock = () async {
+    try {
+      return !await LocalAuthService.isSupported();
+    } catch (_) {
+      return false; // cannot tell: claim nothing
+    }
+  };
+
+  /// What to tell a person whose device has no screen lock: that the lock on a
+  /// logged-out identity is only as strong as the device's own, and where to
+  /// set one. [platform] is one of android, ios, windows, macos.
+  static String noScreenLockMessage({String? platform}) {
+    final p = platform ?? Platform.operatingSystem;
+    final where = switch (p) {
+      'android' => 'Android Settings > Security > Screen lock',
+      'ios' => 'iOS Settings > Face ID & Passcode',
+      'windows' => 'Windows Settings > Accounts > Sign-in options',
+      'macos' => 'macOS System Settings > Lock Screen / Touch ID & Password',
+      _ => "this device's settings",
+    };
+    return 'This device has no screen lock, so anyone holding it can open '
+        'this identity. Set one in $where.';
   }
 
   static Future<File> _lockedMarker(String profileId) async =>
@@ -271,14 +334,55 @@ class IdentityProfiles {
     final marker = await _lockedMarker(await ProfileScope.activeId());
     await marker.parent.create(recursive: true);
     await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
-    await _stopWhateverIsRunning();
+    // The marker stays set whatever happens next: a profile that could not be
+    // confirmed stopped is still locked. What is not allowed is saying it is
+    // done. Stopped is verified (the core no longer answers), and when it is
+    // not, [TheCoreDidNotStop] reaches the screen instead of the next one.
+    await _stopAndVerify();
+  }
+
+  /// Log out with [logOut] and tell the person what happened, through [say].
+  /// Returns whether to go on to the start-up screen.
+  ///
+  /// A stop that could not be confirmed is SHOWN and nothing proceeds: a core
+  /// may still be answering, so "logged out" would be untrue. A device with no
+  /// screen lock is told so now (see [noScreenLockMessage]). One place, for
+  /// both apps, so they cannot say different things.
+  static Future<bool> logOutAndTell({
+    required Future<void> Function() logOut,
+    required Future<void> Function(String title, String body) say,
+  }) async {
+    try {
+      await logOut();
+    } on TheCoreDidNotStop catch (e) {
+      await say('Not logged out', '$e');
+      return false;
+    }
+    if (await deviceHasNoScreenLock()) {
+      await say('Logged out', noScreenLockMessage());
+    }
+    return true;
+  }
+
+  /// Stops whatever runs and confirms nothing answers. Throws
+  /// [TheCoreDidNotStop] when a stop throws or a core still answers.
+  static Future<void> _stopAndVerify() async {
+    try {
+      if (!await _stopWhateverIsRunning()) throw const TheCoreDidNotStop();
+    } on TheCoreDidNotStop {
+      rethrow;
+    } catch (e) {
+      throw TheCoreDidNotStop('$e');
+    }
   }
 
   /// Open [profileId], first making its owner authenticate if it is locked.
   /// Held inside [TheCoreIsSettled.during], like every switch.
   ///
   /// Returns false, and changes nothing, when authentication did not succeed.
-  /// A profile that fails to start is locked again rather than left open.
+  /// A profile that fails to start is locked again, and whatever core the
+  /// failed switch got started is stopped and verified stopped, rather than
+  /// left open.
   static Future<bool> openAfterAuthenticating(String profileId) async {
     final locked = await isLocked(profileId);
     if (locked &&
@@ -294,42 +398,86 @@ class IdentityProfiles {
         await marker.parent.create(recursive: true);
         await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
       }
+      // A core switchTo already started must not be left answering for a
+      // profile that is marked locked.
+      try {
+        await _stopAndVerify();
+      } catch (stopFailed) {
+        debugPrint('[profiles] could not stop the core after a failed '
+            'open: $stopFailed');
+      }
       rethrow;
     }
     return true;
   }
 
-  /// What says whether the open profile already holds an identity. A seam for
-  /// tests.
+  /// What says whether the open profile may already hold an identity. A seam
+  /// for tests.
+  ///
+  /// DECIDED FROM LOCAL FACTS AND FAILING CLOSED. It used to ask the core and
+  /// answer "no" on any error, so a core that was stopped, slow or refusing
+  /// looked like an empty profile; the app founded in the occupied one, the
+  /// core said "already exists", and the interrupted-founding repair opened
+  /// the previous identity. Now a card, a lock marker, or a phrase held (or
+  /// one that cannot be ruled out) each mean "occupied": a new profile is
+  /// begun. The only "no" is a profile with none of them.
   @visibleForTesting
   static Future<bool> Function() openOneHoldsAnIdentity = () async {
-    final core = CoreService();
+    final id = await ProfileScope.activeId();
+    if (File(await _cardPathFor(id)).existsSync()) return true;
+    if (await isLocked(id)) return true;
     try {
-      final identity = await core.getIdentity();
-      return identity.initialized && (identity.aid ?? '').isNotEmpty;
+      if (await SecureKeyStore.hasMnemonic()) return true;
     } catch (_) {
-      // Nothing answering is not a reason to abandon this profile: the core may
-      // simply not be up yet, and beginning another would strand the first.
-      return false;
-    } finally {
-      core.dispose();
+      return true; // cannot be ruled out, so not empty
     }
+    return false;
   };
+
+  // ── a founding this run started ──────────────────────────────────────────
+
+  static const _foundingFile = 'founding';
+
+  static Future<File> _foundingMarker(String profileId) async => File(
+      '${await directoryFor(profileId)}${Platform.pathSeparator}$_foundingFile');
+
+  /// Written before the founding is asked of the core. A repair of an
+  /// "already exists" answer is only for a founding this run started; without
+  /// the marker the identity that is there is somebody else's, and is not
+  /// opened.
+  static Future<void> markFoundingStarted() async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    await f.parent.create(recursive: true);
+    await f.writeAsString(DateTime.now().toUtc().toIso8601String());
+  }
+
+  /// Whether the open profile has a founding that was started and not
+  /// finished.
+  static Future<bool> foundingWasStarted() async =>
+      (await _foundingMarker(await ProfileScope.activeId())).existsSync();
+
+  /// Removed once the founding is finished or repaired.
+  static Future<void> clearFoundingMarker() async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    if (f.existsSync()) f.deleteSync();
+  }
 
   /// Make room for an identity about to be created, on every platform.
   ///
   /// The core keeps one identity per data directory, so a second cannot be
-  /// founded in the directory that holds the first: it comes back "already
-  /// exists", and an app that treats that as an interrupted founding opens the
-  /// identity that is there. So when the open profile holds one, or is a
-  /// locked one, a new profile is begun and opened.
+  /// founded in the directory that holds the first. When the open profile
+  /// holds one (by local facts, [openOneHoldsAnIdentity]) or is a locked one, a
+  /// new profile is begun and opened. A profile with a founding in progress
+  /// is the exception: it is resumed, because beginning another would strand
+  /// the words it already holds.
   ///
   /// An empty profile is used as it is — beginning a fresh one on every Create
   /// press would leave an empty directory behind each abandoned attempt.
   /// Returns whether a new profile was begun.
   static Future<bool> makeRoomForANewOne() async {
-    if (!await activeIsLocked() && !await openOneHoldsAnIdentity()) {
-      return false;
+    if (!await activeIsLocked()) {
+      if (await foundingWasStarted()) return false;
+      if (!await openOneHoldsAnIdentity()) return false;
     }
     // Held shut while the core moves to the new profile's data, as for any other
     // switch: a request in between would be signed by the old core.
@@ -337,14 +485,36 @@ class IdentityProfiles {
     return true;
   }
 
-  static Future<void> _stopWhateverIsRunning() async {
+  /// Whether nothing answers afterwards.
+  static Future<bool> _stopWhateverIsRunning() async {
     final stopper = coreStopper;
-    if (stopper != null) return stopper();
-    if (BackendProcessService.isDesktopPlatform) {
-      await BackendProcessService.instance.stop();
-    } else {
-      await mobileCore?.stopCore();
+    if (stopper != null) {
+      await stopper();
+      return true;
     }
+    if (BackendProcessService.isDesktopPlatform) {
+      // By the profile's data directory, so a core this app adopted rather than
+      // spawned is ended too — see [BackendProcessService.stop].
+      BackendProcessService.dataDirOverride ??=
+          await dataDirectoryForActive();
+      return BackendProcessService.instance.stop();
+    }
+    final core = mobileCore;
+    if (core == null) return true;
+    await core.stopCore();
+    return !await core.isHealthy();
+  }
+
+  /// At launch, for a profile that is locked: end any core still answering on
+  /// its data (a leftover from before it was locked or from a crash). Desktop
+  /// only. Returns whether nothing answers afterwards.
+  static Future<bool> stopALeftoverCoreOfTheLockedOne() async {
+    if (!BackendProcessService.isDesktopPlatform || coreStopper != null) {
+      return true;
+    }
+    if (!await activeIsLocked()) return true;
+    BackendProcessService.dataDirOverride = await dataDirectoryForActive();
+    return BackendProcessService.instance.stop();
   }
 
   // ── describing them without running them ─────────────────────────────────
@@ -500,8 +670,23 @@ class IdentityProfiles {
     final target = Directory(await dataDirectoryForActive());
     if (target.listSync().isNotEmpty) return true; // already done, or founded here
 
-    final files =
-        legacy.listSync(recursive: true, followLinks: false).whereType<File>();
+    // NOT WHILE A CORE ANSWERS. A running core has its database open and is
+    // writing it: a copy taken now can be torn halfway through a write, and the
+    // original then removed. Left where it is, the identity keeps working.
+    if (await _aCoreAnswersOn(legacy) && !await _endTheCoreOn(legacy)) {
+      debugPrint('[profiles] a core is running on the old directory — not '
+          'moving it now');
+      return false;
+    }
+
+    // What a running core leaves to say where it was and who it was, not data.
+    bool isCoreRuntimeNote(String rel) => rel == '.port' || rel == '.pid';
+
+    final files = legacy
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .where((f) => !isCoreRuntimeNote(f.path.substring(legacy.path.length + 1)))
+        .toList();
 
     try {
       for (final f in files) {
@@ -512,15 +697,21 @@ class IdentityProfiles {
       }
     } catch (e) {
       debugPrint('[profiles] copy failed, original left in place: $e');
+      _clear(target);
       return false;
     }
 
+    // Verified by content, not length: a copy of a database taken while it was
+    // being written has the right length and the wrong bytes.
     for (final f in files) {
       final rel = f.path.substring(legacy.path.length + 1);
       final dest = File('${target.path}${Platform.pathSeparator}$rel');
-      if (!dest.existsSync() || dest.lengthSync() != f.lengthSync()) {
+      if (!dest.existsSync() ||
+          sha256.convert(await dest.readAsBytes()) !=
+              sha256.convert(await f.readAsBytes())) {
         debugPrint('[profiles] $rel did not survive the copy — '
             'original left in place');
+        _clear(target);
         return false;
       }
     }
@@ -533,6 +724,62 @@ class IdentityProfiles {
       debugPrint('[profiles] migrated, old directory not removed: $e');
     }
     return true;
+  }
+
+  /// Empties a half-made copy, so the next launch does not take it for a
+  /// finished move ("target not empty").
+  static void _clear(Directory target) {
+    try {
+      for (final e in target.listSync()) {
+        e.deleteSync(recursive: true);
+      }
+    } catch (e) {
+      debugPrint('[profiles] could not clear the partial copy: $e');
+    }
+  }
+
+  /// Ends this app's own leftover core on [dataDir], once it has proved it is
+  /// this directory's. Desktop only; elsewhere nothing is ended.
+  static Future<bool> _endTheCoreOn(Directory dataDir) async {
+    if (!BackendProcessService.isDesktopPlatform || coreStopper != null) {
+      return false;
+    }
+    final before = BackendProcessService.dataDirOverride;
+    BackendProcessService.dataDirOverride = dataDir.path;
+    try {
+      return await BackendProcessService.instance.stopTheCoreOnThisData();
+    } finally {
+      BackendProcessService.dataDirOverride = before;
+    }
+  }
+
+  /// Where a single-directory installation kept its identity. An app whose
+  /// [migrateTheSingleDirectory] returned false keeps running on this, rather
+  /// than start empty beside an identity it did not move.
+  static Future<String> legacyDirectory() async =>
+      '${await _root()}${Platform.pathSeparator}data';
+
+  static Future<bool> _aCoreAnswersOn(Directory dataDir) async {
+    try {
+      final f = File('${dataDir.path}${Platform.pathSeparator}.port');
+      if (!f.existsSync()) return false;
+      final port = int.tryParse(f.readAsStringSync().trim());
+      if (port == null) return false;
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(milliseconds: 600);
+      try {
+        final req = await client
+            .getUrl(Uri.parse('http://127.0.0.1:$port/api/health'))
+            .timeout(const Duration(milliseconds: 800));
+        final resp = await req.close().timeout(const Duration(milliseconds: 800));
+        await resp.drain<void>();
+        return true; // anything answering there is a reason not to move it
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── paths ────────────────────────────────────────────────────────────────
@@ -558,28 +805,7 @@ class IdentityProfiles {
       return (await getApplicationSupportDirectory()).path;
     }
 
-    final sep = Platform.pathSeparator;
-    final home = Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '';
-    var appName = 'IdentityAgent';
-    try {
-      final resolved = Platform.resolvedExecutable.split(sep).last;
-      if (resolved.isNotEmpty) appName = resolved;
-    } catch (_) {/* keep the default */}
-
-    if (Platform.isMacOS) {
-      return '$home${sep}Library${sep}Application Support$sep$appName';
-    }
-    if (Platform.isWindows) {
-      final appData =
-          Platform.environment['APPDATA'] ?? '$home${sep}AppData${sep}Roaming';
-      return '$appData$sep$appName';
-    }
-    final xdg = Platform.environment['XDG_DATA_HOME'];
-    return (xdg != null && xdg.isNotEmpty)
-        ? '$xdg$sep$appName'
-        : '$home$sep.local${sep}share$sep$appName';
+    return BackendProcessService.desktopInstallationRoot();
   }
 
   /// Short, random, and only unique within this installation — which is all it

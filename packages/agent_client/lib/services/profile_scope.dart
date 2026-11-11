@@ -27,7 +27,20 @@ class ProfileScope {
   static const _activeProfileKey = 'active_profile_id';
   static const _knownProfilesKey = 'known_profile_ids';
 
+  static const _firstProfileKey = 'first_profile_id';
+
   static String? _cached;
+
+  /// The profile this installation began with — the one that existed when
+  /// anything stored under an unscoped name was moved into profiles. Null when
+  /// it cannot be told (several known and none recorded).
+  static Future<String?> firstId() async {
+    final prefs = await _prefs;
+    final recorded = prefs.getString(_firstProfileKey);
+    if (recorded != null && recorded.isNotEmpty) return recorded;
+    final known = prefs.getStringList(_knownProfilesKey) ?? const <String>[];
+    return known.length == 1 ? known.first : null;
+  }
 
   static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
 
@@ -71,6 +84,9 @@ class ProfileScope {
   static Future<void> _register(SharedPreferences prefs, String id) async {
     final known = prefs.getStringList(_knownProfilesKey) ?? <String>[];
     if (known.contains(id)) return;
+    if (known.isEmpty && prefs.getString(_firstProfileKey) == null) {
+      await prefs.setString(_firstProfileKey, id);
+    }
     await prefs.setStringList(_knownProfilesKey, [...known, id]);
   }
 

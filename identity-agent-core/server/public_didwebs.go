@@ -44,6 +44,20 @@ var pairwiseKELs = struct {
 	m map[string][]map[string]interface{}
 }{m: map[string][]map[string]interface{}{}}
 
+// forgetPublishedPairwise empties what a stopped core published (pairwiseKeys,
+// pairwiseKELs) and its contact key-check results (kelCheckCache).
+func forgetPublishedPairwise() {
+	pairwiseKeys.Lock()
+	pairwiseKeys.m = map[string]string{}
+	pairwiseKeys.Unlock()
+	pairwiseKELs.Lock()
+	pairwiseKELs.m = map[string][]map[string]interface{}{}
+	pairwiseKELs.Unlock()
+	kelCheckCache.Lock()
+	kelCheckCache.m = map[string]kelCheckResult{}
+	kelCheckCache.Unlock()
+}
+
 func registerPairwiseKEL(aid string, kel []map[string]interface{}) {
 	pairwiseKELs.Lock()
 	pairwiseKELs.m[aid] = kel

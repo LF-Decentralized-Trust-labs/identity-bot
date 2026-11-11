@@ -1,7 +1,10 @@
 import 'dart:io';
 
 import 'package:agent_client/services/identity_profiles.dart';
+import 'package:agent_client/services/local_auth_service.dart';
+import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/profile_scope.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
@@ -13,6 +16,7 @@ import 'package:test/test.dart';
 /// where the answers are stored so they can be examined directly; the storage
 /// and the paths need a device and are exercised there.
 void main() {
+  final realOpenOneHolds = IdentityProfiles.openOneHoldsAnIdentity;
   const one = 'EIdentityOne';
   const two = 'EIdentityTwo';
 
@@ -105,7 +109,8 @@ void main() {
               'without its owner having authenticated');
     });
 
-    test('it is offered by name while locked, and opens only after '
+    test(
+        'it is offered by name while locked, and opens only after '
         'authenticating', () async {
       final id = await ProfileScope.activeId();
       await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
@@ -133,7 +138,8 @@ void main() {
       expect(await IdentityProfiles.isLocked(id), isTrue);
     });
 
-    test('creating after logging out begins a second profile and leaves the '
+    test(
+        'creating after logging out begins a second profile and leaves the '
         'first where it was', () async {
       final first = await ProfileScope.activeId();
       await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
@@ -155,5 +161,125 @@ void main() {
       IdentityProfiles.openOneHoldsAnIdentity = () async => true;
       expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
     });
+
+    test('a stop that fails is reported, and the identity stays locked',
+        () async {
+      final id = await ProfileScope.activeId();
+      IdentityProfiles.coreStopper = () async => throw Exception('refused');
+      await expectLater(IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada'),
+          throwsA(isA<TheCoreDidNotStop>()));
+      expect(await IdentityProfiles.isLocked(id), isTrue,
+          reason: 'the marker is not undone by a stop that did not work');
+    });
+
+    test('an open that fails stops the core it started, and locks again',
+        () async {
+      final id = await ProfileScope.activeId();
+      await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
+      stopped = 0;
+      // The start gets as far as having a core, then fails after it.
+      IdentityProfiles.coreStarter = (_) async => throw Exception('late');
+      await expectLater(
+          IdentityProfiles.openAfterAuthenticating(id), throwsException);
+      expect(stopped, greaterThanOrEqualTo(2),
+          reason: 'once leaving the old, once after the failure');
+      expect(await IdentityProfiles.isLocked(id), isTrue);
+    });
+
+    group('is the open profile occupied (decided locally, failing closed)', () {
+      setUp(() {
+        FlutterSecureStorage.setMockInitialValues({});
+        IdentityProfiles.openOneHoldsAnIdentity = realOpenOneHolds;
+        SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
+      });
+      tearDown(SecureKeyStore.holdPhraseInTheCore);
+
+      test('an empty profile is not', () async {
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isFalse);
+      });
+      test('a card means it is', () async {
+        await IdentityProfiles.remember(aid: one, name: 'Ada');
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
+      });
+      test('a lock marker means it is', () async {
+        await IdentityProfiles.lockTheOpenOne();
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
+      });
+      test('a held phrase means it is', () async {
+        await SecureKeyStore.saveMnemonic(['abandon', 'about']);
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
+      });
+      test('a core that cannot be asked is not an empty profile', () async {
+        SecureKeyStore.holdPhraseWith(_ARefusingHolder());
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue,
+            reason: 'an error must begin a new profile, never found in the '
+                'occupied one');
+        final first = await ProfileScope.activeId();
+        expect(await IdentityProfiles.makeRoomForANewOne(), isTrue);
+        expect(await ProfileScope.activeId(), isNot(first));
+      });
+    });
+
+    test('a founding this run started is resumed, not abandoned', () async {
+      final id = await ProfileScope.activeId();
+      IdentityProfiles.openOneHoldsAnIdentity = () async => true;
+      expect(await IdentityProfiles.foundingWasStarted(), isFalse);
+      await IdentityProfiles.markFoundingStarted();
+      expect(await IdentityProfiles.foundingWasStarted(), isTrue);
+      expect(await IdentityProfiles.makeRoomForANewOne(), isFalse,
+          reason: 'its words are held in this profile');
+      expect(await ProfileScope.activeId(), id);
+      await IdentityProfiles.clearFoundingMarker();
+      expect(await IdentityProfiles.foundingWasStarted(), isFalse);
+    });
+
+    test('a profile id that is not a profile id names no directory', () async {
+      for (final bad in ['../evil', '/etc', 'a/b', '..', '', r'a\b']) {
+        await expectLater(
+            IdentityProfiles.directoryFor(bad), throwsArgumentError,
+            reason: bad);
+      }
+      expect(await IdentityProfiles.directoryFor('abcdefghij12'),
+          startsWith(root.path));
+    });
   });
+
+  group('no screen lock', () {
+    test('local_auth\'s not-enrolled and passcode-not-set are no lock', () {
+      for (final c in ['NotEnrolled', 'PasscodeNotSet', 'passcodeNotSet']) {
+        expect(LocalAuthService.isNoScreenLockCode(c), isTrue, reason: c);
+      }
+      expect(LocalAuthService.isNoScreenLockCode('LockedOut'), isFalse);
+      expect(LocalAuthService.isNoScreenLockCode('auth_in_progress'), isFalse);
+    });
+
+    test('the message says so plainly and where to set one, per platform', () {
+      final where = {
+        'android': 'Android Settings > Security > Screen lock',
+        'ios': 'iOS Settings > Face ID & Passcode',
+        'windows': 'Windows Settings > Accounts > Sign-in options',
+        'macos': 'macOS System Settings > Lock Screen / Touch ID & Password',
+      };
+      where.forEach((os, text) {
+        final m = IdentityProfiles.noScreenLockMessage(platform: os);
+        expect(m, contains('no screen lock'));
+        expect(m, contains('anyone holding it can open'));
+        expect(m, contains(text));
+      });
+    });
+  });
+}
+
+class _ARefusingHolder implements PhraseHolder {
+  @override
+  Future<void> hold(String phrase, {bool replacing = false}) async =>
+      throw StateError('no core');
+  @override
+  Future<String?> open() async => throw StateError('no core');
+  @override
+  Future<bool> isHeld() async => throw StateError('no core');
+  @override
+  Future<String?> protection() async => throw StateError('no core');
+  @override
+  Future<bool> forget() async => throw StateError('no core');
 }
