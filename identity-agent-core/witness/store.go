@@ -40,6 +40,9 @@ type Store interface {
 	GetIssuedReceipt(signerAID, eventSAID string) (*IssuedReceipt, error)
 	GetFinalization(eventSAID string) (*FinalizationState, error)
 	SaveFinalization(f FinalizationState) error
+	// ListUnfinalized is every finalization not in the finalized state:
+	// pending, partial or timed out.
+	ListUnfinalized() ([]FinalizationState, error)
 
 	CountWitnessingFor() (int, error)
 	RecordSelfHealAttempt(contactAID string, at string) error

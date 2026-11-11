@@ -2,6 +2,7 @@ package drivers
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 
@@ -295,6 +296,32 @@ func ReadControllerSignature(sig string) (ControllerSignature, error) {
 // something the verdict never covered.
 func DecodeRawBytes(b64 string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(b64)
+}
+
+// EventIDOfRecord is the event identifier (d) and type (t) of one log record,
+// read from its raw_bytes_b64 and from nothing else: a field served beside the
+// bytes is not covered by a verdict. Empty when the bytes are absent, do not
+// decode, or are not an event. This is the one reader of "which event is this
+// record" — the store, recovery and corroboration all use it.
+func EventIDOfRecord(rec map[string]interface{}) (said, ilk string) {
+	rawB64, _ := rec["raw_bytes_b64"].(string)
+	return EventIDOfRawB64(rawB64)
+}
+
+// EventIDOfRawB64 is EventIDOfRecord for the base64 form alone.
+func EventIDOfRawB64(rawB64 string) (said, ilk string) {
+	raw, err := DecodeRawBytes(rawB64)
+	if err != nil || len(raw) == 0 {
+		return "", ""
+	}
+	var ev struct {
+		D string `json:"d"`
+		T string `json:"t"`
+	}
+	if json.Unmarshal(raw, &ev) != nil {
+		return "", ""
+	}
+	return ev.D, ev.T
 }
 
 // DecodeRawEvents turns the base64 wire form into bytes, reporting which entry

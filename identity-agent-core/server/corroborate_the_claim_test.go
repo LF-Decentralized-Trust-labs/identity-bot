@@ -93,9 +93,7 @@ func TestAHistoryWithARotationWithheldIsRefused(t *testing.T) {
 	w := newStandInWitness(t)
 	s := agentWithNoIdentity(t)
 
-	presented := []map[string]interface{}{
-		{"t": "icp", "i": "EClaimant", "s": "0", "b": []interface{}{w.key}},
-	}
+	presented := withBytes(map[string]interface{}{"t": "icp", "i": "EClaimant", "s": "0", "d": "EInception", "b": []interface{}{w.key}})
 	// The witness saw a rotation the claim did not show.
 	w.held["EClaimant"] = []map[string]interface{}{
 		{"t": "icp", "i": "EClaimant", "s": "0", "b": []interface{}{w.key}},
@@ -120,10 +118,8 @@ func TestAWholeHistoryIsCorroborated(t *testing.T) {
 	w := newStandInWitness(t)
 	s := agentWithNoIdentity(t)
 
-	kel := []map[string]interface{}{
-		{"t": "icp", "i": "EClaimant", "s": "0", "b": []interface{}{w.key}},
-	}
-	w.held["EClaimant"] = kel
+	kel := withBytes(map[string]interface{}{"t": "icp", "i": "EClaimant", "s": "0", "d": "EInception", "b": []interface{}{w.key}})
+	w.held["EClaimant"] = []map[string]interface{}{{"t": "icp", "i": "EClaimant", "s": "0", "d": "EInception", "b": []interface{}{w.key}}}
 
 	got := s.askTheWitnesses("EClaimant", kel)
 	if got.Contradicted {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
 )
@@ -43,6 +44,18 @@ import (
 type corroboration struct {
 	// Asked is how many designated witnesses were reachable and answered.
 	Asked int
+	// Held is how many of those hold the presented events: at least the
+	// sequence claimed, with the same digests. Only these corroborate.
+	Held int
+	// Empty is how many answered, but with no events for this identifier, as a
+	// witness does for one it has never seen. Reachable is not confirming.
+	Empty int
+	// Behind is how many answered with some of the history but less than was
+	// claimed.
+	Behind int
+	// Failed is how many designated witnesses could not be asked: no address
+	// for the key, or no answer.
+	Failed int
 	// Designated is how many the log names at all.
 	Designated int
 	// Contradicted means a witness holds a longer history than the one
@@ -53,7 +66,10 @@ type corroboration struct {
 }
 
 // Corroborated is the question a caller actually wants answered.
-func (c corroboration) Corroborated() bool { return c.Asked > 0 && !c.Contradicted }
+//
+// A witness that is reachable but holds nothing confirms nothing, so it is the
+// witnesses that hold the events that count, not the ones that answered.
+func (c corroboration) Corroborated() bool { return c.Held > 0 && !c.Contradicted }
 
 // witnessKeysIn reads the witness keys an inception event designates.
 //
@@ -90,11 +106,17 @@ func eventCountIn(kel []map[string]interface{}) int { return len(kel) }
 // about it. Conflating the two would make every network fault look like an
 // attack, and would make a machine with no internet unable to be set up at all.
 func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]interface{}) corroboration {
+	// Rebuilt from the bytes the verdict on the claim covers, so nothing served
+	// beside them (a top-level "d", event_json) can say what the claim shows. A
+	// log that cannot be rebuilt was not verified by its bytes and cannot be
+	// corroborated.
+	rebuilt, ok := drivers.RecordsFromVerifiedBytes(presented)
 	keys := witnessKeysIn(presented)
 	out := corroboration{Designated: len(keys)}
-	if len(keys) == 0 {
+	if len(keys) == 0 || !ok {
 		return out
 	}
+	presented = rebuilt
 
 	// A designated key is not an address. Resolve it through the registry this
 	// agent already uses; a key it does not recognise cannot be asked.
@@ -110,10 +132,12 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 			}
 		}
 		if base == "" {
+			out.Failed++
 			continue
 		}
 		replica, err := fetchWitnessReplica(client, base, ownerAID, presented)
 		if err != nil {
+			out.Failed++
 			continue
 		}
 		out.Asked++
@@ -129,8 +153,67 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 				len(replica), ownerAID, eventCountIn(presented))
 			return out
 		}
+		// A different event where the claim shows one is a fork, not a
+		// confirmation.
+		if at, differs := firstDigestMismatch(presented, replica); differs {
+			out.Contradicted = true
+			out.Why = fmt.Sprintf(
+				"a witness holds a different event %d for %s than the claim presented", at, ownerAID)
+			return out
+		}
+		switch {
+		case len(replica) == 0:
+			out.Empty++
+		case len(replica) < eventCountIn(presented):
+			out.Behind++
+		case !holdsDigests(presented, replica):
+			out.Behind++
+		default:
+			out.Held++
+		}
 	}
 	return out
+}
+
+// eventDigestOf is the event identifier of one record on either side. From the raw
+// bytes when the record carries them; otherwise from its top-level "d", which
+// is what a witness serves (it keeps the event's parsed fields, not its bytes).
+// The presented log has been rebuilt from its verified bytes before this is
+// asked of it, so on that side "d" can only be what the bytes say.
+func eventDigestOf(rec map[string]interface{}) string {
+	if said, _ := drivers.EventIDOfRecord(rec); said != "" {
+		return said
+	}
+	d, _ := rec["d"].(string)
+	return d
+}
+
+// firstDigestMismatch finds an event where both sides give a readable digest
+// and they differ. Digests are read from raw bytes alone (eventDigestOf).
+func firstDigestMismatch(presented, replica []map[string]interface{}) (int, bool) {
+	for i := 0; i < len(presented) && i < len(replica); i++ {
+		a, b := eventDigestOf(presented[i]), eventDigestOf(replica[i])
+		if a != "" && b != "" && a != b {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// holdsDigests reports whether the witness gives, for EVERY event the claim
+// shows, the same readable digest at the same place. An event whose digest
+// cannot be read on either side is not held: unreadable is not confirming.
+func holdsDigests(presented, replica []map[string]interface{}) bool {
+	if len(replica) < len(presented) {
+		return false
+	}
+	for i, p := range presented {
+		want, got := eventDigestOf(p), eventDigestOf(replica[i])
+		if want == "" || got == "" || got != want {
+			return false
+		}
+	}
+	return true
 }
 
 // fetchWitnessReplica reads one witness's copy of an identity's key log.

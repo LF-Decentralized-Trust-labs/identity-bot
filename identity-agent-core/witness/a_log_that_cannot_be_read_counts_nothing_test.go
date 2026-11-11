@@ -135,15 +135,20 @@ func TestAReceiptKeptUnreadableIsNotCountedOnceTheLogHasCutItsWitness(t *testing
 	}
 	settled(kc, 1)
 	icp := inceptionOf(theAID, []string{kc.kept[0].WitnessAID}, 1)
-	s.KeyLogOf = keyLog(theAID, icp, rot) // read now: every witness cut
+	// read now: every witness cut. Set under the lock the readers hold, as a
+	// post that has been receipted may still be settling.
+	s.receiptMu.Lock()
+	s.KeyLogOf = keyLog(theAID, icp, rot)
+	s.receiptMu.Unlock()
 
 	s.RecountReceipts(said)
 	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 {
 		t.Fatalf("a recount counted a cut witness: %+v", f)
 	}
-	// A broadcast again must not either.
+	// A broadcast again must not either. The log now asks no receipt (its own
+	// threshold is 0), so the event is finalized on that, not on a count.
 	s.begin(said, theAID, 1, 1, rot)
-	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 || f.State == FinalizeFinalized {
-		t.Fatalf("a new broadcast counted a cut witness: %+v", f)
+	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 || f.Threshold != 0 || f.State != FinalizeFinalized {
+		t.Fatalf("a new broadcast counted a cut witness, or did not finalize on a log that asks for none: %+v", f)
 	}
 }

@@ -103,3 +103,16 @@ func TestTheCountOfWitnessesLeavesOutAReceiptAtTheWrongIndex(t *testing.T) {
 		t.Fatalf("the same signature at another index counted %d", got)
 	}
 }
+
+// The event an entry is, is what its bytes say: a "d" or "t" served beside the
+// bytes is not read.
+func TestEventIDOfRecordIgnoresATopLevelDAndT(t *testing.T) {
+	raw := base64.StdEncoding.EncodeToString([]byte(`{"t":"icp","d":"Ereal","i":"Eaid","s":"0"}`))
+	said, ilk := EventIDOfRecord(map[string]interface{}{"raw_bytes_b64": raw, "d": "Eforged", "t": "rot"})
+	if said != "Ereal" || ilk != "icp" {
+		t.Fatalf("read %q %q from beside the bytes", said, ilk)
+	}
+	if said, ilk := EventIDOfRecord(map[string]interface{}{"d": "Eforged", "t": "rot"}); said != "" || ilk != "" {
+		t.Fatalf("a record with no bytes gave %q %q", said, ilk)
+	}
+}
