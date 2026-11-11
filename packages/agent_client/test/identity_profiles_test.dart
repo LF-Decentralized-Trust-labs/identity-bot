@@ -162,6 +162,10 @@ void main() {
           lockedNames: ['Ada', 'Ben'], noScreenLock: true)!;
       expect(two, contains('Each owner is asked'));
       expect(two, contains('has no screen lock'));
+      expect(
+          IdentityProfiles.listNotice(
+              lockedNames: [], noScreenLock: true, what: 'organisation'),
+          contains('this organisation'));
     });
 
     group('getting back in', () {

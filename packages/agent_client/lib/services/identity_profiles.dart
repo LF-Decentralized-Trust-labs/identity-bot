@@ -375,7 +375,7 @@ class IdentityProfiles {
             lockedNames.length == 1 ? lockedNames.first : 'Each owner',
             method: method,
             what: what),
-      if (noScreenLock) noScreenLockMessage(),
+      if (noScreenLock) noScreenLockMessage(what: what),
     ];
     return parts.isEmpty ? null : parts.join(' ');
   }
