@@ -18,15 +18,19 @@ func anAppOffering(t *testing.T, offered, off []string) *aWebsiteWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.AssetType, a.DeviceFrontEnds, a.FrontEndsOff = "app", offered, off
+	a.AssetType, a.DeviceFrontEnds, a.FrontEndsOff, a.FrontEndsDeclared = "app", offered, off, true
 	if err := w.org.assetHandler.Store.UpsertAsset(a); err != nil {
 		t.Fatal(err)
 	}
 	return w
 }
 
+// theChallengeFor asks as a caller that carries the installed app's own key, so
+// the rules tested with it are the offered list and the owner's switches alone;
+// what a request must prove to be an installed app is tested apart (see
+// TestAPageCannotCallItselfTheInstalledApp).
 func theChallengeFor(w *aWebsiteWorld, key, frontEnd string) (int, string) {
-	_, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, key, frontEnd, w.srv.URL)
+	_, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, key, frontEnd, w.srv.URL, true)
 	return code, msg
 }
 

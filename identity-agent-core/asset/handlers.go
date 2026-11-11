@@ -263,19 +263,20 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	asset := Asset{
-		ID:              id,
-		DisplayName:     body.DisplayName,
-		AssetType:       body.AssetType,
-		Origin:          body.Origin,
-		PairwiseAID:     pairwise,
-		DelegationModel: model,
-		DelegatorAID:    delegator,
-		ApprovalPending: approvalPending,
-		Policy:          body.Policy,
-		DeviceFrontEnds: body.DeviceFrontEnds,
-		SigningIndex:    signingIndex,
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
+		ID:                id,
+		DisplayName:       body.DisplayName,
+		AssetType:         body.AssetType,
+		Origin:            body.Origin,
+		PairwiseAID:       pairwise,
+		DelegationModel:   model,
+		DelegatorAID:      delegator,
+		ApprovalPending:   approvalPending,
+		Policy:            body.Policy,
+		DeviceFrontEnds:   body.DeviceFrontEnds,
+		FrontEndsDeclared: DeclaresFrontEnds(body.AssetType, body.DeviceFrontEnds),
+		SigningIndex:      signingIndex,
+		CreatedAt:         time.Now().UTC(),
+		UpdatedAt:         time.Now().UTC(),
 	}
 
 	if awaiting != nil {
@@ -369,9 +370,15 @@ func (h *Handler) HandlePutFrontEnds(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, map[string]string{"error": "bad request: switched_off is required (an empty list switches everything on)"}, http.StatusBadRequest)
 		return
 	}
+	frontEndsMu.Lock()
+	defer frontEndsMu.Unlock()
 	a, ok, status, msg := h.appForFrontEnds(chi.URLParam(r, "id"))
 	if !ok {
 		h.writeJSON(w, map[string]string{"error": msg}, status)
+		return
+	}
+	if !a.FrontEndsAreDeclared() {
+		h.writeJSON(w, map[string]string{"error": "this app was made before it could say how it is used, so there is nothing to switch off until its front ends are declared"}, http.StatusConflict)
 		return
 	}
 	off, err := SwitchOff(a.DeviceFrontEnds, *body.SwitchedOff)
@@ -380,6 +387,50 @@ func (h *Handler) HandlePutFrontEnds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.FrontEndsOff = off
+	a.UpdatedAt = time.Now().UTC()
+	if err := h.Store.UpsertAsset(a); err != nil {
+		h.writeJSON(w, map[string]string{"error": "the setting could not be saved"}, http.StatusInternalServerError)
+		return
+	}
+	h.writeJSON(w, frontEndsOf(a), http.StatusOK)
+}
+
+// HandleSetOfferedFrontEnds declares the front ends of an app that has none
+// declared: an app made before it could say. PUT /api/assets/{id}/front-ends/offered
+// {"device_front_ends": ["browser"]}, taken from the app's manifest. Owner only,
+// and once only: an app that has declared is refused, because what an app
+// offers is not for the owner's switches to grow (ADR-072 section 3).
+func (h *Handler) HandleSetOfferedFrontEnds(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DeviceFrontEnds *[]string `json:"device_front_ends"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DeviceFrontEnds == nil {
+		h.writeJSON(w, map[string]string{"error": "bad request: device_front_ends is required (the app's manifest list, which may be empty)"}, http.StatusBadRequest)
+		return
+	}
+	offered := *body.DeviceFrontEnds
+	if offered == nil {
+		offered = []string{}
+	}
+	if err := CheckOfferedFrontEnds("app", offered); err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
+	// Held from the read to the write so two requests cannot both pass the
+	// "once only" check.
+	frontEndsMu.Lock()
+	defer frontEndsMu.Unlock()
+	a, ok, status, msg := h.appForFrontEnds(chi.URLParam(r, "id"))
+	if !ok {
+		h.writeJSON(w, map[string]string{"error": msg}, status)
+		return
+	}
+	if a.FrontEndsAreDeclared() {
+		h.writeJSON(w, map[string]string{"error": ErrFrontEndsAlreadyDeclared.Error()}, http.StatusConflict)
+		return
+	}
+	a.DeviceFrontEnds = offered
+	a.FrontEndsDeclared = true
 	a.UpdatedAt = time.Now().UTC()
 	if err := h.Store.UpsertAsset(a); err != nil {
 		h.writeJSON(w, map[string]string{"error": "the setting could not be saved"}, http.StatusInternalServerError)

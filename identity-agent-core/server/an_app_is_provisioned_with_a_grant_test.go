@@ -34,7 +34,7 @@ func provisionedApp(t *testing.T) (*CoreServer, string, string) {
 	t.Helper()
 	s := appWorld(t)
 	app, err := s.assetHandler.ProvisionAppAsset("Task console", []string{"system.info.read", "infra.zone.list"}, nil,
-		map[string]interface{}{"infra.zone.list": map[string]interface{}{"zone": []interface{}{"a.example"}}})
+		map[string]interface{}{"infra.zone.list": map[string]interface{}{"zone": []interface{}{"a.example"}}}, nil)
 	if err != nil {
 		t.Fatalf("provisioning an app: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestReissuingAnAppsGrantWithdrawsTheOldOne(t *testing.T) {
 // the interaction it signs anchors exactly that.
 func TestADeviceIsShownAnAppGrantToSign(t *testing.T) {
 	s := appWorld(t)
-	app, err := s.assetHandler.ProvisionAppAsset("Task console", []string{"system.info.read"}, nil, nil)
+	app, err := s.assetHandler.ProvisionAppAsset("Task console", []string{"system.info.read"}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

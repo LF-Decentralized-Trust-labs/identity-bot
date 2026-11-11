@@ -58,6 +58,10 @@ export interface LoginChallenge {
    *  and cannot export, when the sign-in is for that browser (ADR-066).
    *  Signed; the assertion repeats it. */
   browser_key?: string;
+  /** The kind of front end a sign-in to a utility app is for, `browser` or
+   *  `installed_app` (ADR-072 §2, amended). Signed; the assertion repeats it,
+   *  so the person approves a named kind. */
+  front_end?: string;
   callback_url: string;
   session_token: string;
   sig?: string;
@@ -96,6 +100,9 @@ export interface LoginAssertion {
   /** Repeats the challenge's `browser_key` (ADR-066): the person approved a
    *  sign-in for that browser key and no other. */
   browser_key?: string;
+  /** Repeats the challenge's `front_end`: the person approved a sign-in for
+   *  that kind of front end and no other. */
+  front_end?: string;
   sig?: string;
 }
 
@@ -108,6 +115,8 @@ export interface CreateChallengeOptions {
   sessionToken?: string;
   /** Thumbprint of the browser key this sign-in is for (ADR-066). */
   browserKey?: string;
+  /** The kind of front end this sign-in is for, `browser` or `installed_app`. */
+  frontEnd?: string;
 }
 
 export interface VerifyAssertionOptions {
@@ -119,6 +128,9 @@ export interface VerifyAssertionOptions {
    *  assertion must repeat exactly it, and an assertion naming a browser key
    *  is refused when none was expected. */
   expectedBrowserKey?: string;
+  /** The front end the challenge named (ADR-072 §2); omit when it named none.
+   *  The assertion must repeat exactly it. */
+  expectedFrontEnd?: string;
   maxSkewSeconds?: number;
 }
 

@@ -28,7 +28,14 @@ type ChallengeBundle struct {
 	// a browser holds and cannot export, when the sign-in is for that browser
 	// (ADR-066). Signed in the challenge; the person's assertion repeats it.
 	BrowserKey string `json:"browser_key,omitempty"`
-	Sig        string `json:"sig,omitempty"`
+	// FrontEnd names the kind of front end the sign-in is for, "browser" or
+	// "installed_app", when the site is a utility app (ADR-072 section 2,
+	// amended). Signed in the challenge; the person's assertion repeats it, so
+	// the person approves a named kind and a relying party can refuse an answer
+	// for another. Omitted when the challenge names none, so a challenge for
+	// anything else keeps its form.
+	FrontEnd string `json:"front_end,omitempty"`
+	Sig      string `json:"sig,omitempty"`
 }
 
 type RequestedCredential struct {
@@ -93,7 +100,10 @@ type Assertion struct {
 	// named (ADR-066). The signature covers it, so the person approved a
 	// sign-in for that browser's key and no other.
 	BrowserKey string `json:"browser_key,omitempty"`
-	Sig        string `json:"sig,omitempty"`
+	// FrontEnd repeats the kind of front end the challenge named. The signature
+	// covers it, so the person approved a sign-in for that kind and no other.
+	FrontEnd string `json:"front_end,omitempty"`
+	Sig      string `json:"sig,omitempty"`
 }
 
 type SiteRelationship struct {
@@ -137,7 +147,10 @@ type LoginPreviewResponse struct {
 	// (verified delegation) — lets consent UI say "sign in as a member" vs.
 	// "use your account with this site".
 	RelationshipAnchorAID string `json:"relationship_anchor_aid,omitempty"`
-	RPSessionURL          string `json:"rp_session_url"`
+	// FrontEnd is the kind of front end the sign-in is for, as the signed
+	// challenge names it, so the consent screen can say what is being approved.
+	FrontEnd     string `json:"front_end,omitempty"`
+	RPSessionURL string `json:"rp_session_url"`
 }
 
 // ScoreAttestation is a signed statement about the holder's identity level.

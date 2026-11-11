@@ -52,6 +52,10 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 	if c.BrowserKey != "" {
 		parts = append(parts, jsonField("browser_key", c.BrowserKey))
 	}
+	// Omitted when empty, so a challenge that names no front end keeps its form.
+	if c.FrontEnd != "" {
+		parts = append(parts, jsonField("front_end", c.FrontEnd))
+	}
 	parts = append(parts,
 		jsonField("callback_url", nfc(c.CallbackURL)),
 		jsonField("session_token", c.SessionToken),
@@ -91,6 +95,9 @@ func canonicalAssertionBody(a Assertion) string {
 	}
 	if a.BrowserKey != "" {
 		parts = append(parts, jsonField("browser_key", a.BrowserKey))
+	}
+	if a.FrontEnd != "" {
+		parts = append(parts, jsonField("front_end", a.FrontEnd))
 	}
 	return "{" + strings.Join(filterEmpty(parts), ",") + "}"
 }

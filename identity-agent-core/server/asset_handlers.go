@@ -103,6 +103,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Put("/{id}/policy", s.assetHandler.HandleUpdatePolicy)
 		r.Get("/{id}/front-ends", s.assetHandler.HandleGetFrontEnds)
 		r.Put("/{id}/front-ends", s.assetHandler.HandlePutFrontEnds)
+		r.Put("/{id}/front-ends/offered", s.assetHandler.HandleSetOfferedFrontEnds)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
 		r.Post("/{id}/invites", s.assetHandler.HandleCreateInvite)
 		r.Delete("/{id}/invites/{invite}", s.assetHandler.HandleRevokeInvite)

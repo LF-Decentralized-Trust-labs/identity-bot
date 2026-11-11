@@ -44,6 +44,7 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	e.DeviceFrontEnds = body.DeviceFrontEnds
+	e.FrontEndsDeclared = DeclaresFrontEnds(e.AssetType, body.DeviceFrontEnds)
 	if body.ExpiresInS > 0 {
 		e.ExpiresAt = time.Now().UTC().Add(time.Duration(body.ExpiresInS) * time.Second)
 	}
@@ -200,7 +201,8 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 		Origin:      enrolment.Origin,
 		PairwiseAID: resp.AID,
 		// Also the owner's, from the token.
-		DeviceFrontEnds: enrolment.DeviceFrontEnds,
+		DeviceFrontEnds:   enrolment.DeviceFrontEnds,
+		FrontEndsDeclared: enrolment.FrontEndsDeclared,
 		// Recorded so this machine's later requests can be verified. Without it
 		// the enrolment produces an identity nothing can check a signature
 		// against, which is most of the point of having enrolled.

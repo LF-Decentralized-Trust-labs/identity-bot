@@ -32,7 +32,7 @@ func TestAGrantThatShouldNotBeIssuedIsRefusedForAnAppAndAnAIAgent(t *testing.T) 
 			func(e error) bool { return e != nil && strings.Contains(e.Error(), "must list strings") }},
 	}
 	for _, c := range cases {
-		_, err := h.ProvisionAppAsset("An app "+c.name, c.caps, c.until, c.constraints)
+		_, err := h.ProvisionAppAsset("An app "+c.name, c.caps, c.until, c.constraints, nil)
 		if !c.want(err) {
 			t.Errorf("app, %s: %v", c.name, err)
 		}

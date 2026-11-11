@@ -1,6 +1,7 @@
 import {
   canonicalAssertionBody,
   isBrowserKeyThumbprint,
+  isFrontEndKind,
   parseRfc3339,
   parseRfc3339Exact,
   verifyCanonical,
@@ -167,6 +168,13 @@ export async function verifyLoginAssertion(
   }
   if (expectedBrowserKey !== "" && !isBrowserKeyThumbprint(expectedBrowserKey)) {
     return { valid: false, reason: "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)" };
+  }
+  const expectedFrontEnd = opts.expectedFrontEnd ?? "";
+  if ((assertion.front_end ?? "") !== expectedFrontEnd) {
+    return { valid: false, reason: "front end mismatch: the assertion was approved for another kind of front end" };
+  }
+  if (expectedFrontEnd !== "" && !isFrontEndKind(expectedFrontEnd)) {
+    return { valid: false, reason: "front end mismatch: a sign-in names a front end that is not 'browser' or 'installed_app'" };
   }
   if (!assertion.sig) {
     return { valid: false, reason: "missing sig" };

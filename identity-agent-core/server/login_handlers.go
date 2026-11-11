@@ -128,7 +128,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, "", body.RequestedDisclosures, body.BrowserKey, body.FrontEnd, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, "", body.RequestedDisclosures, body.BrowserKey, body.FrontEnd, s.getPublicURL(r), false)
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -265,7 +265,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
-	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
+	res := login.VerifyAssertionForFrontEnd(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, bundle.FrontEnd, 300)
 	if !res.Valid {
 		// The reason can carry text the poster chose (the identifier it sent),
 		// and the browser that started the sign-in shows what is recorded, so
@@ -302,6 +302,16 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		// nothing: being admitted after a policy change is correct. The
 		// reason is kept so the person's page can show it.
 		s.recordRefusal(token, reason)
+		http.Error(w, "not authorized", http.StatusForbidden)
+		return
+	}
+
+	// 3) The owner's front-end setting, again: a challenge issued just before
+	// the owner switched a front end off must not be approved after it. This is
+	// all switching off does today, it applies to new sign-ins only; sessions
+	// already open carry on until ADR-072 section 6's revocation push exists.
+	if why := s.frontEndRefusalNow(bundle); why != "" {
+		s.recordRefusal(token, why)
 		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
@@ -351,6 +361,11 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// reads the result can check it is the one it asked for.
 	if bundle.BrowserKey != "" {
 		st["browser_key"] = a.BrowserKey
+	}
+	// The front end the verified assertion repeated (ADR-072 section 2), so
+	// whoever reads the result can see which kind of front end was approved.
+	if bundle.FrontEnd != "" {
+		st["front_end"] = a.FrontEnd
 	}
 	// Membership-admitted logins carry the member's info (role, display name)
 	// from the admitting resolver, so the relying party gets "who this is" in

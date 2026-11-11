@@ -210,6 +210,10 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"PUT /api/watcher/hints",
 		"POST /api/watcher/alerts/{id}/acknowledge",
 		"POST /api/watcher/alerts/{id}/resolve",
+		// Which front ends of a utility app people may sign in through, and the
+		// once-only declaration for an app made before it could say.
+		"PUT /api/assets/{id}/front-ends",
+		"PUT /api/assets/{id}/front-ends/offered",
 		// ADR-050 also records POST /api/sandbox/podman/setup. It is the
 		// sandboxed-apps add-on's route, so that add-on closes it with its
 		// own rule (Addon.ControllerOwnerOnly), tested with the add-on.

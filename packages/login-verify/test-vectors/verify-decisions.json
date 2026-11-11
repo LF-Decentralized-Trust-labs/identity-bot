@@ -225,7 +225,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -240,7 +241,40 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+        "front_end": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a sign-in for the browser front end, repeating that kind",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA9oU_UhmM4Z-qOYtq5JuQiCDMhrjPBky_sJbFOFdlkg\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"browser\",\"sig\":\"0BDO-5eDQ_KOQ3tF_-taXDP-SjMXMYTBgZJETM2pHNM3FmX8aJCRBAikynq8Fl1tB59FYLQA3pwE23WA6v9ua_UE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "browser"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a sign-in for the installed_app front end, repeating that kind",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EIPJV_7YoRdrgXGciT2X80lwqb1NkOkbQ3JMDzyk2IbU\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"installed_app\",\"sig\":\"0BB_k_5-JyHk26QIvLIJJ5dcpt_QP6Fh_DnbPD9abRzBzhW4856dI-cD_g7ZlmuwStmZ1aqLJcyfGnOvwuyifIAC\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "installed_app"
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -255,7 +289,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -270,7 +305,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -286,7 +322,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -301,7 +338,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -317,7 +355,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 10,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -332,7 +371,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 10,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -348,7 +388,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -363,7 +404,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -379,7 +421,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": -5,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -395,7 +438,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": -5,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -410,7 +454,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 3600,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -425,7 +470,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 3600,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -441,7 +487,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 100000,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -456,7 +503,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 100000,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -472,7 +520,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 2147483647,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -488,7 +537,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -503,7 +553,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -519,7 +570,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -534,7 +586,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -550,7 +603,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -566,7 +620,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -581,7 +636,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -597,7 +653,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -613,7 +670,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -629,7 +687,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -645,7 +704,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -661,7 +721,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -677,7 +738,8 @@
         "nonce": "nonce-2",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -693,7 +755,8 @@
         "nonce": "nonce-1",
         "audience": "https://other.example",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -709,7 +772,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "EOtherSite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -725,7 +789,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -741,7 +806,8 @@
         "nonce": "nonce-2",
         "audience": "https://other.example",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -757,7 +823,8 @@
         "nonce": "nonce-1",
         "audience": "https://other.example",
         "site_aid": "EOtherSite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -773,7 +840,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "EOtherSite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -789,7 +857,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -805,7 +874,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -821,7 +891,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        "browser_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -837,7 +908,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -853,7 +925,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U="
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U=",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -869,7 +942,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -885,7 +959,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr/CkLMjCE19ECD+U"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr/CkLMjCE19ECD+U",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -901,7 +976,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-V"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-V",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -917,13 +993,150 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": "oKIywvGUpTVTyxMQ3bwI eQUudfr_CkLMjCE19ECD-U"
+        "browser_key": "oKIywvGUpTVTyxMQ3bwI eQUudfr_CkLMjCE19ECD-U",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
       "go_reads": true,
       "go_valid": false,
       "go_reason": "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)"
+    },
+    {
+      "name": "a front end where the challenge named none is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA9oU_UhmM4Z-qOYtq5JuQiCDMhrjPBky_sJbFOFdlkg\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"browser\",\"sig\":\"0BDO-5eDQ_KOQ3tF_-taXDP-SjMXMYTBgZJETM2pHNM3FmX8aJCRBAikynq8Fl1tB59FYLQA3pwE23WA6v9ua_UE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: the assertion was approved for another kind of front end"
+    },
+    {
+      "name": "a different front end is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA9oU_UhmM4Z-qOYtq5JuQiCDMhrjPBky_sJbFOFdlkg\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"browser\",\"sig\":\"0BDO-5eDQ_KOQ3tF_-taXDP-SjMXMYTBgZJETM2pHNM3FmX8aJCRBAikynq8Fl1tB59FYLQA3pwE23WA6v9ua_UE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "installed_app"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: the assertion was approved for another kind of front end"
+    },
+    {
+      "name": "a front end the assertion does not repeat is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "browser"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: the assertion was approved for another kind of front end"
+    },
+    {
+      "name": "a wrong browser key wins over a wrong front end",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA9oU_UhmM4Z-qOYtq5JuQiCDMhrjPBky_sJbFOFdlkg\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"browser\",\"sig\":\"0BDO-5eDQ_KOQ3tF_-taXDP-SjMXMYTBgZJETM2pHNM3FmX8aJCRBAikynq8Fl1tB59FYLQA3pwE23WA6v9ua_UE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+        "front_end": "installed_app"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: the assertion was approved for another browser key"
+    },
+    {
+      "name": "a wrong front end wins over a missing signature",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"installed_app\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "browser"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: the assertion was approved for another kind of front end"
+    },
+    {
+      "name": "a challenge's front end 'Browser' is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EGfKUuTxZMaPpsFT9DvTAov-peoXKMqfGYY7zzdYcGcA\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"Browser\",\"sig\":\"0BA0sUJlJSp15OBsW0nThCMPmdg7ZkrNs35f3o7ZV-GyY-9WhoRlpjUwCtt8IBTsJRbvUyvb2HjfkLWu8SNHnOUK\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "Browser"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: a sign-in names a front end that is not 'browser' or 'installed_app'"
+    },
+    {
+      "name": "a challenge's front end 'desktop' is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EMb198FIXn8HTudLuk44j4iepsOJWTnKebXjKk7VDKet\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\"desktop\",\"sig\":\"0BBdFnL4sy9QHAANuKLpLHE7th5l7IBzPEdZsB4rXNKe1mYJUUC_bgrbfrw7elXL-N-8Obk8XYA5TQ-jRx8wQe8B\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": "desktop"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: a sign-in names a front end that is not 'browser' or 'installed_app'"
+    },
+    {
+      "name": "a challenge's front end ' browser' is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EFVYn6UNGTUOKaHkEss-gyv2bnN-DB62HvcWO_cK1S5g\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"front_end\":\" browser\",\"sig\":\"0BBrCaNquozOJQxAIwrSHijb15yeIhmTtObcSjaF5fpt3kJkruTYQsC1mfJ4EWjH3y50LpEOqMciNuAmDKf-agIC\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "",
+        "front_end": " browser"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "front end mismatch: a sign-in names a front end that is not 'browser' or 'installed_app'"
     },
     {
       "name": "an assertion with no signature is refused",
@@ -933,7 +1146,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -949,7 +1163,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -965,7 +1180,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -981,7 +1197,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
@@ -997,7 +1214,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1013,7 +1231,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1029,7 +1248,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1044,7 +1264,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1059,7 +1280,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1074,7 +1296,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1089,7 +1312,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1104,7 +1328,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1119,7 +1344,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1134,7 +1360,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
@@ -1149,7 +1376,8 @@
         "nonce": "nonce-1",
         "audience": "https://app.example.com",
         "site_aid": "ESite",
-        "browser_key": ""
+        "browser_key": "",
+        "front_end": ""
       },
       "max_skew_seconds": 0,
       "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",

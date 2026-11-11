@@ -74,6 +74,7 @@ type expectation struct {
 	Audience   string `json:"audience"`
 	SiteAID    string `json:"site_aid"`
 	BrowserKey string `json:"browser_key"`
+	FrontEnd   string `json:"front_end"`
 }
 
 // One check of one document: what a relying party expects, the clock, the
@@ -151,7 +152,7 @@ func verificationCases(t *testing.T) []verificationCase {
 		return a
 	}
 	expectFor := func(a Assertion) expectation {
-		return expectation{Nonce: a.Nonce, Audience: a.Audience, SiteAID: a.SiteAID, BrowserKey: a.BrowserKey}
+		return expectation{Nonce: a.Nonce, Audience: a.Audience, SiteAID: a.SiteAID, BrowserKey: a.BrowserKey, FrontEnd: a.FrontEnd}
 	}
 
 	var cases []verificationCase
@@ -188,6 +189,14 @@ func verificationCases(t *testing.T) []verificationCase {
 		a := base()
 		a.BrowserKey = vdThumb
 		plain("a sign-in for a browser key, repeating that key", sign(a, seed))
+	}
+
+	// A sign-in for a utility app names the kind of front end, and the person's
+	// assertion repeats it (ADR-072 section 2, amended).
+	for _, kind := range []string{"browser", "installed_app"} {
+		a := base()
+		a.FrontEnd = kind
+		plain("a sign-in for the "+kind+" front end, repeating that kind", sign(a, seed))
 	}
 
 	// Freshness: the window is either side of the clock, inclusive.
@@ -228,19 +237,19 @@ func verificationCases(t *testing.T) []verificationCase {
 
 	// Binding order: nonce, audience, site, browser key, sig, signature.
 	e := expectFor(base())
-	withExpect("a different nonce is refused", expectation{"nonce-2", e.Audience, e.SiteAID, ""})
-	withExpect("a different audience is refused", expectation{e.Nonce, "https://other.example", e.SiteAID, ""})
-	withExpect("another site's challenge is refused", expectation{e.Nonce, e.Audience, "EOtherSite", ""})
-	withExpect("an expected site that is empty is refused", expectation{e.Nonce, e.Audience, "", ""})
-	withExpect("a nonce wins over a wrong audience", expectation{"nonce-2", "https://other.example", e.SiteAID, ""})
-	withExpect("an audience wins over a wrong site", expectation{e.Nonce, "https://other.example", "EOtherSite", ""})
-	withExpect("a wrong site wins over a wrong browser key", expectation{e.Nonce, e.Audience, "EOtherSite", vdThumb})
-	withExpect("a browser key the assertion does not repeat is refused", expectation{e.Nonce, e.Audience, e.SiteAID, vdThumb})
+	withExpect("a different nonce is refused", expectation{"nonce-2", e.Audience, e.SiteAID, "", ""})
+	withExpect("a different audience is refused", expectation{e.Nonce, "https://other.example", e.SiteAID, "", ""})
+	withExpect("another site's challenge is refused", expectation{e.Nonce, e.Audience, "EOtherSite", "", ""})
+	withExpect("an expected site that is empty is refused", expectation{e.Nonce, e.Audience, "", "", ""})
+	withExpect("a nonce wins over a wrong audience", expectation{"nonce-2", "https://other.example", e.SiteAID, "", ""})
+	withExpect("an audience wins over a wrong site", expectation{e.Nonce, "https://other.example", "EOtherSite", "", ""})
+	withExpect("a wrong site wins over a wrong browser key", expectation{e.Nonce, e.Audience, "EOtherSite", vdThumb, ""})
+	withExpect("a browser key the assertion does not repeat is refused", expectation{e.Nonce, e.Audience, e.SiteAID, vdThumb, ""})
 	{
 		a := base()
 		a.BrowserKey = vdThumb
 		add("a browser key where the challenge named none is refused", sign(a, seed), e, vdNow, 0, pub)
-		other := expectation{e.Nonce, e.Audience, e.SiteAID, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+		other := expectation{e.Nonce, e.Audience, e.SiteAID, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ""}
 		add("a different browser key is refused", sign(a, seed), other, vdNow, 0, pub)
 		a.BrowserKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 		a.Sig = ""
@@ -256,6 +265,27 @@ func verificationCases(t *testing.T) []verificationCase {
 		a := base()
 		a.BrowserKey = c.key
 		add(c.name+" is refused though the assertion repeats it", sign(a, seed), expectFor(a), vdNow, 0, pub)
+	}
+	// Front end: checked after the browser key and before the signature.
+	{
+		a := base()
+		a.FrontEnd = "browser"
+		add("a front end where the challenge named none is refused", sign(a, seed), e, vdNow, 0, pub)
+		add("a different front end is refused", sign(a, seed),
+			expectation{Nonce: e.Nonce, Audience: e.Audience, SiteAID: e.SiteAID, FrontEnd: "installed_app"}, vdNow, 0, pub)
+		add("a front end the assertion does not repeat is refused", sign(base(), seed),
+			expectation{Nonce: e.Nonce, Audience: e.Audience, SiteAID: e.SiteAID, FrontEnd: "browser"}, vdNow, 0, pub)
+		add("a wrong browser key wins over a wrong front end", sign(a, seed),
+			expectation{Nonce: e.Nonce, Audience: e.Audience, SiteAID: e.SiteAID, BrowserKey: vdThumb, FrontEnd: "installed_app"}, vdNow, 0, pub)
+		a.Sig = ""
+		a.FrontEnd = "installed_app"
+		add("a wrong front end wins over a missing signature", a,
+			expectation{Nonce: e.Nonce, Audience: e.Audience, SiteAID: e.SiteAID, FrontEnd: "browser"}, vdNow, 0, pub)
+		for _, kind := range []string{"Browser", "desktop", " browser"} {
+			a := base()
+			a.FrontEnd = kind
+			add("a challenge's front end '"+kind+"' is refused though the assertion repeats it", sign(a, seed), expectFor(a), vdNow, 0, pub)
+		}
 	}
 	{
 		a := base()
@@ -307,7 +337,7 @@ func verificationCases(t *testing.T) []verificationCase {
 			t.Fatal(err)
 		}
 		key, _ := hex.DecodeString(c.PublicKeyHex)
-		res := verifyAssertionAt(a, c.Expect.Nonce, c.Expect.Audience, c.Expect.SiteAID, c.Expect.BrowserKey,
+		res := verifyAssertionAt(a, c.Expect.Nonce, c.Expect.Audience, c.Expect.SiteAID, c.Expect.BrowserKey, c.Expect.FrontEnd,
 			c.MaxSkewSeconds, now, func(string, string) ([]byte, error) { return key, nil })
 		c.GoValid, c.GoReason = res.Valid, res.Reason
 	}

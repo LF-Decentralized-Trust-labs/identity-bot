@@ -46,7 +46,7 @@ func TestAnAgentWaitingForItsApprovalActsForNobody(t *testing.T) {
 	if len(waiting(t, s)) != 0 || len(s.waitingRows()) != 1 {
 		t.Fatal("something was asked of the device for an agent that is not approved")
 	}
-	if _, _, code, _ := s.createSignedAssetChallenge(a.ID, "https://site.example", "", nil, "", "", "https://agent.example"); code != 409 {
+	if _, _, code, _ := s.createSignedAssetChallenge(a.ID, "https://site.example", "", nil, "", "", "https://agent.example", false); code != 409 {
 		t.Fatalf("a login challenge signed as an agent that is not approved: %d", code)
 	}
 	if key := s.publicDidWebsPubKey(a.PairwiseAID); key != "" {

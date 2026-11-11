@@ -62,6 +62,10 @@ opens them to a controller. They are:
   `PUT /api/watcher/hints`), and acknowledging or resolving a duplicity alert
   (`POST /api/watcher/alerts/{id}/acknowledge`, `POST /api/watcher/alerts/{id}/resolve`).
   Reading any of these is open to the owner's own controllers.
+- which front ends of a utility app people may sign in through: changing the
+  owner's switches (`PUT /api/assets/{id}/front-ends`) and declaring, once, what
+  an older app offers (`PUT /api/assets/{id}/front-ends/offered`). A paired
+  controller may read the setting (`GET /api/assets/{id}/front-ends`).
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line

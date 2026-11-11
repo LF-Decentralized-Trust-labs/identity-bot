@@ -141,7 +141,7 @@ sequenceDiagram
 ## What this does not settle
 
 - **The client library.** A library implementing this protocol for browser pages and installed apps belongs beside the formats it implements. This ADR fixes the protocol, not the library.
-- **Wire formats**, with test vectors, for: the front-end kind in a challenge; the owner's setting; the sealing of front-end traffic; the back end's call carrying a front end's signed request; and an app's approval request for one action. Each is set when it is built.
+- **Wire formats**, with test vectors, for: the owner's setting (its routes are built, Amendment 2); the sealing of front-end traffic; the back end's call carrying a front end's signed request; and an app's approval request for one action. Each is set when it is built.
 
 ## What is built
 
@@ -152,12 +152,12 @@ sequenceDiagram
 - the relay for an Identity Agent (ADR-048)
 - the App Grant and App Body formats (ADR-045 Amendment 1); the App Grant is issued by `ProvisionAppAsset`, which no route calls yet
 - an app's back end signing as the app, with its App Body key, to the routes an app may use (Amendment 1)
+- the front-end kind in a challenge and an assertion, with test vectors (Amendment 2)
+- the owner's setting of which front ends an app offers may be used through, and its enforcement when a sign-in starts and again when it is approved (Amendment 2)
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
 - an installed front end's hardware key and its app-key grant
-- the front-end kind in a challenge
-- the owner's setting and its enforcement
 - an app claiming its own relay name
 - sealed front-end traffic
 - the back end carrying a front end's signed request to the core
@@ -185,3 +185,21 @@ The talk-route path that ADR-066 describes is built, and conforms to this ADR as
 - *The bundle's name for the app changes meaning.* The conversation bundle's `Message.App` (JSON `app_asset`) was the asset id a Controller Grant named. It is now `Message.AppAID` (JSON `app_aid`): the identifier of the app that holds the App Body credential whose key signed the request. It was renamed rather than kept under the old name, because the old name would have carried a different thing.
 
 **Not settled here.** The sign-in challenge's front-end kind, the owner's per-front-end setting, sealed front-end traffic, an app's approval request for one action, and revocation pushed to the app remain as listed above. An app's key is refused on the routes that serve them until each is built and listed.
+
+## Amendment 2 (2026-11-11): the front-end kind is named in the signed challenge, and what the owner's setting does and does not do yet
+
+*Amended 2026-11-11. This builds the front-end kind in a challenge and the owner's per-front-end setting that section 2 step 4 and section 3 left to be built. Edits above, each made by this amendment: two lines moved from "Not built" to "Built", and the wire-formats line of "What this does not settle". Nothing else above is changed.*
+
+**The kind is in the signed challenge and repeated in the assertion.** A challenge for a utility app carries `front_end` (`browser` or `installed_app`) in its signed body, written between `browser_key` and `callback_url` and left out when the challenge names none, so every other challenge keeps its form. The person's assertion repeats it as `front_end`, the signature covers it, and a verifier refuses an assertion whose kind is not the one the challenge named, or that names one where the challenge named none, with the reason `front end mismatch`. It is checked after the browser key and before the signature. The person's Identity Agent carries the kind in its consent preview; showing it on the consent screen is not built yet, and matters once installed apps can sign in, since an installed_app sign-in is refused until then. Test vectors: `packages/login-verify/test-vectors/verify-decisions.json` (the front-end cases) and `core-canonical-and-spellings.json` (one challenge and one assertion that name a kind), held in Go and TypeScript alike. A challenge with a kind that is not one of the two is refused by the person's Identity Agent before consent.
+
+**A kind is believed only as far as the request backs it.** The kind is what the caller says, and a web page can say anything. So:
+- `installed_app` is accepted only when the request carries an installed app's own key. That key (the installed front end's hardware key and its app-key grant) is not built, so until it is, **every `installed_app` sign-in is refused on every route.** Without it an installed-app sign-in is a bearer QR sign-in that nothing tells from a browser's, and a page could call itself the installed app to get round a switched-off browser.
+- A request from a web page (it carries a browser `Origin` header), or for a browser's key, is a browser's, and is refused if it names any other kind.
+
+**Older apps.** An app made before it could declare its front ends has no list, and a missing list means *not declared*, never *offers none*: such an app signs people in as it always did. Whether the owner has declared is stored apart from the list, so a declared empty list still refuses every sign-in. The list is set when the app is made or its enrolment token is issued, by the owner and never by the enrolling machine, or when it is provisioned as a delegated app (`ProvisionAppAsset` takes it). For an app that has none, the owner may declare it once, from its manifest's `device_front_ends` (`PUT /api/assets/{id}/front-ends/offered`); a second declaration is refused, because what an app offers is not for the owner's switches to grow. This route and `PUT /api/assets/{id}/front-ends` are the owner's alone, and reading is open to the owner's paired controllers (ADR-050).
+
+**Switching off applies to new sign-ins only, until revocation push exists.** The owner's Identity Agent checks the setting when it issues a challenge and again when the approval completes, so a challenge issued just before the switch cannot be approved after it. A session or app-key grant already open is not ended: section 6's revocation push to the app's back end is not built, so people already signed in stay signed in until they sign out.
+
+**Accepted: the refusal reasons on a public route say what the owner set.** A sign-in is asked for on a public route, and its refusal says that the app does not offer a front end or that its owner has switched it off, so anyone who can reach the route can learn which front ends an app offers and which are off. The front end needs the words to tell the person, and the setting is not a secret from people the app is for.
+
+**Not built, still:** the installed front end's hardware key and app-key grant (the proof `installed_app` waits for), and revocation pushed to the app.

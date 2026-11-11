@@ -3,6 +3,9 @@ package asset
 import (
 	"fmt"
 	"sort"
+	"sync"
+
+	"identity-agent-core/login"
 )
 
 // The front ends a utility app is reached by (ADR-072 §3). An app declares what
@@ -11,10 +14,13 @@ import (
 // offer. The owner's Identity Agent enforces it when it issues a sign-in
 // challenge, never the app's back end.
 
+// frontEndsMu orders the read and write of one declaration.
+var frontEndsMu sync.Mutex
+
 // The two kinds of front end, as the manifest spells them.
 const (
-	FrontEndBrowser      = "browser"
-	FrontEndInstalledApp = "installed_app"
+	FrontEndBrowser      = login.FrontEndBrowser
+	FrontEndInstalledApp = login.FrontEndInstalledApp
 )
 
 func validFrontEnd(k string) bool { return k == FrontEndBrowser || k == FrontEndInstalledApp }
@@ -55,6 +61,22 @@ func CheckOfferedFrontEnds(assetType string, offered []string) error {
 	return checkKinds("device_front_ends", offered)
 }
 
+// DeclaresFrontEnds is whether a list given when an asset is made or enrols is
+// the owner declaring what it offers. Only an app has any, and only a list that
+// was given at all counts: nothing given (nil) is an app that has not said,
+// while an empty list given is an app that offers none. A JSON reader keeps the
+// two apart, which is why this is read from the list and not from its length.
+func DeclaresFrontEnds(assetType string, offered []string) bool {
+	return assetType == "app" && offered != nil
+}
+
+// FrontEndsAreDeclared is whether this app's front ends were declared. An app
+// made before it could say has not declared, and signs people in as it always
+// did; an app with a list has declared even if the flag was not written.
+func (a Asset) FrontEndsAreDeclared() bool {
+	return a.AssetType == "app" && (a.FrontEndsDeclared || len(a.DeviceFrontEnds) > 0)
+}
+
 // SwitchOff is the new list of switched-off front ends: every kind must be one
 // the app offers. The result is in a fixed order and without repeats.
 func SwitchOff(offered, off []string) ([]string, error) {
@@ -73,10 +95,12 @@ func SwitchOff(offered, off []string) ([]string, error) {
 
 // FrontEndRefusal is why a sign-in on the front end of this kind may not start,
 // in words the front end can show the person; "" means it may. A utility app
-// admits only a kind it offers and its owner has not switched off. Any other
-// asset has no front-end setting and is not asked.
+// that has declared its front ends admits only a kind it offers and its owner
+// has not switched off. Any other asset has no front-end setting and is not
+// asked, and neither is an app made before it could declare them: for that one
+// a missing list means "not declared", never "offers none".
 func (a Asset) FrontEndRefusal(kind string) string {
-	if a.AssetType != "app" {
+	if !a.FrontEndsAreDeclared() {
 		return ""
 	}
 	switch {
@@ -100,12 +124,18 @@ func kindWords(k string) string {
 // FrontEnds is what the owner reads and sets: for each front end the app
 // offers, whether it is on.
 type FrontEnds struct {
+	// Declared is false for an app made before it could say what it offers;
+	// its Offered is then empty and means "not said", not "none".
+	Declared    bool     `json:"declared"`
 	Offered     []string `json:"offered"`
 	SwitchedOff []string `json:"switched_off"`
 }
 
+// ErrFrontEndsAlreadyDeclared is the refusal of a second declaration.
+var ErrFrontEndsAlreadyDeclared = fmt.Errorf("this app has already declared its front ends, and what it offers is not changed after that")
+
 func frontEndsOf(a Asset) FrontEnds {
-	f := FrontEnds{Offered: a.DeviceFrontEnds, SwitchedOff: a.FrontEndsOff}
+	f := FrontEnds{Declared: a.FrontEndsAreDeclared(), Offered: a.DeviceFrontEnds, SwitchedOff: a.FrontEndsOff}
 	if f.Offered == nil {
 		f.Offered = []string{}
 	}

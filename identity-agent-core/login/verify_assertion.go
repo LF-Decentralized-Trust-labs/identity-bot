@@ -60,13 +60,22 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteA
 // so an approval made for one browser's key cannot let in another. Empty
 // means the challenge named no key and the assertion must name none.
 func VerifyAssertionForBrowserKey(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey string, maxSkewSeconds int) AssertionVerifyResult {
-	return verifyAssertionAt(a, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey, maxSkewSeconds, time.Now(), KeyFromKeyLog)
+	return VerifyAssertionForFrontEnd(a, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey, "", maxSkewSeconds)
+}
+
+// VerifyAssertionForFrontEnd is VerifyAssertionForBrowserKey for a sign-in whose
+// challenge also named the kind of front end it was for (ADR-072 section 2,
+// amended). expectedFrontEnd is that kind, and the signed assertion must repeat
+// exactly it: another kind, none, or one where the challenge named none are all
+// refused, so an approval made for one kind cannot let in another.
+func VerifyAssertionForFrontEnd(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey, expectedFrontEnd string, maxSkewSeconds int) AssertionVerifyResult {
+	return verifyAssertionAt(a, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey, expectedFrontEnd, maxSkewSeconds, time.Now(), KeyFromKeyLog)
 }
 
 // verifyAssertionAt is the whole check with the clock and the key's source
 // given, so the published decision vectors (packages/login-verify/test-vectors)
 // can fix both. Nothing else differs from VerifyAssertionForBrowserKey.
-func verifyAssertionAt(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey string, maxSkewSeconds int, now time.Time, keyOf func(aid, keyLog string) ([]byte, error)) AssertionVerifyResult {
+func verifyAssertionAt(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey, expectedFrontEnd string, maxSkewSeconds int, now time.Time, keyOf func(aid, keyLog string) ([]byte, error)) AssertionVerifyResult {
 	window := freshnessWindow(maxSkewSeconds)
 
 	dt, err := parseRFC3339(a.Dt)
@@ -91,6 +100,14 @@ func verifyAssertionAt(a Assertion, expectedNonce, expectedAudience, expectedSit
 	if expectedBrowserKey != "" {
 		if err := CheckBrowserKeyThumbprint(expectedBrowserKey); err != nil {
 			return AssertionVerifyResult{Reason: "browser key mismatch: " + err.Error()}
+		}
+	}
+	if a.FrontEnd != expectedFrontEnd {
+		return AssertionVerifyResult{Reason: "front end mismatch: the assertion was approved for another kind of front end"}
+	}
+	if expectedFrontEnd != "" {
+		if err := CheckFrontEnd(expectedFrontEnd); err != nil {
+			return AssertionVerifyResult{Reason: "front end mismatch: " + err.Error()}
 		}
 	}
 	if a.Sig == "" {

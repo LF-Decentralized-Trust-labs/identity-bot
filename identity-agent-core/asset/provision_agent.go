@@ -37,10 +37,19 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 //
 // An app has no brain, so unlike an agent it takes no AgentConfig: its grant
 // carries only capabilities and resource constraints.
-func (h *Handler) ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time, constraints map[string]interface{}) (*Asset, error) {
+//
+// frontEnds is what the app's manifest offers (device_front_ends, ADR-012
+// Amendment 5). nil means the caller did not say, and the app signs people in
+// as before; an empty non-nil list is a declaration that it offers none, and
+// every sign-in is then refused (ADR-072 section 3).
+func (h *Handler) ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time, constraints map[string]interface{}, frontEnds []string) (*Asset, error) {
+	if err := CheckOfferedFrontEnds("app", frontEnds); err != nil {
+		return nil, err
+	}
 	return h.provisionDelegated(delegatedAsset{
 		assetType: "app", noun: "app", originScheme: "app", errTaken: ErrAppNameTaken,
 		displayName: displayName, capabilities: capabilities, validUntil: validUntil, constraints: constraints,
+		frontEnds: frontEnds,
 	})
 }
 
@@ -57,6 +66,7 @@ type delegatedAsset struct {
 	cfg          *AgentConfig
 	validUntil   *time.Time
 	constraints  map[string]interface{}
+	frontEnds    []string // an app's offered front ends; nil: not declared
 }
 
 func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
@@ -119,20 +129,22 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 
 	now := time.Now().UTC()
 	asset := Asset{
-		ID:               id,
-		DisplayName:      displayName,
-		AssetType:        d.assetType,
-		Origin:           d.originScheme + "://" + id,
-		PairwiseAID:      resp.AID,
-		DelegationModel:  "delegated",
-		DelegatorAID:     resp.DelegatorAID,
-		SigningIndex:     signingIndex,
-		Capabilities:     d.capabilities,
-		AgentConfig:      d.cfg,
-		GrantValidUntil:  d.validUntil,
-		GrantConstraints: d.constraints,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                id,
+		DisplayName:       displayName,
+		AssetType:         d.assetType,
+		Origin:            d.originScheme + "://" + id,
+		PairwiseAID:       resp.AID,
+		DelegationModel:   "delegated",
+		DelegatorAID:      resp.DelegatorAID,
+		SigningIndex:      signingIndex,
+		Capabilities:      d.capabilities,
+		AgentConfig:       d.cfg,
+		GrantValidUntil:   d.validUntil,
+		GrantConstraints:  d.constraints,
+		DeviceFrontEnds:   d.frontEnds,
+		FrontEndsDeclared: DeclaresFrontEnds(d.assetType, d.frontEnds),
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	h.Store.UpsertAsset(asset)
 	return &asset, nil

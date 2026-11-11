@@ -60,7 +60,7 @@ func (s *CoreServer) startBrowserKeySignIn(assetID, audience, browserKey, public
 	if browserKey == "" {
 		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in for a browser's key names the key"}
 	}
-	token, qr, code, msg := s.createSignedAssetChallenge(assetID, audience, "", nil, browserKey, asset.FrontEndBrowser, publicURL)
+	token, qr, code, msg := s.createSignedAssetChallenge(assetID, audience, "", nil, browserKey, asset.FrontEndBrowser, publicURL, false)
 	if code != 0 {
 		return BrowserKeySignIn{}, &SignInRefused{code, msg}
 	}
