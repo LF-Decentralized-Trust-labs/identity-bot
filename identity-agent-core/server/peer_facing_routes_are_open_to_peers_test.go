@@ -123,6 +123,7 @@ func TestEveryWitnessProtocolRouteIsDeclaredPublic(t *testing.T) {
 func TestTwoWatchersCrossCheckEachOtherOverTheNetwork(t *testing.T) {
 	eaidDigest := serveLog("EAID")
 	bob := watcherAgent(t, "EAID", 1, eaidDigest)
+	bob.registerPairwiseKEL("EAID", twoEventLog("EAID"))
 	srv := httptest.NewServer(bob.buildRouter())
 	defer srv.Close()
 	// Bob's address as he reports it to himself, which is what a request must name.

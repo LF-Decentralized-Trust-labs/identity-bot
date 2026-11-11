@@ -231,6 +231,7 @@ class LocalCoreKeriService extends KeriService {
   Future<InceptionResult> inceptAid({
     required String name,
     required String code,
+    Future<void> Function(String aid)? whenPrepared,
   }) async {
     // Prepared by the core, checked here against the founding this phrase
     // makes, reserved, signed and committed: the core adds nothing this
@@ -243,7 +244,10 @@ class LocalCoreKeriService extends KeriService {
           await TheWitnessesAFoundingNames(_client, _baseUrl, _km).choose();
       final founded = await _makesFounding(TheWitnessesOfThisDevicesEvents(
               _client, _km, KnownWitnesses(chosen.addresses)))
-          .found(seed, witnesses: chosen.witnesses, toad: chosen.toad);
+          .found(seed,
+              witnesses: chosen.witnesses,
+              toad: chosen.toad,
+              whenPrepared: whenPrepared);
       return InceptionResult(
         aid: founded.aid,
         publicKey: KeyManager.publicKeyAt(seed, 0),

@@ -161,5 +161,5 @@ func (s *CoreServer) servedLog(aid string, r *http.Request) ([]map[string]interf
 			}
 		}
 	}
-	return getPairwiseKEL(aid)
+	return s.getPairwiseKEL(aid)
 }

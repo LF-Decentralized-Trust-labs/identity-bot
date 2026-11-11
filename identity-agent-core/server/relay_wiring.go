@@ -142,7 +142,7 @@ func (s *CoreServer) loadRelayEnrolment(kind relayKind, base string) (*relayEnro
 		log.Printf("[relay] the recorded %s enrolment could not be read (%v); minting a fresh one, "+
 			"which changes this Identity Agent's %s address", kind.mode, lerr, kind.mode)
 	} else if found && stored.BaseURL == base {
-		if e, rerr := reuseRelayEnrolment(rootSeed, stored); rerr == nil {
+		if e, rerr := s.reuseRelayEnrolment(rootSeed, stored); rerr == nil {
 			log.Printf("[relay] reusing the %s enrolment recorded for %s (%s)", kind.mode, base, stored.AID)
 			return e, nil
 		} else {
@@ -158,12 +158,12 @@ func (s *CoreServer) loadRelayEnrolment(kind relayKind, base string) (*relayEnro
 	if err != nil {
 		return nil, fmt.Errorf("mint an enrolment identifier: %w", err)
 	}
-	pubB64, ok := getPairwiseKey(aid)
+	pubB64, ok := s.getPairwiseKey(aid)
 	if !ok {
 		pubB64 = base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 	}
 	rec := storedRelayEnrollment{BaseURL: base, AID: aid, RelationshipIndex: idx, PublicKey: pubB64}
-	if kel, ok := getPairwiseKEL(aid); ok {
+	if kel, ok := s.getPairwiseKEL(aid); ok {
 		rec.KEL = kel
 	}
 	stream, err := signedInceptionKEL(aid, rec.KEL, seed)
@@ -182,7 +182,7 @@ func (s *CoreServer) loadRelayEnrolment(kind relayKind, base string) (*relayEnro
 // recorded: a root seed that changed since would otherwise sign as an
 // identifier whose log names a different key, and every admission would fail
 // with no explanation.
-func reuseRelayEnrolment(rootSeed []byte, stored *storedRelayEnrollment) (*relayEnrolment, error) {
+func (s *CoreServer) reuseRelayEnrolment(rootSeed []byte, stored *storedRelayEnrollment) (*relayEnrolment, error) {
 	seed, err := backup.DerivePairwiseSeed(rootSeed, stored.RelationshipIndex, 0)
 	if err != nil {
 		return nil, fmt.Errorf("re-derive the enrolment key: %w", err)
@@ -196,9 +196,9 @@ func reuseRelayEnrolment(rootSeed []byte, stored *storedRelayEnrollment) (*relay
 		return nil, fmt.Errorf("produce %s's key log: %w", stored.AID, err)
 	}
 	// Put back what makes the identifier resolvable after a restart.
-	registerPairwiseKey(stored.AID, pubB64)
+	s.registerPairwiseKey(stored.AID, pubB64)
 	if len(stored.KEL) > 0 {
-		registerPairwiseKEL(stored.AID, stored.KEL)
+		s.registerPairwiseKEL(stored.AID, stored.KEL)
 	}
 	return &relayEnrolment{record: *stored, seed: seed, kel: stream}, nil
 }

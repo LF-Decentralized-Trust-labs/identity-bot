@@ -414,7 +414,7 @@ func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
 	}
 
 	at := time.Now().UTC()
-	statement := canonicalAuthLevelStatement("BSomeController", authprovider.LevelHigh, at, 99)
+	statement := canonicalAuthLevelStatement("BWhateverTheCallerWrote", "BSomeController", authprovider.LevelHigh, at, 99)
 	vouched, err := login.SignString(statement, attacker)
 	if err != nil {
 		t.Fatal(err)
@@ -611,7 +611,7 @@ func TestAnUnverifiedOwnerRowCannotVouch(t *testing.T) {
 
 	at := time.Now().UTC()
 	vouched, err := login.SignString(
-		canonicalAuthLevelStatement("BSomeController", authprovider.LevelHigh, at, 99),
+		canonicalAuthLevelStatement(s.thisIdentityAgentsIdentifier(), "BSomeController", authprovider.LevelHigh, at, 99),
 		attacker)
 	if err != nil {
 		t.Fatal(err)

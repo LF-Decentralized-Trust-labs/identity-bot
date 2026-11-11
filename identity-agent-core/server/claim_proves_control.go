@@ -111,7 +111,7 @@ func (s *CoreServer) kelToPresent(aid string) []map[string]interface{} {
 	if kel := s.ownKELForIntroduction(aid); len(kel) > 0 {
 		return kel
 	}
-	if kel, ok := getPairwiseKEL(aid); ok {
+	if kel, ok := s.getPairwiseKEL(aid); ok {
 		return kel
 	}
 	return nil

@@ -1,6 +1,19 @@
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:local_auth/local_auth.dart';
 
 enum BiometricMethod { fingerprint, face, none }
+
+/// What asking the device's own authentication came to.
+enum OwnerCheck {
+  /// The owner passed it.
+  passed,
+
+  /// It was asked and was cancelled, failed, or could not be completed.
+  notUnlocked,
+
+  /// The device has no screen lock, so there is nothing to ask.
+  noScreenLock,
+}
 
 enum BiometricAvailability { available, availableNotEnrolled, unavailable }
 
@@ -54,6 +67,40 @@ class LocalAuthService {
       );
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Whether the error code is local_auth's way of saying the device has no
+  /// screen lock or no enrolled credential: nothing to ask, which is not the
+  /// same as the owner failing it. Without this some Android phones could never
+  /// reopen an identity.
+  static bool isNoScreenLockCode(String code) {
+    switch (code.toLowerCase()) {
+      case 'notenrolled':
+      case 'passcodenotset':
+      case 'nocredentialsset':
+        return true;
+    }
+    return false;
+  }
+
+  /// Asks the device's own authentication, telling "no screen lock" apart from
+  /// "the owner did not pass".
+  static Future<OwnerCheck> checkOwner({required String reason}) async {
+    try {
+      if (!await _auth.isDeviceSupported()) return OwnerCheck.noScreenLock;
+      final ok = await _auth.authenticate(
+        localizedReason: reason,
+        options: const AuthenticationOptions(
+            biometricOnly: false, stickyAuth: true),
+      );
+      return ok ? OwnerCheck.passed : OwnerCheck.notUnlocked;
+    } on PlatformException catch (e) {
+      return isNoScreenLockCode(e.code)
+          ? OwnerCheck.noScreenLock
+          : OwnerCheck.notUnlocked;
+    } catch (_) {
+      return OwnerCheck.notUnlocked;
     }
   }
 }

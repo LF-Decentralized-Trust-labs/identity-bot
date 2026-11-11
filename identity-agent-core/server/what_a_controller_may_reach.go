@@ -168,7 +168,7 @@ var controllerOwnerOnly = map[string]string{
 	// the owner's, and whose statement counts when vouching for a score.
 	//
 	// The attack, proven before these were closed: a controller posts its own
-	// key here, becomes the owner authority, signs an IA-AUTH-LEVEL-V1
+	// key here, becomes the owner authority, signs an IA-AUTH-LEVEL-V2
 	// statement for itself at the strongest score, and is then the owner for
 	// isOwner on every route — which survives revoking its grant, because the
 	// grant is no longer what it is using.

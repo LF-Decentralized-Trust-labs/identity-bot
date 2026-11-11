@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'dart:ui' show AppExitResponse;
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:agent_client/config/agent_config.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -165,9 +167,12 @@ class BackendProcessService {
     return null;
   }
 
-  // Absolute, per-app writable data dir. Namespaced by the app/executable name
-  // so the oss / Grape ID / Grape ID Org flavors don't collide when run together.
-  String _resolveDataDir() {
+  /// Where this app keeps everything on a desktop, namespaced by the
+  /// executable name so two apps built on this package don't collide
+  /// when run together. THE ONE COPY of this rule: [IdentityProfiles] calls it
+  /// rather than repeating it, because two copies that disagree look for an
+  /// existing identity where it never was.
+  static String desktopInstallationRoot() {
     final sep = Platform.pathSeparator;
     final home = Platform.environment['HOME'] ??
         Platform.environment['USERPROFILE'] ??
@@ -180,20 +185,23 @@ class BackendProcessService {
     }
     if (appName.isEmpty) appName = 'IdentityAgent';
 
-    String base;
     if (Platform.isMacOS) {
-      base = '$home${sep}Library${sep}Application Support${sep}$appName';
+      return '$home${sep}Library${sep}Application Support$sep$appName';
     } else if (Platform.isWindows) {
       final appData =
           Platform.environment['APPDATA'] ?? '$home${sep}AppData${sep}Roaming';
-      base = '$appData$sep$appName';
-    } else {
-      final xdg = Platform.environment['XDG_DATA_HOME'];
-      base = (xdg != null && xdg.isNotEmpty)
-          ? '$xdg$sep$appName'
-          : '$home${sep}.local${sep}share${sep}$appName';
+      return '$appData$sep$appName';
     }
-    final dataDir = '$base${sep}data';
+    final xdg = Platform.environment['XDG_DATA_HOME'];
+    return (xdg != null && xdg.isNotEmpty)
+        ? '$xdg$sep$appName'
+        : '$home$sep.local${sep}share$sep$appName';
+  }
+
+  // Absolute, per-app writable data dir (see [desktopInstallationRoot]).
+  String _resolveDataDir() {
+    final sep = Platform.pathSeparator;
+    final dataDir = '${desktopInstallationRoot()}${sep}data';
     try {
       Directory(dataDir).createSync(recursive: true);
     } catch (_) {}
@@ -237,7 +245,10 @@ class BackendProcessService {
           }
         }
       } else {
-        final result = await Process.run('lsof', ['-ti', ':$port']);
+        // The listener only: a plain `-ti :port` also lists this app's own
+        // connection to it, which may come first.
+        final result =
+            await Process.run('lsof', ['-ti', 'tcp:$port', '-sTCP:LISTEN']);
         if (result.exitCode == 0) {
           final pid = (result.stdout as String).trim().split('\n').first;
           if (pid.isNotEmpty && int.tryParse(pid) != null) {
@@ -353,7 +364,10 @@ class BackendProcessService {
     try {
       final env = withEnvironmentDefaults(Platform.environment);
       env['PORT'] = '${AgentConfig.defaultDesktopPort}';
-      env['HOST'] = '0.0.0.0';
+      // Loopback. The core does not read HOST (it binds 127.0.0.1 itself,
+      // server.rootListenAddr, except on a sealed instance), so this was only
+      // ever a misleading statement that it listened on every interface.
+      env['HOST'] = '127.0.0.1';
       // The backend's working dir is inside the read-only .app bundle, so its
       // default relative "./data" store can't be created. Point it at an
       // absolute, per-app writable location so multiple flavors (oss / Grape ID
@@ -672,7 +686,41 @@ class BackendProcessService {
     return false;
   }
 
-  Future<void> stop() async {
+  static AppLifecycleListener? _quitHook;
+
+  /// Ends this app's core, spawned or adopted, when the app quits. Without it
+  /// a core outlives the window: a log-in's leftover answers on its port, with
+  /// its owner secret still in the data directory, until the machine restarts.
+  /// Desktop only; call once, after the binding is initialised.
+  static void stopTheCoreWhenTheAppQuits() {
+    if (!isDesktopPlatform || _quitHook != null) return;
+    _quitHook = AppLifecycleListener(
+      onExitRequested: () async {
+        try {
+          await instance.stop();
+        } catch (e) {
+          debugPrint('[BackendProcess] could not stop the core at quit: $e');
+        }
+        return AppExitResponse.exit;
+      },
+    );
+  }
+
+  /// Stop the core serving this app's data directory, and say whether nothing
+  /// answers there afterwards.
+  ///
+  /// Two kinds of core are ended: the one this app spawned (signalled, as
+  /// before), and one it ADOPTED rather than spawned — a leftover from an
+  /// earlier run, which this process holds no handle to. The second is found
+  /// by the data directory: the port in `.port`, and the process id the core
+  /// writes beside it in `.pid`. It is ended only after it has proved it holds
+  /// the owner secret kept in that directory, so a stale file naming some other
+  /// program's port or pid ends nothing.
+  ///
+  /// The answer is read from the core, not assumed from the signal: logging out
+  /// is reported done only when the port no longer answers. False means a core
+  /// still answers on this profile's port, and the caller must say so.
+  Future<bool> stop() async {
     if (_backendProcess != null) {
       debugPrint('[BackendProcess] Stopping (PID: ${_backendProcess!.pid})');
       _backendProcess!.kill(ProcessSignal.sigterm);
@@ -684,5 +732,109 @@ class BackendProcessService {
       _backendProcess = null;
       _isRunning = false;
     }
+    return stopTheCoreOnThisData();
   }
+
+  /// See [stop]. Exposed so a caller that has no process of its own (launch,
+  /// for a locked profile) can end a leftover core.
+  Future<bool> stopTheCoreOnThisData() async {
+    final port = _discoverActualPort();
+    if (port == null || !await _answersHealth(port)) {
+      _forgetPort();
+      return true; // nothing answers on this profile's port
+    }
+    final previous = AgentConfig.desktopPort;
+    AgentConfig.desktopPort = port;
+    var proven = false;
+    try {
+      proven = adoptRunningCoresSecret() &&
+          await LocalOwnerSecret.proveTheCoreAt(AgentConfig.coreBaseUrl);
+    } finally {
+      AgentConfig.desktopPort = previous;
+    }
+    if (!proven) {
+      _appendOutput('[stop] a core answers on port $port but did not prove it is '
+          'this profile\'s, so it was left alone');
+      return false;
+    }
+    final held = (await checkPortConflict(port))?.pid;
+    final decided = decideWhichProcessEndsTheCore(
+        holdingThePort: held, fromPidFile: _pidFromPidFile());
+    if (decided.refusal != null) {
+      _appendOutput('[stop] ${decided.refusal} (port $port)');
+      return false;
+    }
+    final id = int.tryParse(decided.pid ?? '');
+    if (id == null) return false;
+    for (final hard in const [false, true]) {
+      try {
+        if (Platform.isWindows) {
+          await Process.run('taskkill', ['/PID', '$id', if (hard) '/F']);
+        } else {
+          Process.killPid(id, hard ? ProcessSignal.sigkill : ProcessSignal.sigterm);
+        }
+      } catch (e) {
+        _appendOutput('[stop] could not signal $id: $e');
+      }
+      for (var i = 0; i < 20; i++) {
+        if (!await _answersHealth(port)) {
+          _forgetPort();
+          _forgetPid();
+          return true;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    }
+    return false;
+  }
+
+  /// Which process is ended to stop a core that answers on this profile's
+  /// port. The process HOLDING THE PORT is the one. A pid file beside it is
+  /// only a cross-check: a stale one, left beside an adopted core too old to
+  /// write one, can name an unrelated process, so when both exist they must
+  /// agree, and a pid file alone is not enough to signal anything.
+  @visibleForTesting
+  static ({String? pid, String? refusal}) decideWhichProcessEndsTheCore(
+      {String? holdingThePort, String? fromPidFile}) {
+    final held = int.tryParse(holdingThePort ?? '');
+    if (held == null) {
+      return (
+        pid: null,
+        refusal: 'could not tell which process holds the port, so none was '
+            'signalled'
+      );
+    }
+    final filed = fromPidFile == null ? null : int.tryParse(fromPidFile);
+    if (filed != null && filed != held) {
+      return (
+        pid: null,
+        refusal: 'the pid file names $filed but $held holds the port, so '
+            'none was signalled'
+      );
+    }
+    return (pid: '$held', refusal: null);
+  }
+
+  String get _pidFilePath => '${_backendDataDir()}${Platform.pathSeparator}.pid';
+
+  String? _pidFromPidFile() {
+    try {
+      final f = File(_pidFilePath);
+      if (!f.existsSync()) return null;
+      final t = f.readAsStringSync().trim();
+      return int.tryParse(t) == null ? null : t;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _forgetPid() {
+    try {
+      final f = File(_pidFilePath);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
+
+  @visibleForTesting
+  String debugPidFilePath() => _pidFilePath;
 }

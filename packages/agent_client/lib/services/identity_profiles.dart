@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,7 +12,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'backend_process_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
+import 'secure_key_store.dart';
 import 'point_this_app_at_its_agent.dart';
+import 'the_core_is_settled.dart';
 
 /// One identity this installation holds, as it can be described while its
 /// Identity Agent is not running.
@@ -36,6 +41,102 @@ class IdentityProfile {
     this.picture,
     this.lastOpened,
   });
+}
+
+/// A fresh measurement of the person holding a device, from its authentication
+/// provider (identity-agent-core/authprovider `Result`).
+@immutable
+class MeasuredScore {
+  const MeasuredScore({
+    required this.measured,
+    required this.score,
+    required this.at,
+  });
+  final bool measured;
+  final int score;
+  final DateTime at;
+}
+
+/// What a locked identity is opened with on this device.
+enum UnlockMethod {
+  /// A real authentication provider measures who is holding the device.
+  provider,
+
+  /// No provider is built yet: the placeholder answers the minimum score, so
+  /// choosing a profile logs that person in and nothing measured them.
+  placeholderProvider,
+}
+
+/// The authentication provider a device logs a person in with.
+///
+/// Used ONLY for logging in on this device. Recovery and the score a
+/// controller vouches for are not asked through it.
+@immutable
+class LoginProvider {
+  const LoginProvider({
+    required this.name,
+    required this.isPlaceholder,
+    required this.measure,
+  });
+
+  /// What the provider calls itself, as `authprovider.Provider.Name()` does.
+  final String name;
+
+  /// True while this answers without measuring anybody.
+  final bool isPlaceholder;
+
+  /// A fresh measurement of whoever is holding this device. [profileId] is the
+  /// profile being opened, or null when the question is about the device's
+  /// person and no profile (starting a new identity).
+  final Future<MeasuredScore?> Function(String? profileId) measure;
+
+  /// The placeholder while no real provider exists: always a measured 80, the
+  /// bare minimum. No core runs for a logged-out identity, so this cannot ask
+  /// one; a test in identity-agent-core (`permission`) holds [minimumScore] to
+  /// that core's `DefaultMinimumScore`.
+  static LoginProvider fixedMinimum({DateTime Function()? now}) =>
+      LoginProvider(
+        name: 'fixed-minimum',
+        isPlaceholder: true,
+        measure: (_) async => MeasuredScore(
+            measured: true,
+            score: IdentityProfiles.minimumScore,
+            at: (now ?? () => DateTime.now().toUtc())()),
+      );
+}
+
+/// The person did not pass the check that a locked device asks before
+/// something is begun on it.
+class NotAuthenticated implements Exception {
+  const NotAuthenticated([this.what = 'identity']);
+
+  /// "identity", or "organisation" in the organisation app.
+  final String what;
+  @override
+  String toString() => 'This device is locked, and starting a new $what on '
+      'it needs the same check as opening one. That check did not pass, so '
+      'nothing was started.';
+}
+
+/// Logging out could not be confirmed: a core may still answer for the
+/// identity. The marker is set, but the person must be told, not shown the
+/// next screen as though it were done.
+class TheCoreDidNotStop implements Exception {
+  const TheCoreDidNotStop([this.detail]) : notMarked = false;
+
+  /// An identity could not be marked logged out, so it may still be open.
+  const TheCoreDidNotStop.notMarked(this.detail) : notMarked = true;
+
+  final String? detail;
+  final bool notMarked;
+  @override
+  String toString() => notMarked
+      ? 'An identity on this device could not be marked as logged out'
+          '${detail == null ? '' : ' ($detail)'}, so it may still be open. '
+          'Quit the app and open it again.'
+      : 'The Identity Agent for this identity could not be '
+          'stopped${detail == null ? '' : ' ($detail)'}, so it is not logged '
+          'out. Quit the app and open it again.';
 }
 
 /// The identities on this installation: where each one's data lives, which is
@@ -70,6 +171,16 @@ class IdentityProfiles {
   /// that question wrongly. On desktop it stays null and is never consulted.
   static MobileCoreService? mobileCore;
 
+  /// Replace starting and stopping the core, for tests, which cannot run one.
+  @visibleForTesting
+  static Future<void> Function(String dataDir)? coreStarter;
+  @visibleForTesting
+  static Future<void> Function()? coreStopper;
+
+  /// Replace where this installation keeps everything, for tests.
+  @visibleForTesting
+  static String? rootOverride;
+
   static const _cardFile = 'card.json';
   static const _openedKey = 'opened_aid';
   static const _leftKey = 'left_aid';
@@ -79,8 +190,26 @@ class IdentityProfiles {
   /// The directory belonging to [profileId] — the profile itself, not the data
   /// inside it. Anything ABOUT a profile lives here; anything its Identity
   /// Agent owns lives under [dataDirectoryFor].
-  static Future<String> directoryFor(String profileId) async =>
-      '${await _profilesRoot()}${Platform.pathSeparator}$profileId';
+  ///
+  /// Refuses anything but a minted id ([isAProfileId]) or an id this
+  /// installation already knows from before minting, so a value from outside can never name a path above or beside
+  /// the profiles directory.
+  static Future<String> directoryFor(String profileId) async {
+    if (!isAProfileId(profileId) &&
+        !(_safeEarlierForm.hasMatch(profileId) &&
+            (await ProfileScope.knownIds()).contains(profileId))) {
+      throw ArgumentError.value(profileId, 'profileId',
+          'neither a minted profile id nor one this installation already knows');
+    }
+    return '${await _profilesRoot()}${Platform.pathSeparator}$profileId';
+  }
+
+  static final _mintedForm = RegExp(r'^[a-z0-9]{12}$');
+
+  /// Whether [id] is the form this class mints.
+  static bool isAProfileId(String id) => _mintedForm.hasMatch(id);
+
+  static final _safeEarlierForm = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
   /// Where [profileId]'s Identity Agent keeps its data, created if absent.
   static Future<String> dataDirectoryFor(String profileId) async {
@@ -103,7 +232,21 @@ class IdentityProfiles {
   /// handed to the embedded core when it starts. Either way the core reads it
   /// once, at start — which is why moving between identities means restarting.
   static Future<void> startTheActiveOne() async {
+    // A locked profile is not started. Logging out stopped its Identity Agent;
+    // starting it again here — on launch, or when the app resumes — would put
+    // the identity back within reach of anything on this device that can open
+    // a local port, without its owner having done anything. It starts when
+    // [openAfterAuthenticating] has been through.
+    // And no OTHER locked profile may have a core answering either: a crash
+    // between choosing the new profile and stopping the old core leaves the old
+    // one answering with its owner secret, marked locked.
+    await stopLeftoverCoresOfEveryLockedOne();
+    if (await activeIsLocked()) return;
+
     final dir = await dataDirectoryForActive();
+
+    final starter = coreStarter;
+    if (starter != null) return starter(dir);
 
     if (BackendProcessService.isDesktopPlatform) {
       BackendProcessService.dataDirOverride = dir;
@@ -178,7 +321,7 @@ class IdentityProfiles {
   /// identity being left is exactly where it was, and can be returned to.
   static Future<void> switchTo(String profileId) async {
     await ProfileScope.setActive(profileId);
-    await _stopWhateverIsRunning();
+    await _stopAndVerify();
     await startTheActiveOne();
     debugPrint('[profiles] now on $profileId');
   }
@@ -195,12 +338,499 @@ class IdentityProfiles {
     return id;
   }
 
-  static Future<void> _stopWhateverIsRunning() async {
-    if (BackendProcessService.isDesktopPlatform) {
-      await BackendProcessService.instance.stop();
-    } else {
-      await mobileCore?.stopCore();
+  // ── locking ──────────────────────────────────────────────────────────────
+
+  static const _lockedFile = 'locked';
+
+  /// The least a measured score may be to open a locked identity: the same
+  /// bar as an ordinary action, `permission.DefaultMinimumScore` in
+  /// identity-agent-core.
+  static const minimumScore = 80;
+
+  /// How recent a measurement must be to count. A score is about a moment.
+  static const scoreFreshFor = Duration(minutes: 2);
+
+  /// How far ahead of this device's clock a measurement's time may be.
+  static const clockSkew = Duration(seconds: 30);
+
+  /// The provider a person logs in with on this device. Until a real one is
+  /// built it is [LoginProvider.fixedMinimum], which answers a measured 80, so
+  /// choosing a profile logs that person in. A seam for tests and for the real
+  /// provider when it arrives.
+  static LoginProvider loginProvider = LoginProvider.fixedMinimum();
+
+  /// How a locked identity will be opened on this device right now, so the
+  /// screens can say it before anyone is asked.
+  static UnlockMethod howItWillBeChecked() => loginProvider.isPlaceholder
+      ? UnlockMethod.placeholderProvider
+      : UnlockMethod.provider;
+
+  /// Plain words for the lock screen: who is logging in, and how it will be
+  /// checked — including, while it is true, that nothing measures the person.
+  /// One place, for both apps.
+  static String lockScreenExplanation(String name,
+      {UnlockMethod? method,
+      String what = 'identity',
+      bool anotherIsOpen = true}) {
+    final who = name.isEmpty ? 'the owner of this $what' : name;
+    final m = method ?? howItWillBeChecked();
+    final why = 'Only one $what is logged in on this device at a time, and '
+        'this one is logged out. Choosing it logs $who in'
+        '${anotherIsOpen ? ' and logs out the one that is open' : ''}.';
+    switch (m) {
+      case UnlockMethod.provider:
+        return '$why The authentication provider measures who is holding this '
+            'device; a score of $minimumScore or more logs in.';
+      case UnlockMethod.placeholderProvider:
+        return '$why $placeholderProviderNotice';
     }
+  }
+
+  /// What is said wherever the placeholder logs someone in, so nobody takes
+  /// it for a check.
+  static const placeholderProviderNotice =
+      'No authentication provider is built yet, so nothing measures who you '
+      'are. Anyone who taps a profile is logged in as that person.';
+
+  /// What the list of identities says above itself: who logs in and how, when
+  /// any listed one is logged out, and in every case that the provider is a
+  /// placeholder while it is one. Null only when there is nothing to say. One
+  /// place, so both apps say the same thing.
+  static String? listNotice({
+    required List<String> lockedNames,
+    String what = 'identity',
+    UnlockMethod? method,
+    bool anotherIsOpen = true,
+  }) {
+    if (lockedNames.isEmpty) {
+      return (method ?? howItWillBeChecked()) == UnlockMethod.placeholderProvider
+          ? placeholderProviderNotice
+          : null;
+    }
+    return lockScreenExplanation(
+        lockedNames.length == 1 ? lockedNames.first : 'a person',
+        method: method,
+        what: what,
+        anotherIsOpen: anotherIsOpen);
+  }
+
+  /// Whether a measurement opens an identity: measured, fresh, and at least
+  /// [minimumScore]. Pure, so it can be tested without a provider.
+  static bool scoreOpens({
+    required bool measured,
+    required int score,
+    required DateTime at,
+    DateTime? now,
+  }) {
+    if (!measured) return false;
+    if (score < minimumScore) return false;
+    final age = (now ?? DateTime.now().toUtc()).difference(at.toUtc());
+    return age <= scoreFreshFor && age >= -clockSkew;
+  }
+
+  /// Passes only when the login provider's fresh score is high enough. There
+  /// is no fallback to the device's screen lock: failing here is failing.
+  static Future<bool> proveItIsThem(String? profileId, String reason) async {
+    try {
+      final m = await loginProvider.measure(profileId);
+      return m != null &&
+          scoreOpens(measured: m.measured, score: m.score, at: m.at);
+    } catch (_) {
+      return false; // could not be established: not opened
+    }
+  }
+
+  /// Why an identity or organisation did not open, in plain words. The detail
+  /// of [error] goes to the log, not to the person.
+  static String couldNotOpenBecause(Object error, {String what = 'identity'}) {
+    debugPrint('[profiles] could not open: $error');
+    return 'Could not open this $what: its Identity Agent did not start or '
+        'did not answer. Try again, or quit the app and open it again.';
+  }
+
+  static Future<File> _lockedMarker(String profileId) async => File(
+      '${await directoryFor(profileId)}${Platform.pathSeparator}$_lockedFile');
+
+  /// Whether [profileId] was logged out of and has not been opened since.
+  static Future<bool> isLocked(String profileId) async =>
+      (await _lockedMarker(profileId)).existsSync();
+
+  static Future<bool> activeIsLocked() async =>
+      isLocked(await ProfileScope.activeId());
+
+  /// Log out of the open identity: stop its Identity Agent and mark it locked.
+  ///
+  /// Nothing of it is reachable afterwards — its core is not running, and
+  /// nothing here starts it again — until [openAfterAuthenticating] succeeds.
+  /// Nothing is deleted.
+  ///
+  /// The card is written first, from what the running agent says, so the
+  /// identity can still be offered by name while nothing is running. The
+  /// marker is written BEFORE the core is stopped: the other order leaves a
+  /// window in which an interruption has stopped the agent but left the
+  /// identity looking open.
+  static Future<void> lockTheOpenOne({
+    String? aid,
+    String? name,
+    Uint8List? picture,
+  }) =>
+      _oneAtATime(() => _lockTheOpenOne(aid: aid, name: name, picture: picture));
+
+  static Future<void> _lockTheOpenOne({
+    String? aid,
+    String? name,
+    Uint8List? picture,
+  }) async {
+    if (aid != null && aid.isNotEmpty) {
+      await remember(aid: aid, name: name ?? '', picture: picture);
+      await rememberWeLeft(aid);
+    }
+    // Only one identity is logged in on a device at a time, so when the open
+    // one logs out, nothing is left open for the next person to pick up. Each
+    // person logs in by choosing their profile ([openAfterAuthenticating]).
+    final couldNotMark = await _markLocked(except: null);
+    // The marker stays set whatever happens next: a profile that could not be
+    // confirmed stopped is still locked. What is not allowed is saying it is
+    // done. Stopped is verified (the core no longer answers), and when it is
+    // not, [TheCoreDidNotStop] reaches the screen instead of the next one.
+    await _stopAndVerify();
+    if (couldNotMark != null) throw TheCoreDidNotStop.notMarked('$couldNotMark');
+  }
+
+  /// Only one of these runs at a time. Opening, logging out and making room
+  /// each read and rewrite every profile's marker and move the core, so two at
+  /// once can interleave: A and B both opened at once left both unlocked
+  /// markers cleared and only B served. [TheCoreIsSettled.during] counts work
+  /// and does not order it.
+  static Future<void> _serial = Future<void>.value();
+
+  /// Forget what is queued, so a test that left an operation waiting for ever
+  /// (a core that never answers) does not hold up the tests after it.
+  @visibleForTesting
+  static void forgetWhatIsQueuedForTest() => _serial = Future<void>.value();
+
+  static Future<T> _oneAtATime<T>(Future<T> Function() work) {
+    final done = Completer<T>();
+    final before = _serial;
+    _serial = done.future.then((_) {}, onError: (_) {});
+    before.then((_) async {
+      try {
+        done.complete(await work());
+      } catch (e, st) {
+        done.completeError(e, st);
+      }
+    });
+    return done.future;
+  }
+
+  /// Marks every known profile locked except [except]. Returns the first
+  /// failure rather than throwing, so one profile that cannot be marked does
+  /// not stop the others being marked.
+  static Future<Object?> _markLocked({required String? except}) async {
+    final active = await ProfileScope.activeId();
+    Object? couldNotMark;
+    for (final id in {active, ...await ProfileScope.knownIds()}) {
+      if (id == except) continue;
+      if (!isAProfileId(id) && !_safeEarlierForm.hasMatch(id)) {
+        // An id that cannot name a directory cannot be marked, and an identity
+        // that cannot be marked is not logged out.
+        couldNotMark ??= ArgumentError.value(id, 'profileId', 'not a profile id');
+        continue;
+      }
+      try {
+        final marker = await _lockedMarker(id);
+        await marker.parent.create(recursive: true);
+        await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+      } catch (e) {
+        couldNotMark ??= e;
+      }
+    }
+    return couldNotMark;
+  }
+
+  /// Log out with [logOut] and tell the person what happened, through [say].
+  /// Returns whether to go on to the start-up screen.
+  ///
+  /// A stop that could not be confirmed is SHOWN and nothing proceeds: a core
+  /// may still be answering, so "logged out" would be untrue. A device with no
+  /// One place, for both apps, so they cannot say different things.
+  ///
+  /// [what] is "identity", or "organisation" in the organisation app. What
+  /// failed is said in plain words; its detail is in the log.
+  static Future<bool> logOutAndTell({
+    required Future<void> Function() logOut,
+    required Future<void> Function(String title, String body) say,
+    String what = 'identity',
+  }) async {
+    try {
+      await logOut();
+    } on TheCoreDidNotStop catch (e) {
+      debugPrint('[profiles] not logged out: ${e.detail}');
+      await say(
+          'Not logged out',
+          e.notMarked
+              ? 'A $what on this device could not be marked as logged out, so '
+                  'it may still be open. Quit the app and open it again.'
+              : 'The Identity Agent for this $what could not be stopped, so '
+                  'it is not logged out. Quit the app and open it again.');
+      return false;
+    }
+    return true;
+  }
+
+  /// Stops whatever runs and confirms nothing answers. Throws
+  /// [TheCoreDidNotStop] when a stop throws or a core still answers.
+  static Future<void> _stopAndVerify() async {
+    try {
+      if (!await _stopWhateverIsRunning()) throw const TheCoreDidNotStop();
+    } on TheCoreDidNotStop {
+      rethrow;
+    } catch (e) {
+      throw TheCoreDidNotStop('$e');
+    }
+  }
+
+  /// Log [profileId] in: its person authenticates through the login provider
+  /// if it is locked, every other identity on this device is logged out
+  /// (locked) and the open one's agent stopped, and [profileId] is opened. Only
+  /// one is ever logged in. Held inside [TheCoreIsSettled.during], like every switch.
+  ///
+  /// Returns false, and changes nothing, when authentication did not succeed.
+  /// A profile that fails to start is locked again, and whatever core the
+  /// failed switch got started is stopped and verified stopped, rather than
+  /// left open.
+  static Future<bool> openAfterAuthenticating(String profileId) =>
+      _oneAtATime(() => _openAfterAuthenticating(profileId));
+
+  static Future<bool> _openAfterAuthenticating(String profileId) async {
+    final locked = await isLocked(profileId);
+    if (locked &&
+        !await proveItIsThem(
+            profileId, 'Unlock this identity on this device')) {
+      return false;
+    }
+    // The others log out FIRST, and if one cannot be marked nothing is opened:
+    // two identities are never open at once.
+    final couldNotMark = await _markLocked(except: profileId);
+    if (couldNotMark != null) throw TheCoreDidNotStop.notMarked('$couldNotMark');
+    final marker = await _lockedMarker(profileId);
+    if (locked) marker.deleteSync();
+    try {
+      await TheCoreIsSettled.during(() => switchTo(profileId));
+      // Every other profile is locked again after the switch, not only before
+      // it: whatever happened in between, only this one is open.
+      final stillOpen = await _markLocked(except: profileId);
+      if (stillOpen != null) throw TheCoreDidNotStop.notMarked('$stillOpen');
+    } catch (_) {
+      if (locked) {
+        await marker.parent.create(recursive: true);
+        await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+      }
+      // A core switchTo already started must not be left answering for a
+      // profile that is marked locked.
+      try {
+        await _stopAndVerify();
+      } catch (stopFailed) {
+        debugPrint('[profiles] could not stop the core after a failed '
+            'open: $stopFailed');
+      }
+      rethrow;
+    }
+    return true;
+  }
+
+  /// What says whether the open profile may already hold an identity. A seam
+  /// for tests.
+  ///
+  /// DECIDED FROM LOCAL FACTS AND FAILING CLOSED. It used to ask the core and
+  /// answer "no" on any error, so a core that was stopped, slow or refusing
+  /// looked like an empty profile; the app founded in the occupied one, the
+  /// core said "already exists", and the interrupted-founding repair opened
+  /// the previous identity. Now a card, a lock marker, a phrase held (or one
+  /// that cannot be ruled out), or ANYTHING in the profile's data directory
+  /// each mean "occupied": a new profile is begun. The data directory counts
+  /// because an identity can be there with none of the others: a desktop
+  /// controller profile keeps no phrase, and one founded before cards existed
+  /// and never logged out has no card or lock. The only "no" is a profile with
+  /// none of them.
+  ///
+  /// The cost is that a profile whose core has run (it writes its store when
+  /// it starts) is occupied even when nothing was founded in it, so a retry
+  /// after a failure before the founding begins another profile and leaves
+  /// that one empty and unlisted. An empty directory is the price of never
+  /// founding on top of an identity.
+  @visibleForTesting
+  static Future<bool> Function() openOneHoldsAnIdentity = () async {
+    final id = await ProfileScope.activeId();
+    if (File(await _cardPathFor(id)).existsSync()) return true;
+    if (await isLocked(id)) return true;
+    try {
+      if (await _dataDirectoryHoldsAnything(id)) return true;
+    } catch (_) {
+      return true; // cannot be ruled out, so not empty
+    }
+    try {
+      if (await SecureKeyStore.hasMnemonic()) return true;
+    } catch (_) {
+      return true; // cannot be ruled out, so not empty
+    }
+    return false;
+  };
+
+  /// Whether [profileId]'s data directory holds anything but the files a
+  /// running core leaves to say where it listens (`.port`, `.pid`). Does not
+  /// create the directory.
+  static Future<bool> _dataDirectoryHoldsAnything(String profileId) async {
+    final dir = Directory(
+        '${await directoryFor(profileId)}${Platform.pathSeparator}data');
+    if (!dir.existsSync()) return false;
+    await for (final entry in dir.list(followLinks: false)) {
+      final name = entry.uri.pathSegments
+          .lastWhere((s) => s.isNotEmpty, orElse: () => '');
+      if (name == '.port' || name == '.pid') continue;
+      return true;
+    }
+    return false;
+  }
+
+  // ── a founding this run started ──────────────────────────────────────────
+
+  static const _foundingFile = 'founding';
+
+  static Future<File> _foundingMarker(String profileId) async => File(
+      '${await directoryFor(profileId)}${Platform.pathSeparator}$_foundingFile');
+
+  /// Written before the words are saved and before the founding is asked of
+  /// the core. A repair of an "already exists" answer is only for a founding
+  /// this run started; without the marker the identity that is there is
+  /// somebody else's, and is not opened.
+  ///
+  /// Written first of all because the words are saved next: a kill between
+  /// the two the other way round leaves a profile that holds a phrase and
+  /// nothing saying why. An existing marker is kept as it is, with the
+  /// identifier it already names.
+  static Future<void> markFoundingStarted() async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    if (f.existsSync()) return;
+    await f.parent.create(recursive: true);
+    await f.writeAsString(jsonEncode(
+        {'started': DateTime.now().toUtc().toIso8601String(), 'aid': ''}));
+  }
+
+  /// Records the identifier the core prepared for this founding, before it is
+  /// signed or committed. A repair opens only an identity with this one.
+  static Future<void> recordFoundingAid(String aid) async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    await f.parent.create(recursive: true);
+    await f.writeAsString(jsonEncode(
+        {'started': DateTime.now().toUtc().toIso8601String(), 'aid': aid}));
+  }
+
+  /// The identifier the open profile's founding was prepared for, or null
+  /// when none was recorded (the run ended before the core prepared one).
+  static Future<String?> foundingAid() async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    if (!f.existsSync()) return null;
+    try {
+      final body = jsonDecode(await f.readAsString());
+      final aid = body is Map ? body['aid'] : null;
+      return aid is String && aid.isNotEmpty ? aid : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether the open profile has a founding that was started and not
+  /// finished.
+  static Future<bool> foundingWasStarted() async =>
+      (await _foundingMarker(await ProfileScope.activeId())).existsSync();
+
+  /// Removed once the founding is finished or repaired.
+  static Future<void> clearFoundingMarker() async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    if (f.existsSync()) f.deleteSync();
+  }
+
+  /// Make room for an identity about to be created, on every platform.
+  ///
+  /// The core keeps one identity per data directory, so a second cannot be
+  /// founded in the directory that holds the first. When the open profile
+  /// holds one (by local facts, [openOneHoldsAnIdentity]) or is a locked one, a
+  /// new profile is begun and opened. A profile with a founding in progress
+  /// is the exception: it is resumed, because beginning another would strand
+  /// the words it already holds.
+  ///
+  /// An empty profile is used as it is — beginning a fresh one on every Create
+  /// press would leave an empty directory behind each abandoned attempt.
+  /// Returns whether a new profile was begun.
+  ///
+  /// When the open profile is locked, a new identity is begun only after the
+  /// person passes the same check as for opening a locked one
+  /// ([proveItIsThem]: the login provider's score). Otherwise anyone holding a locked device could start one.
+  /// Throws [NotAuthenticated] when they do not, and nothing is begun.
+  static Future<bool> makeRoomForANewOne({String what = 'identity'}) =>
+      _oneAtATime(() => _makeRoomForANewOne(what));
+
+  static Future<bool> _makeRoomForANewOne(String what) async {
+    if (await activeIsLocked()) {
+      // About the device's person, not about the locked profile that happens
+      // to be active: nobody has chosen that one.
+      if (!await proveItIsThem(null, 'Start a new identity on this device')) {
+        throw NotAuthenticated(what);
+      }
+    } else {
+      if (await foundingWasStarted()) return false;
+      if (!await openOneHoldsAnIdentity()) return false;
+    }
+    // Only one identity is logged in at a time: the one being left logs out.
+    final couldNotMark = await _markLocked(except: null);
+    if (couldNotMark != null) throw TheCoreDidNotStop.notMarked('$couldNotMark');
+    // Held shut while the core moves to the new profile's data, as for any other
+    // switch: a request in between would be signed by the old core.
+    final begun = await TheCoreIsSettled.during(beginANewOne);
+    final stillOpen = await _markLocked(except: begun);
+    if (stillOpen != null) throw TheCoreDidNotStop.notMarked('$stillOpen');
+    return true;
+  }
+
+  /// Whether nothing answers afterwards.
+  static Future<bool> _stopWhateverIsRunning() async {
+    final stopper = coreStopper;
+    if (stopper != null) {
+      await stopper();
+      return true;
+    }
+    if (BackendProcessService.isDesktopPlatform) {
+      // By the profile's data directory, so a core this app adopted rather than
+      // spawned is ended too — see [BackendProcessService.stop].
+      BackendProcessService.dataDirOverride ??= await dataDirectoryForActive();
+      return BackendProcessService.instance.stop();
+    }
+    final core = mobileCore;
+    if (core == null) return true;
+    await core.stopCore();
+    return !await core.isHealthy();
+  }
+
+  /// At launch: end any core still answering on the data of ANY locked
+  /// profile (a leftover from before it was locked or from a crash), not only
+  /// the open one. Desktop only. Returns whether nothing locked answers
+  /// afterwards.
+  static Future<bool> stopLeftoverCoresOfEveryLockedOne() async {
+    if (!BackendProcessService.isDesktopPlatform || coreStopper != null) {
+      return true;
+    }
+    final active = await ProfileScope.activeId();
+    var allStopped = true;
+    for (final id in {active, ...await ProfileScope.knownIds()}) {
+      if (!isAProfileId(id) && !_safeEarlierForm.hasMatch(id)) continue;
+      if (!await isLocked(id)) continue;
+      final dir = Directory(
+          '${await directoryFor(id)}${Platform.pathSeparator}data');
+      if (!dir.existsSync()) continue;
+      if (!await _endTheCoreOn(dir)) allStopped = false;
+    }
+    return allStopped;
   }
 
   // ── describing them without running them ─────────────────────────────────
@@ -349,15 +979,31 @@ class IdentityProfiles {
   /// Returns false if anything did not line up, leaving the original exactly
   /// where it is so a caller can keep using it rather than pretend.
   static Future<bool> migrateTheSingleDirectory() async {
-    final legacy =
-        Directory('${await _root()}${Platform.pathSeparator}data');
+    final legacy = Directory('${await _root()}${Platform.pathSeparator}data');
     if (!legacy.existsSync()) return true; // nothing was ever there
 
     final target = Directory(await dataDirectoryForActive());
-    if (target.listSync().isNotEmpty) return true; // already done, or founded here
+    if (target.listSync().isNotEmpty)
+      return true; // already done, or founded here
 
-    final files =
-        legacy.listSync(recursive: true, followLinks: false).whereType<File>();
+    // NOT WHILE A CORE ANSWERS. A running core has its database open and is
+    // writing it: a copy taken now can be torn halfway through a write, and the
+    // original then removed. Left where it is, the identity keeps working.
+    if (await _aCoreAnswersOn(legacy) && !await _endTheCoreOn(legacy)) {
+      debugPrint('[profiles] a core is running on the old directory — not '
+          'moving it now');
+      return false;
+    }
+
+    // What a running core leaves to say where it was and who it was, not data.
+    bool isCoreRuntimeNote(String rel) => rel == '.port' || rel == '.pid';
+
+    final files = legacy
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .where(
+            (f) => !isCoreRuntimeNote(f.path.substring(legacy.path.length + 1)))
+        .toList();
 
     try {
       for (final f in files) {
@@ -368,15 +1014,21 @@ class IdentityProfiles {
       }
     } catch (e) {
       debugPrint('[profiles] copy failed, original left in place: $e');
+      _clear(target);
       return false;
     }
 
+    // Verified by content, not length: a copy of a database taken while it was
+    // being written has the right length and the wrong bytes.
     for (final f in files) {
       final rel = f.path.substring(legacy.path.length + 1);
       final dest = File('${target.path}${Platform.pathSeparator}$rel');
-      if (!dest.existsSync() || dest.lengthSync() != f.lengthSync()) {
+      if (!dest.existsSync() ||
+          sha256.convert(await dest.readAsBytes()) !=
+              sha256.convert(await f.readAsBytes())) {
         debugPrint('[profiles] $rel did not survive the copy — '
             'original left in place');
+        _clear(target);
         return false;
       }
     }
@@ -389,6 +1041,63 @@ class IdentityProfiles {
       debugPrint('[profiles] migrated, old directory not removed: $e');
     }
     return true;
+  }
+
+  /// Empties a half-made copy, so the next launch does not take it for a
+  /// finished move ("target not empty").
+  static void _clear(Directory target) {
+    try {
+      for (final e in target.listSync()) {
+        e.deleteSync(recursive: true);
+      }
+    } catch (e) {
+      debugPrint('[profiles] could not clear the partial copy: $e');
+    }
+  }
+
+  /// Ends this app's own leftover core on [dataDir], once it has proved it is
+  /// this directory's. Desktop only; elsewhere nothing is ended.
+  static Future<bool> _endTheCoreOn(Directory dataDir) async {
+    if (!BackendProcessService.isDesktopPlatform || coreStopper != null) {
+      return false;
+    }
+    final before = BackendProcessService.dataDirOverride;
+    BackendProcessService.dataDirOverride = dataDir.path;
+    try {
+      return await BackendProcessService.instance.stopTheCoreOnThisData();
+    } finally {
+      BackendProcessService.dataDirOverride = before;
+    }
+  }
+
+  /// Where a single-directory installation kept its identity. An app whose
+  /// [migrateTheSingleDirectory] returned false keeps running on this, rather
+  /// than start empty beside an identity it did not move.
+  static Future<String> legacyDirectory() async =>
+      '${await _root()}${Platform.pathSeparator}data';
+
+  static Future<bool> _aCoreAnswersOn(Directory dataDir) async {
+    try {
+      final f = File('${dataDir.path}${Platform.pathSeparator}.port');
+      if (!f.existsSync()) return false;
+      final port = int.tryParse(f.readAsStringSync().trim());
+      if (port == null) return false;
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(milliseconds: 600);
+      try {
+        final req = await client
+            .getUrl(Uri.parse('http://127.0.0.1:$port/api/health'))
+            .timeout(const Duration(milliseconds: 800));
+        final resp =
+            await req.close().timeout(const Duration(milliseconds: 800));
+        await resp.drain<void>();
+        return true; // anything answering there is a reason not to move it
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── paths ────────────────────────────────────────────────────────────────
@@ -408,32 +1117,13 @@ class IdentityProfiles {
   /// is to find what that produced. Deriving it differently would look for an
   /// existing identity where it never was, find nothing, and start empty.
   static Future<String> _root() async {
+    final over = rootOverride;
+    if (over != null) return over;
     if (!BackendProcessService.isDesktopPlatform) {
       return (await getApplicationSupportDirectory()).path;
     }
 
-    final sep = Platform.pathSeparator;
-    final home = Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '';
-    var appName = 'IdentityAgent';
-    try {
-      final resolved = Platform.resolvedExecutable.split(sep).last;
-      if (resolved.isNotEmpty) appName = resolved;
-    } catch (_) {/* keep the default */}
-
-    if (Platform.isMacOS) {
-      return '$home${sep}Library${sep}Application Support$sep$appName';
-    }
-    if (Platform.isWindows) {
-      final appData =
-          Platform.environment['APPDATA'] ?? '$home${sep}AppData${sep}Roaming';
-      return '$appData$sep$appName';
-    }
-    final xdg = Platform.environment['XDG_DATA_HOME'];
-    return (xdg != null && xdg.isNotEmpty)
-        ? '$xdg$sep$appName'
-        : '$home$sep.local${sep}share$sep$appName';
+    return BackendProcessService.desktopInstallationRoot();
   }
 
   /// Short, random, and only unique within this installation — which is all it

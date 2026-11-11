@@ -286,10 +286,10 @@ func TestAnEnrolmentFromAnotherRootSeedIsNotReused(t *testing.T) {
 	rec := recordedEnrolment(t, dir, relayEnrollmentFileName, "https://relay.example", 4)
 	other := deterministicRootSeed()
 	other[0] ^= 0xff
-	if _, err := reuseRelayEnrolment(other, &rec); err == nil || !strings.Contains(err.Error(), "not the one") {
+	if _, err := (&CoreServer{}).reuseRelayEnrolment(other, &rec); err == nil || !strings.Contains(err.Error(), "not the one") {
 		t.Fatalf("an enrolment was reused with a key re-derived from a different root seed: %v", err)
 	}
-	if _, err := reuseRelayEnrolment(deterministicRootSeed(), &rec); err != nil {
+	if _, err := (&CoreServer{}).reuseRelayEnrolment(deterministicRootSeed(), &rec); err != nil {
 		t.Fatalf("the enrolment's own root seed was refused: %v", err)
 	}
 }

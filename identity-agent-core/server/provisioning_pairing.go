@@ -119,10 +119,10 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 	// resolvable — remembering which AID was published without them would leave
 	// an address that is remembered and still cannot be reached.
 	stored := storedPairingOffer{AID: aid}
-	if pub, ok := getPairwiseKey(aid); ok {
+	if pub, ok := s.getPairwiseKey(aid); ok {
 		stored.PublicKey = pub
 	}
-	if kel, ok := getPairwiseKEL(aid); ok {
+	if kel, ok := s.getPairwiseKEL(aid); ok {
 		stored.KEL = kel
 	}
 	if serr := savePairingOffer(s.DataDir, stored); serr != nil {
@@ -218,10 +218,10 @@ func (s *CoreServer) restorePairingOffer() {
 	// identity it published and still cannot serve it, which to anybody holding
 	// the address looks the same as it being gone.
 	if stored.PublicKey != "" {
-		registerPairwiseKey(stored.AID, stored.PublicKey)
+		s.registerPairwiseKey(stored.AID, stored.PublicKey)
 	}
 	if len(stored.KEL) > 0 {
-		registerPairwiseKEL(stored.AID, stored.KEL)
+		s.registerPairwiseKEL(stored.AID, stored.KEL)
 	} else {
 		log.Printf("[provisioning] WARNING: the recorded pairing identity %s has no key event log, so its OOBI will not resolve", stored.AID)
 	}

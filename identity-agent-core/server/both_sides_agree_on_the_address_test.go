@@ -37,7 +37,7 @@ func TestAskerAndAnswererAgreeOnTheAddressEndToEnd(t *testing.T) {
 	if err := bob.WatcherService.Store.SetConfig("default_l2_url", "http://127.0.0.1:1/public/kel-digest"); err != nil {
 		t.Fatal(err)
 	}
-	registerPairwiseKEL("EBob", ebobLog)
+	bob.registerPairwiseKEL("EBob", ebobLog)
 	bob.EndpointService = endpoint.New(nil, 0)
 	srv := httptest.NewServer(bob.buildRouter())
 	defer srv.Close()
@@ -159,7 +159,7 @@ var ebobDigest = func() string {
 func contactAndAgent(t *testing.T, status string, seed []byte) *CoreServer {
 	t.Helper()
 	s := watcherAgent(t, "EBob", 0, "Ebob")
-	registerPairwiseKEL("EBob", ebobLog)
+	s.registerPairwiseKEL("EBob", ebobLog)
 	if err := s.DataStore.SaveContact(store.ContactRecord{
 		AID: "EContact", Status: status, OobiURL: "http://test/public/oobi/EContact",
 		PublicKey: iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)),

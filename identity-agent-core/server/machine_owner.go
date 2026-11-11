@@ -91,7 +91,7 @@ func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err 
 // persistPairwiseKEL writes a freshly minted pairwise identity's key log to
 // the store, so it outlives this process.
 func (s *CoreServer) persistPairwiseKEL(aid string) error {
-	kel, ok := getPairwiseKEL(aid)
+	kel, ok := s.getPairwiseKEL(aid)
 	if !ok || len(kel) == 0 {
 		return fmt.Errorf("no key log was produced for %s", aid)
 	}

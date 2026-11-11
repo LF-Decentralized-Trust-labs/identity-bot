@@ -231,9 +231,12 @@ class VerificationResult {
 abstract class KeriService {
   AgentEnvironment get environment;
 
+  /// [whenPrepared], when given, is told the identifier the engine prepared
+  /// before the founding is signed or committed.
   Future<InceptionResult> inceptAid({
     required String name,
     required String code,
+    Future<void> Function(String aid)? whenPrepared,
   });
 
   Future<RotationResult> rotateAid({required String name});

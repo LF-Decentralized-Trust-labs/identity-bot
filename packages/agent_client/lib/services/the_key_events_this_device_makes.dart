@@ -276,8 +276,14 @@ class TheKeyEventsThisDeviceMakes {
   /// the generation 0 signing key, committing to the generation 1 key and the
   /// generation 0 post-quantum key, and anchoring the generation 0 messaging
   /// keyset, whose seed the core is handed first so it can hold those keys.
+  ///
+  /// [whenPrepared] is told the identifier the core prepared, once the
+  /// founding is checked and before anything is signed or committed, so a
+  /// caller can record which identity this run set out to found.
   Future<Committed> found(Uint8List seed,
-      {List<String> witnesses = const [], int toad = 0}) async {
+      {List<String> witnesses = const [],
+      int toad = 0,
+      Future<void> Function(String aid)? whenPrepared}) async {
     final key = KeyManager.publicKeyAt(seed, 0);
     final next = KeyManager.publicKeyAt(seed, 1);
     final pqSeed = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
@@ -316,7 +322,8 @@ class TheKeyEventsThisDeviceMakes {
           KeyManager.signingSeed(seed, index: 0),
           WitnessSet(witnesses, witnesses.isEmpty ? 0 : toad),
           reveals: key,
-          generation: 0);
+          generation: 0,
+          whenPrepared: whenPrepared);
     } finally {
       pqSeed.fillRange(0, pqSeed.length, 0);
       messagingSeed.fillRange(0, messagingSeed.length, 0);
@@ -849,10 +856,12 @@ class TheKeyEventsThisDeviceMakes {
       String? reveals,
       int? generation,
       Uint8List? alsoSignedBy,
-      Future<void> Function()? beforeSigning}) async {
+      Future<void> Function()? beforeSigning,
+      Future<void> Function(String aid)? whenPrepared}) async {
     try {
       final raw = base64Decode(rawB64);
       final ev = await expected.requireIn(_km, raw);
+      await whenPrepared?.call(ev.i);
       await beforeSigning?.call();
       // A founding names the identity this device holds from now on, with
       // where its witnesses are, before anything is signed for it.

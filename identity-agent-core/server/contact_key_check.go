@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"identity-agent-core/internal/boundedread"
@@ -48,10 +47,7 @@ const (
 // a row does not re-fetch their log each time. Short, because the point is
 // freshness — long enough to cover one interaction, not long enough to make
 // this the old behaviour under a new name.
-var kelCheckCache = struct {
-	sync.Mutex
-	m map[string]kelCheckResult
-}{m: map[string]kelCheckResult{}}
+// (held per core: see pairwise_registry.go)
 
 const kelCheckFreshness = 5 * time.Minute
 
@@ -85,18 +81,13 @@ type kelCheckResult struct {
 // with, and returning the stored one would authenticate against a key they have
 // retired.
 func (s *CoreServer) contactKeyForUse(aid string) kelCheckResult {
-	kelCheckCache.Lock()
-	if hit, ok := kelCheckCache.m[aid]; ok && time.Since(hit.CheckedAt) < kelCheckFreshness {
-		kelCheckCache.Unlock()
+	if hit, ok := s.cachedKelCheck(aid); ok && time.Since(hit.CheckedAt) < kelCheckFreshness {
 		return hit
 	}
-	kelCheckCache.Unlock()
 
 	result := s.checkContactKEL(aid)
 
-	kelCheckCache.Lock()
-	kelCheckCache.m[aid] = result
-	kelCheckCache.Unlock()
+	s.cacheKelCheck(aid, result)
 	return result
 }
 

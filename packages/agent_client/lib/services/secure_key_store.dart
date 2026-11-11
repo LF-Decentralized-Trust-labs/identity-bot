@@ -261,6 +261,17 @@ class SecureKeyStore {
   static String _normalised(String s) =>
       s.trim().split(RegExp(r'\s+')).join(' ');
 
+  /// Whether the open profile is the one the unscoped phrase belongs to (the
+  /// profile this installation began with), so no other profile reads or
+  /// deletes it.
+  static Future<bool> _ownsTheUnscopedPhrase() async {
+    // The active profile first: it is registered (and, on a first run, recorded
+    // as the first) by being asked for.
+    final active = await ProfileScope.activeId();
+    final first = await ProfileScope.firstId();
+    return first != null && first == active;
+  }
+
   static Future<String> _scopedKey() => ProfileScope.key(_mnemonicName);
 
   /// Moves a phrase an earlier version left in this app's own storage (software
@@ -283,7 +294,15 @@ class SecureKeyStore {
   /// [hasMnemonic] runs it (apps ask that at startup), and so does every [loadMnemonic].
   static Future<bool> migrateLegacyMnemonic() async {
     var clean = true;
-    for (final key in {await _scopedKey(), _legacyMnemonicKey}) {
+    // The old UNSCOPED phrase belongs to the profile this installation began
+    // with and to no other. Offered to whichever profile was active it would
+    // found the previous identity again in a brand-new one. The scoped key is
+    // always this profile's own.
+    final keys = <String>{
+      await _scopedKey(),
+      if (await _ownsTheUnscopedPhrase()) _legacyMnemonicKey,
+    };
+    for (final key in keys) {
       final raw = await _legacyStorage.read(key: key);
       if (raw == null) continue;
       if (raw.trim().isEmpty) {
@@ -363,7 +382,8 @@ class SecureKeyStore {
       debugPrint('[SecureKeyStore] the old phrase was not moved just now: $e');
     }
     if (await _legacyStorage.containsKey(key: await _scopedKey()) ||
-        await _legacyStorage.containsKey(key: _legacyMnemonicKey)) {
+        (await _ownsTheUnscopedPhrase() &&
+            await _legacyStorage.containsKey(key: _legacyMnemonicKey))) {
       return true;
     }
     try {
@@ -382,7 +402,9 @@ class SecureKeyStore {
   static Future<void> clearMnemonic() async {
     await _holder.forget();
     await _legacyStorage.delete(key: await _scopedKey());
-    await _legacyStorage.delete(key: _legacyMnemonicKey);
+    if (await _ownsTheUnscopedPhrase()) {
+      await _legacyStorage.delete(key: _legacyMnemonicKey);
+    }
   }
 
   /// The name within a profile of the phrase an identity is moving to, as an
@@ -438,7 +460,9 @@ class SecureKeyStore {
     // An older copy of the phrase just replaced, left in this app's own
     // storage, is no longer the phrase in force.
     await _legacyStorage.delete(key: await _scopedKey());
-    await _legacyStorage.delete(key: _legacyMnemonicKey);
+    if (await _ownsTheUnscopedPhrase()) {
+      await _legacyStorage.delete(key: _legacyMnemonicKey);
+    }
     await clearPhraseMovingTo();
     return true;
   }
@@ -494,10 +518,13 @@ class SecureKeyStore {
   static Future<bool> forgetWordsAfterRecording() async {
     final gone = await _holder.forget();
     await _legacyStorage.delete(key: await _scopedKey());
-    await _legacyStorage.delete(key: _legacyMnemonicKey);
+    if (await _ownsTheUnscopedPhrase()) {
+      await _legacyStorage.delete(key: _legacyMnemonicKey);
+    }
     return gone &&
         !(await _holder.isHeld()) &&
         !(await _legacyStorage.containsKey(key: await _scopedKey())) &&
-        !(await _legacyStorage.containsKey(key: _legacyMnemonicKey));
+        !(await _ownsTheUnscopedPhrase() &&
+            await _legacyStorage.containsKey(key: _legacyMnemonicKey));
   }
 }

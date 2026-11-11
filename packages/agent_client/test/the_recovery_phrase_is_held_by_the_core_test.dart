@@ -79,6 +79,7 @@ void main() {
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
     SharedPreferences.setMockInitialValues({});
+    ProfileScope.resetCacheForTest();
     legacy = const FlutterSecureStorage();
   });
   tearDown(SecureKeyStore.holdPhraseInTheCore);
@@ -269,7 +270,11 @@ void main() {
 }
 
 void migrationSafety() {
-  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
+    ProfileScope.resetCacheForTest();
+  });
   tearDown(SecureKeyStore.holdPhraseInTheCore);
 
   test('an old phrase that differs from the one the core holds is not deleted',
