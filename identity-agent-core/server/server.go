@@ -3562,7 +3562,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 					}
 					publicURL := s.getPublicURL(r)
 					oobiURL := oobiLink(r, publicURL, a.PairwiseAID)
-					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
+					rawEvents, signatures := asset.PublishedLog(s.DataDir, a, kelResp.RawEventsB64)
 					jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 						"aid":             a.PairwiseAID,
 						"oobi":            oobiURL,

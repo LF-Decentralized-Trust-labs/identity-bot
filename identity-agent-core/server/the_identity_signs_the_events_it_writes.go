@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
-	"identity-agent-core/asset"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
@@ -129,37 +128,6 @@ func (s *CoreServer) storedKelForVerifying(aid string) ([]map[string]interface{}
 		out = append(out, m)
 	}
 	return out, nil
-}
-
-// assetEventsAndSignatures is an asset's log as published: each event's bytes,
-// and the asset's signature over them where this Identity Agent holds the asset's key.
-//
-// The engine keeps no signatures, so an asset's log was served as parsed events
-// alone and a verifier could confirm the chain and nothing more — not that the
-// asset's own key ever authorised its inception. An asset whose key this Identity Agent
-// derived is signed here; the signature is deterministic, so it is the same
-// every time it is served. An asset whose key lives on its own machine is
-// served unsigned, because only that machine can sign for it.
-func (s *CoreServer) assetEventsAndSignatures(a asset.Asset, rawEventsB64 []string) ([]string, []string) {
-	signatures := make([]string, len(rawEventsB64))
-	if a.SigningIndex == 0 {
-		return rawEventsB64, signatures
-	}
-	seed, err := asset.AssetSigningSeed(s.DataDir, a.SigningIndex)
-	if err != nil {
-		log.Printf("[keri] the log of %s is served unsigned: %v", a.PairwiseAID, err)
-		return rawEventsB64, signatures
-	}
-	for i, rawB64 := range rawEventsB64 {
-		raw, err := base64.StdEncoding.DecodeString(rawB64)
-		if err != nil {
-			continue
-		}
-		if sig, err := signEventBytes(raw, seed); err == nil {
-			signatures[i] = sig
-		}
-	}
-	return rawEventsB64, signatures
 }
 
 // warnAboutUnprovableEvents says once, at startup, when this identity's own log
