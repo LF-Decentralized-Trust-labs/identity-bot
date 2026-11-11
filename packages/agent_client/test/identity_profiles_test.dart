@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:agent_client/services/controller_signing_client.dart'
+    show VouchedAuthentication;
 import 'package:agent_client/services/identity_profiles.dart';
 import 'package:agent_client/services/local_auth_service.dart';
 import 'package:agent_client/services/secure_key_store.dart';
@@ -93,6 +95,8 @@ void main() {
       IdentityProfiles.rootOverride = null;
       IdentityProfiles.coreStarter = null;
       IdentityProfiles.coreStopper = null;
+      IdentityProfiles.providerOnThisDevice = null;
+      IdentityProfiles.vouchedByThePersonsDevice = null;
       root.deleteSync(recursive: true);
     });
 
@@ -126,6 +130,101 @@ void main() {
       expect(await IdentityProfiles.openAfterAuthenticating(id), isTrue);
       expect(await IdentityProfiles.isLocked(id), isFalse);
       expect(started, hasLength(1));
+    });
+
+    test('logging out locks EVERY identity on the device, and each needs its '
+        'own person', () async {
+      final first = await ProfileScope.activeId();
+      await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
+      IdentityProfiles.authenticateOwner = (_) async => true;
+      await IdentityProfiles.openAfterAuthenticating(first);
+      final second = await IdentityProfiles.beginANewOne();
+      await IdentityProfiles.remember(aid: 'Bchild', name: 'Ben');
+      expect(await IdentityProfiles.isLocked(first), isFalse);
+      expect(await IdentityProfiles.isLocked(second), isFalse);
+
+      // The child logs out; the parent's identity locks too.
+      await IdentityProfiles.lockTheOpenOne(aid: 'Bchild', name: 'Ben');
+      expect(await IdentityProfiles.isLocked(second), isTrue);
+      expect(await IdentityProfiles.isLocked(first), isTrue,
+          reason: 'any logout locks every identity on the device');
+    });
+
+    group('getting back in', () {
+      final now = DateTime.now().toUtc();
+      test('80 opens, 79 does not, an unmeasured or stale one does not', () {
+        bool opens(int score,
+                {bool measured = true,
+                DateTime? at,
+                bool vouching = false,
+                String by = ''}) =>
+            IdentityProfiles.scoreOpens(
+                measured: measured,
+                score: score,
+                at: at ?? now,
+                needsVouching: vouching,
+                vouchedBy: by,
+                now: now);
+        expect(opens(80), isTrue);
+        expect(opens(79), isFalse);
+        expect(opens(100, measured: false), isFalse);
+        expect(opens(100, at: now.subtract(const Duration(minutes: 5))),
+            isFalse);
+        expect(opens(100, at: now.add(const Duration(minutes: 5))), isFalse);
+        // A computer may not score itself.
+        expect(opens(100, vouching: true), isFalse);
+        expect(opens(100, vouching: true, by: 'sig'), isTrue);
+      });
+
+      test('with a provider, a failed score is not rescued by the screen lock',
+          () async {
+        final id = await ProfileScope.activeId();
+        await IdentityProfiles.lockTheOpenOne(aid: one, name: 'Ada');
+        var screenLockAsked = false;
+        IdentityProfiles.authenticateOwner = (_) async {
+          screenLockAsked = true;
+          return true;
+        };
+        IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
+            measured: true, score: 79, at: DateTime.now().toUtc());
+        IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
+            VouchedAuthentication(
+                level: 'verified',
+                at: DateTime.now().toUtc(),
+                score: 79,
+                vouchedBy: 'sig');
+        addTearDown(() {
+          IdentityProfiles.providerOnThisDevice = null;
+          IdentityProfiles.vouchedByThePersonsDevice = null;
+        });
+        expect(await IdentityProfiles.openAfterAuthenticating(id), isFalse);
+        expect(screenLockAsked, isFalse);
+        expect(await IdentityProfiles.isLocked(id), isTrue);
+
+        IdentityProfiles.providerOnThisDevice = (_) async => MeasuredScore(
+            measured: true, score: 85, at: DateTime.now().toUtc());
+        IdentityProfiles.vouchedByThePersonsDevice = (_) async =>
+            VouchedAuthentication(
+                level: 'verified',
+                at: DateTime.now().toUtc(),
+                score: 85,
+                vouchedBy: 'sig');
+        expect(await IdentityProfiles.openAfterAuthenticating(id), isTrue);
+      });
+
+      test('with no provider the screen lock stands in, and the lock screen '
+          'says nothing measured the person', () {
+        expect(IdentityProfiles.howItWillBeChecked(),
+            UnlockMethod.deviceScreenLockNoProvider);
+        final text = IdentityProfiles.lockScreenExplanation('Ada');
+        expect(text, contains('Ada'));
+        expect(text, contains('nothing has measured who you are'));
+        expect(text, contains('every identity on this device'));
+        expect(
+            IdentityProfiles.lockScreenExplanation('Ada',
+                method: UnlockMethod.providerVouchedByAnotherDevice),
+            contains('phone or black box'));
+      });
     });
 
     test('a locked identity whose agent will not start is locked again',

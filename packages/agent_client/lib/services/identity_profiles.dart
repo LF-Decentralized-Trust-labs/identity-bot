@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'backend_process_service.dart';
+import 'controller_signing_client.dart' show VouchedAuthentication;
 import 'local_auth_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
@@ -43,6 +44,45 @@ class IdentityProfile {
   });
 }
 
+/// A fresh measurement of the person holding a device, from its authentication
+/// provider (identity-agent-core/authprovider `Result`).
+@immutable
+class MeasuredScore {
+  const MeasuredScore({
+    required this.measured,
+    required this.score,
+    required this.at,
+  });
+  final bool measured;
+  final int score;
+  final DateTime at;
+}
+
+/// What a locked identity is opened with on this device.
+enum UnlockMethod {
+  /// A phone: the provider runs here.
+  providerOnThisDevice,
+
+  /// A Mac or PC: the person's phone or black box measured and vouched.
+  providerVouchedByAnotherDevice,
+
+  /// No provider exists yet: the device's own screen lock, and nothing
+  /// measured the person.
+  deviceScreenLockNoProvider,
+}
+
+/// Logging out could not be confirmed: a core may still answer for the
+/// identity. The marker is set, but the person must be told, not shown the
+/// next screen as though it were done.
+class TheCoreDidNotStop implements Exception {
+  const TheCoreDidNotStop([this.detail]);
+  final String? detail;
+  @override
+  String toString() => 'The Identity Agent for this identity could not be '
+      'stopped${detail == null ? '' : ' ($detail)'}, so it is not logged out. '
+      'Quit the app and open it again.';
+}
+
 /// The identities on this installation: where each one's data lives, which is
 /// open, and enough about the others to offer them.
 ///
@@ -66,18 +106,6 @@ class IdentityProfile {
 /// Desktop and mobile run the core differently — a spawned process against
 /// AGENT_DATA_DIR, or an embedded one told its directory when it starts — so
 /// both are handled here rather than in every app that has the problem.
-/// Logging out could not be confirmed: a core may still answer for the
-/// identity. The marker is set, but the person must be told, not shown the
-/// next screen as though it were done.
-class TheCoreDidNotStop implements Exception {
-  const TheCoreDidNotStop([this.detail]);
-  final String? detail;
-  @override
-  String toString() => 'The Identity Agent for this identity could not be '
-      'stopped${detail == null ? '' : ' ($detail)'}, so it is not logged out. '
-      'Quit the app and open it again.';
-}
-
 class IdentityProfiles {
   /// The embedded core, on mobile. Set once at start-up, before anything else
   /// here is called.
@@ -264,6 +292,120 @@ class IdentityProfiles {
   static Future<bool> Function(String reason) authenticateOwner =
       _authenticateOnThisDevice;
 
+  /// The least a measured score may be to open a locked identity: the same
+  /// bar as an ordinary action, `permission.DefaultMinimumScore` in
+  /// identity-agent-core.
+  static const minimumScore = 80;
+
+  /// How recent a measurement must be to count. A score is about a moment.
+  static const scoreFreshFor = Duration(minutes: 2);
+
+  /// The authentication provider running ON THIS DEVICE (a phone), asked for a
+  /// fresh measurement of whoever is holding it. Null while none exists: only
+  /// `authprovider.NotConfigured` does today. A seam for tests and for the
+  /// provider when it arrives.
+  static Future<MeasuredScore?> Function(String profileId)?
+      providerOnThisDevice;
+
+  /// What the person's phone or black box vouches for, for a Mac or PC. A
+  /// machine may not score itself, so on a computer the score counts only when
+  /// the device holding the root identity has signed it
+  /// ([VouchedAuthentication.vouchedBy]). Null while no such device offers
+  /// one.
+  static Future<VouchedAuthentication?> Function(String profileId)?
+      vouchedByThePersonsDevice;
+
+  /// How a locked identity will be opened on this device right now, so the
+  /// lock screen can say it before anyone is asked.
+  static UnlockMethod howItWillBeChecked() {
+    if (BackendProcessService.isDesktopPlatform) {
+      return vouchedByThePersonsDevice != null
+          ? UnlockMethod.providerVouchedByAnotherDevice
+          : UnlockMethod.deviceScreenLockNoProvider;
+    }
+    return providerOnThisDevice != null
+        ? UnlockMethod.providerOnThisDevice
+        : UnlockMethod.deviceScreenLockNoProvider;
+  }
+
+  /// Plain words for the lock screen: who is being asked to authenticate, why,
+  /// and how it will be checked — including, when it is true, that nothing
+  /// measured the person. One place, for both apps.
+  static String lockScreenExplanation(String name,
+      {UnlockMethod? method}) {
+    final who = name.isEmpty ? 'the owner of this identity' : name;
+    final m = method ?? howItWillBeChecked();
+    final why = 'Logging out locked every identity on this device, so that '
+        'nobody can open one that is not theirs. $who is asked to '
+        'authenticate because this identity can only be opened by its own '
+        'person.';
+    switch (m) {
+      case UnlockMethod.providerOnThisDevice:
+        return '$why The authentication provider will measure who is holding '
+            'this device; a score of $minimumScore or more opens it.';
+      case UnlockMethod.providerVouchedByAnotherDevice:
+        return '$why This computer cannot score a person itself, so your '
+            'phone or black box will measure you and vouch for the result; '
+            'a score of $minimumScore or more opens it.';
+      case UnlockMethod.deviceScreenLockNoProvider:
+        return '$why No authentication provider is set up yet, so nothing '
+            'has measured who you are. This device\'s own screen lock is '
+            'used instead, and it only shows that someone who can unlock '
+            'this device is here.';
+    }
+  }
+
+  /// Whether [m] is a measurement that opens an identity: measured, fresh,
+  /// at least [minimumScore], and on a computer vouched for. Pure, so it can be
+  /// tested without a provider.
+  static bool scoreOpens({
+    required bool measured,
+    required int score,
+    required DateTime at,
+    required bool needsVouching,
+    String vouchedBy = '',
+    DateTime? now,
+  }) {
+    if (!measured) return false;
+    if (needsVouching && vouchedBy.isEmpty) return false;
+    if (score < minimumScore) return false;
+    final age = (now ?? DateTime.now().toUtc()).difference(at.toUtc());
+    return age <= scoreFreshFor && !age.isNegative;
+  }
+
+  /// Passes only when the owner of [profileId] proves it is them. With a
+  /// provider configured this is the provider's fresh score and nothing else:
+  /// failing it does NOT fall back to the screen lock. With none configured
+  /// the device's own screen lock stands in ([authenticateOwner]).
+  static Future<bool> proveItIsThem(String profileId, String reason) async {
+    final method = howItWillBeChecked();
+    try {
+      switch (method) {
+        case UnlockMethod.providerOnThisDevice:
+          final m = await providerOnThisDevice!(profileId);
+          return m != null &&
+              scoreOpens(
+                  measured: m.measured,
+                  score: m.score,
+                  at: m.at,
+                  needsVouching: false);
+        case UnlockMethod.providerVouchedByAnotherDevice:
+          final v = await vouchedByThePersonsDevice!(profileId);
+          return v != null &&
+              scoreOpens(
+                  measured: true,
+                  score: v.score,
+                  at: v.at,
+                  needsVouching: true,
+                  vouchedBy: v.vouchedBy);
+        case UnlockMethod.deviceScreenLockNoProvider:
+          return await authenticateOwner(reason);
+      }
+    } catch (_) {
+      return false; // could not be established: not opened
+    }
+  }
+
   static Future<bool> _authenticateOnThisDevice(String reason) async {
     // A device with no screen lock has nothing to ask. There is no second
     // secret anywhere in this app to fall back to, and refusing would lock an
@@ -331,9 +473,18 @@ class IdentityProfiles {
       await remember(aid: aid, name: name ?? '', picture: picture);
       await rememberWeLeft(aid);
     }
-    final marker = await _lockedMarker(await ProfileScope.activeId());
-    await marker.parent.create(recursive: true);
-    await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+    // EVERY identity on this device locks, not only the open one. One person
+    // has one identity, and several people may share a device (a parent and a
+    // child on one phone): when anyone logs out, nobody is left open for the
+    // next person to pick up. Each person gets back in only by passing
+    // [proveItIsThem] for their own identity.
+    final active = await ProfileScope.activeId();
+    for (final id in {active, ...await ProfileScope.knownIds()}) {
+      if (!isAProfileId(id) && !_safeEarlierForm.hasMatch(id)) continue;
+      final marker = await _lockedMarker(id);
+      await marker.parent.create(recursive: true);
+      await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+    }
     // The marker stays set whatever happens next: a profile that could not be
     // confirmed stopped is still locked. What is not allowed is saying it is
     // done. Stopped is verified (the core no longer answers), and when it is
@@ -386,7 +537,8 @@ class IdentityProfiles {
   static Future<bool> openAfterAuthenticating(String profileId) async {
     final locked = await isLocked(profileId);
     if (locked &&
-        !await authenticateOwner('Unlock this identity on this device')) {
+        !await proveItIsThem(
+            profileId, 'Unlock this identity on this device')) {
       return false;
     }
     final marker = await _lockedMarker(profileId);
