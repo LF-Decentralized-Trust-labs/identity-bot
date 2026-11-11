@@ -83,12 +83,12 @@ func OpenHead(signer *didcomm.DID, env *didcomm.Envelope) (HeadStatement, error)
 	return h, nil
 }
 
-// checkHead reads the bundle's head statement, when it carries one, and holds
-// the entries to it. Without one nothing in a bundle fixes where the
-// conversation ended, and the report says so.
-func (v *verifier) checkHead() {
+// openHead reads the bundle's head statement, when it carries one, before the
+// entries are read: what the Identity Agent says it had committed decides which
+// of the bundle's entries are the conversation. A statement that cannot be read
+// is a fault and decides nothing.
+func (v *verifier) openHead() {
 	if v.b.Head == nil {
-		v.cannotRuleOut("That entries were not cut off the end of the conversation after the last one an anchor fixes: this bundle carries no head statement, so a copy cut short there looks whole.")
 		return
 	}
 	signer, ok := v.dids[v.b.Root]
@@ -113,6 +113,41 @@ func (v *verifier) checkHead() {
 	case at.After(exported.Add(authorisation.Skew)):
 		v.fault("head statement", "it is dated after the export")
 	}
+	v.head = &h
+}
+
+// kept is the entries of the bundle that are the conversation: all of them,
+// or, with a head statement, the first count. Entries past the count were never
+// committed (ADR-068): they are not read, not listed in the report as messages,
+// and only counted (Report.UncommittedEntries).
+func (v *verifier) kept() []Entry {
+	if v.head != nil && v.head.Count < len(v.b.Entries) {
+		return v.b.Entries[:v.head.Count]
+	}
+	return v.b.Entries
+}
+
+// checkHead holds the entries to the head statement openHead read. Without one
+// nothing in a bundle fixes where the conversation ended, and the report says so
+// for a conversation an app keeps, where an end can be cut off unseen.
+func (v *verifier) checkHead() {
+	if v.b.Head == nil {
+		// Only a conversation a utility app keeps can be cut short unseen by the
+		// anchors, and the bundle names no keeper, so it is told by a person's words
+		// having been spoken through an app (an app's own request, or a person's
+		// statement over a fingerprint of words the app keeps).
+		for _, m := range v.r.Messages {
+			if m.Sender == "app" || m.Sender == "statement" || m.AppAID != "" {
+				v.cannotRuleOut("That entries were not cut off the end of the conversation after the last one an anchor fixes: a person spoke in it through an app that may keep it, and this bundle carries no head statement, so a copy cut short there looks whole.")
+				break
+			}
+		}
+		return
+	}
+	if v.head == nil {
+		return // the statement was faulted in openHead
+	}
+	h := *v.head
 	envs := make([]*didcomm.Envelope, 0, len(v.b.Entries))
 	for i, e := range v.b.Entries {
 		if e.Envelope == nil {
@@ -121,14 +156,14 @@ func (v *verifier) checkHead() {
 		}
 		envs = append(envs, e.Envelope)
 	}
-	// Entries past the count were never committed and are left out; the rest
-	// are held to the statement's count and head.
-	outcome, err := CheckCopy(v.b.Conversation, envs, h.Count, h.Head)
+	v.r.UncommittedEntries = len(envs) - len(v.kept())
+	res, err := CheckCopy(v.b.Conversation, envs, h.Count, h.Head, nil)
 	switch {
-	case outcome == CopyMatches:
-	case outcome == "":
+	case res.Outcome == CopyMatches:
+		v.cannotRuleOut(fmt.Sprintf("Whether the conversation went on after %s, when the Identity Agent signed its head: the end is shown as of that time, and an entry committed later is not in it.", h.IATime))
+	case res.Outcome == "":
 		v.fault("head statement", "the entries cannot be read against it: %v", err)
 	default:
-		v.fault("head statement", "the entries do not match the head the Identity Agent signed (%s): %v", outcome, err)
+		v.fault("head statement", "the entries do not match the head the Identity Agent signed (%s): %v", res.Outcome, err)
 	}
 }

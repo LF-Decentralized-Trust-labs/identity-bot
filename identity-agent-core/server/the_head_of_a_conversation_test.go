@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,13 +19,13 @@ func aHeadAddon() Addon {
 	return Addon{ID: "heads", Name: "heads", ConversationHead: func(_ *CoreServer, id string) (ConversationHead, bool, error) {
 		switch id {
 		case "kept":
-			return ConversationHead{Count: 3, Head: "Ehead3", App: appAID}, true, nil
+			return ConversationHead{Count: 3, Head: "Ehead3", App: theAppsAsset}, true, nil
 		case "another-apps":
 			return ConversationHead{Count: 1, Head: "Ehead1", App: "Eother"}, true, nil
 		case "no-app":
 			return ConversationHead{Count: 2, Head: "Ehead2"}, true, nil
 		case "empty":
-			return ConversationHead{App: appAID}, true, nil
+			return ConversationHead{App: theAppsAsset}, true, nil
 		case "broken":
 			return ConversationHead{Count: 2, Head: ""}, true, nil
 		}
@@ -153,5 +154,50 @@ func TestTheHeadStatementIsTheRoutesPairSigned(t *testing.T) {
 	otherDID, _ := other.DID()
 	if _, err := conversationbundle.OpenHead(otherDID, env); err == nil {
 		t.Fatal("a head statement opened with a key that did not sign it")
+	}
+}
+
+// An AI agent holding capability scopes, and any caller that is not the owner,
+// one of its controllers or an app, is not admitted: the route is owner-class.
+func TestAScopedCallerIsNotAdmittedToTheHead(t *testing.T) {
+	if got := classify(http.MethodGet, "/api/conversations/{id}/head"); got != accessOwner {
+		t.Fatalf("the head route is classed %v, so a caller holding scopes may reach it", got)
+	}
+	if _, ok := scopedRoutes["GET /api/conversations/{id}/head"]; ok {
+		t.Fatal("the head route is a scoped route")
+	}
+}
+
+// The app that keeps a conversation is the one whose asset id the add-on holds:
+// an add-on naming the app's identifier instead is another app's, so every app
+// is refused rather than served by accident.
+func TestTheAppIsHeldToTheAssetIdTheAddOnHolds(t *testing.T) {
+	onlyAddons(t, Addon{ID: "heads", Name: "heads", ConversationHead: func(_ *CoreServer, id string) (ConversationHead, bool, error) {
+		return ConversationHead{Count: 1, Head: "Ehead1", App: appAID}, true, nil
+	}})
+	w := newAnAppWorld(t)
+	_ = w.cw.s.DataStore.DeleteCredential("Egrant")
+	w.enrolApp(t, w.cw.s, []string{CapabilityConversationHeadRead})
+	if rec := theAppAsks(t, w, "kept"); rec.Code != http.StatusNotFound {
+		t.Fatalf("an add-on that names the app by its identifier served it: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A failing add-on is told to an app as the same 404 as a conversation that is
+// not its own, and to the owner as a failure.
+func TestAFailingAddOnIsTheSame404ToAnApp(t *testing.T) {
+	onlyAddons(t, Addon{ID: "heads", Name: "heads", ConversationHead: func(_ *CoreServer, id string) (ConversationHead, bool, error) {
+		return ConversationHead{}, false, errors.New("the store is down")
+	}})
+	w := newAnAppWorld(t)
+	_ = w.cw.s.DataStore.DeleteCredential("Egrant")
+	w.enrolApp(t, w.cw.s, []string{CapabilityConversationHeadRead})
+	app := theAppAsks(t, w, "kept")
+	unknown := theAppAsks(t, w, "kept")
+	if app.Code != http.StatusNotFound || strings.Contains(app.Body.String(), "store") || app.Body.String() != unknown.Body.String() {
+		t.Fatalf("an app was answered %d %s for a failing add-on", app.Code, app.Body)
+	}
+	if rec := theOwnerAsks(w, "kept"); rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "store") {
+		t.Fatalf("the owner was answered %d %s for a failing add-on", rec.Code, rec.Body)
 	}
 }

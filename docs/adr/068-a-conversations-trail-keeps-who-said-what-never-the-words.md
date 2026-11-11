@@ -89,7 +89,7 @@ Agent countersigns an entry at `seq` count+1 and hands it, with the words it
 holds in passing, to the app. The app keeps it and confirms the fingerprint it
 stored. Only then does the Identity Agent move the head and the count, in one
 step, and only if the head is still the one the entry was countersigned for;
-otherwise it tells the app to discard that `seq`. The Identity Agent's own copy
+otherwise it tells the app to discard that entry, named by its hash, not by its `seq`: two writes racing for one place are both kept by the app until the loser is discarded, so for a while the app may hold more than one entry at a place. The Identity Agent's own copy
 of an entry is **transitory**: held until the app confirms, then deleted. An
 entry the app never confirmed is never committed, so a person is told a message
 was sent only once the app holds it, and a message the Identity Agent did not
@@ -113,17 +113,27 @@ entry without breaking a signature or the chain.
 **How a copy is checked.** A reader takes the entries from the app and the head
 and count from the Identity Agent (`conversationbundle.CheckCopy`, with `Verify`
 for the signatures and each entry). Entries beyond the count are uncommitted:
-left out, and never shown as part of the conversation. The copy must hold exactly
-the count, entry i at place i, each linked to the one before it, the last hashing
-to the head. It then shows one of four things: *removed from the end* (fewer than
-the count), *removed or reordered inside* (a gap or a broken link), *substituted*
-(the right count, another last entry) or *matches*. Only the head catches the
-first and the third; the rest needs no Identity Agent.
+left out, and never shown as part of the conversation. The copy may hold more
+than one entry at a place (a write that lost the race, not yet discarded), in any
+order. The committed entry at each place is chosen from the head back: the one
+whose hash is the head, then the one whose hash the entry after it names as its
+`prev_hash`; never by its position in the copy or by its `seq` alone. The others
+are *ignored* and reported, and never make the copy fail. Every place must then
+hold a committed entry, each linked to the one before it, the last hashing to
+the head. It then shows one of four things: *removed from the end* (fewer than
+the count, nothing missing inside), *removed or reordered inside* (a gap or a
+broken link: an entry inside the chain replaced by another shows here too,
+because the entry after it no longer follows from it), *substituted* (every
+place held and chained, but none ends at the head, which is how a replaced last
+entry shows) or *matches*. Only the head catches the first and the third, as of
+the head's time; the rest needs no Identity Agent. This one check is the open
+format's: an add-on that keeps conversations calls it rather than carrying its
+own copy.
 
 **Where the head comes from.**
 
 - *Live:* `GET /api/conversations/{id}/head`, answering `{conversation, count,
-  head}`. The owner may ask it, and so may the app that keeps the conversation,
+  head}`. The owner and the owner's controllers may ask it, and so may the app that keeps the conversation,
   signing as the app (ADR-072) with an App Grant holding
   `conversation.head.read`. An app that does not keep the conversation, and any
   other caller, is refused, and the answer to the two refusals is the same words,
@@ -134,7 +144,7 @@ first and the third; the rest needs no Identity Agent.
   countersigns a person's entries. `Verify` checks the signature, that it names
   this conversation, that it is not dated after the export, and holds the entries
   to it as `CheckCopy` does. A bundle without one says it cannot rule out an
-  entry cut off the end after the last anchor. A head statement shows the end as
+  entry cut off the end after the last anchor, when a person spoke in it through an app that may keep it. A head statement shows the end as
   it was at its time only: an entry committed after it is not shown missing.
   Recording the head in the key history (below) is still the way to a check that
   needs no statement. That is a later change.

@@ -55,6 +55,9 @@ func aPersonsKey(b byte) ed25519Key {
 // appAID is the identifier of the chat app, which holds its App Body and App Grant.
 const appAID = "Eapp"
 
+// theAppsAsset is the chat app's asset id, the id the add-ons keep it by.
+const theAppsAsset = "chat"
+
 type anAppWorld struct {
 	appKey   ed25519Key
 	lastBody string

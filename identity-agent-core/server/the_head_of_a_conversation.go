@@ -32,8 +32,12 @@ type ConversationHead struct {
 	Count int
 	// Head is the hash of the newest committed entry, empty when Count is 0.
 	Head string
-	// App is the identifier of the app that keeps the conversation, empty for a
-	// conversation no app keeps (its whole trail is in the Identity Agent).
+	// App is the asset id of the app that keeps the conversation (what the
+	// add-on's conversation store holds, and what AppCaller.Asset is), empty for
+	// a conversation no app keeps (its whole trail is in the Identity Agent). It
+	// is the asset id and not the identifier (AppCaller.AID) because the add-on
+	// holds the first; the core compares it with AppCaller.Asset, so the add-on
+	// has nothing to resolve.
 	App string
 }
 
@@ -75,8 +79,15 @@ func (s *CoreServer) theHeadOf(id string) (ConversationHead, error) {
 }
 
 // conversationHeadRoutes mounts the route. Owner-class: the owner's own keys
-// and front end, and an app signing as the app (coreAppRoutes), which the
-// handler holds to the conversation that app keeps.
+// and front end, the owner's controllers, and an app signing as the app
+// (coreAppRoutes), which the handler holds to the conversation that app keeps.
+// An AI agent holding capability scopes is not admitted: the route is in no
+// scoped list.
+//
+// The path is /api/conversations/{id}/head and not under /api/mcp/conversations
+// as the add-on's routes are: the core serves it for every add-on that keeps
+// conversations, and /api/mcp is the AI-agent add-on's own namespace, which the
+// head of a conversation an app keeps does not belong to.
 func (s *CoreServer) conversationHeadRoutes(r chi.Router) {
 	r.Get("/conversations/{id}/head", s.handleConversationHead)
 }
@@ -93,7 +104,7 @@ func (s *CoreServer) handleConversationHead(w http.ResponseWriter, r *http.Reque
 	h, err := s.theHeadOf(id)
 	if err == nil {
 		// An app is told only of a conversation it keeps. The owner is told of any.
-		if app, isApp := TheAppThatAsked(r); isApp && (h.App == "" || h.App != app.AID) {
+		if app, isApp := TheAppThatAsked(r); isApp && (h.App == "" || h.App != app.Asset) {
 			err = errConversationUnknown
 		}
 	}

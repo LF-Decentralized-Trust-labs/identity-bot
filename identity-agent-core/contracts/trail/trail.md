@@ -65,29 +65,41 @@ checks are `conversationbundle.Verify`'s, over the same entries):
 1. Entries with `seq` above the count are **uncommitted**: left out by the copy
    check (`CheckCopy`), and never to be shown as part of the conversation. The app does not drop one by itself at a
    read, since the Identity Agent may be about to commit it; it goes when the
-   Identity Agent tells the app to discard it, or when a later entry takes its
-   place.
-2. The copy must hold exactly `count` entries, entry i at place i, each in this
-   conversation.
-3. Each entry's `prev_hash` must be the hash of the entry before it (`""` for the
-   first).
-4. The last entry's hash must be the head. With a count of 0 nothing is
-   committed, and the head must be `""`.
+   Identity Agent tells the app to discard it (by its hash), or when a later
+   entry takes its place.
+2. The copy may hold **more than one entry at a place** (two writes raced for it
+   and the loser is not yet discarded), in **any order**. Every place from 1 to
+   `count` must hold at least one entry, each in this conversation, and each
+   place's entry must say it is that place's. Two entries with one hash are one.
+3. The committed entry at each place is **chosen from the head back, by hash,
+   never by `seq`**: the entry whose hash is the head, then at each place the
+   entry whose hash the entry after it names as its `prev_hash`. The first
+   entry's `prev_hash` is `""`. The entries held at a place that are not the
+   committed one are **ignored**: they never fail the check, and the result lists
+   them so nobody reads a copy as holding one entry per place.
+4. A chain of entries, each following from one held at the place before it, must
+   end at the head. With a count of 0 nothing is committed, and the head must be
+   `""`.
 
 | Outcome | How it shows |
 |---|---|
-| removed from the end | fewer than `count` entries |
-| removed or reordered inside | a `seq` gap or a `prev_hash` mismatch |
-| substituted | the right count, another last hash |
+| removed from the end | a place at the end with no entry, none missing inside |
+| removed or reordered inside | a place with no entry before a later one, or an entry that does not follow from one held before it. An entry inside the chain replaced by another with the same `seq` shows as this, not as *substituted*: the entry after it no longer follows from it |
+| substituted | every place held and chained, but no chain ends at the head (a replaced last entry) |
 | matches | all of the above hold |
+| ignored | not an outcome: the entries held at a place that are not the committed one, reported beside any outcome that reaches the choice |
 
-Steps 2 and 3 need no Identity Agent; step 4 needs the head.
+Steps 2 and 3 need no Identity Agent; step 4 needs the head, and shows the end as
+of the head's time. There is one implementation of this check,
+`conversationbundle.CheckCopy`; an add-on that keeps conversations calls it, with
+a check of each committed entry's countersignature if it can make one, rather
+than carrying its own.
 
 ### Where the head comes from
 
 - **Live:** `GET /api/conversations/{id}/head`, answering
   `{"conversation", "count", "head"}` (`head` is `""` when `count` is 0). The
-  owner may ask it, and so may the app that keeps the conversation, signing as
+  owner and the owner's controllers may ask it, and so may the app that keeps the conversation, signing as
   the app (`../app-request/app-request.md`) with an App Grant that holds
   `conversation.head.read`. Any other caller, an app that does not keep the
   conversation, and a conversation that does not exist are all refused with the
@@ -101,9 +113,10 @@ Steps 2 and 3 need no Identity Agent; step 4 needs the head.
   entries to it as above. It shows the end as it stood at `ia_time`; an entry
   committed later is not shown missing, and an older genuine statement paired
   with entries cut back to its count passes, so a statement shows the end only as
-  of its time. A bundle with no head statement says it
-  cannot rule out an entry cut off the end after the last anchor in the key
-  history. Recording the head in the key history would let a bundle show it
+  of its time. A bundle with no head statement says, when a person spoke in it through an
+  app that may keep it, that it cannot rule out an entry cut off the end after
+  the last anchor in the key history. Entries past the statement's count are
+  left out of the report's messages and only counted. Recording the head in the key history would let a bundle show it
   without a statement; that is not part of the format yet (ADR-068).
 
 ### The order of a write
@@ -115,7 +128,9 @@ Steps 2 and 3 need no Identity Agent; step 4 needs the head.
 - The app keeps the entry and the words and confirms the fingerprint it stored.
 - Only then does the Identity Agent move the head and the count, in one step,
   and only if the head is still the one the entry was countersigned for;
-  otherwise it tells the app to discard that `seq`.
+  otherwise it tells the app to discard that entry, named by its hash. Two
+  writes racing for one place are both kept by the app until the loser is
+  discarded, so a copy may hold more than one entry at a place for a while.
 - The Identity Agent's own copy of an entry is transitory, held until the app
   confirms and then deleted. An entry the app never confirmed is never committed.
 - A person's message the Identity Agent did not accept leaves nothing in the

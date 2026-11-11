@@ -159,7 +159,7 @@ func (v *verifier) checkOutcome(where string, rec agentmessage.Record, m *Messag
 // not kept are a fault, and a kept entry's words are recomputed.
 func (v *verifier) finishPeople() {
 	pending, unwords := 0, 0
-	for i := range v.b.Entries {
+	for i := range v.kept() {
 		pe := v.people[fmt.Sprintf("e%d", i+1)]
 		if pe == nil {
 			continue

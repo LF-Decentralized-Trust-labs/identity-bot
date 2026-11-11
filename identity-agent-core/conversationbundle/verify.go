@@ -62,6 +62,10 @@ type Report struct {
 	// fixes; UnanchoredEntries are the entries after it.
 	AnchoredThrough   int   `json:"anchored_through"`
 	UnanchoredEntries []int `json:"unanchored_entries,omitempty"`
+	// UncommittedEntries is how many entries the bundle carries past the count
+	// its head statement signs. They are not part of the conversation, so they
+	// are not in Messages.
+	UncommittedEntries int `json:"uncommitted_entries,omitempty"`
 	// LogRows is how many rows of the governance log the bundle carries;
 	// UnanchoredRows are those no anchor fixes yet.
 	LogRows        int     `json:"log_rows"`
@@ -167,7 +171,10 @@ func (c *credential) liveBetween(asked, taken time.Time) string {
 }
 
 type verifier struct {
-	b       *Bundle
+	b *Bundle
+	// head is the head statement, when the bundle carries one that was read: its
+	// count is how many entries make the conversation.
+	head    *HeadStatement
 	r       *Report
 	kels    map[string]*keyLog
 	regs    map[string]bool
@@ -248,6 +255,7 @@ func Verify(b *Bundle) Report {
 	v.checkRegistries()
 	v.checkCredentials()
 	v.checkCountersigners()
+	v.openHead()
 	v.checkEntries()
 	rows := v.checkLog()
 	v.checkAnchors(rows)
@@ -672,13 +680,13 @@ func (v *verifier) checkCountersigners() {
 // ── Entries ────────────────────────────────────────────────────────────────
 
 func (v *verifier) checkEntries() {
-	if len(v.b.Entries) == 0 {
+	if len(v.kept()) == 0 {
 		v.fault("conversation", "the bundle carries no entries")
 		return
 	}
 	prev := ""
 	opener := ""
-	for i, e := range v.b.Entries {
+	for i, e := range v.kept() {
 		seq := i + 1
 		where := fmt.Sprintf("entry %d", seq)
 		m := Message{Seq: seq}
@@ -1282,7 +1290,7 @@ func (v *verifier) checkAnchors(rowHashes map[int64]string) {
 			if c.ID != v.b.Conversation {
 				continue
 			}
-			if h, ok := v.hashes[c.Seq]; !ok || c.Seq > len(v.b.Entries) || h != c.Head {
+			if h, ok := v.hashes[c.Seq]; !ok || c.Seq > len(v.kept()) || h != c.Head {
 				v.fault(aw, "it fixes entry %d of this conversation, which the bundle does not carry unchanged", c.Seq)
 				continue
 			}
@@ -1366,6 +1374,9 @@ func (r Report) Text() string {
 	fmt.Fprintf(&b, "\nAnchored through entry %d of %d.", r.AnchoredThrough, len(r.Messages))
 	if len(r.UnanchoredEntries) > 0 {
 		fmt.Fprintf(&b, " Entries after the last anchor: %s.", joinInts(r.UnanchoredEntries))
+	}
+	if r.UncommittedEntries > 0 {
+		fmt.Fprintf(&b, "\n%d entry(ies) past the head's count are not committed and are not shown as part of the conversation.", r.UncommittedEntries)
 	}
 	fmt.Fprintf(&b, "\nGovernance log: %d row(s) carried, %d after the last anchor.\n", r.LogRows, len(r.UnanchoredRows))
 	b.WriteString("\nThis result trusts:\n")

@@ -26,7 +26,16 @@ func (c *conversation) checkHead(b *Bundle) *verifier {
 	if b.ExportedAt == "" {
 		b.ExportedAt = c.now.Add(time.Minute).UTC().Format(time.RFC3339Nano)
 	}
-	v := c.check(b)
+	did, err := c.keys.DID()
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	v := newVerifier()
+	v.b, v.hashes, v.signedOnce, v.answered, v.notes = b, map[int]string{}, map[string]int{}, map[string]bool{}, map[string]bool{}
+	v.dids = map[string]*didcomm.DID{rootAID: did}
+	v.r = &Report{}
+	v.openHead()
+	v.checkEntries()
 	v.checkHead()
 	return v
 }
@@ -148,4 +157,70 @@ func mustDID(t *testing.T, c *conversation) *didcomm.DID {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// The entries past the head's count are not part of the conversation the report
+// lists, and are only counted.
+func TestEntriesPastTheHeadsCountAreNotListedAsMessages(t *testing.T) {
+	c := newConversation(t)
+	writeMixed(c)
+	n := len(c.chain)
+	head := c.chain[n-1].Hash
+	c.say("EALICE", "after the statement", nil)
+
+	b := c.bundle(false)
+	b.Head = c.signHead(t, "c1", n, head, c.now)
+	v := c.checkHead(b)
+	if len(v.r.Faults) != 0 || len(v.r.Messages) != n || v.r.UncommittedEntries != len(b.Entries)-n {
+		t.Fatalf("faults %q, %d messages (want %d), %d uncommitted", openingFaults(v), len(v.r.Messages), n, v.r.UncommittedEntries)
+	}
+	if !strings.Contains(Report{UncommittedEntries: 2}.Text(), "not committed") {
+		t.Fatal("the report does not say entries were left out")
+	}
+}
+
+// Verify itself reads the head statement: one it cannot check is a fault in its
+// report, and a bundle without one says it cannot rule out an end cut off.
+func TestVerifyRunsTheHeadCheck(t *testing.T) {
+	_, b := theVector(t)
+	with := *b
+	other, err := didcomm.GenerateKeySet(b.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	with.Head, err = SignHead(b.Root, func(m *didcomm.JWM) (*didcomm.Envelope, error) { return didcomm.PackSigned(other, m) },
+		HeadStatement{Conversation: b.Conversation, Count: len(b.Entries), Head: "Ex", IATime: time.Now().UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Verify(&with)
+	found := false
+	for _, f := range r.Faults {
+		found = found || f.Where == "head statement"
+	}
+	if r.Verified || !found {
+		t.Fatalf("a head statement signed by another key did not fail Verify: %+v", r.Faults)
+	}
+}
+
+func TestOpenHeadRefusesAnotherMessageTypeAndAnotherId(t *testing.T) {
+	c := newConversation(t)
+	did := mustDID(t, c)
+	pack := func(typ, id string) *didcomm.Envelope {
+		body := []byte(`{"conversation":"c1","count":1,"head":"Ex","ia_time":"` + c.now.UTC().Format(time.RFC3339Nano) + `"}`)
+		env, err := didcomm.PackSigned(c.keys, &didcomm.JWM{ID: id, Type: typ, From: "did:keri:" + rootAID, To: []string{"did:keri:" + rootAID}, CreatedTime: c.now.UTC().Format(time.RFC3339Nano), Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return env
+	}
+	if _, err := OpenHead(did, pack(TypeTrailHead, "trail-head:c1:1")); err != nil {
+		t.Fatalf("a good statement was refused: %v", err)
+	}
+	if _, err := OpenHead(did, pack("something-else", "trail-head:c1:1")); err == nil {
+		t.Error("a message of another type was opened as a head statement")
+	}
+	if _, err := OpenHead(did, pack(TypeTrailHead, "trail-head:c1:2")); err == nil {
+		t.Error("a head statement with an id that is not the one its body gives was accepted")
+	}
 }
