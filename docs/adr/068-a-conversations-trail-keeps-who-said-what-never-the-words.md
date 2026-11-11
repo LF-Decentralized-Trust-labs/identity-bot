@@ -210,6 +210,8 @@ read from the chain itself.
 
 ### Four states
 
+*For a conversation an app keeps, a person's entry no longer passes through *pending* or *not kept*: see "Where the trail is kept", above.*
+
 | State | Meaning |
 |---|---|
 | **pending** | allowed, forwarded to the app, not yet confirmed |

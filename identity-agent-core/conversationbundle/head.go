@@ -105,10 +105,13 @@ func (v *verifier) checkHead() {
 		v.fault("head statement", "it is about conversation %s, not %s", h.Conversation, v.b.Conversation)
 		return
 	}
-	if at, aerr := time.Parse(time.RFC3339Nano, h.IATime); aerr == nil {
-		if exported, eerr := time.Parse(time.RFC3339Nano, v.b.ExportedAt); eerr == nil && at.After(exported.Add(authorisation.Skew)) {
-			v.fault("head statement", "it is dated after the export")
-		}
+	at, aerr := time.Parse(time.RFC3339Nano, h.IATime)
+	exported, eerr := time.Parse(time.RFC3339Nano, v.b.ExportedAt)
+	switch {
+	case aerr != nil || eerr != nil:
+		v.fault("head statement", "the export's time or the statement's cannot be read, so it cannot be shown the statement is not dated after the export")
+	case at.After(exported.Add(authorisation.Skew)):
+		v.fault("head statement", "it is dated after the export")
 	}
 	envs := make([]*didcomm.Envelope, 0, len(v.b.Entries))
 	for i, e := range v.b.Entries {

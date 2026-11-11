@@ -23,6 +23,9 @@ func (c *conversation) signHead(t *testing.T, conversation string, count int, he
 }
 
 func (c *conversation) checkHead(b *Bundle) *verifier {
+	if b.ExportedAt == "" {
+		b.ExportedAt = c.now.Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	}
 	v := c.check(b)
 	v.checkHead()
 	return v

@@ -62,8 +62,8 @@ Given the copy E1..Ek an app hands over, and the `(count, head)` the Identity
 Agent reports (`conversationbundle.CheckCopy`; the signatures and each entry's
 checks are `conversationbundle.Verify`'s, over the same entries):
 
-1. Entries with `seq` above the count are **uncommitted**: left out, and never
-   shown as part of the conversation. The app does not drop one by itself at a
+1. Entries with `seq` above the count are **uncommitted**: left out by the copy
+   check (`CheckCopy`), and never to be shown as part of the conversation. The app does not drop one by itself at a
    read, since the Identity Agent may be about to commit it; it goes when the
    Identity Agent tells the app to discard it, or when a later entry takes its
    place.
@@ -99,7 +99,9 @@ Steps 2 and 3 need no Identity Agent; step 4 needs the head.
   `trail-head:<conversation>:<count>`. The checker verifies the signature, that
   it names this conversation, that it is not dated after the export, and holds the
   entries to it as above. It shows the end as it stood at `ia_time`; an entry
-  committed later is not shown missing. A bundle with no head statement says it
+  committed later is not shown missing, and an older genuine statement paired
+  with entries cut back to its count passes, so a statement shows the end only as
+  of its time. A bundle with no head statement says it
   cannot rule out an entry cut off the end after the last anchor in the key
   history. Recording the head in the key history would let a bundle show it
   without a statement; that is not part of the format yet (ADR-068).

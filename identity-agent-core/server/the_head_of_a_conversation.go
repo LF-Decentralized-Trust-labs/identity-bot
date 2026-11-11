@@ -97,6 +97,11 @@ func (s *CoreServer) handleConversationHead(w http.ResponseWriter, r *http.Reque
 			err = errConversationUnknown
 		}
 	}
+	// An app is told the same for a failure as for a conversation that is not
+	// its own, so a failing add-on is not a way to learn which ids exist.
+	if _, isApp := TheAppThatAsked(r); isApp && err != nil {
+		err = errConversationUnknown
+	}
 	if errors.Is(err, errConversationUnknown) {
 		jsonreply.Write(w, http.StatusNotFound, map[string]string{"error": errConversationUnknown.Error()})
 		return
