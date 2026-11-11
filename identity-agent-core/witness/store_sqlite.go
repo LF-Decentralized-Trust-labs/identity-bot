@@ -380,6 +380,7 @@ func (s *SQLiteStore) SaveFinalization(f FinalizationState) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(event_said) DO UPDATE SET
 			state = excluded.state,
+			threshold = excluded.threshold,
 			receipt_count = excluded.receipt_count,
 			updated_at = excluded.updated_at`,
 		f.EventSAID, f.SignerAID, f.SequenceNum, f.State, f.ReceiptCount,

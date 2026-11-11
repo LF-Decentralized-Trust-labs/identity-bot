@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -43,6 +44,18 @@ import (
 type corroboration struct {
 	// Asked is how many designated witnesses were reachable and answered.
 	Asked int
+	// Held is how many of those hold the presented events: at least the
+	// sequence claimed, with the same digests. Only these corroborate.
+	Held int
+	// Empty is how many answered, but with no events for this identifier, as a
+	// witness does for one it has never seen. Reachable is not confirming.
+	Empty int
+	// Behind is how many answered with some of the history but less than was
+	// claimed.
+	Behind int
+	// Failed is how many designated witnesses could not be asked: no address
+	// for the key, or no answer.
+	Failed int
 	// Designated is how many the log names at all.
 	Designated int
 	// Contradicted means a witness holds a longer history than the one
@@ -53,7 +66,10 @@ type corroboration struct {
 }
 
 // Corroborated is the question a caller actually wants answered.
-func (c corroboration) Corroborated() bool { return c.Asked > 0 && !c.Contradicted }
+//
+// A witness that is reachable but holds nothing confirms nothing, so it is the
+// witnesses that hold the events that count, not the ones that answered.
+func (c corroboration) Corroborated() bool { return c.Held > 0 && !c.Contradicted }
 
 // witnessKeysIn reads the witness keys an inception event designates.
 //
@@ -110,10 +126,12 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 			}
 		}
 		if base == "" {
+			out.Failed++
 			continue
 		}
 		replica, err := fetchWitnessReplica(client, base, ownerAID, presented)
 		if err != nil {
+			out.Failed++
 			continue
 		}
 		out.Asked++
@@ -129,8 +147,67 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 				len(replica), ownerAID, eventCountIn(presented))
 			return out
 		}
+		// A different event where the claim shows one is a fork, not a
+		// confirmation.
+		if at, differs := firstDigestMismatch(presented, replica); differs {
+			out.Contradicted = true
+			out.Why = fmt.Sprintf(
+				"a witness holds a different event %d for %s than the claim presented", at, ownerAID)
+			return out
+		}
+		switch {
+		case len(replica) == 0:
+			out.Empty++
+		case len(replica) < eventCountIn(presented):
+			out.Behind++
+		case !holdsDigests(presented, replica):
+			out.Behind++
+		default:
+			out.Held++
+		}
 	}
 	return out
+}
+
+// claimedEventDigest is the said of an event as a log carries it: the event itself, its
+// event_json text, or its raw bytes. Empty when it cannot be read.
+func claimedEventDigest(entry map[string]interface{}) string {
+	if d, _ := entry["d"].(string); d != "" {
+		return d
+	}
+	var parsed map[string]interface{}
+	if b64, _ := entry["raw_bytes_b64"].(string); b64 != "" {
+		if raw, err := base64.StdEncoding.DecodeString(b64); err == nil {
+			_ = json.Unmarshal(raw, &parsed)
+		}
+	} else if body, _ := entry["event_json"].(string); body != "" {
+		_ = json.Unmarshal([]byte(body), &parsed)
+	}
+	d, _ := parsed["d"].(string)
+	return d
+}
+
+// firstDigestMismatch finds an event where both sides give a digest and they
+// differ.
+func firstDigestMismatch(presented, replica []map[string]interface{}) (int, bool) {
+	for i := 0; i < len(presented) && i < len(replica); i++ {
+		a, b := claimedEventDigest(presented[i]), claimedEventDigest(replica[i])
+		if a != "" && b != "" && a != b {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// holdsDigests reports whether the witness gives, for each event the claim
+// shows with a digest, the same digest at the same place.
+func holdsDigests(presented, replica []map[string]interface{}) bool {
+	for i, p := range presented {
+		if want := claimedEventDigest(p); want != "" && claimedEventDigest(replica[i]) != want {
+			return false
+		}
+	}
+	return true
 }
 
 // fetchWitnessReplica reads one witness's copy of an identity's key log.

@@ -518,6 +518,10 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 	return out, nil
 }
 
+// Threshold is the receipt count this agent's configuration asks of a set of
+// witnesses as large as the cap allows. It describes the configuration, for
+// the status report; it is not what any one event is finalized against, which
+// is the toad the event's own key log carries (see thresholdFor).
 func (s *Service) Threshold() int {
 	v, _ := s.Store.GetConfig("threshold")
 	n, _ := strconvAtoi(v, DefaultThreshold)
@@ -526,6 +530,36 @@ func (s *Service) Threshold() int {
 		return floor
 	}
 	return n
+}
+
+// configuredRaise is a threshold the owner set explicitly above the shipped
+// default, or 0 when none was set. The default itself is a majority of the cap,
+// which no smaller witness set can reach, so it is never a raise.
+func (s *Service) configuredRaise() int {
+	v, _ := s.Store.GetConfig("threshold")
+	n, ok := strconvAtoi(v, DefaultThreshold)
+	if ok != nil || n == DefaultThreshold {
+		return 0
+	}
+	return n
+}
+
+// thresholdFor is how many receipts an event is finalized against: the toad its
+// own key log recorded, over the witnesses that log designates. A configured
+// threshold can only raise it, and only up to the number of witnesses
+// designated, since a higher one could never be met.
+func (s *Service) thresholdFor(row drivers.EventWitnessing) int {
+	at := row.Threshold
+	if raise := s.configuredRaise(); raise > at {
+		at = raise
+		if n := len(row.Designated); at > n {
+			at = n
+		}
+		if at < row.Threshold {
+			at = row.Threshold
+		}
+	}
+	return at
 }
 
 func (s *Service) MaxWitnesses() int {
@@ -940,9 +974,12 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	// for, not a floor that a smaller witness set can never reach. A log that
 	// was read and designates nobody has its own threshold, 0; only a log that
 	// could not be read falls back to the floor.
-	threshold := s.Threshold()
+	// While the log cannot be read nothing is counted and no toad is known, so
+	// the threshold is the least that is ever met (one receipt); settle replaces
+	// it with the log's own once the log can be read.
+	threshold := 1
 	if lerr == nil {
-		threshold = row.Threshold
+		threshold = s.thresholdFor(row)
 	}
 	s.begin(said, signerAID, seq, threshold, rawEvent)
 
@@ -1016,7 +1053,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			seq, _ := eventSeq(ev)
 			at := threshold
 			if row, ok := atPlace[said]; ok && row.Known {
-				at = row.Threshold
+				at = s.thresholdFor(row)
 			}
 			s.startFinalization(said, signerAID, seq, at, "", raw)
 		}
@@ -1588,6 +1625,8 @@ func (s *Service) settle(f *FinalizationState, rawEvent []byte) {
 	f.ReceiptCount = 0
 	if row, err := s.witnessing(f.SignerAID, f.EventSAID, rawEvent); err == nil {
 		f.ReceiptCount = row.Verified
+		// Always the log's own toad, never one stored when the event was sent.
+		f.Threshold = s.thresholdFor(row)
 	}
 	f.UpdatedAt = NowRFC3339()
 	switch {
@@ -1654,9 +1693,12 @@ func rawEventOf(body []byte) []byte {
 	return raw
 }
 
+// finalizeWait is FinalizeWaitDuration; a variable so a test need not wait it out.
+var finalizeWait = FinalizeWaitDuration
+
 func (s *Service) finalizeLoop(eventSAID string, threshold int) {
 	select {
-	case <-time.After(FinalizeWaitDuration):
+	case <-time.After(finalizeWait):
 	case <-s.stopping():
 		// Stopping: the timeout is not recorded, so the finalization stays
 		// pending in the store. It is NOT re-read on the next start: nothing
@@ -1670,6 +1712,9 @@ func (s *Service) finalizeLoop(eventSAID string, threshold int) {
 	if f == nil || f.State == FinalizeFinalized {
 		return
 	}
+	// The threshold the finalization holds now, which settle keeps at the log's
+	// own toad, not the one passed when the wait began.
+	threshold = f.Threshold
 	if f.ReceiptCount < threshold {
 		f.State = FinalizeTimeout
 		f.UpdatedAt = NowRFC3339()

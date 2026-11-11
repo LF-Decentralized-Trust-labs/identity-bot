@@ -141,9 +141,10 @@ func TestAReceiptKeptUnreadableIsNotCountedOnceTheLogHasCutItsWitness(t *testing
 	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 {
 		t.Fatalf("a recount counted a cut witness: %+v", f)
 	}
-	// A broadcast again must not either.
+	// A broadcast again must not either. The log now asks no receipt (its own
+	// threshold is 0), so the event is finalized on that, not on a count.
 	s.begin(said, theAID, 1, 1, rot)
-	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 || f.State == FinalizeFinalized {
+	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 || f.Threshold != 0 {
 		t.Fatalf("a new broadcast counted a cut witness: %+v", f)
 	}
 }
