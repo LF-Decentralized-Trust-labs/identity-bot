@@ -7,8 +7,10 @@ import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_event_this_device_expects.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:test/test.dart';
 
+import 'support/a_witness.dart';
 import 'support/kel_events.dart';
 import 'support/the_core.dart';
 
@@ -258,9 +260,17 @@ void main() {
   group('an event with several owners', () {
     // Sorted as ASCII: alice, bob, carol, so bob is owner 1 (k[1], n[2..3]).
     String id(String w) => 'E${w.padRight(43, w[0])}';
-    // A key's second character carries its code's padding bits, which must be
-    // zero for keri-go to read it as a key: an A.
-    String keyOf(String w) => 'DA${w.padRight(42, w[0])}';
+    // A real key for each name: a made-up one is not on the curve or of small
+    // order, which keri-go does not read as a key.
+    String keyOf(String w) => qb64(
+        'D',
+        Uint8List.fromList(ed
+            .public(ed.newKeyFromSeed(Uint8List.fromList(utf8
+                .encode(w)
+                .followedBy(List.filled(32, 0))
+                .take(32)
+                .toList())))
+            .bytes));
     final alice = id('alice'), bob = id('bob'), carol = id('carol');
     OwnerKeys keysOf(String w) =>
         OwnerKeys(keyOf(w), id('${w}next'), id('${w}pq'));

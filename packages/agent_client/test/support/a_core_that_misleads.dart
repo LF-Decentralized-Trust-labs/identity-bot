@@ -163,8 +163,8 @@ class ACoreThatMisleads extends http.BaseClient {
 /// The event [body] asks the core at [base] to prepare, signed by the key
 /// [seed] derives at generation [gen]: what another device holding the
 /// phrase would make.
-Future<SignedCopy> preparedAndSigned(
-    http.Client client, String base, KeyMath km, Uint8List seed, int gen, Map<String, Object?> body) async {
+Future<SignedCopy> preparedAndSigned(http.Client client, String base,
+    KeyMath km, Uint8List seed, int gen, Map<String, Object?> body) async {
   final res = await client.post(Uri.parse('$base/api/events/prepare'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(body));
@@ -291,8 +291,26 @@ Future<ACore> anotherCore(String bin, KeyMath km,
     } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
-  return ACore(p, base, ACoreThatMisleads(http.Client()), km, logs, data);
+  final client = ACoreThatMisleads(http.Client());
+  if (witnesses.length > 1) {
+    // A core names ONE witness endpoint from its registry for a new identity
+    // (ADR-031); several come only from the owner's own witness contacts,
+    // which a test does not set up. What the app does with a proposal of
+    // several is the app's, so the proposal is made here.
+    client.alterTheAnswerTo['/api/events/witnesses-for-a-founding'] =
+        (_) => proposalOf(witnesses);
+  }
+  return ACore(p, base, client, km, logs, data);
 }
+
+/// What a core proposes for a founding when it names [witnesses]: each one's
+/// key and address, and a majority of them as the threshold.
+Map<String, Object?> proposalOf(List<AWitness> witnesses) => {
+      'witnesses': [
+        for (final w in witnesses) {'aid': w.aid, 'address': w.base.toString()}
+      ],
+      'toad': witnesses.length ~/ 2 + 1,
+    };
 
 /// Leaves the events of [aid] at [sns] in the core's data in [data] as an
 /// earlier version left them: without a signature, and marked, as the upgrade

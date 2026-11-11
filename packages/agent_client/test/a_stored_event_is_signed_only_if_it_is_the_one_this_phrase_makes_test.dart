@@ -19,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
 import 'support/a_core_that_misleads.dart';
+import 'support/a_witness.dart';
 import 'support/the_core.dart';
 
 /// An event an earlier version stored without a signature is signed late only
@@ -495,7 +496,7 @@ void main() {
     expect(await signedInTheCore(core, aid), [true, false]);
   });
 
-  final witnesses = [for (final c in ['A', 'B', 'C']) 'B${c * 43}'];
+  final witnesses = [for (final c in ['A', 'B', 'C']) aWitnessNamed(c)];
 
   test('a stored rotation that lowers the witness threshold is not signed',
       () async {
@@ -597,7 +598,7 @@ void main() {
     final (core, aid, _) =
         await storedBy([await legacyFounding(witnesses: witnesses, toad: '2')], [0]);
     await askedForTheFounding();
-    final mine = [for (final c in ['X', 'Y', 'Z']) 'B${c * 43}'];
+    final mine = [for (final c in ['X', 'Y', 'Z']) aWitnessNamed(c)];
     await expectLater(
         keysOf(core, knows: WitnessSet(mine, 2)).finishStrandedEvents(seed),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()

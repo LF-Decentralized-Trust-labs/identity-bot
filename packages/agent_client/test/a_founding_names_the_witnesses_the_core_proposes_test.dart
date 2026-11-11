@@ -75,8 +75,8 @@ void main() {
     expect(done.unwitnessedBecause, isNull);
 
     final icp = await founding(done.aid);
-    expect(List<String>.from(icp['b'] as List),
-        unorderedEquals([w1.aid, w2.aid]));
+    expect(
+        List<String>.from(icp['b'] as List), unorderedEquals([w1.aid, w2.aid]));
     expect(icp['bt'], '2');
 
     final h = await TheIdentityThisDeviceHolds().read();
@@ -93,7 +93,10 @@ void main() {
       'named gets a majority', () async {
     core = await anotherCore(bin, km, witnesses: [w1, w2]);
     core.client.alterTheAnswerTo['/api/events/witnesses-for-a-founding'] =
-        (a) => {...a, 'toad': 1};
+        (_) => {
+              ...proposalOf([w1, w2]),
+              'toad': 1
+            };
     final done = await LocalCoreKeriService(
             baseUrl: core.base, client: core.client, keyMath: km)
         .inceptAid(name: 'me', code: phrase);
@@ -131,7 +134,8 @@ void main() {
     expect(h!.witnessAddresses.keys, [w1.aid]);
   });
 
-  test('a proposed witness that answers with another witness\'s key is left out',
+  test(
+      'a proposed witness that answers with another witness\'s key is left out',
       () async {
     w2.tipSignedByAnother = true;
     final done = await found([w1, w2]);

@@ -6,6 +6,17 @@ import 'dart:typed_data';
 import 'package:agent_client/services/key_math.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 
+/// The name of a witness that is only named, never reached: the
+/// non-transferable identifier of a real Ed25519 key, one for each [label]
+/// character. A made-up one (`B` then the same letter repeated) is a key of
+/// small order, which the core refuses to name in an event.
+String aWitnessNamed(String label) => qb64(
+    'B',
+    Uint8List.fromList(ed
+        .public(ed.newKeyFromSeed(
+            Uint8List.fromList(List.filled(32, label.codeUnitAt(0)))))
+        .bytes));
+
 /// A witness for a test, answering the routes an Identity Agent's witness
 /// answers (`POST witness/event`, `GET witness/kel/{aid}/tip`,
 /// `GET witness/kel/{aid}/event/{sn}`) with the same bodies. It judges each
