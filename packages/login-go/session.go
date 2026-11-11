@@ -44,6 +44,12 @@ type Started struct {
 	// CollectorSecret stays on the server. ConfirmSession needs it to read who
 	// signed in. Keep it out of the page and out of any link.
 	CollectorSecret string
+	// CanonicalBody and Signature are the signed challenge, for a transport that
+	// hands it over: the exact text the Identity Agent signed and its signature,
+	// so a page can check the challenge is the app's before showing the code.
+	// Empty where the Identity Agent's answer does not carry them.
+	CanonicalBody string
+	Signature     string
 }
 
 // Status is the Identity Agent's own word on a sign-in, as it said it, before
