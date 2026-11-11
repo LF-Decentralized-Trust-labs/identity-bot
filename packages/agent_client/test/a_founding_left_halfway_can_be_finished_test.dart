@@ -15,6 +15,7 @@ import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 import 'support/a_signature_read_back.dart';
+import 'support/a_witness.dart';
 import 'support/kel_events.dart';
 import 'support/the_core.dart';
 
@@ -298,17 +299,17 @@ void main() {
     final bytes = saidified({
       't': 'icp', 'd': '', 'i': '', 's': '0', 'kt': '1', 'k': [key], 'nt': '1',
       'n': [TheKeyInForce.commitmentTo(next)], 'bt': '1',
-      'b': ['B${'A' * 43}'], 'c': [], 'a': [],
+      'b': [aWitnessNamed('A')], 'c': [], 'a': [],
     });
     await expectLater(
         coreThatAnswers(theEngineShape(bytes), sent).signTheFoundingOf(
             aidOf(bytes), seed,
-            witnesses: WitnessSet(['B${'Z' * 43}'], 1)),
+            witnesses: WitnessSet([aWitnessNamed('Z')], 1)),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(signed(sent), isFalse);
     await coreThatAnswers(theEngineShape(bytes), sent).signTheFoundingOf(
         aidOf(bytes), seed,
-        witnesses: WitnessSet(['B${'A' * 43}'], 1));
+        witnesses: WitnessSet([aWitnessNamed('A')], 1));
     expect(signed(sent), isTrue);
   });
 
