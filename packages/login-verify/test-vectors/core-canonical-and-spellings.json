@@ -185,6 +185,13 @@
       "name": "a document that is a list is refused",
       "json": "[]",
       "go_reads": false
+    },
+    {
+      "name": "a front end repeated by the assertion (ADR-072)",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"z\":\"1\",\"email\":\"a@example.com\",\"a\":\"2\"},\"presented_acdcs\":[{\"said\":\"Ex\",\"b\":{\"z\":1,\"a\":[3,{\"y\":true,\"b\":null}]}},\"text\",7],\"custom_data\":{\"zeta\":1.5,\"alpha\":{\"k2\":\"v\",\"k1\":1e+21},\"n\":0,\"small\":1e-07,\"tiny\":1e-06,\"big\":12345678901234567890,\"int\":100,\"exp\":100.0},\"p_kel\":\"kel\",\"site_aid\":\"ESite\",\"front_end\":\"browser\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"a\":\"2\",\"email\":\"a@example.com\",\"z\":\"1\"},\"presented_acdcs\":[{\"b\":{\"a\":[3,{\"b\":null,\"y\":true}],\"z\":1},\"said\":\"Ex\"},\"text\",7],\"custom_data\":{\"alpha\":{\"k1\":1e+21,\"k2\":\"v\"},\"big\":12345678901234567000,\"exp\":100,\"int\":100,\"n\":0,\"small\":1e-7,\"tiny\":0.000001,\"zeta\":1.5},\"p_kel\":\"kel\",\"site_aid\":\"ESite\",\"front_end\":\"browser\"}",
+      "said": "EFM6xHuD7GoCoOr7G-7GeW7ZIW0ARiEAl4QBR_JRo0so"
     }
   ],
   "canonical_challenges": [
@@ -294,6 +301,12 @@
       "name": "unknown fields are refused",
       "json": "{\"v\":\"ASK1\",\"t\":1,\"extra\":true}",
       "go_reads": false
+    },
+    {
+      "name": "a front end named for a utility app (ADR-072)",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"installed_app\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"installed_app\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"
     }
   ],
   "description": "Produced by the Go core: canonical bodies, accept/refuse decisions for key and signature spellings, and a signed assertion. The TypeScript verifier must agree byte for byte. Regenerated and checked by TestThePublishedLoginVectorsAreTheCores in identity-agent-core/login.",

@@ -68,6 +68,7 @@ export interface PageSessionRead {
   nonce?: string;
   siteAid?: string;
   browserKey?: string;
+  frontEnd?: string;
   reason?: string;
   /** Why the last answer was refused while the sign-in is still open, so the person can fix it and try again. */
   lastRefusal?: string;
@@ -95,6 +96,7 @@ export async function readPageSession(opts: {
     nonce: d.nonce as string | undefined,
     siteAid: d.site_aid as string | undefined,
     browserKey: d.browser_key as string | undefined,
+    frontEnd: d.front_end as string | undefined,
     reason: d.reason as string | undefined,
     lastRefusal: d.last_refusal as string | undefined,
     identityWithheld: d.identity_withheld === true ? true : undefined,

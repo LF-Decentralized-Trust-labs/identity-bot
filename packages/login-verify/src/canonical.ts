@@ -181,12 +181,12 @@ function isMap(v: unknown): v is Record<string, unknown> {
 
 const ASSERTION_FIELDS = new Set([
   "v", "t", "d", "i", "relationship_aid_oobi", "audience", "nonce", "dt",
-  "disclosures", "presented_acdcs", "custom_data", "p_kel", "site_aid", "browser_key", "sig",
+  "disclosures", "presented_acdcs", "custom_data", "p_kel", "site_aid", "browser_key", "front_end", "sig",
 ]);
 const CHALLENGE_FIELDS = new Set([
   "v", "t", "site_aid", "site_oobi", "audience", "nonce", "dt", "expiry",
   "requested_disclosures", "requested_credentials", "requested_score",
-  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "callback_url", "session_token", "sig",
+  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "front_end", "callback_url", "session_token", "sig",
 ]);
 const REQUESTED_CREDENTIAL_FIELDS = new Set(["schema_said", "required"]);
 const REQUESTED_SCORE_FIELDS = new Set(["min_band", "min_score", "required"]);
@@ -283,6 +283,8 @@ export function canonicalChallengeBody(challenge: LoginChallenge): string {
   }
   // The browser key a sign-in is for (ADR-066), omitted when the challenge names none.
   if (str(c.browser_key, "browser_key") !== "") parts.push(textField("browser_key", c.browser_key));
+  // The front end a sign-in is for (ADR-072 §2), omitted when the challenge names none.
+  if (str(c.front_end, "front_end") !== "") parts.push(textField("front_end", c.front_end));
   parts.push(textField("callback_url", c.callback_url), textField("session_token", c.session_token));
   return `{${parts.join(",")}}`;
 }
@@ -315,6 +317,7 @@ export function canonicalAssertionBody(assertion: LoginAssertion): string {
   if (str(a.p_kel, "p_kel") !== "") parts.push(textField("p_kel", a.p_kel));
   if (str(a.site_aid, "site_aid") !== "") parts.push(textField("site_aid", a.site_aid));
   if (str(a.browser_key, "browser_key") !== "") parts.push(textField("browser_key", a.browser_key));
+  if (str(a.front_end, "front_end") !== "") parts.push(textField("front_end", a.front_end));
   return `{${parts.join(",")}}`;
 }
 
@@ -382,6 +385,11 @@ export function thumbprintP256(x: unknown, y: unknown): string | null {
 
 /** True for exactly one spelling of a thumbprint: 43 characters of base64url
  *  that are a 32-byte digest. */
+/** The two kinds of front end a sign-in to a utility app can name. */
+export function isFrontEndKind(s: unknown): s is "browser" | "installed_app" {
+  return s === "browser" || s === "installed_app";
+}
+
 export function isBrowserKeyThumbprint(s: unknown): s is string {
   return decodeBase64UrlStrict(s, 32) !== null;
 }

@@ -233,6 +233,14 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/watcher/alerts/{id}/acknowledge": "an alert is raised for the owner, and what the owner has seen is the owner's to record",
 	"POST /api/watcher/alerts/{id}/resolve":     "closing a duplicity alert is the owner's call, and a controller that could close one could hide a fork",
 
+	// --- how a utility app may be signed in to ---
+	// Which front ends of an app are switched off decides who can sign in to
+	// it, so a change is the owner's, while a paired controller may read what is
+	// set (GET /api/assets/{id}/front-ends). Declaring what an older app offers
+	// is the same kind of choice, and may be made once.
+	"PUT /api/assets/{id}/front-ends":         "this decides which front ends of a utility app people may sign in through",
+	"PUT /api/assets/{id}/front-ends/offered": "this declares, once, which front ends a utility app made before it could say offers",
+
 	// --- who else may act for this identity ---
 	//
 	// Enrolling a controller from a controller is how an attacker who briefly

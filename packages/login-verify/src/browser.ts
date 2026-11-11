@@ -24,6 +24,8 @@ export interface HandedSignIn {
   siteAid: string;
   /** The thumbprint of the browser key the sign-in was for, if it named one. */
   browserKey?: string;
+  /** The kind of front end the sign-in was for, if the challenge named one. */
+  frontEnd?: string;
 }
 
 export interface CheckInPageOptions {
@@ -73,6 +75,7 @@ export async function checkSignInInPage(
     expectedNonce: signIn.nonce,
     expectedSiteAid: signIn.siteAid,
     expectedBrowserKey: signIn.browserKey,
+    expectedFrontEnd: signIn.frontEnd,
     maxSkewSeconds: opts.maxSkewSeconds,
     resolveKey: keyFromIdentityAgent(opts.agentUrl, opts.fetchFn ?? ((...a) => fetch(...a))),
     consume: opts.consume ?? (pageSpent ??= inMemoryConsumedNonces()),

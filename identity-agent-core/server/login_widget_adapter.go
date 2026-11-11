@@ -29,7 +29,14 @@ import (
 // it is the audience: a sign-in asked for from a page is for that page and no
 // other, and an asset that names the origin of its website is not signed in to
 // from any other page.
-func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
+//
+// frontEnd is the kind of front end the sign-in is for, which a utility app
+// admits only by the rules in refuseFrontEnd. installedAppKey is true when the
+// request proved it came from an installed app's own key. No route can prove
+// that yet (the installed front end's hardware key and app-key grant are not
+// built), so every caller passes false and an installed_app sign-in is refused:
+// without the key it is a bearer QR sign-in nothing tells from a browser's.
+func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
@@ -66,6 +73,14 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		if found.Origin != "" && !sameOrigin(found.Origin, askedFrom) {
 			return "", "", http.StatusForbidden, "this website asset is not for this page"
 		}
+	}
+
+	// A utility app is reached only by a front end it offers and its owner has
+	// not switched off; this is the owner's Identity Agent's to enforce, and
+	// the app's back end is never asked (ADR-072 §3).
+	frontEnd, code, why := refuseFrontEnd(*found, frontEnd, browserKey, askedFrom != "", installedAppKey)
+	if code != 0 {
+		return "", "", code, why
 	}
 
 	// A sign-in for a browser's key names its thumbprint in the signed
@@ -105,6 +120,7 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
 		BrowserKey:           browserKey,
+		FrontEnd:             frontEnd,
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,
@@ -187,9 +203,10 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		RequestDisclosures []string `json:"requestDisclosures"`
 		Audience           string   `json:"audience"`
 		BrowserKey         string   `json:"browserKey"`
+		FrontEnd           string   `json:"frontEnd"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body) // tolerate empty body
-	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, body.FrontEnd, s.getPublicURL(r), false)
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -284,6 +301,9 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			// to the collector only, like who signed in.
 			if bk, ok := st["browser_key"].(string); ok {
 				resp["browser_key"] = bk
+			}
+			if fe, ok := st["front_end"].(string); ok {
+				resp["front_end"] = fe
 			}
 			// Membership-admitted logins: who the admitting roster says this is
 			// (e.g. role + display_name), so the RP needs no org-internal lookups.

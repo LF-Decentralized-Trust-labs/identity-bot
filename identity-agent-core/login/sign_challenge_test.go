@@ -3,6 +3,7 @@ package login
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,43 @@ func TestSignChallengeForAssetRoundTrip(t *testing.T) {
 	bundle.Audience = "Evil RP"
 	if ok2, _ := verifyUTF8(canonicalChallengeBody(bundle), bundle.Sig, pub); ok2 {
 		t.Fatal("signature verified over tampered body — must fail")
+	}
+}
+
+// The front end a sign-in is for is inside the signed body: a challenge for one
+// kind cannot be turned into another's, and one that names none keeps the form
+// it always had.
+func TestTheFrontEndIsSignedInTheChallenge(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
+	if _, err := rand.Read(seed); err != nil {
+		t.Fatal(err)
+	}
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	bundle := ChallengeBundle{V: "ASK1", T: 1, SiteAID: "ESite", Audience: "https://a.example", Nonce: "n",
+		Dt: "2026-06-30T00:00:00Z", Expiry: "2026-06-30T00:10:00Z", RequestedDisclosures: []string{}, RequestedCredentials: []RequestedCredential{},
+		CallbackURL: "https://a.example/cb", SessionToken: "s"}
+	plain := canonicalChallengeBody(bundle)
+	bundle.FrontEnd = "browser"
+	if err := SignChallengeForAsset(&bundle, seed); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := verifyUTF8(canonicalChallengeBody(bundle), bundle.Sig, pub); !ok {
+		t.Fatal("a challenge naming its front end does not verify")
+	}
+	if !strings.Contains(canonicalChallengeBody(bundle), `"front_end":"browser","callback_url"`) || strings.Contains(plain, "front_end") {
+		t.Fatalf("the kind is not written where, and only when, it is named: %s", canonicalChallengeBody(bundle))
+	}
+	bundle.FrontEnd = "installed_app"
+	if ok, _ := verifyUTF8(canonicalChallengeBody(bundle), bundle.Sig, pub); ok {
+		t.Fatal("a challenge for the browser verified as one for the installed app")
+	}
+	bundle.FrontEnd = ""
+	if ok, _ := verifyUTF8(canonicalChallengeBody(bundle), bundle.Sig, pub); ok {
+		t.Fatal("the kind could be removed from a signed challenge")
+	}
+	for kind, ok := range map[string]bool{"": true, "browser": true, "installed_app": true, "Browser": false, "tablet": false} {
+		if (CheckFrontEnd(kind) == nil) != ok {
+			t.Fatalf("CheckFrontEnd(%q) = %v", kind, CheckFrontEnd(kind))
+		}
 	}
 }

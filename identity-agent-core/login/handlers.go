@@ -382,6 +382,7 @@ func (h *Handler) buildAssertionWithCredentials(rel *SiteRelationship, bundle *C
 		PKEL:                keyLog,
 		SiteAID:             bundle.SiteAID,
 		BrowserKey:          bundle.BrowserKey,
+		FrontEnd:            bundle.FrontEnd,
 	}
 	if err := SignAssertion(&a, seed); err != nil {
 		return nil, nil, err
@@ -536,6 +537,9 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	if err := CheckBrowserKeyThumbprint(bundle.BrowserKey); bundle.BrowserKey != "" && err != nil {
 		return nil, nil, nil, err
 	}
+	if err := CheckFrontEnd(bundle.FrontEnd); err != nil {
+		return nil, nil, nil, err
+	}
 	// The expiry is read from the bundle whose signature was just verified,
 	// never from an earlier fetch of the same session, which a relay could
 	// have served differently.
@@ -592,6 +596,7 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		Expiry:                bundle.Expiry,
 		PairwiseAID:           rel.PairwiseAID,
 		RelationshipAnchorAID: bundle.RelationshipAnchorAID,
+		FrontEnd:              bundle.FrontEnd,
 		RPSessionURL:          req.RPSessionURL,
 	}
 	return bundle, rel, preview, nil
@@ -861,6 +866,7 @@ func (h *Handler) HandlePendingList(w http.ResponseWriter, _ *http.Request) {
 			RequestedScore:       p.Bundle.RequestedScore,
 			Expiry:               p.Bundle.Expiry,
 			PairwiseAID:          p.Relationship.PairwiseAID,
+			FrontEnd:             p.Bundle.FrontEnd,
 			RPSessionURL:         p.RPSessionURL,
 		})
 	}

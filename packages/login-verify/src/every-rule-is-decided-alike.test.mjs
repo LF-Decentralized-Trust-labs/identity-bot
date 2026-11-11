@@ -57,6 +57,7 @@ async function decide(c, consume) {
     expectedAudience: c.expect.audience,
     expectedSiteAid: c.expect.site_aid,
     expectedBrowserKey: c.expect.browser_key,
+    expectedFrontEnd: c.expect.front_end,
     maxSkewSeconds: c.max_skew_seconds,
     signingPublicKey: new Uint8Array(Buffer.from(c.public_key_hex, "hex")),
     nowMs: Date.parse(c.now),

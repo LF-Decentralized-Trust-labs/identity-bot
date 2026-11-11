@@ -4,6 +4,7 @@ import {
   canonicalAssertionBody,
   canonicalChallengeBody,
   isBrowserKeyThumbprint,
+  isFrontEndKind,
   nonTransferableAidQb64,
   randomToken,
   rfc3339Utc,
@@ -97,6 +98,10 @@ export class IdentityAgentVerifier {
       if (!isBrowserKeyThumbprint(opts.browserKey)) throw new Error("browserKey must be a browser key thumbprint");
       challenge.browser_key = opts.browserKey;
     }
+    if (opts.frontEnd) {
+      if (!isFrontEndKind(opts.frontEnd)) throw new Error("frontEnd must be 'browser' or 'installed_app'");
+      challenge.front_end = opts.frontEnd;
+    }
 
     const body = canonicalChallengeBody(challenge);
     challenge.sig = await signCanonical(body, this.site.privateKey);
@@ -144,6 +149,7 @@ export class IdentityAgentVerifier {
       expectedNonce: opts.expectedNonce,
       expectedSiteAid: opts.expectedSiteAid,
       expectedBrowserKey: opts.expectedBrowserKey,
+      expectedFrontEnd: opts.expectedFrontEnd,
       maxSkewSeconds: opts.maxSkewSeconds,
       resolveKey: this.resolveKey,
       // Accepting an assertion spends it, whichever way it reached here.
@@ -172,6 +178,7 @@ export class IdentityAgentVerifier {
       expectedNonce: rec.challenge.nonce,
       expectedSiteAid: rec.challenge.site_aid,
       expectedBrowserKey: rec.challenge.browser_key,
+      expectedFrontEnd: rec.challenge.front_end,
     });
     // A refused answer spends nothing: the sign-in stays as it was, and so does
     // the assertion (it is only claimed once everything else has passed).

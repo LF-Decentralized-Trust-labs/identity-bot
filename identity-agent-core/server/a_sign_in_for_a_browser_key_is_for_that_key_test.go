@@ -19,7 +19,7 @@ const anotherBrowserKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 func aBrowserKeyChallenge(t *testing.T, w *aWebsiteWorld, key string) login.StartLoginRequest {
 	t.Helper()
-	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", []string{"display_name"}, key, w.srv.URL)
+	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", []string{"display_name"}, key, "", w.srv.URL, false)
 	if code != 0 {
 		t.Fatalf("no challenge for browser key %q: %d %s", key, code, msg)
 	}
@@ -104,7 +104,7 @@ func TestAnAssertionForAnotherBrowserKeyIsRefusedAtTheCallback(t *testing.T) {
 // A site does not sign a challenge naming something that is not a thumbprint.
 func TestAChallengeNamingAMalformedBrowserKeyIsNotIssued(t *testing.T) {
 	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
-	_, _, code, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, "not-a-thumbprint", w.srv.URL)
+	_, _, code, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, "not-a-thumbprint", "", w.srv.URL, false)
 	if code != http.StatusBadRequest {
 		t.Fatalf("code %d, want 400", code)
 	}
@@ -142,7 +142,7 @@ func TestAnAddOnStartsASignInForABrowserKeyAndReadsItsResultWithTheSecret(t *tes
 		t.Fatalf("after the person approved: %+v %v", res, err)
 	}
 	// A sign-in that was not for a browser's key is not read this way, even with its secret.
-	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, "", w.srv.URL)
+	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, "", "", w.srv.URL, false)
 	if code != 0 {
 		t.Fatal(msg)
 	}
