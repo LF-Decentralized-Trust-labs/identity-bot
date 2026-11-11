@@ -70,7 +70,9 @@ const (
 // it says how well somebody was authenticated.
 //
 // Bound to ONE controller, so a statement made for the laptop cannot be relayed
-// by a different machine. Bound to the moment, so freshness means something. Its
+// by a different machine. Bound to ONE Identity Agent, so a statement made for
+// the laptop's work on one identity cannot be relayed to another Identity Agent
+// whose root device is the same. Bound to the moment, so freshness means something. Its
 // own first line so it can never be confused with a request signature.
 //
 // It is not bound to a single request, and that is a real choice: the person
@@ -80,10 +82,11 @@ const (
 // what the person had in mind — which is the argument for binding the highest
 // actions to a specific one, and is left open deliberately.
 func canonicalAuthLevelStatement(
-	controllerAID string, level authprovider.Level, at time.Time, score int,
+	agentAID, controllerAID string, level authprovider.Level, at time.Time, score int,
 ) string {
 	return strings.Join([]string{
-		"IA-AUTH-LEVEL-V1",
+		"IA-AUTH-LEVEL-V2",
+		agentAID,
 		controllerAID,
 		string(level),
 		at.UTC().Format(time.RFC3339),
@@ -555,8 +558,12 @@ func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
 	if err != nil {
 		return authprovider.Unmeasured("the key of the device that vouches is unusable")
 	}
+	// A statement names the Identity Agent it is for: its identifier, or
+	// nothing while it has none yet (a machine sealed before it had an
+	// identity), so a statement for an identified agent never fits one.
+	agentAID := s.thisIdentityAgentsIdentifier()
 	ok, err := login.VerifyString(
-		canonicalAuthLevelStatement(controllerAID, level, when, score), vouched, pub)
+		canonicalAuthLevelStatement(agentAID, controllerAID, level, when, score), vouched, pub)
 	if err != nil || !ok {
 		return authprovider.Unmeasured(
 			"the authentication level was not vouched for by the device that holds this identity's key")

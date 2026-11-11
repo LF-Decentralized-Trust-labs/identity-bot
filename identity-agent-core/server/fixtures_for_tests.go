@@ -669,7 +669,8 @@ func ownerSeedForTest(t coretypes.TB, s *CoreServer) []byte {
 	t.Helper()
 	seed, _ := sealTestOwner(t, s)
 	rootDeviceSeeds[t.Name()] = seed
-	t.Cleanup(func() { delete(rootDeviceSeeds, t.Name()) })
+	rootDeviceAgents[t.Name()] = s
+	t.Cleanup(func() { delete(rootDeviceSeeds, t.Name()); delete(rootDeviceAgents, t.Name()) })
 	return seed
 }
 
@@ -688,8 +689,12 @@ func theRootDeviceVouches(t coretypes.TB, controllerAID string, level authprovid
 	if !ok {
 		return ""
 	}
+	agent := ""
+	if s := rootDeviceAgents[t.Name()]; s != nil {
+		agent = s.thisIdentityAgentsIdentifier()
+	}
 	sig, err := login.SignString(
-		canonicalAuthLevelStatement(controllerAID, level, at, score), seed)
+		canonicalAuthLevelStatement(agent, controllerAID, level, at, score), seed)
 	if err != nil {
 		t.Fatalf("the root device could not vouch: %v", err)
 	}
@@ -760,6 +765,9 @@ func ownerRequest(method, path string, body io.Reader, _ *CoreServer) *http.Requ
 }
 
 var rootDeviceSeeds = map[string][]byte{}
+
+// rootDeviceAgents is the Identity Agent each test's root device vouches for.
+var rootDeviceAgents = map[string]*CoreServer{}
 
 func withID(r *http.Request, id string) *http.Request {
 	rctx := chi.NewRouteContext()
