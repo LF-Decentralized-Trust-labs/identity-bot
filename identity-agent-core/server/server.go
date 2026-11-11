@@ -468,6 +468,8 @@ func New(cfg Config) (*CoreServer, error) {
 
 	// Peers to cross-check with, drawn from contacts and registered services.
 	ws.PeerWatchers = s.peerWatchers
+	ws.SignRequest = s.signRequestToContact
+	ws.VerifyRequester = s.verifyContactRequest
 	// A peer's address is held to the address dialled; a local one is reached
 	// only where the owner recorded that contact.
 	ws.L3.AllowLocal = func(peerBaseURL string) bool { return s.oobiMayBeLocal(peerBaseURL, "") }
@@ -1068,6 +1070,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// The owner's say over whether this agent's watcher discusses an identity.
 		r.Get("/watcher/opt-out", s.handleWatcherOptOutGet)
 		r.Put("/watcher/opt-out", s.handleWatcherOptOutSet)
+		// Which contacts it cross-checks with. Any controller may read; PUT is owner-only.
+		r.Get("/watcher/peers", s.handleWatcherPeersGet)
+		r.Put("/watcher/peers", s.handleWatcherPeersSet)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
 		// Everything this agent's trust rests on, assembled into one answer for

@@ -3,6 +3,7 @@
 **Status:** Accepted; the relay client's transport and enrolment token are superseded by ADR-048 (2026-10-21)
 **Date:** 2026-06-19
 **Amended:** 2026-11-09 — the owner can opt an identity out of what the watcher tells others (see "Amendment, 2026-11-09" at the end)
+**Amended:** 2026-11-11 — what peers are asked and told, and who chooses them (see "Amendment, 2026-11-11" at the end)
 **Deciders:** Rob Andersen
 
 ---
@@ -128,3 +129,72 @@ credential from it, learns that this agent has seen that identity. It does not
 learn whether the identity opted out, because the refusal is the same either
 way. Refusing a forked issuer is the purpose of the watcher, so this is
 accepted rather than closed.
+
+---
+
+## Amendment, 2026-11-11: what peers are asked and told, and who chooses them
+
+**Why.** Asking a peer whether it holds a digest tells it whom this agent is
+dealing with, and answering tells the asker whom this agent has met and when:
+the digest of any identity's key log can be computed by whoever can fetch the
+log. Layer L3 as first written asked every contact about every identity and
+answered anybody with the digest and the time it was first seen.
+
+**`/public/kel-digest` is for public watcher services.** It answers truthfully
+(digest, `first_seen_at`, `observed_since`) only on an Identity Agent whose owner
+has opted it in as a public watcher service (`public_watcher_service`, off by
+default). Everywhere else it gives the signed "never seen" answer, which is a
+valid digest statement, so published test vectors and existing clients still
+verify it. The shared hosted watcher is such a service.
+
+**`/public/kel-check` is for contacts.** The request is
+`{aid, seq, digest, requester, at, signature}`; `our_digest` and
+`our_first_seen_at` are no longer in the response, which is `{"match": bool}`.
+The signature is over `KelCheckRequestStatement` with `to` set to the answering
+agent's own public base URL, made with the key of the identifier the answering
+agent's contact knows the asker by (the per-contact identifier, not the witness
+key, so the signature tells the contact nothing it does not already know and
+nothing it could show another party). It is answered only if `requester` is an
+accepted contact of the answering agent, the signature verifies against the key
+recorded for that contact, `|now - at| <= 60 s`, and the (requester, at, aid,
+seq) has not been answered inside that window, and the identity is one whose log
+the answering agent serves at its own address (the set `GET /public/oobi/{aid}`
+answers), compared with its own copy of that log, so a contact cannot ask whether
+the owner has met some third party. The
+address a request must name comes from the answering agent's endpoint service or
+relay allocation, never from the request's Host or forwarding headers; with
+neither known nothing is answered. Every other request, an unsigned
+one, one from a stranger, a stale or repeated one, and a question about an
+identity not held, never seen or opted out, gets the same `{"match": false}`.
+That closes the match/no-match oracle for identities whose key log a prober can
+fetch. Every caller is limited (60 a minute) before any signature is checked,
+and a requester that is not a contact costs the same signature check as one that
+is. Strangers are then limited per caller (20 a minute) and together (600 a
+minute); contacts are limited per contact and do not draw on the strangers'
+budget. A relayed request is counted by the visitor address the relay passes on.
+
+**Older clients.** A client that reads `OurDigest == nil` as "the peer holds
+nothing" keeps working: the field is gone, so it is always nil, which reads as
+unknown. A client that does not sign is answered no match, so its cross-checks
+return unknown, never agreement.
+
+**Who is asked, and when.** Peer checks are off until the owner turns them on
+(`peer_watch_enabled`, off by default). Then only contacts the owner chose, at
+most five, in `GET`/`PUT /api/watcher/peers` (`PUT` owner-only, `GET` open to the
+owner's controllers, ADR-050), and only about an identity the contact plausibly
+knows: it is where this agent met the identity's log, now or before, and it is
+not the identity itself. A contact is asked only on a repeat contact whose record
+this agent holds and agrees with, while the hosted watcher holds a different
+digest. That disagreement always raises a non-blocking `kel_l3_escalation` event,
+broadcast to the owner's connected apps, and the verification still passes. A contact's
+answer is context: it is recorded in the sources queried and never quiets or
+changes the escalation, because the contact able to answer about an identity is
+its own controller, the party that showed this agent the branch in question.
+Duplicity is therefore not a network property through contacts: a contact cannot
+confirm or clear it. The escalation is not stored as a duplicity alert, since an
+open alert blocks the next check of that identity and a disagreement that proves
+nothing must not. A peer's "no match" never blocks, because it cannot tell a
+different history from one it never saw. Installs that existed before this
+amendment have chosen nobody, so contact cross-checks stay off until the owner
+turns them on and chooses, through the route above. Registered watcher services are consulted for
+their digest (L2) and are not asked for a cross-check.

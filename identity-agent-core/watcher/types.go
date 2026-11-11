@@ -56,17 +56,26 @@ type DigestResponse struct {
 }
 
 // KelCheckRequest is the watcher /public/kel-check contract.
+//
+// The caller proves it already holds the log by giving its digest; Requester,
+// At and Signature say who asked and bind the question to one peer and moment
+// (see KelCheckRequestStatement).
 type KelCheckRequest struct {
-	AID    string `json:"aid"`
-	Seq    int    `json:"seq"`
-	Digest string `json:"digest"`
+	AID       string `json:"aid"`
+	Seq       int    `json:"seq"`
+	Digest    string `json:"digest"`
+	Requester string `json:"requester,omitempty"`
+	At        int64  `json:"at,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
-// KelCheckResponse is the watcher /public/kel-check response.
+// KelCheckResponse is the watcher /public/kel-check response: whether the
+// caller's digest is the one held, and nothing else. A watcher that has never
+// seen the identity, one that holds a different digest and one whose owner
+// opted out all answer the same "no match", so the answer cannot be used to
+// find out whom its owner deals with.
 type KelCheckResponse struct {
-	Match        bool    `json:"match"`
-	OurDigest    *string `json:"our_digest"`
-	OurFirstSeen *string `json:"our_first_seen_at"`
+	Match bool `json:"match"`
 }
 
 // SourceOutcome tracks one layer in a verification pass.

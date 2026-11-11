@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/ratewindow"
 )
@@ -133,13 +134,40 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+// callerKey is who a public watcher request is counted as. A relayed request
+// reaches this agent from the relay's own address, so counting that would make
+// every caller through the relay one caller; it is counted as the visitor address
+// the relay passed on (the /64 for IPv6), or, from a relay that names none, as one
+// shared caller. A direct request is counted by clientIP, which believes a
+// forwarding header only from a trusted proxy.
+func callerKey(r *http.Request) string {
+	if p, relayed := relayproto.PreambleFrom(r.Context()); relayed {
+		if v := visitorShare(p.Visitor); v != "" {
+			return "relayed " + v
+		}
+		return "relayed, address unknown"
+	}
+	return clientIP(r)
+}
+
 func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 	if s.WatcherService == nil {
 		return
 	}
 	lim := newIPRateLimiter(60, time.Minute)
+	// A cross-check is a yes/no on a digest, so guessing one is the only way to
+	// probe it: a tighter limit per caller, and a cap across all callers so
+	// many addresses cannot add up to a search.
+	checkLim := newIPRateLimiter(20, time.Minute)
+	checkAll := newIPRateLimiter(600, time.Minute)
+	contactLim := newIPRateLimiter(120, time.Minute)
+	// Before any signature is checked, which is the costly part: a caller that
+	// sends more than a contact ever would is turned away unchecked. Set above
+	// the strangers' own limit so a contact reaching this agent through the same
+	// relay as strangers is not turned away by them.
+	preLim := newIPRateLimiter(60, time.Minute)
 	r.Get("/public/kel-digest", func(w http.ResponseWriter, r *http.Request) {
-		if !lim.allow(clientIP(r)) {
+		if !lim.allow(callerKey(r)) {
 			writeError(w, http.StatusTooManyRequests, "Rate limited", "")
 			return
 		}
@@ -162,18 +190,33 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 		jsonreply.Write(w, http.StatusOK, resp)
 	})
 
+	// A cross-check is a yes/no on a digest, so guessing one is the only way to
+	// probe it. It is answered only for a contact who signed the request, so the
+	// limits below bind strangers, who get "no match" whatever they send: a
+	// tighter limit per caller, and a cap across all strangers so many addresses
+	// cannot add up to a search. A contact has its own, larger, limit and does not
+	// draw on the strangers' cap, so a crowd of strangers cannot lock out peers.
 	r.Post("/public/kel-check", func(w http.ResponseWriter, r *http.Request) {
-		if !lim.allow(clientIP(r)) {
-			writeError(w, http.StatusTooManyRequests, "Rate limited", "")
-			return
-		}
 		var req watcher.KelCheckRequest
 		r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 			return
 		}
-		resp, err := s.WatcherService.KelCheck(req)
+		if !preLim.allow(callerKey(r)) {
+			writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+			return
+		}
+		resp, fromContact, err := s.WatcherService.KelCheck(req, s.ownPublicURL(r), func(aid string) ([]map[string]interface{}, bool) { return s.servedLog(aid, r) })
+		if fromContact {
+			if !contactLim.allow(req.Requester) {
+				writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+				return
+			}
+		} else if !checkLim.allow(callerKey(r)) || !checkAll.allow("all strangers") {
+			writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "kel-check failed", err.Error())
 			return

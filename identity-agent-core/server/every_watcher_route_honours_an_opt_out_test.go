@@ -1,13 +1,51 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+	"identity-agent-core/endpoint"
 
 	"github.com/go-chi/chi/v5"
 )
+
+var checkStamp atomic.Int64
+
+// asAPublicWatcherWithAContact makes the watcher answer what it has seen, as one
+// opted in as a public watcher service does, and accept EContact as a contact.
+func asAPublicWatcherWithAContact(t *testing.T, s *CoreServer) {
+	t.Helper()
+	if err := s.WatcherService.Store.SetConfig("public_watcher_service", "true"); err != nil {
+		t.Fatal(err)
+	}
+	withAContactWhoMetEAIDAt(s)
+}
+
+// serveLog makes the agent serve a two-event log for aid, as a minted pairwise
+// identifier is, and returns its digest at 1.
+func serveLog(aid string) string {
+	kel := []map[string]interface{}{{"t": "icp", "i": aid, "s": "0"}, {"t": "rot", "i": aid, "s": "1"}}
+	registerPairwiseKEL(aid, kel)
+	d, err := witnessproto.KelDigestAtSeq(kel, 1)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
+// withAContactWhoMetEAIDAt makes EContact an accepted contact and gives the agent the address it is reached
+// at, which a signed request must name. Signatures are not checked here.
+func withAContactWhoMetEAIDAt(s *CoreServer) {
+	s.WatcherService.VerifyRequester = func(requester, _, _ string) bool { return requester == "EContact" }
+	s.EndpointService = endpoint.New(nil, 0)
+	s.EndpointService.SetOverrideURL("https://us.example")
+}
 
 // routesThatAnswerFromTheWatcher are the routes that tell a caller what this
 // agent's watcher has seen of an identity, each with a request asking about aid.
@@ -17,8 +55,13 @@ var routesThatAnswerFromTheWatcher = map[string]func(aid, digest string) *http.R
 	"GET /public/kel-digest": func(aid, _ string) *http.Request {
 		return remote("GET", "/public/kel-digest?aid="+aid+"&seq=1", "")
 	},
+	// Asked as a contact, because a stranger is answered "no match" whatever it
+	// asks (see TestAStrangerGetsNothingFromEitherPublicRoute). The request is
+	// stamped a second later each time so none is refused as a repeat.
 	"POST /public/kel-check": func(aid, digest string) *http.Request {
-		return remote("POST", "/public/kel-check", `{"aid":"`+aid+`","seq":1,"digest":"`+digest+`"}`)
+		at := time.Now().Unix() + checkStamp.Add(1)
+		return remote("POST", "/public/kel-check", fmt.Sprintf(
+			`{"aid":%q,"seq":1,"digest":%q,"requester":"EContact","at":%d,"signature":"sig"}`, aid, digest, at))
 	},
 	"GET /debug/watcher/first-seen": func(aid, _ string) *http.Request {
 		return local("GET", "/debug/watcher/first-seen?aid="+aid, "")
@@ -145,8 +188,10 @@ func TestEveryWatcherRouteHonoursAnOptOut(t *testing.T) {
 // opted-out one fails here.
 func TestAnOptedOutIdentityIsAnsweredExactlyAsOneNeverSeen(t *testing.T) {
 	t.Setenv("WATCHER_DEBUG", "true")
-	const seen, neverSeen, digest = "ESeenAID", "ENeverSeenAID", "Esecretdigest"
+	const seen, neverSeen = "ESeenAID", "ENeverSeenAID"
+	digest := serveLog(seen)
 	s := watcherAgent(t, seen, 1, digest)
+	asAPublicWatcherWithAContact(t, s)
 	s.WatcherService.SignDigest = func(stmt string) (string, string, error) {
 		return "Ewatcher", "signature-over-" + stmt, nil
 	}

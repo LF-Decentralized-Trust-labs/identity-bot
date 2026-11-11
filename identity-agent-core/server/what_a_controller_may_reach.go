@@ -220,6 +220,11 @@ var controllerOwnerOnly = map[string]string{
 	// owner's agent discloses to every peer that asks, so it is the owner's
 	// choice, not a paired machine's at the score every action needs.
 	"PUT /api/watcher/opt-out": "this decides whether this agent's watcher tells peers what it has seen of an identity",
+	// Which contacts the watcher asks about an identity tells each of them whom
+	// this agent is checking on, so choosing them is the owner's. Reading the
+	// list is not (like the opt-out read): the owner reads it from any of their
+	// own apps.
+	"PUT /api/watcher/peers": "this decides which contacts the watcher tells whom this agent is checking on",
 
 	// --- who else may act for this identity ---
 	//

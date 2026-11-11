@@ -639,6 +639,26 @@ class ScanDecodeResult {
   }
 }
 
+/// The contacts an agent's watcher cross-checks key logs with.
+class WatcherPeers {
+  /// The accepted contacts the owner chose to be asked.
+  final List<String> aids;
+
+  /// Whether peer cross-checks are on at all.
+  final bool enabled;
+
+  /// The most contacts that can be chosen.
+  final int max;
+
+  const WatcherPeers({required this.aids, required this.enabled, required this.max});
+
+  factory WatcherPeers.fromJson(Map<String, dynamic> json) => WatcherPeers(
+        aids: List<String>.from(json['aids'] ?? const []),
+        enabled: json['enabled'] ?? true,
+        max: json['max'] ?? 0,
+      );
+}
+
 class CoreService {
   final String baseUrl;
   final http.Client _client;
@@ -1010,6 +1030,35 @@ class CoreService {
     if (response.statusCode != 200) {
       throw Exception('Could not rename that machine: ${response.statusCode}');
     }
+  }
+
+  /// The contacts this agent's watcher cross-checks key logs with, whether peer
+  /// cross-checks are on, and the most that can be chosen.
+  ///
+  /// Owner-only on the agent: asking a contact tells it whom this agent is
+  /// checking on, so who is asked is the owner's choice. None is asked until
+  /// the owner has chosen it.
+  Future<WatcherPeers> getWatcherPeers() async {
+    final response = await _client.get(Uri.parse('$baseUrl/api/watcher/peers'));
+    if (response.statusCode != 200) {
+      throw Exception('Could not read the watcher peers: ${response.statusCode}');
+    }
+    return WatcherPeers.fromJson(jsonDecode(response.body));
+  }
+
+  /// Replaces the contacts the watcher cross-checks with. Each must be an
+  /// accepted contact and there can be at most [WatcherPeers.max]; otherwise the
+  /// agent refuses and keeps what was chosen before.
+  Future<WatcherPeers> setWatcherPeers(List<String> contactAids) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/api/watcher/peers'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'aids': contactAids}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Could not choose the watcher peers: ${response.statusCode}');
+    }
+    return WatcherPeers.fromJson(jsonDecode(response.body));
   }
 
   Future<ContactsListResponse> getContacts() async {

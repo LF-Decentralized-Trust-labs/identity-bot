@@ -22,6 +22,7 @@ func TestOwnerOnlyActionsAreRefusedAtAnyScore(t *testing.T) {
 		{"POST", "/api/rotation"},
 		{"DELETE", "/api/controllers/BSomeOtherMachine"},
 		{"PUT", "/api/watcher/opt-out"},
+		{"PUT", "/api/watcher/peers"},
 	} {
 		for j, vouched := range []int{0, 80, 100} {
 			level := authprovider.Level("")
@@ -204,6 +205,7 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"DELETE /api/capability-registry/{id}",
 		"POST /api/sealed/send",
 		"PUT /api/watcher/opt-out",
+		"PUT /api/watcher/peers",
 		// ADR-050 also records POST /api/sandbox/podman/setup. It is the
 		// sandboxed-apps add-on's route, so that add-on closes it with its
 		// own rule (Addon.ControllerOwnerOnly), tested with the add-on.

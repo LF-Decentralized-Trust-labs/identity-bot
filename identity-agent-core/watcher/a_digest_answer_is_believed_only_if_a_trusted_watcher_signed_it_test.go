@@ -42,6 +42,11 @@ func (k testWatcherKey) sign(stmt string) (string, string, error) {
 func servedBy(t *testing.T, signer *testWatcherKey, alter func(*DigestResponse)) (url string, serving *Service) {
 	t.Helper()
 	serving, _ = migratedWatcher(t)
+	// The watchers these tests stand up are public watcher services; without
+	// that they answer as for an identity never seen.
+	if err := serving.Store.SetConfig(configPublicWatcher, "true"); err != nil {
+		t.Fatal(err)
+	}
 	if signer != nil {
 		serving.SignDigest = signer.sign
 	}
@@ -242,6 +247,9 @@ func TestAGenuineAnswerForAnotherQuestionIsNotAnAnswerToThisOne(t *testing.T) {
 	for _, tc := range cases {
 		serving, _ := migratedWatcher(t)
 		serving.SignDigest = trusted.sign
+		if err := serving.Store.SetConfig(configPublicWatcher, "true"); err != nil {
+			t.Fatal(err)
+		}
 		seen(t, serving, tc.answerAID, tc.answerSeq, "ffff")
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			resp, err := serving.GetPublicDigest(tc.answerAID, tc.answerSeq) // whatever was asked
