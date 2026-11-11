@@ -113,4 +113,4 @@ app; `SignInButton` already hands it to `onError`.
 A page that wants none of React or a build step loads the ready-built
 `bundle/identity-agent-app.js` (`@identity-agent/login-web/bundle`, global
 `IdentityAgentApp`: `readAppLink`, `appSession`, `mountSignIn`, `SessionEnded`).
-`npm run bundle` makes it; a test fails if it is not what the sources build.
+`npm run build:app -- <folder>` makes it (`bundle/` by default, which git ignores): it is built from the sources, never committed, and a test fails if what it writes lacks what pages use.

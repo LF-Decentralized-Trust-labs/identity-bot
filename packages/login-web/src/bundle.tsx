@@ -1,5 +1,5 @@
 /**
- * The ready-built page for a utility app (`bundle/identity-agent-app.js`, global
+ * The ready-built page for a utility app (`identity-agent-app.js` built by `npm run build:app`, global
  * `IdentityAgentApp`): the sign-in button, the checks of `./app`, the signed
  * calls and sign-out, in one script a page loads with a plain `<script src>`.
  * A page needs no build step, no React and no copy of any of it:
@@ -9,8 +9,8 @@
  *   if (!session.held()) IdentityAgentApp.mountSignIn(el, link, session, { onSignedIn, onProblem });
  *   else await session.call("GET", "/session/something");
  *
- * Rebuilt by `npm run bundle`; a test fails when the committed file is not what
- * the sources build.
+ * Built by `npm run build:app`, never committed; a test fails when what it writes
+ * lacks what a page uses.
  */
 import React from "react";
 import { createRoot } from "react-dom/client";

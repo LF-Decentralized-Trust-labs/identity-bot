@@ -84,3 +84,6 @@ drivers/keri-core/.venv/
 
 # Build outputs, including the Secure Enclave shim the macOS build compiles.
 identity-agent-core/build/
+
+# The ready-built login page: made by `npm run build:app`, never committed
+packages/*/bundle/
