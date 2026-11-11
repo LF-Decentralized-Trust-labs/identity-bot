@@ -135,7 +135,11 @@ func TestAReceiptKeptUnreadableIsNotCountedOnceTheLogHasCutItsWitness(t *testing
 	}
 	settled(kc, 1)
 	icp := inceptionOf(theAID, []string{kc.kept[0].WitnessAID}, 1)
-	s.KeyLogOf = keyLog(theAID, icp, rot) // read now: every witness cut
+	// read now: every witness cut. Set under the lock the readers hold, as a
+	// post that has been receipted may still be settling.
+	s.receiptMu.Lock()
+	s.KeyLogOf = keyLog(theAID, icp, rot)
+	s.receiptMu.Unlock()
 
 	s.RecountReceipts(said)
 	if f, _ := s.Store.GetFinalization(said); f == nil || f.ReceiptCount != 0 {

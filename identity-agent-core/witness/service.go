@@ -1056,29 +1056,47 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}
 		logRaw = append(logRaw, raw)
 	}
-	atPlace := drivers.WitnessingByEvent(drivers.ValidateKELInput{AID: signerAID, RawEvents: logRaw})
+	// One read of the log serves every event: its places and thresholds, and
+	// the receipts kept for the rows that may be re-armed below.
+	type pass struct {
+		said string
+		seq  int
+		raw  []byte
+		f    *FinalizationState
+	}
+	var todo []pass
+	var rearmSAIDs []string
 	for _, e := range events {
 		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
 		var ev map[string]interface{}
 		if json.Unmarshal(raw, &ev) != nil {
 			continue
 		}
-		if sn, err := eventSeq(ev); err == nil && sn <= lowest {
+		sn, serr := eventSeq(ev)
+		if serr == nil && sn <= lowest {
 			continue
 		}
 		said := eventSAID(ev)
 		f, _ := s.Store.GetFinalization(said)
-		if f == nil {
-			seq, _ := eventSeq(ev)
-			at := threshold
-			if row, ok := atPlace[said]; ok && row.Known {
-				at = s.thresholdFor(row)
-			}
-			s.startFinalization(said, signerAID, seq, at, "", raw)
-		} else if f.State == FinalizeTimeout && f.ReceiptCount == 0 {
-			s.rearm(said, signerAID, raw)
+		todo = append(todo, pass{said: said, seq: sn, raw: raw, f: f})
+		if f != nil && f.State == FinalizeTimeout && f.ReceiptCount == 0 {
+			rearmSAIDs = append(rearmSAIDs, said)
 		}
 	}
+	atPlace := drivers.WitnessingByEvent(drivers.ValidateKELInput{AID: signerAID, RawEvents: logRaw, Receipts: s.heldReceipts(rearmSAIDs)})
+	var rearm []rearmRow
+	for _, p := range todo {
+		if p.f == nil {
+			at := threshold
+			if row, ok := atPlace[p.said]; ok && row.Known {
+				at = s.thresholdFor(row)
+			}
+			s.startFinalization(p.said, signerAID, p.seq, at, "", p.raw)
+		} else if p.f.State == FinalizeTimeout && p.f.ReceiptCount == 0 {
+			rearm = append(rearm, rearmRow{said: p.said, row: atPlace[p.said]})
+		}
+	}
+	s.rearm(signerAID, rearm)
 	var wg sync.WaitGroup
 	for _, key := range designated {
 		w, ok := known[key]
@@ -1164,32 +1182,110 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 	return true
 }
 
-// rearm gives an event that timed out with no receipt at all another wait, so
-// that sending it again (this pass does, to any witness whose tip is short of
-// it) can finalize it: an event no designated witness ever held, as an old
-// install's inception may be, is otherwise left timed out for good. Once per
-// event per boot, and the new wait is the usual one, so a witness that stays
-// silent costs one more try per start and no more.
-func (s *Service) rearm(eventSAID, signerAID string, rawEvent []byte) {
-	if _, again := s.rearmed.LoadOrStore(eventSAID, true); again {
-		return
+// rearmRow is a timed-out event with what the log says of it.
+type rearmRow struct {
+	said string
+	row  drivers.EventWitnessing
+}
+
+// heldReceipts is the receipts kept for each of saids, in the form the key
+// log's report counts them.
+func (s *Service) heldReceipts(saids []string) map[string][]drivers.WitnessReceipt {
+	out := map[string][]drivers.WitnessReceipt{}
+	for _, said := range saids {
+		held, _ := s.Contacts.GetWitnessReceipts(said)
+		for _, h := range held {
+			out[said] = append(out[said], drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
+		}
 	}
+	return out
+}
+
+// rearm gives events that timed out with no receipt at all another wait, so
+// that sending them again (this pass does, to any witness whose tip is short
+// of them) can finalize them: an event no designated witness ever held, as an
+// old install's inception may be, is otherwise left timed out for good. Once
+// per event per boot, and the new wait is the usual one, so a witness that
+// stays silent costs one more try per start and no more.
+//
+// Every row is settled from the report the caller already read (one read of
+// the log however many rows there are) and all of them share one wait.
+func (s *Service) rearm(signerAID string, rows []rearmRow) {
+	var armed []string
 	s.receiptMu.Lock()
-	f, _ := s.Store.GetFinalization(eventSAID)
-	if f == nil || f.State != FinalizeTimeout || f.ReceiptCount != 0 {
-		s.receiptMu.Unlock()
+	for _, r := range rows {
+		if _, again := s.rearmed.LoadOrStore(r.said, true); again {
+			continue
+		}
+		f, _ := s.Store.GetFinalization(r.said)
+		if f == nil || f.State != FinalizeTimeout || f.ReceiptCount != 0 {
+			continue
+		}
+		var rerr error
+		if !r.row.Known {
+			rerr = fmt.Errorf("event %s cannot be read in the key log of %s", r.said, signerAID)
+		}
+		f.State = FinalizePending
+		s.settleFrom(f, r.row, rerr, false)
+		f.StartedAt = NowRFC3339()
+		_ = s.Store.SaveFinalization(*f)
+		if f.State != FinalizeFinalized {
+			armed = append(armed, r.said)
+		}
+	}
+	s.receiptMu.Unlock()
+	if len(armed) > 0 {
+		s.background(func() { s.finalizeBatch(signerAID, armed) })
+	}
+}
+
+// finalizeBatch is finalizeLoop for events of one key log that share a
+// deadline: one wait, one read of the log, each row settled from it.
+func (s *Service) finalizeBatch(signerAID string, saids []string) {
+	select {
+	case <-time.After(finalizeWait):
+	case <-s.stopping():
 		return
 	}
-	f.State = FinalizePending
-	s.settle(f, rawEvent)
-	f.StartedAt = NowRFC3339()
-	if f.State == FinalizeTimeout {
-		f.State = FinalizePending
+	var report map[string]drivers.EventWitnessing
+	var rerr error
+	if s.KeyLogOf == nil {
+		rerr = ErrNoKeyLog
+	} else if events, err := s.KeyLogOf(signerAID); err != nil {
+		rerr = err
+	} else if len(events) == 0 {
+		rerr = fmt.Errorf("the key log of %s holds no events", signerAID)
+	} else {
+		report = drivers.WitnessingByEvent(drivers.ValidateKELInput{AID: signerAID, RawEvents: events, Receipts: s.heldReceipts(saids)})
 	}
-	_ = s.Store.SaveFinalization(*f)
+	var timedOut []FinalizationState
+	s.receiptMu.Lock()
+	for _, said := range saids {
+		f, _ := s.Store.GetFinalization(said)
+		if f == nil || f.State == FinalizeFinalized {
+			continue
+		}
+		row, ok := report[said]
+		err := rerr
+		if err == nil && (!ok || !row.Known) {
+			err = fmt.Errorf("event %s cannot be read in the key log of %s", said, signerAID)
+		}
+		s.settleFrom(f, row, err, true)
+		if f.State != FinalizeFinalized {
+			f.State = FinalizeTimeout
+		}
+		_ = s.Store.SaveFinalization(*f)
+		if f.State == FinalizeTimeout {
+			timedOut = append(timedOut, *f)
+		}
+	}
 	s.receiptMu.Unlock()
-	if f.State != FinalizeFinalized {
-		s.background(func() { s.finalizeLoop(eventSAID) })
+	if s.OnEvent != nil {
+		for _, f := range timedOut {
+			s.OnEvent("witness_finalize_timeout", map[string]interface{}{
+				"event_said": f.EventSAID, "receipt_count": f.ReceiptCount, "threshold": f.Threshold,
+			})
+		}
 	}
 }
 
@@ -1707,6 +1803,10 @@ func (s *Service) settleFrom(f *FinalizationState, row drivers.EventWitnessing, 
 		f.State = FinalizeFinalized
 	case f.ReceiptCount > 0:
 		f.State = FinalizePartial
+	case f.State == FinalizeTimeout:
+		// A wait that ended with nothing stays ended: turning it pending would
+		// leave a row with no timer behind it, and would hide it from rearm,
+		// which takes only timed-out rows.
 	default:
 		f.State = FinalizePending
 	}
@@ -1846,13 +1946,7 @@ func (s *Service) SettleUnfinalized() int {
 		if err != nil || len(events) == 0 {
 			continue
 		}
-		in := drivers.ValidateKELInput{AID: signer, RawEvents: events, Receipts: map[string][]drivers.WitnessReceipt{}}
-		for _, said := range saids {
-			held, _ := s.Contacts.GetWitnessReceipts(said)
-			for _, h := range held {
-				in.Receipts[said] = append(in.Receipts[said], drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
-			}
-		}
+		in := drivers.ValidateKELInput{AID: signer, RawEvents: events, Receipts: s.heldReceipts(saids)}
 		report := drivers.WitnessingByEvent(in)
 		for _, said := range saids {
 			s.receiptMu.Lock()
@@ -1862,6 +1956,13 @@ func (s *Service) SettleUnfinalized() int {
 				var rerr error
 				if !ok || !row.Known {
 					rerr = fmt.Errorf("event %s cannot be read in the key log of %s", said, signer)
+				}
+				// A receipt kept since the report was made is not in it, and
+				// settling from it would write a lower count over the receipt.
+				// A receipt arriving through receive is kept under this lock,
+				// so the receipts read here are the ones the count is of.
+				if held, _ := s.Contacts.GetWitnessReceipts(said); len(held) != len(in.Receipts[said]) {
+					row, rerr = s.witnessing(signer, said, nil)
 				}
 				before := *cur
 				s.settleFrom(cur, row, rerr, true)

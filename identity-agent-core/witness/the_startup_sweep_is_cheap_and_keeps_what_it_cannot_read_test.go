@@ -151,6 +151,13 @@ func TestAnEventNoWitnessHoldsIsSentAgainAndFinalizes(t *testing.T) {
 	if err := sender.Store.SaveFinalization(old); err != nil {
 		t.Fatal(err)
 	}
+	// On an existing install the background sweep runs before the first
+	// BringUpToDate: it must leave the timed-out row timed out, or nothing
+	// re-arms it.
+	sender.SettleUnfinalized()
+	if g, _ := sender.Store.GetFinalization(said); g.State != FinalizeTimeout {
+		t.Fatalf("the sweep turned a timed-out row into %s: %+v", g.State, g)
+	}
 	sender.BringUpToDate(context.Background(), d.delegate, []SignedEvent{{RawBytesB64: d.dipB64, CesrSignature: sig}}, []string{d.wkey}, 5)
 	if posts != 1 {
 		t.Fatalf("the event was sent %d times, want once", posts)
@@ -162,7 +169,7 @@ func TestAnEventNoWitnessHoldsIsSentAgainAndFinalizes(t *testing.T) {
 	// Once per boot: a row that times out with nothing again is not re-armed
 	// by the next pass.
 	_ = sender.Store.SaveFinalization(old)
-	sender.rearm(said, d.delegate, dip)
+	sender.rearm(d.delegate, []rearmRow{{said: said}})
 	if g, _ := sender.Store.GetFinalization(said); g.State != FinalizeTimeout {
 		t.Fatalf("an event was re-armed twice in one run: %+v", g)
 	}
