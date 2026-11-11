@@ -33,7 +33,7 @@ func TestAnAgentsPublishedLogCarriesItsOwnSignature(t *testing.T) {
 	}
 	a := asset.Asset{PairwiseAID: dip.AID, SigningIndex: index, DisplayName: "Research assistant"}
 
-	rawEvents, sigs := s.assetEventsAndSignatures(a, []string{dip.RawBytesB64})
+	rawEvents, sigs := asset.PublishedLog(s.DataDir, a, []string{dip.RawBytesB64})
 	if sigs[0] == "" {
 		t.Fatal("the agent's inception is served unsigned")
 	}
@@ -49,7 +49,7 @@ func TestAnAgentsPublishedLogCarriesItsOwnSignature(t *testing.T) {
 	}
 
 	// A machine-enrolled asset's key is on its own machine: nothing is invented.
-	_, none := s.assetEventsAndSignatures(asset.Asset{PairwiseAID: dip.AID}, []string{dip.RawBytesB64})
+	_, none := asset.PublishedLog(s.DataDir, asset.Asset{PairwiseAID: dip.AID}, []string{dip.RawBytesB64})
 	if none[0] != "" {
 		t.Fatal("a signature was produced for an asset whose key this agent does not hold")
 	}
