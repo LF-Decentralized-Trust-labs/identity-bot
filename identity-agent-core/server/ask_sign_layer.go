@@ -107,12 +107,14 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 	}
 	// Publish the key (did.json, for did:webs resolvers) and the KEL (OOBI, which is what a
 	// verifier takes the key from, and how a peer resolves this pairwise AID as a contact).
-	pairwiseKeys.Lock()
-	pairwiseKeys.m[icp.AID] = base64.RawURLEncoding.EncodeToString(pub)
-	pairwiseKeys.Unlock()
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	var mintedKEL []map[string]interface{}
 	if kel, kerr := s.KeriDriver.GetKel(uniqueName); kerr == nil {
-		registerPairwiseKEL(icp.AID, kel.KEL)
+		mintedKEL = kel.KEL
 	}
+	// Kept in this profile's own data directory too, so a restart of the core
+	// (a phone's OS ends it in the background) still answers for it.
+	s.rememberMintedPairwise(icp.AID, pubB64, mintedKEL)
 
 	// Write the inception down, signed, with the bytes it was signed over.
 	//

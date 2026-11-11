@@ -43,14 +43,7 @@ func TestSelfRegisteredKeyCannotOverrideOurOwnAsset(t *testing.T) {
 	})
 
 	// An attacker who knows the AID publishes a key of their own choosing.
-	pairwiseKeys.Lock()
-	pairwiseKeys.m[aid] = "attacker-supplied-key"
-	pairwiseKeys.Unlock()
-	t.Cleanup(func() {
-		pairwiseKeys.Lock()
-		delete(pairwiseKeys.m, aid)
-		pairwiseKeys.Unlock()
-	})
+	s.registerPairwiseKey(aid, "attacker-supplied-key")
 
 	if got := s.publicDidWebsPubKey(aid); got != recorded {
 		t.Fatalf("a self-registered key overrode our own record: got %q", got)
@@ -66,14 +59,7 @@ func TestAKnownAssetWeCannotResolveAnswersNothing(t *testing.T) {
 		ID: "a2", AssetType: "ai_agent", PairwiseAID: aid,
 		// no PublicKey, no SigningIndex
 	})
-	pairwiseKeys.Lock()
-	pairwiseKeys.m[aid] = "attacker-supplied-key"
-	pairwiseKeys.Unlock()
-	t.Cleanup(func() {
-		pairwiseKeys.Lock()
-		delete(pairwiseKeys.m, aid)
-		pairwiseKeys.Unlock()
-	})
+	s.registerPairwiseKey(aid, "attacker-supplied-key")
 
 	if got := s.publicDidWebsPubKey(aid); got != "" {
 		t.Fatalf("a known asset we cannot resolve must answer nothing, got %q", got)
@@ -86,14 +72,7 @@ func TestAStrangerIsStillAnsweredFromTheRegistry(t *testing.T) {
 	const aid = "ESomeCounterpartyWeHaveNeverMet"
 	s := serverWithAsset(t, asset.Asset{ID: "a3", PairwiseAID: "EDifferentAID", PublicKey: "x"})
 
-	pairwiseKeys.Lock()
-	pairwiseKeys.m[aid] = "their-published-key"
-	pairwiseKeys.Unlock()
-	t.Cleanup(func() {
-		pairwiseKeys.Lock()
-		delete(pairwiseKeys.m, aid)
-		pairwiseKeys.Unlock()
-	})
+	s.registerPairwiseKey(aid, "their-published-key")
 
 	if got := s.publicDidWebsPubKey(aid); got != "their-published-key" {
 		t.Fatalf("an unknown AID should still resolve from the registry, got %q", got)

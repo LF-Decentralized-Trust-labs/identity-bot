@@ -57,10 +57,10 @@ func TestThePublishedPairingIdentitySurvivesARestart(t *testing.T) {
 	// Remembering which identity was published is not enough on its own: both
 	// registries that make it resolvable live in memory, so without them the
 	// agent names an address it cannot serve.
-	if _, ok := getPairwiseKey("EPUBLISHED"); !ok {
+	if _, ok := s.getPairwiseKey("EPUBLISHED"); !ok {
 		t.Error("the verification key was not put back, so did.json will not resolve")
 	}
-	if _, ok := getPairwiseKEL("EPUBLISHED"); !ok {
+	if _, ok := s.getPairwiseKEL("EPUBLISHED"); !ok {
 		t.Error("the key event log was not put back, so the OOBI will not resolve")
 	}
 }

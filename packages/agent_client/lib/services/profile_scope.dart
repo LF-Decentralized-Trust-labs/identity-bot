@@ -36,10 +36,21 @@ class ProfileScope {
   /// it cannot be told (several known and none recorded).
   static Future<String?> firstId() async {
     final prefs = await _prefs;
+    await _recordTheFirstIfKnown(prefs);
     final recorded = prefs.getString(_firstProfileKey);
-    if (recorded != null && recorded.isNotEmpty) return recorded;
+    return recorded != null && recorded.isNotEmpty ? recorded : null;
+  }
+
+  /// Writes down the first profile the first time one is known. An install
+  /// from before this was recorded has one profile until a second is added,
+  /// and that moment is the last it can be told: so it is recorded whenever
+  /// exactly one is known, and again before a second is registered. With two
+  /// already known and none recorded it cannot be told, and stays unrecorded.
+  static Future<void> _recordTheFirstIfKnown(SharedPreferences prefs) async {
+    final recorded = prefs.getString(_firstProfileKey);
+    if (recorded != null && recorded.isNotEmpty) return;
     final known = prefs.getStringList(_knownProfilesKey) ?? const <String>[];
-    return known.length == 1 ? known.first : null;
+    if (known.length == 1) await prefs.setString(_firstProfileKey, known.first);
   }
 
   static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
@@ -49,6 +60,7 @@ class ProfileScope {
     if (_cached != null) return _cached!;
     final prefs = await _prefs;
     var id = prefs.getString(_activeProfileKey);
+    await _recordTheFirstIfKnown(prefs);
     if (id == null || id.isEmpty) {
       id = _mintId();
       await prefs.setString(_activeProfileKey, id);
@@ -84,6 +96,7 @@ class ProfileScope {
   static Future<void> _register(SharedPreferences prefs, String id) async {
     final known = prefs.getStringList(_knownProfilesKey) ?? <String>[];
     if (known.contains(id)) return;
+    await _recordTheFirstIfKnown(prefs); // before a second makes it unknowable
     if (known.isEmpty && prefs.getString(_firstProfileKey) == null) {
       await prefs.setString(_firstProfileKey, id);
     }

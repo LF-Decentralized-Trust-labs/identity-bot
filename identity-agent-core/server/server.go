@@ -60,6 +60,11 @@ import (
 
 type CoreServer struct {
 	DataStore store.Store
+	// pairwiseReg is what this core publishes for its pairwise identifiers
+	// (pairwise_registry.go).
+	pairwiseMu     sync.Mutex
+	pairwiseFileMu sync.Mutex
+	pairwiseReg    *pairwiseRegistry
 	// localOwnerSecret is what a request from this computer must carry to be
 	// the owner's (the_owner_at_this_computer.go).
 	localOwnerSecret string
@@ -753,6 +758,7 @@ func (s *CoreServer) Start() error {
 	// After the endpoint refresh above, because the OOBI is composed from where
 	// this agent is currently reachable.
 	s.restorePairingOffer()
+	s.restoreMintedPairwise()
 
 	if s.UpdateService != nil {
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", s.Port)
@@ -900,7 +906,7 @@ func (s *CoreServer) Stop() {
 	// does not outlive it: the embedded core is stopped and started against
 	// another identity's data in the same process, and a later core must not
 	// answer /public/{aid}/did.json or an OOBI for the earlier one.
-	forgetPublishedPairwise()
+	s.forgetPublishedPairwise()
 
 	// Tell everything that runs on its own to stop, before anything waits,
 	// and start no more background work: a request finishing while the
@@ -3596,7 +3602,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		}
 		// Minted pairwise AID (e.g. an add-contact Ask signer): serve its OOBI from the
 		// registered KEL so a peer can resolve + add it.
-		if kel, ok := getPairwiseKEL(requestedAID); ok {
+		if kel, ok := s.getPairwiseKEL(requestedAID); ok {
 			publicURL := s.getPublicURL(r)
 			doc := map[string]interface{}{
 				"aid":  requestedAID,

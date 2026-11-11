@@ -17,15 +17,13 @@ import (
 
 // registerSigner mints an ed25519 keypair, registers its public key under aid so
 // publicDidWebsPubKey resolves it, and returns the private key for signing.
-func registerSigner(t *testing.T, aid string) ed25519.PrivateKey {
+func registerSigner(t *testing.T, s *CoreServer, aid string) ed25519.PrivateKey {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pairwiseKeys.Lock()
-	pairwiseKeys.m[aid] = base64.RawURLEncoding.EncodeToString(pub)
-	pairwiseKeys.Unlock()
+	s.registerPairwiseKey(aid, base64.RawURLEncoding.EncodeToString(pub))
 	return priv
 }
 
@@ -59,7 +57,7 @@ func TestEnvelopeAbsentIsNoOp(t *testing.T) {
 
 func TestEnvelopeValidVerifies(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	priv := registerSigner(t, "EAgentValid")
+	priv := registerSigner(t, s, "EAgentValid")
 	params := []byte(`{"capability_id":"infra.zone.list"}`)
 	nonce := "nonce-valid-1"
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
@@ -80,7 +78,7 @@ func TestEnvelopeValidVerifies(t *testing.T) {
 
 func TestEnvelopeStaleRejected(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	priv := registerSigner(t, "EAgentStale")
+	priv := registerSigner(t, s, "EAgentStale")
 	params := []byte("{}")
 	nonce := "nonce-stale"
 	ts := strconv.FormatInt(time.Now().Add(-10*time.Minute).Unix(), 10) // outside 5m window
@@ -97,7 +95,7 @@ func TestEnvelopeStaleRejected(t *testing.T) {
 
 func TestEnvelopeReplayRejected(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	priv := registerSigner(t, "EAgentReplay")
+	priv := registerSigner(t, s, "EAgentReplay")
 	params := []byte("{}")
 	nonce := "nonce-replay-once"
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
@@ -120,7 +118,7 @@ func TestEnvelopeReplayRejected(t *testing.T) {
 
 func TestEnvelopeTamperedRejected(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	priv := registerSigner(t, "EAgentTamper")
+	priv := registerSigner(t, s, "EAgentTamper")
 	params := []byte(`{"capability_id":"infra.zone.list"}`)
 	nonce := "nonce-tamper"
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
@@ -138,7 +136,7 @@ func TestEnvelopeTamperedRejected(t *testing.T) {
 
 func TestEnvelopeSignerMismatchRejected(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	priv := registerSigner(t, "EAgentReal")
+	priv := registerSigner(t, s, "EAgentReal")
 	params := []byte("{}")
 	nonce := "nonce-mismatch"
 	ts := strconv.FormatInt(time.Now().Unix(), 10)

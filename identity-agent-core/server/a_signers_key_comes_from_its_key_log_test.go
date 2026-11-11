@@ -39,7 +39,7 @@ func aMintedSigner(t *testing.T, s *CoreServer) (aid string, pub ed25519.PublicK
 	}); err != nil {
 		t.Fatal(err)
 	}
-	registerPairwiseKEL(icp.AID, []map[string]interface{}{icp.InceptionEvent})
+	s.registerPairwiseKEL(icp.AID, []map[string]interface{}{icp.InceptionEvent})
 	return icp.AID, pub
 }
 

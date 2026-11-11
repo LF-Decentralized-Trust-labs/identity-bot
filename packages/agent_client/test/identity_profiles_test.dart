@@ -308,6 +308,22 @@ void main() {
         await SecureKeyStore.saveMnemonic(['abandon', 'about']);
         expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
       });
+      test('a data directory with an identity in it means it is, with no card, '
+          'lock or phrase', () async {
+        // A desktop controller profile, or one founded before cards existed
+        // and never logged out: nothing but the core's own files says so.
+        final id = await ProfileScope.activeId();
+        final data = await IdentityProfiles.dataDirectoryFor(id);
+        File('$data${Platform.pathSeparator}.port').writeAsStringSync('1');
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isFalse,
+            reason: 'the files that only say where a core listens are not an '
+                'identity');
+        File('$data${Platform.pathSeparator}identity.db').writeAsStringSync('x');
+        expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue);
+        expect(await IdentityProfiles.makeRoomForANewOne(), isTrue,
+            reason: 'Create must not found where an identity already is');
+        expect(await ProfileScope.activeId(), isNot(id));
+      });
       test('a core that cannot be asked is not an empty profile', () async {
         SecureKeyStore.holdPhraseWith(_ARefusingHolder());
         expect(await IdentityProfiles.openOneHoldsAnIdentity(), isTrue,
@@ -330,6 +346,21 @@ void main() {
       expect(await ProfileScope.activeId(), id);
       await IdentityProfiles.clearFoundingMarker();
       expect(await IdentityProfiles.foundingWasStarted(), isFalse);
+    });
+
+    test('the founding marker names the identity the core prepared', () async {
+      expect(await IdentityProfiles.foundingAid(), isNull);
+      await IdentityProfiles.markFoundingStarted();
+      expect(await IdentityProfiles.foundingWasStarted(), isTrue);
+      expect(await IdentityProfiles.foundingAid(), isNull,
+          reason: 'started, but the core has prepared nothing yet');
+      await IdentityProfiles.recordFoundingAid('EPrepared');
+      expect(await IdentityProfiles.foundingAid(), 'EPrepared');
+      await IdentityProfiles.markFoundingStarted();
+      expect(await IdentityProfiles.foundingAid(), 'EPrepared',
+          reason: 'a retry keeps the identifier an earlier run recorded');
+      await IdentityProfiles.clearFoundingMarker();
+      expect(await IdentityProfiles.foundingAid(), isNull);
     });
 
     test('a profile id that is not a profile id names no directory', () async {
@@ -362,9 +393,33 @@ void main() {
       where.forEach((os, text) {
         final m = IdentityProfiles.noScreenLockMessage(platform: os);
         expect(m, contains('no screen lock'));
-        expect(m, contains('anyone holding it can open'));
+        final computer = os == 'windows' || os == 'macos';
+        expect(m, contains(computer ? 'anyone using it can open this identity'
+            : 'anyone holding it can open this identity'));
         expect(m, contains(text));
       });
+    });
+
+    test('an organisation says "this organisation", never "this identity"', () {
+      final m = IdentityProfiles.noScreenLockMessage(
+          platform: 'macos', what: 'organisation');
+      expect(m, contains('can open this organisation'));
+      expect(m, isNot(contains('this identity')));
+    });
+
+    test('a log-out that failed says so in plain words, not the exception',
+        () async {
+      final said = <String>[];
+      final went = await IdentityProfiles.logOutAndTell(
+          what: 'organisation',
+          logOut: () async =>
+              throw const TheCoreDidNotStop('SocketException: connection reset by 127.0.0.1:5050'),
+          say: (title, body) async => said.add('$title|$body'));
+      expect(went, isFalse);
+      expect(said.single, startsWith('Not logged out|'));
+      expect(said.single, contains('this organisation'));
+      expect(said.single, isNot(contains('Socket')));
+      expect(said.single, isNot(contains('5050')));
     });
   });
 }

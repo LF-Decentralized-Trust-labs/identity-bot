@@ -32,44 +32,7 @@ import (
 // never takes its key from here: it comes from the key log the assertion carries. Registered
 // before the SPA catch-all so it returns real did.json, not the app shell. The same endpoint
 // answers for PAIRWISE AIDs minted here or published to the key registry with their key log.
-var pairwiseKeys = struct {
-	sync.Mutex
-	m map[string]string // aid -> base64url Ed25519 pubkey
-}{m: map[string]string{}}
-
-// KELs of minted pairwise AIDs, so their OOBI (/public/oobi/{aid}) resolves when a peer adds
-// us as a contact.
-var pairwiseKELs = struct {
-	sync.Mutex
-	m map[string][]map[string]interface{}
-}{m: map[string][]map[string]interface{}{}}
-
-// forgetPublishedPairwise empties what a stopped core published (pairwiseKeys,
-// pairwiseKELs) and its contact key-check results (kelCheckCache).
-func forgetPublishedPairwise() {
-	pairwiseKeys.Lock()
-	pairwiseKeys.m = map[string]string{}
-	pairwiseKeys.Unlock()
-	pairwiseKELs.Lock()
-	pairwiseKELs.m = map[string][]map[string]interface{}{}
-	pairwiseKELs.Unlock()
-	kelCheckCache.Lock()
-	kelCheckCache.m = map[string]kelCheckResult{}
-	kelCheckCache.Unlock()
-}
-
-func registerPairwiseKEL(aid string, kel []map[string]interface{}) {
-	pairwiseKELs.Lock()
-	pairwiseKELs.m[aid] = kel
-	pairwiseKELs.Unlock()
-}
-
-func getPairwiseKEL(aid string) ([]map[string]interface{}, bool) {
-	pairwiseKELs.Lock()
-	defer pairwiseKELs.Unlock()
-	k, ok := pairwiseKELs.m[aid]
-	return k, ok
-}
+// The maps behind that live per core (pairwise_registry.go).
 
 // fullySignedLogOf is aid's stored key log (signedEventsOf) split into the
 // two lists an introduction carries, or ok false when any event lacks its
@@ -91,19 +54,6 @@ func (s *CoreServer) fullySignedLogOf(aid string) (raws, sigs []string, ok bool)
 		sigs = append(sigs, ev.CesrSignature)
 	}
 	return raws, sigs, true
-}
-
-func registerPairwiseKey(aid, publicKeyB64 string) {
-	pairwiseKeys.Lock()
-	pairwiseKeys.m[aid] = publicKeyB64
-	pairwiseKeys.Unlock()
-}
-
-func getPairwiseKey(aid string) (string, bool) {
-	pairwiseKeys.Lock()
-	defer pairwiseKeys.Unlock()
-	k, ok := pairwiseKeys.m[aid]
-	return k, ok
 }
 
 func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
@@ -655,10 +605,7 @@ func (s *CoreServer) publicDidWebsPubKey(aid string) string {
 	}
 
 	// Identities this agent minted itself, whose keys it recorded as it made them.
-	pairwiseKeys.Lock()
-	p := pairwiseKeys.m[aid]
-	pairwiseKeys.Unlock()
-	if p != "" {
+	if p, _ := s.getPairwiseKey(aid); p != "" {
 		return p
 	}
 	// Identities that published here, each proved by its key log.

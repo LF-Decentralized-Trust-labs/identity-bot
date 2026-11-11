@@ -27,11 +27,17 @@ func asAPublicWatcherWithAContact(t *testing.T, s *CoreServer) {
 	withAContactWhoMetEAIDAt(s)
 }
 
+// twoEventLog is the log a minted pairwise identifier has.
+func twoEventLog(aid string) []map[string]interface{} {
+	return []map[string]interface{}{{"t": "icp", "i": aid, "s": "0"}, {"t": "rot", "i": aid, "s": "1"}}
+}
+
+// serveLog returns the digest at 1 of the log an agent serves for aid; the
+// agent is made to serve it with registerPairwiseKEL(aid, twoEventLog(aid)).
 // serveLog makes the agent serve a two-event log for aid, as a minted pairwise
 // identifier is, and returns its digest at 1.
 func serveLog(aid string) string {
-	kel := []map[string]interface{}{{"t": "icp", "i": aid, "s": "0"}, {"t": "rot", "i": aid, "s": "1"}}
-	registerPairwiseKEL(aid, kel)
+	kel := twoEventLog(aid)
 	d, err := witnessproto.KelDigestAtSeq(kel, 1)
 	if err != nil {
 		panic(err)
@@ -191,6 +197,7 @@ func TestAnOptedOutIdentityIsAnsweredExactlyAsOneNeverSeen(t *testing.T) {
 	const seen, neverSeen = "ESeenAID", "ENeverSeenAID"
 	digest := serveLog(seen)
 	s := watcherAgent(t, seen, 1, digest)
+	s.registerPairwiseKEL(seen, twoEventLog(seen))
 	asAPublicWatcherWithAContact(t, s)
 	s.WatcherService.SignDigest = func(stmt string) (string, string, error) {
 		return "Ewatcher", "signature-over-" + stmt, nil

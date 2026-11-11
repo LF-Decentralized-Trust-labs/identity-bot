@@ -245,7 +245,10 @@ class BackendProcessService {
           }
         }
       } else {
-        final result = await Process.run('lsof', ['-ti', ':$port']);
+        // The listener only: a plain `-ti :port` also lists this app's own
+        // connection to it, which may come first.
+        final result =
+            await Process.run('lsof', ['-ti', 'tcp:$port', '-sTCP:LISTEN']);
         if (result.exitCode == 0) {
           final pid = (result.stdout as String).trim().split('\n').first;
           if (pid.isNotEmpty && int.tryParse(pid) != null) {
@@ -754,12 +757,15 @@ class BackendProcessService {
           'this profile\'s, so it was left alone');
       return false;
     }
-    final pid = _pidFromPidFile() ?? (await checkPortConflict(port))?.pid;
-    final id = pid == null ? null : int.tryParse('$pid');
-    if (id == null) {
-      _appendOutput('[stop] could not tell which process holds port $port');
+    final held = (await checkPortConflict(port))?.pid;
+    final decided = decideWhichProcessEndsTheCore(
+        holdingThePort: held, fromPidFile: _pidFromPidFile());
+    if (decided.refusal != null) {
+      _appendOutput('[stop] ${decided.refusal} (port $port)');
       return false;
     }
+    final id = int.tryParse(decided.pid ?? '');
+    if (id == null) return false;
     for (final hard in const [false, true]) {
       try {
         if (Platform.isWindows) {
@@ -780,6 +786,33 @@ class BackendProcessService {
       }
     }
     return false;
+  }
+
+  /// Which process is ended to stop a core that answers on this profile's
+  /// port. The process HOLDING THE PORT is the one. A pid file beside it is
+  /// only a cross-check: a stale one, left beside an adopted core too old to
+  /// write one, can name an unrelated process, so when both exist they must
+  /// agree, and a pid file alone is not enough to signal anything.
+  @visibleForTesting
+  static ({String? pid, String? refusal}) decideWhichProcessEndsTheCore(
+      {String? holdingThePort, String? fromPidFile}) {
+    final held = int.tryParse(holdingThePort ?? '');
+    if (held == null) {
+      return (
+        pid: null,
+        refusal: 'could not tell which process holds the port, so none was '
+            'signalled'
+      );
+    }
+    final filed = fromPidFile == null ? null : int.tryParse(fromPidFile);
+    if (filed != null && filed != held) {
+      return (
+        pid: null,
+        refusal: 'the pid file names $filed but $held holds the port, so '
+            'none was signalled'
+      );
+    }
+    return (pid: '$held', refusal: null);
   }
 
   String get _pidFilePath => '${_backendDataDir()}${Platform.pathSeparator}.pid';

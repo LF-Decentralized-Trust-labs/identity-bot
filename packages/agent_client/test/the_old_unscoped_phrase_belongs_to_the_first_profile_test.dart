@@ -49,4 +49,30 @@ void main() {
     expect(await ProfileScope.firstId(), first);
     expect(IdentityProfiles.isAProfileId('abcdefghij12'), isTrue);
   });
+
+  test('an install that never recorded its first profile does when a second '
+      'is begun', () async {
+    // What an earlier version left: one known profile, no first recorded.
+    SharedPreferences.setMockInitialValues({
+      'active_profile_id': 'olderprofile',
+      'known_profile_ids': ['olderprofile'],
+    });
+    ProfileScope.resetCacheForTest();
+    await ProfileScope.activeId();
+    await ProfileScope.setActive('abcdefghij12');
+    await ProfileScope.setActive('zyxwvutsrq98');
+    expect(await ProfileScope.firstId(), 'olderprofile',
+        reason: 'with two known it could no longer be told, so it must have '
+            'been written down before the second');
+  });
+
+  test('with two already known and none recorded it is not guessed',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'active_profile_id': 'bbbbbbbbbbbb',
+      'known_profile_ids': ['aaaaaaaaaaaa', 'bbbbbbbbbbbb'],
+    });
+    ProfileScope.resetCacheForTest();
+    expect(await ProfileScope.firstId(), isNull);
+  });
 }

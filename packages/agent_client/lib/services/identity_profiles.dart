@@ -428,9 +428,11 @@ class IdentityProfiles {
   };
 
   /// What to tell a person whose device has no screen lock: that the lock on a
-  /// logged-out identity is only as strong as the device's own, and where to
-  /// set one. [platform] is one of android, ios, windows, macos.
-  static String noScreenLockMessage({String? platform}) {
+  /// logged-out [what] ("identity", or "organisation" in the organisation app)
+  /// is only as strong as the device's own, and where to set one. [platform] is
+  /// one of android, ios, windows, macos. On a computer it is "anyone using
+  /// it", on a phone "anyone holding it".
+  static String noScreenLockMessage({String? platform, String what = 'identity'}) {
     final p = platform ?? Platform.operatingSystem;
     final where = switch (p) {
       'android' => 'Android Settings > Security > Screen lock',
@@ -439,8 +441,18 @@ class IdentityProfiles {
       'macos' => 'macOS System Settings > Lock Screen / Touch ID & Password',
       _ => "this device's settings",
     };
-    return 'This device has no screen lock, so anyone holding it can open '
-        'this identity. Set one in $where.';
+    final computer = p == 'windows' || p == 'macos' || p == 'linux';
+    return 'This ${computer ? 'computer' : 'device'} has no screen lock, so '
+        'anyone ${computer ? 'using' : 'holding'} it can open this $what. '
+        'Set one in $where.';
+  }
+
+  /// Why an identity or organisation did not open, in plain words. The detail
+  /// of [error] goes to the log, not to the person.
+  static String couldNotOpenBecause(Object error, {String what = 'identity'}) {
+    debugPrint('[profiles] could not open: $error');
+    return 'Could not open this $what: its Identity Agent did not start or '
+        'did not answer. Try again, or quit the app and open it again.';
   }
 
   static Future<File> _lockedMarker(String profileId) async =>
@@ -499,18 +511,26 @@ class IdentityProfiles {
   /// may still be answering, so "logged out" would be untrue. A device with no
   /// screen lock is told so now (see [noScreenLockMessage]). One place, for
   /// both apps, so they cannot say different things.
+  ///
+  /// [what] is "identity", or "organisation" in the organisation app. What
+  /// failed is said in plain words; its detail is in the log.
   static Future<bool> logOutAndTell({
     required Future<void> Function() logOut,
     required Future<void> Function(String title, String body) say,
+    String what = 'identity',
   }) async {
     try {
       await logOut();
     } on TheCoreDidNotStop catch (e) {
-      await say('Not logged out', '$e');
+      debugPrint('[profiles] not logged out: ${e.detail}');
+      await say(
+          'Not logged out',
+          'The Identity Agent for this $what could not be stopped, so it is '
+              'not logged out. Quit the app and open it again.');
       return false;
     }
     if (await deviceHasNoScreenLock()) {
-      await say('Logged out', noScreenLockMessage());
+      await say('Logged out', noScreenLockMessage(what: what));
     }
     return true;
   }
@@ -570,14 +590,29 @@ class IdentityProfiles {
   /// answer "no" on any error, so a core that was stopped, slow or refusing
   /// looked like an empty profile; the app founded in the occupied one, the
   /// core said "already exists", and the interrupted-founding repair opened
-  /// the previous identity. Now a card, a lock marker, or a phrase held (or
-  /// one that cannot be ruled out) each mean "occupied": a new profile is
-  /// begun. The only "no" is a profile with none of them.
+  /// the previous identity. Now a card, a lock marker, a phrase held (or one
+  /// that cannot be ruled out), or ANYTHING in the profile's data directory
+  /// each mean "occupied": a new profile is begun. The data directory counts
+  /// because an identity can be there with none of the others: a desktop
+  /// controller profile keeps no phrase, and one founded before cards existed
+  /// and never logged out has no card or lock. The only "no" is a profile with
+  /// none of them.
+  ///
+  /// The cost is that a profile whose core has run (it writes its store when
+  /// it starts) is occupied even when nothing was founded in it, so a retry
+  /// after a failure before the founding begins another profile and leaves
+  /// that one empty and unlisted. An empty directory is the price of never
+  /// founding on top of an identity.
   @visibleForTesting
   static Future<bool> Function() openOneHoldsAnIdentity = () async {
     final id = await ProfileScope.activeId();
     if (File(await _cardPathFor(id)).existsSync()) return true;
     if (await isLocked(id)) return true;
+    try {
+      if (await _dataDirectoryHoldsAnything(id)) return true;
+    } catch (_) {
+      return true; // cannot be ruled out, so not empty
+    }
     try {
       if (await SecureKeyStore.hasMnemonic()) return true;
     } catch (_) {
@@ -586,6 +621,22 @@ class IdentityProfiles {
     return false;
   };
 
+  /// Whether [profileId]'s data directory holds anything but the files a
+  /// running core leaves to say where it listens (`.port`, `.pid`). Does not
+  /// create the directory.
+  static Future<bool> _dataDirectoryHoldsAnything(String profileId) async {
+    final dir = Directory(
+        '${await directoryFor(profileId)}${Platform.pathSeparator}data');
+    if (!dir.existsSync()) return false;
+    await for (final entry in dir.list(followLinks: false)) {
+      final name = entry.uri.pathSegments
+          .lastWhere((s) => s.isNotEmpty, orElse: () => '');
+      if (name == '.port' || name == '.pid') continue;
+      return true;
+    }
+    return false;
+  }
+
   // ── a founding this run started ──────────────────────────────────────────
 
   static const _foundingFile = 'founding';
@@ -593,14 +644,44 @@ class IdentityProfiles {
   static Future<File> _foundingMarker(String profileId) async => File(
       '${await directoryFor(profileId)}${Platform.pathSeparator}$_foundingFile');
 
-  /// Written before the founding is asked of the core. A repair of an
-  /// "already exists" answer is only for a founding this run started; without
-  /// the marker the identity that is there is somebody else's, and is not
-  /// opened.
+  /// Written before the words are saved and before the founding is asked of
+  /// the core. A repair of an "already exists" answer is only for a founding
+  /// this run started; without the marker the identity that is there is
+  /// somebody else's, and is not opened.
+  ///
+  /// Written first of all because the words are saved next: a kill between
+  /// the two the other way round leaves a profile that holds a phrase and
+  /// nothing saying why. An existing marker is kept as it is, with the
+  /// identifier it already names.
   static Future<void> markFoundingStarted() async {
     final f = await _foundingMarker(await ProfileScope.activeId());
+    if (f.existsSync()) return;
     await f.parent.create(recursive: true);
-    await f.writeAsString(DateTime.now().toUtc().toIso8601String());
+    await f.writeAsString(jsonEncode(
+        {'started': DateTime.now().toUtc().toIso8601String(), 'aid': ''}));
+  }
+
+  /// Records the identifier the core prepared for this founding, before it is
+  /// signed or committed. A repair opens only an identity with this one.
+  static Future<void> recordFoundingAid(String aid) async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    await f.parent.create(recursive: true);
+    await f.writeAsString(jsonEncode(
+        {'started': DateTime.now().toUtc().toIso8601String(), 'aid': aid}));
+  }
+
+  /// The identifier the open profile's founding was prepared for, or null
+  /// when none was recorded (the run ended before the core prepared one).
+  static Future<String?> foundingAid() async {
+    final f = await _foundingMarker(await ProfileScope.activeId());
+    if (!f.existsSync()) return null;
+    try {
+      final body = jsonDecode(await f.readAsString());
+      final aid = body is Map ? body['aid'] : null;
+      return aid is String && aid.isNotEmpty ? aid : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Whether the open profile has a founding that was started and not
