@@ -264,16 +264,45 @@ func isLocalhost(r *http.Request) bool {
 	return ip == "127.0.0.1" || ip == "::1" || ip == "localhost"
 }
 
+// maxContactNamedWatchers caps the watcher addresses a contact names in its own
+// introduction that are queried. They are advisory and the contact chose them.
+const maxContactNamedWatchers = 3
+
+// cappedWatcherHints drops any address that is not https (the same rule as the
+// owner's own hints, so a contact cannot make this agent send a query in the
+// clear that the owner could not), removes repeats and keeps the first
+// maxContactNamedWatchers.
+func cappedWatcherHints(in []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, h := range in {
+		if !isHTTPSWatcherAddress(h) || seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
+		if len(out) == maxContactNamedWatchers {
+			break
+		}
+	}
+	return out
+}
+
 func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) *watcher.VerifyKelResult {
 	if s.WatcherService == nil || aid == "" || len(kel) == 0 {
 		return nil
 	}
 	res, err := s.WatcherService.VerifyKel(ctx, watcher.VerifyKelInput{
-		AID: aid, KEL: kel, SourceType: source, SourceURL: sourceURL, BootstrapL2: bootstrap,
+		AID: aid, KEL: kel, SourceType: source, SourceURL: sourceURL, BootstrapL2: cappedWatcherHints(bootstrap),
 	})
 	if err != nil {
 		log.Printf("[watcher] VerifyKel %s: %v", aid, err)
 		return nil
+	}
+	// Kept so a screen can say what was found and when. A failure to keep it
+	// is logged and does not change the verdict the caller acts on.
+	if err := s.WatcherService.RecordCheck(res); err != nil {
+		log.Printf("[watcher] could not keep the check of %s: %v", aid, err)
 	}
 	if res.Blocked {
 		log.Printf("[watcher] DUPLICITY blocked aid=%s seq=%d reason=%s", aid, res.SequenceNum, res.Reason)
@@ -285,7 +314,7 @@ func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[
 // identity. Under /api, so a stranger is refused; a paired controller may read it.
 func (s *CoreServer) handleWatcherOptOutGet(w http.ResponseWriter, r *http.Request) {
 	if s.WatcherService == nil {
-		writeError(w, http.StatusNotFound, "watcher not running", "")
+		jsonreply.Write(w, http.StatusNotFound, ErrorResponse{Error: "watcher not running", Code: "watcher_off"})
 		return
 	}
 	aid := r.URL.Query().Get("aid")
@@ -311,7 +340,7 @@ func (s *CoreServer) handleWatcherOptOutGet(w http.ResponseWriter, r *http.Reque
 // let a forked key log pass unnoticed.
 func (s *CoreServer) handleWatcherOptOutSet(w http.ResponseWriter, r *http.Request) {
 	if s.WatcherService == nil {
-		writeError(w, http.StatusNotFound, "watcher not running", "")
+		jsonreply.Write(w, http.StatusNotFound, ErrorResponse{Error: "watcher not running", Code: "watcher_off"})
 		return
 	}
 	var req struct {
@@ -328,4 +357,14 @@ func (s *CoreServer) handleWatcherOptOutSet(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"aid": req.AID, "opted_out": *req.OptedOut})
+}
+
+// writeDuplicity refuses a contact whose key history the watcher found forked.
+// The code and aid are for the app, which words the refusal itself; error and
+// details are for a log or a developer, and "details" is the technical reason.
+func writeDuplicity(w http.ResponseWriter, aid, reason string) {
+	jsonreply.Write(w, http.StatusConflict, map[string]interface{}{
+		"error": "KEL duplicity detected", "details": reason,
+		"code": "duplicity", "aid": aid,
+	})
 }

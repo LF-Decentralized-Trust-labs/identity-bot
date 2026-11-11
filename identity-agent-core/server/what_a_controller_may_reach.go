@@ -225,6 +225,13 @@ var controllerOwnerOnly = map[string]string{
 	// list is not (like the opt-out read): the owner reads it from any of their
 	// own apps.
 	"PUT /api/watcher/peers": "this decides which contacts the watcher tells whom this agent is checking on",
+	// Who the watcher believes decides what a duplicity check can find, and an
+	// alert is the owner's to close: a controller that could clear one could
+	// hide a fork from the person it was raised for.
+	"PUT /api/watcher/trusted":                  "the watchers this agent trusts decide whose word a duplicity check believes",
+	"PUT /api/watcher/hints":                    "the watchers this identity names in its introduction decide whom every new contact is pointed to",
+	"POST /api/watcher/alerts/{id}/acknowledge": "an alert is raised for the owner, and what the owner has seen is the owner's to record",
+	"POST /api/watcher/alerts/{id}/resolve":     "closing a duplicity alert is the owner's call, and a controller that could close one could hide a fork",
 
 	// --- who else may act for this identity ---
 	//

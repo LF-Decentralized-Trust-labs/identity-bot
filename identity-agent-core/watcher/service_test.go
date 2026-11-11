@@ -103,6 +103,11 @@ CREATE TABLE IF NOT EXISTS duplicity_alerts (
     our_digest TEXT NOT NULL, their_digest TEXT NOT NULL, source_url TEXT,
     detected_at TEXT NOT NULL, resolved INTEGER DEFAULT 0, resolution_note TEXT
 );
+CREATE TABLE IF NOT EXISTS watcher_alert_ack (alert_id INTEGER PRIMARY KEY, acknowledged_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS watcher_contact_check (
+    aid TEXT PRIMARY KEY, checked_at TEXT NOT NULL, verdict TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '', sources_json TEXT NOT NULL DEFAULT '[]'
+);
 CREATE TABLE IF NOT EXISTS watcher_opt_out (aid TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS watcher_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `)

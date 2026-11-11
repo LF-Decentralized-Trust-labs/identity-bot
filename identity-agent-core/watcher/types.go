@@ -32,6 +32,12 @@ type FirstSeenRecord struct {
 }
 
 // DuplicityAlert is an immutable fork-detection audit record.
+// The kinds of alert. Only a duplicity alert blocks.
+const (
+	AlertKindDuplicity  = "duplicity"
+	AlertKindEscalation = "escalation"
+)
+
 type DuplicityAlert struct {
 	ID             int64
 	AID            string
@@ -42,6 +48,13 @@ type DuplicityAlert struct {
 	DetectedAt     time.Time
 	Resolved       bool
 	ResolutionNote string
+	// Kind is AlertKindDuplicity (blocks the log it is about until resolved) or
+	// AlertKindEscalation (the standing watcher disagreed: shown, never blocks). Empty means
+	// duplicity.
+	Kind string
+	// AcknowledgedAt is empty until the owner has seen the alert. An alert
+	// stays one until it is resolved.
+	AcknowledgedAt time.Time
 }
 
 // DigestResponse is the watcher /public/kel-digest contract.
@@ -112,4 +125,89 @@ type VerifyKelResult struct {
 	sourcesQueried []SourceOutcome
 	duplicityAlert *DuplicityAlert
 	firstContact   bool
+}
+
+// Verdicts of a check of one identity's key log.
+const (
+	VerdictConfirmed  = "confirmed"  // no source disagreed
+	VerdictDuplicity  = "duplicity"  // two histories were seen for the same event
+	VerdictUnreadable = "unreadable" // the log could not be placed
+	VerdictEscalated  = "escalated"  // the standing watcher disagreed; shown to the owner, nothing was blocked
+)
+
+// Outcomes a source gave in a check, as the owner is told them. A source's
+// own outcome is "agrees" or "disagrees", or says why it could not answer.
+const (
+	OutcomeAgrees      = "agrees"
+	OutcomeDisagrees   = "disagrees"
+	OutcomeNoAnswer    = "no_answer"   // reached, but had not seen this identity
+	OutcomeUnreachable = "unreachable" // could not be asked
+)
+
+// CheckSource is what one source said in the newest check of an identity.
+// Type is "own_record", "standing", "hint" or "peer". It never carries a digest,
+// and the own record's "seen before or not" is folded into "agrees", so this
+// reveals nothing the opt-out check exists to hide.
+type CheckSource struct {
+	Type    string `json:"type"`
+	URL     string `json:"url,omitempty"`
+	Outcome string `json:"outcome"`
+}
+
+// ContactCheck is the newest check of one identity: when, the verdict, and what
+// each source said. A contact that has never been checked has none, which is
+// not the same as one whose check found nothing wrong.
+type ContactCheck struct {
+	AID       string        `json:"aid"`
+	CheckedAt string        `json:"checked_at"`
+	Verdict   string        `json:"verdict"`
+	Reason    string        `json:"reason,omitempty"`
+	Sources   []CheckSource `json:"sources"`
+}
+
+// Check summarises a result for the owner. The per-source detail is folded here,
+// at the one place it is read, so what leaves the package is the summary and
+// not the observation.
+func (r *VerifyKelResult) Check() ContactCheck {
+	c := ContactCheck{
+		AID: r.AID, CheckedAt: time.Now().UTC().Format(time.RFC3339),
+		Verdict: VerdictConfirmed, Reason: r.Reason, Sources: []CheckSource{},
+	}
+	switch {
+	case r.OverallOutcome == "unreadable":
+		c.Verdict = VerdictUnreadable
+	case r.Blocked:
+		c.Verdict = VerdictDuplicity
+	case r.OverallOutcome == "escalated":
+		c.Verdict = VerdictEscalated
+	}
+	for _, so := range r.sourcesQueried {
+		cs := CheckSource{URL: so.URL}
+		switch so.Type {
+		case "L1":
+			cs.Type = "own_record"
+		case "L2_standing":
+			cs.Type = "standing"
+		case "L2_bootstrap":
+			cs.Type = "hint"
+		default:
+			cs.Type = "peer"
+		}
+		switch so.Outcome {
+		case "first_seen", "match", "confirmed":
+			cs.Outcome = OutcomeAgrees
+		case "mismatch":
+			cs.Outcome = OutcomeDisagrees
+		case "unavailable", "unreachable", "error":
+			cs.Outcome = OutcomeUnreachable
+		default:
+			cs.Outcome = OutcomeNoAnswer
+		}
+		// The own record cannot "have no answer"; it either held or it did not.
+		if cs.Type == "own_record" && cs.Outcome == OutcomeNoAnswer {
+			cs.Outcome = OutcomeAgrees
+		}
+		c.Sources = append(c.Sources, cs)
+	}
+	return c
 }

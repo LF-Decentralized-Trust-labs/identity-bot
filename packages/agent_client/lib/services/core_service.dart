@@ -11,6 +11,7 @@ import 'the_witnesses_of_this_devices_events.dart' show WitnessSet;
 import 'root_seed_handoff.dart';
 import '../crypto/keys.dart';
 import '../models/public_name_rule.dart';
+import '../models/what_the_watcher_found.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
 
@@ -1080,6 +1081,8 @@ class CoreService {
       return ResolvedContactResponse.fromJson(jsonDecode(response.body));
     } else {
       final body = jsonDecode(response.body);
+      final refused = ContactRefusedForDuplicity.fromResponse(response.statusCode, body);
+      if (refused != null) throw refused;
       throw Exception(body['error'] ?? 'OOBI resolution failed: ${response.statusCode}');
     }
   }
@@ -1094,6 +1097,8 @@ class CoreService {
       return ContactResponse.fromJson(jsonDecode(response.body));
     } else {
       final body = jsonDecode(response.body);
+      final refused = ContactRefusedForDuplicity.fromResponse(response.statusCode, body);
+      if (refused != null) throw refused;
       throw Exception(body['error'] ?? 'Add contact failed: ${response.statusCode}');
     }
   }
@@ -2450,6 +2455,144 @@ class CoreService {
     final keys = cfg['seal_to_public_keys_b64'];
     if (keys is! List) return const [];
     return keys.map((k) => k.toString()).where((k) => k.isNotEmpty).toList();
+  }
+
+
+  // ── What the watcher found (the core's /api/watcher/*) ──────────────────────
+
+  Future<Map<String, dynamic>> _watcherJson(http.Response r, String what) {
+    if (r.statusCode == 200) {
+      return Future.value(jsonDecode(r.body) as Map<String, dynamic>);
+    }
+    if (r.statusCode == 404 && _code(r.body) == 'watcher_off') {
+      throw const WatcherNotRunning();
+    }
+    throw Exception('$what failed: ${r.statusCode}');
+  }
+
+  /// The machine-readable `code` of an error answer, so a screen never tells
+  /// "watcher off" from "never checked" by the wording of the message.
+  static String? _code(String body) {
+    try {
+      return (jsonDecode(body) as Map)['code'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Is the watcher on, and whom does it believe. An agent with no watcher
+  /// answers "off" rather than failing, so a screen can say so.
+  Future<WatcherStatus> getWatcherStatus() async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/status'));
+    return WatcherStatus.fromJson(await _watcherJson(r, 'Watcher status'));
+  }
+
+  /// Duplicity alerts, newest first. [onlyOpen] leaves out resolved ones. Throws
+  /// when the watcher is off, so "off" is never read as "no alerts".
+  Future<List<WatcherAlert>> getWatcherAlerts({String? aid, bool onlyOpen = false}) async {
+    final q = <String, String>{if (aid != null) 'aid': aid, if (onlyOpen) 'open': 'true'};
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/alerts').replace(queryParameters: q.isEmpty ? null : q));
+    final body = await _watcherJson(r, 'Watcher alerts');
+    return ((body['alerts'] ?? const []) as List)
+        .map((e) => WatcherAlert.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// The identities with an open alert, for a contact list's Blocked filter.
+  /// When the watcher is off there are none to show, and the list simply has
+  /// no Blocked entries; the Watchers screen is where "off" is said. Any other
+  /// failure is thrown: a safety signal that vanishes quietly is worse than an
+  /// error.
+  Future<Set<String>> getAidsWithOpenAlerts() async {
+    try {
+      return aidsWithOpenAlerts(await getWatcherAlerts(onlyOpen: true));
+    } on WatcherNotRunning {
+      return <String>{};
+    }
+  }
+
+  /// Records that the owner has seen an alert. It stays an alert.
+  Future<void> acknowledgeWatcherAlert(int id) async {
+    final r = await _client.post(Uri.parse('$baseUrl/api/watcher/alerts/$id/acknowledge'));
+    await _watcherJson(r, 'Acknowledge alert');
+  }
+
+  /// Closes an alert; [note] says why and is required.
+  Future<void> resolveWatcherAlert(int id, {required String note}) async {
+    final r = await _client.post(
+      Uri.parse('$baseUrl/api/watcher/alerts/$id/resolve'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'note': note}),
+    );
+    await _watcherJson(r, 'Resolve alert');
+  }
+
+  /// The newest check of every identity checked, by aid.
+  Future<Map<String, ContactWatchCheck>> getWatcherChecks() async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/checks'));
+    final body = await _watcherJson(r, 'Watcher checks');
+    return {
+      for (final e in (body['checks'] ?? const []) as List)
+        (e['aid'] ?? '').toString(): ContactWatchCheck.fromJson(e as Map<String, dynamic>),
+    };
+  }
+
+  /// The newest check of one identity, or null when it was never checked (or
+  /// the owner opted it out, which reads the same).
+  Future<ContactWatchCheck?> getWatcherCheck(String aid) async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/checks/${Uri.encodeComponent(aid)}'));
+    if (r.statusCode == 404 && _code(r.body) == 'never_checked') return null;
+    return ContactWatchCheck.fromJson(await _watcherJson(r, 'Watcher check'));
+  }
+
+  /// The watchers whose answers are believed: the shipped ones, and those the owner added.
+  Future<({List<String> shipped, List<String> added})> getTrustedWatchers() async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/trusted'));
+    final b = await _watcherJson(r, 'Trusted watchers');
+    List<String> l(Object? v) => ((v ?? const []) as List).map((e) => e.toString()).toList();
+    return (shipped: l(b['shipped']), added: l(b['added']));
+  }
+
+  /// Replaces the watchers the owner added (the whole list, which may be empty).
+  Future<void> setTrustedWatchers(List<String> aids) async {
+    final r = await _client.put(
+      Uri.parse('$baseUrl/api/watcher/trusted'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'aids': aids}),
+    );
+    await _watcherJson(r, 'Set trusted watchers');
+  }
+
+  /// The watcher addresses this identity names to contacts in its introduction.
+  Future<List<String>> getWatcherHints() async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/hints'));
+    final b = await _watcherJson(r, 'Watcher hints');
+    return ((b['hints'] ?? const []) as List).map((e) => e.toString()).toList();
+  }
+
+  Future<void> setWatcherHints(List<String> urls) async {
+    final r = await _client.put(
+      Uri.parse('$baseUrl/api/watcher/hints'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'urls': urls}),
+    );
+    await _watcherJson(r, 'Set watcher hints');
+  }
+
+  /// Whether this agent's watcher is silent about [aid] to peers.
+  Future<bool> getWatcherOptOut(String aid) async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/watcher/opt-out').replace(queryParameters: {'aid': aid}));
+    final b = await _watcherJson(r, 'Watcher opt-out');
+    return b['opted_out'] == true;
+  }
+
+  Future<void> setWatcherOptOut(String aid, {required bool optedOut}) async {
+    final r = await _client.put(
+      Uri.parse('$baseUrl/api/watcher/opt-out'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'aid': aid, 'opted_out': optedOut}),
+    );
+    await _watcherJson(r, 'Set watcher opt-out');
   }
 
   void dispose() {

@@ -11,7 +11,8 @@ import (
 // what it returns must not carry an observation (observationIn). Only the three
 // Disclosable reads, which are the check, may return one.
 func TestNoExportedReadReturnsAnObservation(t *testing.T) {
-	theCheck := map[string]bool{"Disclosable": true, "DisclosableAll": true, "DisclosableAlerts": true}
+	theCheck := map[string]bool{"Disclosable": true, "DisclosableAll": true, "DisclosableAlerts": true,
+		"DisclosableAllAlerts": true, "DisclosableCheck": true, "DisclosableChecks": true}
 	for _, owner := range []reflect.Type{reflect.TypeOf((*Store)(nil)).Elem(), reflect.TypeOf(&Service{})} {
 		for i := 0; i < owner.NumMethod(); i++ {
 			m := owner.Method(i)
