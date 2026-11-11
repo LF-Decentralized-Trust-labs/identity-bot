@@ -300,6 +300,10 @@ class IdentityProfiles {
   /// How recent a measurement must be to count. A score is about a moment.
   static const scoreFreshFor = Duration(minutes: 2);
 
+  /// How far ahead of this device's clock a vouching device's may be, so a
+  /// phone a few seconds fast is not refused.
+  static const clockSkew = Duration(seconds: 30);
+
   /// The authentication provider running ON THIS DEVICE (a phone), asked for a
   /// fresh measurement of whoever is holding it. Null while none exists: only
   /// `authprovider.NotConfigured` does today. A seam for tests and for the
@@ -391,7 +395,7 @@ class IdentityProfiles {
     if (needsVouching && vouchedBy.isEmpty) return false;
     if (score < minimumScore) return false;
     final age = (now ?? DateTime.now().toUtc()).difference(at.toUtc());
-    return age <= scoreFreshFor && !age.isNegative;
+    return age <= scoreFreshFor && age >= -clockSkew;
   }
 
   /// Passes only when the owner of [profileId] proves it is them. With a
@@ -512,17 +516,28 @@ class IdentityProfiles {
     // next person to pick up. Each person gets back in only by passing
     // [proveItIsThem] for their own identity.
     final active = await ProfileScope.activeId();
+    Object? couldNotMark;
     for (final id in {active, ...await ProfileScope.knownIds()}) {
       if (!isAProfileId(id) && !_safeEarlierForm.hasMatch(id)) continue;
-      final marker = await _lockedMarker(id);
-      await marker.parent.create(recursive: true);
-      await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+      try {
+        final marker = await _lockedMarker(id);
+        await marker.parent.create(recursive: true);
+        await marker.writeAsString(DateTime.now().toUtc().toIso8601String());
+      } catch (e) {
+        // One profile that cannot be marked must not leave the open core
+        // running: the stop below still happens, and the failure is said.
+        couldNotMark ??= e;
+      }
     }
     // The marker stays set whatever happens next: a profile that could not be
     // confirmed stopped is still locked. What is not allowed is saying it is
     // done. Stopped is verified (the core no longer answers), and when it is
     // not, [TheCoreDidNotStop] reaches the screen instead of the next one.
     await _stopAndVerify();
+    if (couldNotMark != null) {
+      throw TheCoreDidNotStop('an identity could not be marked locked: '
+          '$couldNotMark');
+    }
   }
 
   /// Log out with [logOut] and tell the person what happened, through [say].

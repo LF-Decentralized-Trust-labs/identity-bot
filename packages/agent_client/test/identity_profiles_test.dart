@@ -185,6 +185,8 @@ void main() {
         expect(opens(100, at: now.subtract(const Duration(minutes: 5))),
             isFalse);
         expect(opens(100, at: now.add(const Duration(minutes: 5))), isFalse);
+        expect(opens(100, at: now.add(const Duration(seconds: 10))), isTrue,
+            reason: 'a phone a few seconds fast is not refused');
         // A computer may not score itself.
         expect(opens(100, vouching: true), isFalse);
         expect(opens(100, vouching: true, by: 'sig'), isTrue);
