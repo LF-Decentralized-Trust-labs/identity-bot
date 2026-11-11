@@ -65,6 +65,8 @@ type vectors struct {
 			PairwiseAID   string            `json:"pairwise_aid"`
 			Disclosures   map[string]any    `json:"disclosures"`
 			RawMember     map[string]string `json:"member_info"`
+			BrowserKey    string            `json:"browser_key"`
+			FrontEnd      string            `json:"front_end"`
 			Reason        string            `json:"reason"`
 			ErrorContains string            `json:"error_contains"`
 		} `json:"expect"`
@@ -163,7 +165,7 @@ func TestConfirmMatchesTheSharedVectors(t *testing.T) {
 		} else if err != nil {
 			t.Errorf("%s: %v", c.Name, err)
 		} else {
-			want := Confirmed{State: State(c.Expect.State), PairwiseAID: c.Expect.PairwiseAID, Disclosures: c.Expect.Disclosures, Reason: c.Expect.Reason}
+			want := Confirmed{State: State(c.Expect.State), PairwiseAID: c.Expect.PairwiseAID, Disclosures: c.Expect.Disclosures, BrowserKey: c.Expect.BrowserKey, FrontEnd: c.Expect.FrontEnd, Reason: c.Expect.Reason}
 			if m := c.Expect.RawMember; m != nil {
 				want.MemberInfo = &MemberInfo{Role: m["role"], DisplayName: m["display_name"]}
 			}

@@ -51,6 +51,13 @@ export type ConfirmedSession =
        * (carried in the Identity Agent's login result) — e.g. role + display
        * name. RPs use this instead of querying org-internal rosters. */
       memberInfo?: { role?: string; displayName?: string };
+      /** The browser key the person's approval named (ADR-066), when the
+       *  sign-in was for one. A back end that binds its session to a browser's
+       *  key lets that browser in only when this is the thumbprint it started
+       *  the sign-in with. */
+      browserKey?: string;
+      /** The front-end kind the verified assertion repeated (ADR-072). */
+      frontEnd?: string;
     }
   | { state: "declined"; reason?: string }
   | { state: "pending" };
@@ -81,6 +88,8 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
     disclosures?: Record<string, unknown>;
     member_info?: { role?: string; display_name?: string };
     reason?: string;
+    browser_key?: string;
+    front_end?: string;
     identity_withheld?: boolean;
   };
   // Verified, but this caller could not collect. Reporting it as pending would
@@ -103,6 +112,8 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
       memberInfo: body.member_info
         ? { role: body.member_info.role, displayName: body.member_info.display_name }
         : undefined,
+      browserKey: body.browser_key,
+      frontEnd: body.front_end,
     };
   }
   if (body.state === "declined") return { state: "declined", reason: body.reason };

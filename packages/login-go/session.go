@@ -168,6 +168,13 @@ type Confirmed struct {
 	PairwiseAID string
 	Disclosures map[string]any
 	MemberInfo  *MemberInfo
+	// BrowserKey is the browser key the person's approval named (ADR-066), when
+	// the sign-in was for one. A back end that binds its session to a browser's
+	// key lets that browser in only when this is the thumbprint it started the
+	// sign-in with.
+	BrowserKey string
+	// FrontEnd is the front-end kind the verified assertion repeated (ADR-072).
+	FrontEnd string
 	// Reason is why a sign-in was declined.
 	Reason string
 }
@@ -201,6 +208,8 @@ func ConfirmSession(ctx context.Context, o ConfirmOptions) (Confirmed, error) {
 		AppSessionToken  string         `json:"app_session_token"`
 		Disclosures      map[string]any `json:"disclosures"`
 		Reason           string         `json:"reason"`
+		BrowserKey       string         `json:"browser_key"`
+		FrontEnd         string         `json:"front_end"`
 		IdentityWithheld bool           `json:"identity_withheld"`
 		MemberInfo       *struct {
 			Role        string `json:"role"`
@@ -234,7 +243,7 @@ func ConfirmSession(ctx context.Context, o ConfirmOptions) (Confirmed, error) {
 				return Confirmed{}, ErrAlreadyUsed
 			}
 		}
-		c := Confirmed{State: Verified, PairwiseAID: body.AppSessionToken, Disclosures: body.Disclosures}
+		c := Confirmed{State: Verified, PairwiseAID: body.AppSessionToken, Disclosures: body.Disclosures, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd}
 		if body.MemberInfo != nil {
 			c.MemberInfo = &MemberInfo{Role: body.MemberInfo.Role, DisplayName: body.MemberInfo.DisplayName}
 		}

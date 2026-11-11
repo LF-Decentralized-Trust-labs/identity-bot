@@ -32,6 +32,8 @@ for (const c of v.confirm) {
     if (c.expect.pairwise_aid) want.pairwiseAid = c.expect.pairwise_aid;
     if (c.expect.disclosures) want.disclosures = c.expect.disclosures;
     if (c.expect.member_info) want.memberInfo = { role: c.expect.member_info.role, displayName: c.expect.member_info.display_name };
+    if (c.expect.browser_key) want.browserKey = c.expect.browser_key;
+    if (c.expect.front_end) want.frontEnd = c.expect.front_end;
     if (c.expect.reason) want.reason = c.expect.reason;
     assert.deepEqual(JSON.parse(JSON.stringify(r)), want, c.name);
   }

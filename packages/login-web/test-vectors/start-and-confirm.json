@@ -3,85 +3,347 @@
   "start": [
     {
       "name": "a website asset: audience and disclosures, no key and no front end",
-      "input": {"agent_url": "https://ia.example/", "asset_id": "the portal", "audience": "https://portal.example", "request_disclosures": ["display_name"]},
-      "request": {"method": "POST", "url": "https://ia.example/api/login/session/the%20portal", "body": {"audience": "https://portal.example", "requestDisclosures": ["display_name"]}},
-      "response": {"status": 200, "body": {"session_token": "t", "relay_or_qr_url": "https://ia.example/i/t", "collector_secret": "sec"}},
-      "expect": {"session_token": "t", "pointer_url": "https://ia.example/i/t", "collector_secret": "sec"}
+      "input": {
+        "agent_url": "https://ia.example/",
+        "asset_id": "the portal",
+        "audience": "https://portal.example",
+        "request_disclosures": [
+          "display_name"
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "https://ia.example/api/login/session/the%20portal",
+        "body": {
+          "audience": "https://portal.example",
+          "requestDisclosures": [
+            "display_name"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "session_token": "t",
+          "relay_or_qr_url": "https://ia.example/i/t",
+          "collector_secret": "sec"
+        }
+      },
+      "expect": {
+        "session_token": "t",
+        "pointer_url": "https://ia.example/i/t",
+        "collector_secret": "sec"
+      }
     },
     {
       "name": "a utility app's page: the browser key and the browser kind travel in the body",
-      "input": {"agent_url": "https://ia.example", "asset_id": "app-1", "audience": "https://tasks.example", "browser_key": "BrowserThumb", "front_end": "browser"},
-      "request": {"method": "POST", "url": "https://ia.example/api/login/session/app-1", "body": {"audience": "https://tasks.example", "requestDisclosures": [], "browserKey": "BrowserThumb", "frontEnd": "browser"}},
-      "response": {"status": 200, "body": {"session_token": "t2", "relay_or_qr_url": "https://ia.example/i/t2", "collector_secret": "sec2"}},
-      "expect": {"session_token": "t2", "pointer_url": "https://ia.example/i/t2", "collector_secret": "sec2"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "app-1",
+        "audience": "https://tasks.example",
+        "browser_key": "BrowserThumb",
+        "front_end": "browser"
+      },
+      "request": {
+        "method": "POST",
+        "url": "https://ia.example/api/login/session/app-1",
+        "body": {
+          "audience": "https://tasks.example",
+          "requestDisclosures": [],
+          "browserKey": "BrowserThumb",
+          "frontEnd": "browser"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "session_token": "t2",
+          "relay_or_qr_url": "https://ia.example/i/t2",
+          "collector_secret": "sec2"
+        }
+      },
+      "expect": {
+        "session_token": "t2",
+        "pointer_url": "https://ia.example/i/t2",
+        "collector_secret": "sec2"
+      }
     },
     {
       "name": "a refusal is an error that carries the Identity Agent's words",
-      "input": {"agent_url": "https://ia.example", "asset_id": "app-1", "audience": "https://tasks.example", "front_end": "browser"},
-      "request": {"method": "POST", "url": "https://ia.example/api/login/session/app-1", "body": {"audience": "https://tasks.example", "requestDisclosures": [], "frontEnd": "browser"}},
-      "response": {"status": 403, "text": "its owner has switched the browser front end off\n"},
-      "expect": {"error_contains": "403: its owner has switched the browser front end off"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "app-1",
+        "audience": "https://tasks.example",
+        "front_end": "browser"
+      },
+      "request": {
+        "method": "POST",
+        "url": "https://ia.example/api/login/session/app-1",
+        "body": {
+          "audience": "https://tasks.example",
+          "requestDisclosures": [],
+          "frontEnd": "browser"
+        }
+      },
+      "response": {
+        "status": 403,
+        "text": "its owner has switched the browser front end off\n"
+      },
+      "expect": {
+        "error_contains": "403: its owner has switched the browser front end off"
+      }
     },
     {
       "name": "an answer without the secret is refused, not half used",
-      "input": {"agent_url": "https://ia.example", "asset_id": "x", "audience": "https://a.example"},
-      "request": {"method": "POST", "url": "https://ia.example/api/login/session/x", "body": {"audience": "https://a.example", "requestDisclosures": []}},
-      "response": {"status": 200, "body": {"session_token": "t", "relay_or_qr_url": "https://ia.example/i/t"}},
-      "expect": {"error_contains": "without a token, pointer and secret"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "x",
+        "audience": "https://a.example"
+      },
+      "request": {
+        "method": "POST",
+        "url": "https://ia.example/api/login/session/x",
+        "body": {
+          "audience": "https://a.example",
+          "requestDisclosures": []
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "session_token": "t",
+          "relay_or_qr_url": "https://ia.example/i/t"
+        }
+      },
+      "expect": {
+        "error_contains": "without a token, pointer and secret"
+      }
     }
   ],
   "confirm": [
     {
       "name": "verified names the person and what they disclosed",
-      "input": {"agent_url": "https://ia.example/", "asset_id": "the portal", "session_token": "tok 1", "collector_secret": "sec"},
-      "request": {"url": "https://ia.example/api/login/session/the%20portal/tok%201", "collector_secret": "sec"},
-      "response": {"status": 200, "body": {"state": "verified", "app_session_token": "EPairwise", "disclosures": {"display_name": "Ada"}, "member_info": {"role": "owner", "display_name": "Ada"}}},
-      "expect": {"state": "verified", "pairwise_aid": "EPairwise", "disclosures": {"display_name": "Ada"}, "member_info": {"role": "owner", "display_name": "Ada"}}
+      "input": {
+        "agent_url": "https://ia.example/",
+        "asset_id": "the portal",
+        "session_token": "tok 1",
+        "collector_secret": "sec"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/the%20portal/tok%201",
+        "collector_secret": "sec"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "state": "verified",
+          "app_session_token": "EPairwise",
+          "disclosures": {
+            "display_name": "Ada"
+          },
+          "member_info": {
+            "role": "owner",
+            "display_name": "Ada"
+          }
+        }
+      },
+      "expect": {
+        "state": "verified",
+        "pairwise_aid": "EPairwise",
+        "disclosures": {
+          "display_name": "Ada"
+        },
+        "member_info": {
+          "role": "owner",
+          "display_name": "Ada"
+        }
+      }
+    },
+    {
+      "name": "a sign-in for a browser's key hands back the key and the kind the approval named",
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "app-1",
+        "session_token": "t",
+        "collector_secret": "s"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/app-1/t",
+        "collector_secret": "s"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "state": "verified",
+          "app_session_token": "EPairwise",
+          "browser_key": "BrowserThumb",
+          "front_end": "browser"
+        }
+      },
+      "expect": {
+        "state": "verified",
+        "pairwise_aid": "EPairwise",
+        "browser_key": "BrowserThumb",
+        "front_end": "browser"
+      }
     },
     {
       "name": "no secret, no header",
-      "input": {"agent_url": "https://ia.example", "asset_id": "a", "session_token": "t"},
-      "request": {"url": "https://ia.example/api/login/session/a/t", "collector_secret": ""},
-      "response": {"status": 200, "body": {"state": "connecting"}},
-      "expect": {"state": "pending"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "a",
+        "session_token": "t"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/a/t",
+        "collector_secret": ""
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "state": "connecting"
+        }
+      },
+      "expect": {
+        "state": "pending"
+      }
     },
     {
       "name": "declined carries its reason",
-      "input": {"agent_url": "https://ia.example", "asset_id": "a", "session_token": "t", "collector_secret": "s"},
-      "request": {"url": "https://ia.example/api/login/session/a/t", "collector_secret": "s"},
-      "response": {"status": 200, "body": {"state": "declined", "reason": "front end mismatch"}},
-      "expect": {"state": "declined", "reason": "front end mismatch"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "a",
+        "session_token": "t",
+        "collector_secret": "s"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/a/t",
+        "collector_secret": "s"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "state": "declined",
+          "reason": "front end mismatch"
+        }
+      },
+      "expect": {
+        "state": "declined",
+        "reason": "front end mismatch"
+      }
     },
     {
       "name": "an answer that is not ok is pending, never verified",
-      "input": {"agent_url": "https://ia.example", "asset_id": "a", "session_token": "t", "collector_secret": "s"},
-      "request": {"url": "https://ia.example/api/login/session/a/t", "collector_secret": "s"},
-      "response": {"status": 500, "text": "boom"},
-      "expect": {"state": "pending"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "a",
+        "session_token": "t",
+        "collector_secret": "s"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/a/t",
+        "collector_secret": "s"
+      },
+      "response": {
+        "status": 500,
+        "text": "boom"
+      },
+      "expect": {
+        "state": "pending"
+      }
     },
     {
       "name": "verified with no identity is pending, never verified",
-      "input": {"agent_url": "https://ia.example", "asset_id": "a", "session_token": "t", "collector_secret": "s"},
-      "request": {"url": "https://ia.example/api/login/session/a/t", "collector_secret": "s"},
-      "response": {"status": 200, "body": {"state": "verified"}},
-      "expect": {"state": "pending"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "a",
+        "session_token": "t",
+        "collector_secret": "s"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/a/t",
+        "collector_secret": "s"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "state": "verified"
+        }
+      },
+      "expect": {
+        "state": "pending"
+      }
     },
     {
       "name": "verified but withheld is an error that says what to pass",
-      "input": {"agent_url": "https://ia.example", "asset_id": "a", "session_token": "t"},
-      "request": {"url": "https://ia.example/api/login/session/a/t", "collector_secret": ""},
-      "response": {"status": 200, "body": {"state": "verified", "identity_withheld": true}},
-      "expect": {"error_contains": "pass the collectorSecret"}
+      "input": {
+        "agent_url": "https://ia.example",
+        "asset_id": "a",
+        "session_token": "t"
+      },
+      "request": {
+        "url": "https://ia.example/api/login/session/a/t",
+        "collector_secret": ""
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "state": "verified",
+          "identity_withheld": true
+        }
+      },
+      "expect": {
+        "error_contains": "pass the collectorSecret"
+      }
     }
   ],
   "spending": {
     "about": "One store, shared by the steps in order. A sign-in is spent when verified comes back; a pending one spends nothing; another session is unaffected; the key names the agent, asset and token.",
-    "input": {"agent_url": "https://ia.example", "asset_id": "a", "collector_secret": "s"},
+    "input": {
+      "agent_url": "https://ia.example",
+      "asset_id": "a",
+      "collector_secret": "s"
+    },
     "steps": [
-      {"session_token": "t1", "response": {"state": "connecting"}, "expect": {"state": "pending"}},
-      {"session_token": "t1", "response": {"state": "verified", "app_session_token": "EP"}, "expect": {"state": "verified"}},
-      {"session_token": "t1", "response": {"state": "verified", "app_session_token": "EP"}, "expect": {"error_contains": "already been used"}},
-      {"session_token": "t2", "response": {"state": "verified", "app_session_token": "EP"}, "expect": {"state": "verified"}}
+      {
+        "session_token": "t1",
+        "response": {
+          "state": "connecting"
+        },
+        "expect": {
+          "state": "pending"
+        }
+      },
+      {
+        "session_token": "t1",
+        "response": {
+          "state": "verified",
+          "app_session_token": "EP"
+        },
+        "expect": {
+          "state": "verified"
+        }
+      },
+      {
+        "session_token": "t1",
+        "response": {
+          "state": "verified",
+          "app_session_token": "EP"
+        },
+        "expect": {
+          "error_contains": "already been used"
+        }
+      },
+      {
+        "session_token": "t2",
+        "response": {
+          "state": "verified",
+          "app_session_token": "EP"
+        },
+        "expect": {
+          "state": "verified"
+        }
+      }
     ]
   }
 }
