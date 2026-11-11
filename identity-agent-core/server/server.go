@@ -766,6 +766,10 @@ func (s *CoreServer) Start() error {
 
 	s.running = true
 
+	// Machines granted as an app's back end before an app signed as itself are
+	// withdrawn, so no credential of this identity still says they act for it.
+	go s.withdrawTheGrantsOfRetiredAppBackEnds()
+
 	if cfg, err := s.backupService().LoadConfig(); err == nil && cfg.Enabled && cfg.ScheduleDaily {
 		// Give the scheduler a way to reach this agent's own seed, or every
 		// backup it schedules will skip. It reads the seed rather than asking

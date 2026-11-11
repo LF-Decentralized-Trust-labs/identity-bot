@@ -319,6 +319,13 @@ func Verify(s Statement, verkey, signature string) error {
 // signed. Kept as the exact string signed, so it can be checked again without
 // knowing how a controller builds it — the last line is the digest of the
 // request's body, which carries the words' digest.
+//
+// When an app's back end speaks for a person (AppBody and PersonStatement set),
+// the proof carries no request: no RequestBytes, no Request, and no
+// SignedString or Signature either, because the app's signature is over a body
+// that holds the words and cannot be checked again without them. The app's
+// signature is checked once, when the Identity Agent takes the request; what is
+// kept is the person's own statement, which is the record (ADR-067, ADR-068).
 type ControllerProof struct {
 	Controller string `json:"controller"`
 	// PublicKey is the controller's key as its grant records it.
@@ -326,6 +333,8 @@ type ControllerProof struct {
 	SignedString string `json:"signed_string"`
 	Signature    string `json:"signature"`
 	// RequestBytes is the request body the controller signed, byte for byte.
+	// Absent when an app speaks for a person: the words of a conversation live
+	// only in the app, never in the Identity Agent.
 	// It is carried as bytes, not as JSON inside the record, because the
 	// signed string commits to a digest of these exact bytes and any JSON
 	// encoder that re-writes the record would re-write a nested value too:
@@ -341,6 +350,15 @@ type ControllerProof struct {
 	// rather than by this Identity Agent's word. Empty for a controller granted
 	// before machines were given one.
 	ControllerGrant string `json:"controller_grant,omitempty"`
+	// AppBody is, when an app's back end spoke for a person (ADR-072), the App
+	// Body credential that names the key that signed: Controller is then that
+	// key's identifier (the body's host) and PublicKey its verkey. The proof is
+	// the person's statement alone (see StatementOnly): SignedString, Signature,
+	// RequestBytes and Request are empty, and a proof that sets AppBody and any
+	// of them is refused. The credential is carried in a bundle, so which app's
+	// machine carried the statement is shown by a credential anybody can check.
+	// Empty for a controller's request.
+	AppBody string `json:"app_body,omitempty"`
 	// PersonStatement is, when the controller was an app's back end speaking for
 	// a person, that person's own signed statement over a fingerprint of their
 	// words, as the app carried it (ADR-066, ADR-067). Absent when the
@@ -349,8 +367,38 @@ type ControllerProof struct {
 	PersonStatement *PersonProof `json:"person_statement,omitempty"`
 }
 
-// Verify checks the controller signed this request.
+// StatementOnly is whether this is the proof of an app's back end speaking for
+// a person, kept without the request: the person's statement and the App Body
+// that admitted the app's key, and none of the request or the app's signature
+// over it.
+func (p ControllerProof) StatementOnly() bool {
+	return p.AppBody != "" && p.SignedString == "" && p.Signature == ""
+}
+
+// errProofHoldsWords is a statement-only proof that carries the request after
+// all, which would put a person's words in the record.
+var errProofHoldsWords = errors.New("an app speaking for a person keeps their statement, never the request, which holds the words")
+
+// errAppProofHoldsRequest is an app's proof that carries the app's signed
+// request, which holds a person's words. An app's proof is statement-only.
+var errAppProofHoldsRequest = errors.New("an app's proof is the person's statement alone: it carries no signed request, and a request that is carried is refused")
+
+// Verify checks the controller signed this request. An app's proof is
+// statement-only and has no request to check: it holds the person's own
+// statement, which is checked. An app's proof of any other form is refused.
 func (p ControllerProof) Verify() error {
+	if p.StatementOnly() {
+		if len(p.RequestBytes) > 0 || len(p.Request) > 0 {
+			return errProofHoldsWords
+		}
+		if p.PersonStatement == nil {
+			return errors.New("an app's back end speaks only with a person's own statement, and the proof carries none")
+		}
+		return nil
+	}
+	if p.AppBody != "" {
+		return errAppProofHoldsRequest
+	}
 	ok, err := iacrypto.VerifyMachineSignature(p.PublicKey, p.Signature, []byte(p.SignedString))
 	if err != nil || !ok {
 		return errors.New("the request is not signed by the controller it names")
@@ -374,6 +422,9 @@ func (p ControllerProof) Verify() error {
 // controller signed, so undoing the escaping can recover the signed bytes but
 // can never make other bytes pass for them.
 func (p ControllerProof) SignedRequest() ([]byte, error) {
+	if p.AppBody != "" {
+		return nil, errAppProofHoldsRequest
+	}
 	lines := strings.Split(p.SignedString, "\n")
 	signed := lines[len(lines)-1]
 	switch {
@@ -509,6 +560,17 @@ func (r Record) CheckSenderProof() error {
 			return errors.New("the record does not say what its body signed")
 		}
 		return Verify(st, r.HostVerkey, r.HostSignature)
+	case r.ControllerProof != nil && r.ControllerProof.StatementOnly():
+		if err := r.ControllerProof.Verify(); err != nil {
+			return err
+		}
+		// There are no words to read the message id or the digest from: the
+		// statement names the message, and its fingerprint is the record's.
+		st := r.ControllerProof.PersonStatement.Statement
+		if r.BodyHash != st.Fingerprint {
+			return errors.New("the record does not say what the person signed")
+		}
+		return r.ControllerProof.checkPersonStatement(r, st.MessageID)
 	case r.ControllerProof != nil:
 		if err := r.ControllerProof.Verify(); err != nil {
 			return err
@@ -527,7 +589,10 @@ func (r Record) CheckSenderProof() error {
 			req.Conversation != r.Conversation && req.Conversation != "" || req.InReplyTo != r.InReplyTo {
 			return errors.New("the record does not say what the person's controller signed")
 		}
-		return r.ControllerProof.checkPersonStatement(r, req)
+		if r.ControllerProof.PersonStatement == nil {
+			return nil
+		}
+		return r.ControllerProof.checkPersonStatement(r, req.Nonce)
 	}
 	return errors.New("the message carries no proof from its sender")
 }
@@ -538,17 +603,14 @@ func (r Record) CheckSenderProof() error {
 // conversation, kind, recipient, reply and message the record and the app's
 // signed request have. Whose the key is, and that the words are the ones the
 // fingerprint is over (the salt is not kept), are not shown by the record.
-func (p ControllerProof) checkPersonStatement(r Record, req PersonMessage) error {
-	if p.PersonStatement == nil {
-		return nil
-	}
+func (p ControllerProof) checkPersonStatement(r Record, messageID string) error {
 	if err := p.PersonStatement.Verify(); err != nil {
 		return fmt.Errorf("the person's statement does not hold: %w", err)
 	}
 	st := p.PersonStatement.Statement
 	if (st.Kind != PersonKindMessage && st.Kind != PersonKindAsk) || r.From != Person(st.From) ||
 		st.Kind != r.Kind || st.To != r.To || st.InReplyTo != r.InReplyTo ||
-		st.Conversation != r.Conversation || st.MessageID != req.Nonce {
+		st.Conversation != r.Conversation || st.MessageID != messageID {
 		return errors.New("the record does not say what the person signed")
 	}
 	return nil

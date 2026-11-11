@@ -6,6 +6,7 @@
 **Builds on:** ADR-067 (a person signs a salted fingerprint of their words, not the words)
 **Extends:** ADR-047 (AI agents talk through the Identity Agent that holds them) — its countersigned, chained conversation record, which this ADR makes the trail rather than sitting beside it
 **Amended:** 2026-11-10 — what keeps the trail is an add-on's, not the core's (see "Where the store lives", below)
+**Amended:** 2026-11-10 — the proof kept for a person's message carries the statement, never the words (see "What the core keeps of an app's request", below)
 
 ---
 
@@ -34,6 +35,35 @@ Identity Agent that includes such an add-on still keeps the trail of
 fingerprints while the app keeps the words. Where this ADR names `Trail.*`
 below, it names that store. Nothing about what the store does has changed, only
 where it lives.
+
+## What the core keeps of an app's request
+
+*Amendment, 2026-11-10.* When an app's back end speaks for a person, the
+words of their conversation live only in the app, never in the Identity Agent,
+and that holds for the core and for every add-on the core hands a request to,
+not only for the trail. (A paired machine speaking as the signer it belongs to
+is not this case: it still hands add-ons the `RequestBytes`.) The proof the core
+keeps and hands on
+(`ControllerProof`) carries the person's statement and its salt and the App
+Body that admitted the app's key, and **no request body**: `RequestBytes` and
+`Request` are empty, and so are `SignedString` and `Signature`, because the app's
+signature is over a body that holds the words and cannot be checked again
+without them. The app's signature is checked once, when the Identity Agent takes
+the request; afterwards the person's own statement is the record, and the
+record's body hash is the statement's fingerprint, never a digest of the words.
+`AppCaller` carries none of the request either: what a route needs of the body
+it reads from the request while it is being served.
+
+The offline checker reads such an entry by the App Body that names the app's
+key and by the statement's own time and Identity Agent, and says plainly that
+the app's signature over it is not kept. An app's proof that carries the
+signed request is refused, by `ControllerProof.Verify` and by the offline
+checker: it is not a form anything writes.
+
+**Supersedes:** "a controller proof carries the signed request bytes" (ADR-047),
+where the controller is an app's
+back end speaking for a person. For a paired machine speaking as the signer it
+belongs to, the proof is unchanged.
 
 ## One record, not two
 

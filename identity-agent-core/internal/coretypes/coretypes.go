@@ -33,10 +33,6 @@ type Authority struct {
 	Request *SignedRequest
 	// About is what the request named as the thing it acts on.
 	About string
-	// RegrantOf is, for a machine's Controller Grant re-issued only to name its
-	// app, the SAID of the grant it replaces. It stands in for a signed request
-	// and only for that (server mayWaitWithoutARequest). Empty otherwise.
-	RegrantOf string
 }
 
 // SignedRequest is a request exactly as it was signed, with its body.
@@ -77,6 +73,13 @@ type ControllerProof struct {
 	Signature       string
 	RequestBytes    []byte
 	ControllerGrant string
+	// AppBody is, when the request was an app's back end speaking for a person,
+	// the App Body credential that names the key that signed (Controller and
+	// PublicKey are then that key's identifier and verkey). The proof is then
+	// the person's statement alone: SignedString, Signature and RequestBytes are
+	// empty, because the app's signed request holds the person's words. Empty
+	// for a controller's request.
+	AppBody string
 	// PersonStatement is, when an app's back end spoke for a person, that
 	// person's own signed statement over a fingerprint of their words
 	// (agentmessage.PersonProof as JSON, ADR-067). Empty when the controller

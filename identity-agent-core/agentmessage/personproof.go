@@ -71,6 +71,8 @@ func (r Record) FingerprintVersion() (int, bool) {
 	switch {
 	case r.PersonProof != nil:
 		return r.PersonProof.Statement.FingerprintVersion, true
+	case r.ControllerProof != nil && r.ControllerProof.StatementOnly() && r.ControllerProof.PersonStatement != nil:
+		return r.ControllerProof.PersonStatement.Statement.FingerprintVersion, true
 	case r.ControllerProof != nil:
 		return FingerprintV0, true
 	}

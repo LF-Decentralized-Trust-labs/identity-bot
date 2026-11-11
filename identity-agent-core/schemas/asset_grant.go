@@ -350,10 +350,13 @@ var (
 // its withdrawal is an event anybody can check, and what a person does from
 // that machine can name it as the authority it rests on.
 //
-// Version 1.2.0 adds app_asset: the app asset a machine is the back end of, so
-// what a person said through that machine can show which app spoke. 1.1.0, the
-// version before, keeps its identifier and is still honoured wherever a
-// Controller Grant is read.
+// Version 1.2.0 adds app_asset, which named the app asset a machine was the back
+// end of. It is no longer written and no longer honoured: an app's back end signs
+// as the app, with its App Body key, and is not a controller (ADR-072 Amendment
+// 1). The version stays published byte for byte so a credential issued under it
+// still reads, and a grant naming an app is refused where it is read
+// (ControllerGrant.Live, the conversation bundle). 1.1.0, the version before,
+// keeps its identifier and is still honoured wherever a Controller Grant is read.
 var controllerGrantKind = assetGrantKind{
 	assetType: "controller",
 	title:     "Controller Grant",

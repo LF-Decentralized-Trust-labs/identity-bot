@@ -334,7 +334,8 @@ These seams are still open, and each is refused rather than half-working:
   route that will, and no route yet changes an app's capabilities.
 - The Identity Agent's own list of grant schemas it honours as capability grants
   (`CapabilityGrantSchemaSAIDs`, read by add-ons) is unchanged, so no gateway admits an app on its App
-  Grant yet. Admitting an app's grant at the gateway belongs to step 3 (apps reached through the
+  Grant yet (an app's back end is admitted at the core itself, on its App Body key and the App Grant it holds,
+  by ADR-072 Amendment 1). Admitting an app's grant at the gateway belongs to step 3 (apps reached through the
   relay and making calls), and is decided there.
 
 The check of a body's approval is tied to the asset the path names: the caller gives the check

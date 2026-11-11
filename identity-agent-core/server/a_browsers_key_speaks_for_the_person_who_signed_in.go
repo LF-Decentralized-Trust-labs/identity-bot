@@ -241,29 +241,22 @@ func (s *CoreServer) personStandsAtAsset(assetID, person string) bool {
 	return s.assetStillStands(browserKeyRecord{Asset: assetID, Person: person})
 }
 
-// endBrowserKeys ends the browser-key records of the app's own asset: the asset
-// the machine that signed this request is the back end of, and no other. The
-// key is named by its thumbprint, or the person by their identifier at the
-// asset when every key of theirs is to end. Ending only takes power away, so
-// the app, which signed the person in, may do it when it signs them out.
+// endBrowserKeys ends the browser-key records of the app's own asset: the app
+// whose back end signed this request, and no other. The key is named by its
+// thumbprint, or the person by their identifier at the asset when every key of
+// theirs is to end. Ending only takes power away, so the app, which signed the
+// person in, may do it when it signs them out.
 func (s *CoreServer) endBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
-	grant, ok := TheControllerThatAsked(r)
+	app, ok := TheAppThatAsked(r)
 	if !ok {
-		return 0, errNoProvablePerson
-	}
-	current, had, err := s.controllers().Get(grant.ControllerAID)
-	if err != nil {
-		return 0, err
-	}
-	if !had || current.AppAsset == "" {
-		return 0, errors.New("this machine is not the back end of an app, so it has no sign-ins to end")
+		return 0, errors.New("only an app's back end, signing as the app, has sign-ins to end")
 	}
 	if thumbprint != "" {
 		if err := login.CheckBrowserKeyThumbprint(thumbprint); err != nil {
 			return 0, err
 		}
 	}
-	return s.browserKeys().End(current.AppAsset, thumbprint, person)
+	return s.browserKeys().End(app.Asset, thumbprint, person)
 }
 
 // assetIDOfSite is the id of the asset whose pairwise identifier is siteAID.
