@@ -38,7 +38,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs && node src/the-page-shows-why-an-answer-was-refused.test.mjs && node src/start-and-confirm-vectors.test.mjs && node src/a-utility-apps-page-trusts-only-its-app.test.mjs",
+    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs && node src/the-page-shows-why-an-answer-was-refused.test.mjs && node src/start-and-confirm-vectors.test.mjs && node src/a-utility-apps-page-trusts-only-its-app.test.mjs && node src/app-check-vectors.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
