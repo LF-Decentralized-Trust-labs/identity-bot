@@ -11,6 +11,9 @@ export interface SignInButtonProps {
   /** Thumbprint of a key this browser holds and cannot export (ADR-066). The
    *  challenge names it and the person's approval is for that key. */
   browserKey?: string;
+  /** The kind of front end this page is. A utility app's page passes "browser"
+   *  (ADR-072); a website asset needs none. */
+  frontEnd?: "browser" | "installed_app";
   requestScore?: { minBand?: "red" | "amber" | "green"; minScore?: number; required?: boolean };
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
@@ -49,6 +52,7 @@ export function SignInButton({
   requestCredentials = [],
   requestScore,
   browserKey,
+  frontEnd,
   theme = "auto",
   size = "medium",
   qrFallback = true,
@@ -85,6 +89,7 @@ export function SignInButton({
             required: c.required ?? false,
           })),
           browserKey,
+          frontEnd,
           requestScore: requestScore
             ? {
                 min_band: requestScore.minBand,
@@ -124,7 +129,7 @@ export function SignInButton({
     } finally {
       setBusy(false);
     }
-  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, qrFallback, onError]);
+  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, frontEnd, qrFallback, onError]);
 
   const isDark =
     theme === "dark" ||
