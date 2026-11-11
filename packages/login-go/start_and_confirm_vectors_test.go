@@ -274,3 +274,26 @@ func TestAnotherTransportGetsTheSameChecks(t *testing.T) {
 		t.Errorf("second confirm: %v", err)
 	}
 }
+
+// A spent sign-in is remembered under the Identity Agent's scope and the
+// session token, so the same token at another Identity Agent or asset is a
+// different sign-in, not a replay.
+func TestASpentSignInKeyCarriesTheIdentityAgentScope(t *testing.T) {
+	var keys []string
+	rec := recorder(func(k string, _ time.Time) { keys = append(keys, k) })
+	client := &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		return answer(response{Status: 200, Body: json.RawMessage(`{"state":"verified","app_session_token":"EP"}`)}), nil
+	})}
+	agent := HTTPAgent{URL: "https://ia.example", AssetID: "asset-1", Client: client}
+	for _, a := range []Agent{agent, sealedAgent{Status{State: "verified", AppSessionToken: "EP"}}} {
+		if _, err := ConfirmSession(context.Background(), a, ConfirmOptions{SessionToken: "tok", Spent: rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := agent.Scope() + "|tok"; keys[0] != want || !strings.HasPrefix(keys[0], "https://ia.example|asset-1|") {
+		t.Errorf("the HTTP agent's spent key was %q, want %q", keys[0], want)
+	}
+	if keys[1] != "sealed|app-1|tok" {
+		t.Errorf("a sealed agent's spent key was %q, want its own scope then the token", keys[1])
+	}
+}
