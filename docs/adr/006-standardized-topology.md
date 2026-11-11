@@ -1,8 +1,12 @@
 # ADR 006: Standardized Topology — Two Topologies, Four Configurations
 
-**Date:** 2026-02-22 (revised 2026-05-01, amended 2026-11-07)
+**Date:** 2026-02-22 (revised 2026-05-01, amended 2026-11-07, amended 2026-11-11)
 **Status:** Accepted (revised)
 **Supersedes:** Mode definitions in ADR-003 and ADR-005; the original "3 states × 2 device types" formulation in this same ADR (2026-02-22).
+
+## Amendment (2026-11-11) — "Computer only" on your own computer, and "your own computer" as a place for keys, are withdrawn
+
+ADR-074 decides, on 2026-11-11, that these are withdrawn: a Mac or Windows PC is a controller or a backup target and never holds the root. This ADR still described them as live below, in the topology table, the key-location rule and the class table. They are marked withdrawn in place, so a reader who saw an earlier revision can tell what changed. The code enforces the decision: `foundingVerdictForThisPlatform` in `identity-agent-core/secureenclave/where_an_identity_may_be_founded_{darwin,windows,linux,other,ios,android}.go` permits founding only on iOS, Android and an AMD SEV-SNP sealed machine, and `CheckRootSeedMayLiveHere` asks the same function. A Mac or Windows PC holds no root; what it can hold is its own controller key. The configuration table below already records the withdrawal of configurations 2 and 3 (2026-08-31); this amendment extends it to the topology table, the key-location rule and the class table.
 
 ## Revision Note (2026-08-22) — three corrections, and a third topology
 
@@ -50,9 +54,9 @@ Every Identity Agent instance is in exactly one of two topologies:
 | Topology | Description |
 |---|---|
 | **Phone + Computer** | Identity created on the phone; keys live on the phone. The phone pairs with a computer that handles storage, computing, and always-on services. |
-| **Computer only** | Identity and keys live on the computer. No phone required. |
+| **Computer only** | Identity and keys live on the computer. No phone required. **Withdrawn for your own computer (ADR-074, 2026-11-11): only a black box computer holds an identity with no phone.** A Mac or Windows PC is a controller or a backup target, never the root. |
 
-In either topology, the **computer** can be the user's own (laptop, desktop, mini-PC) or a **black box computer** — professionally managed in a data center, sealed via TEE attestation so even the operator cannot read into it. Internal architecture term: **black box infrastructure** (D10).
+In either topology the **computer** is a **black box computer**. (It could once be the user's own laptop, desktop or mini-PC. **That is withdrawn:** a user's own computer can act as a controller or hold backups, and never holds the identity.) It is professionally managed in a data center, sealed via TEE attestation so even the operator cannot read into it. Internal architecture term: **black box infrastructure** (D10).
 
 ### Four Launch Configurations
 
@@ -116,7 +120,7 @@ The 6-combination internal engineering model still exists at the code level, bec
 
 | Service Class | Used By | What It Does |
 |---|---|---|
-| `DesktopOnDeviceKeriService` | Configurations 3, 4 (Computer only — own or black box). Also runs on the computer side of Configurations 1 and 2 (Phone + Computer) when the phone is absent or as the backend. | Talks to local Go Core → Python keripy via HTTP. Same class for own computer and black box computer — the difference is the deployment target, not the code. |
+| `DesktopOnDeviceKeriService` | Configuration 4 (Computer only — black box; configuration 3, own computer, is withdrawn). Also runs on the computer side of Configurations 1 and 2 (Phone + Computer) when the phone is absent or as the backend. | Talks to local Go Core → Python keripy via HTTP. Same class for own computer and black box computer — the difference is the deployment target, not the code. |
 | `MobileOnDeviceKeriService` | Phone in Configurations 1 and 2 when keys are on the phone (identity created on phone first). Also covers fully-local Phone-only mode (offline credential verification). | Rust bridge (FFI) for all stateful KERI ops. Embedded Go Core (gomobile) for local backend; paired server for backend when paired. The 3 stateless ops (`format-credential`, `resolve-oobi`, `generate-multisig-event`) go to the paired server if one is configured, otherwise to the public KERI microservice (`keri.grapeid.org`). |
 | `MobileRemoteKeriService` | Phone in Configurations 1 and 2 when keys are on the computer (identity created on computer first). Also serves as the fallback when the Rust bridge fails to load on the phone. | Forwards ALL KERI operations to the paired server via HTTP. The Rust bridge is never used. |
 
@@ -125,7 +129,7 @@ The 6-combination internal engineering model still exists at the code level, bec
 In Phone + Computer topology, the user does not choose between "with keys" and "without keys" modes. Instead:
 
 - **Identity created on phone first** → keys live on phone. Computer (own or black box) is added as paired backend. Phone uses `MobileOnDeviceKeriService(pairedServerUrl:)`.
-- **Identity created on computer first** → keys live on computer. A device added later is a **controller** — see below. It does not forward stateful KERI operations to the computer; it holds its own key and acts under authority the identity granted it.
+- **Identity created on computer first** → *(withdrawn for a Mac or Windows PC, which never holds a root; this path now applies to a black box computer only)* keys live on computer. A device added later is a **controller** — see below. It does not forward stateful KERI operations to the computer; it holds its own key and acts under authority the identity granted it.
 
 The two paths converge to the same UX from the user's perspective; only the implementation differs.
 
@@ -313,7 +317,7 @@ The existing `AgentEnvironment` enum maps to the new model:
 
 | Enum Value | Configuration | Device |
 |---|---|---|
-| `desktop` | Computer only (Configurations 3, 4) — deployment target distinguishes own vs. black box | Computer |
+| `desktop` | Computer only (Configuration 4, black box; Configuration 3, own computer, withdrawn) | Computer |
 | `mobileStandalone` | Phone-only fallback / offline-credential-verification mode within Phone + Computer | Phone |
 | `mobileRemoteWithoutKeys` | Phone in Configurations 1, 2 when keys are on the computer | Phone |
 | `mobileRemoteWithKeys` | Phone in Configurations 1, 2 when keys are on the phone | Phone |
