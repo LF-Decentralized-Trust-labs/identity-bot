@@ -7,19 +7,28 @@ half of `startLoginSession` and `confirmLoginSession` in
 ```go
 import login "github.com/LF-Decentralized-Trust-labs/identity-bot/packages/login-go"
 
+agent := login.HTTPAgent{URL: agentURL, AssetID: assetID}
+
 // 1. The person asks to sign in. Show them s.PointerUrl; keep s.CollectorSecret on the server.
-s, err := login.StartSession(ctx, login.StartOptions{
-	AgentURL: agentURL, AssetID: assetID, Audience: "https://your-site.example",
+s, err := login.StartSession(ctx, agent, login.StartRequest{
+	Audience: "https://your-site.example",
 	BrowserKey: thumbprint, FrontEnd: login.FrontEndBrowser, // for a utility app's browser page
 })
 
 // 2. When the page asks how it went:
-c, err := login.ConfirmSession(ctx, login.ConfirmOptions{
-	AgentURL: agentURL, AssetID: assetID, SessionToken: s.SessionToken,
-	CollectorSecret: s.CollectorSecret, Spent: spent, // login.InMemorySpent, or your own shared store
+c, err := login.ConfirmSession(ctx, agent, login.ConfirmOptions{
+	SessionToken: s.SessionToken, CollectorSecret: s.CollectorSecret,
+	Spent: spent, // login.InMemorySpent, or your own shared store
 })
-if c.State == login.Verified { issueYourSession(c.PairwiseAID) }
+if c.State == login.Verified { issueYourSession(c.PairwiseAID, c.BrowserKey) }
 ```
+
+`HTTPAgent` reaches the Identity Agent's public login routes, which is what a
+site's own back end uses. `Agent` is the seam for any other transport: a utility
+app's machine reaches its Identity Agent by sealed, app-signed calls, supplies an
+`Agent` that makes them, and gets the same checks (an answer without a secret is
+refused, verified with no identity is pending, a withheld identity is an error,
+a verified sign-in is spent once) without writing any.
 
 Issue your own session only on `Verified`. `Spent` makes a verified sign-in sign
 nobody in a second time; a site that restarts or runs more than one process

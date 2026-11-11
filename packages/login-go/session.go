@@ -1,15 +1,9 @@
 package login
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
@@ -21,19 +15,14 @@ const (
 )
 
 const (
-	maxAnswer = 1 << 20
 	// DefaultSpentFor is how long a spent sign-in is remembered: the Identity
 	// Agent offers a challenge for ten minutes, so it cannot be answered later
 	// than that and confirmed later still than the poll that follows.
 	DefaultSpentFor = time.Hour
 )
 
-// StartOptions asks for a sign-in.
-type StartOptions struct {
-	// AgentURL is the Identity Agent that holds the asset.
-	AgentURL string
-	// AssetID is the asset the sign-in is on.
-	AssetID string
+// StartRequest is what a site asks of the Identity Agent for one sign-in.
+type StartRequest struct {
 	// Audience is the site's own origin. The person's approval is for it alone.
 	Audience           string
 	RequestDisclosures []string
@@ -43,8 +32,6 @@ type StartOptions struct {
 	// FrontEnd is FrontEndBrowser or FrontEndInstalledApp, for a utility app's
 	// sign-in. Left empty for a website asset.
 	FrontEnd string
-	// Client is the HTTP client; http.DefaultClient when nil.
-	Client *http.Client
 }
 
 // Started is a sign-in the Identity Agent has begun.
@@ -59,66 +46,52 @@ type Started struct {
 	CollectorSecret string
 }
 
-func base(agentURL string) string { return strings.TrimSuffix(agentURL, "/") }
-
-// escape is encodeURIComponent for one path segment.
-func escape(s string) string { return strings.ReplaceAll(url.PathEscape(s), "+", "%2B") }
-
-func client(c *http.Client) *http.Client {
-	if c != nil {
-		return c
-	}
-	return http.DefaultClient
+// Status is the Identity Agent's own word on a sign-in, as it said it, before
+// ConfirmSession judges it.
+type Status struct {
+	State            string
+	AppSessionToken  string
+	Disclosures      map[string]any
+	MemberInfo       *MemberInfo
+	Reason           string
+	BrowserKey       string
+	FrontEnd         string
+	IdentityWithheld bool
 }
 
-// StartSession asks the Identity Agent for a sign-in on the asset. A refusal
-// (the asset not found, a front end the owner switched off) is an error that
-// carries the Identity Agent's words.
-func StartSession(ctx context.Context, o StartOptions) (Started, error) {
-	b := base(o.AgentURL)
-	disclosures := o.RequestDisclosures
-	if disclosures == nil {
-		disclosures = []string{}
+// Agent is how a back end reaches the Identity Agent that holds its asset. The
+// contract (what is asked, what each answer means, what is spent) is this
+// package's; the transport is the Agent's. HTTPAgent is a site's own: the
+// Identity Agent's public login routes. A utility app's machine reaches its
+// Identity Agent by sealed, app-signed calls instead, and supplies an Agent
+// that makes them, so it gets the same checks and writes none of its own.
+type Agent interface {
+	// Scope names this Identity Agent and asset, so a spent sign-in is the same
+	// one wherever it is confirmed from.
+	Scope() string
+	// Start begins a sign-in. A refusal is an error that carries the Identity
+	// Agent's words.
+	Start(ctx context.Context, r StartRequest) (Started, error)
+	// Status reads how a sign-in stands, with the collector secret. An answer the
+	// Identity Agent gave but that is not ok is Status{State: "pending"}; an error
+	// is for a call that could not be made.
+	Status(ctx context.Context, sessionToken, collectorSecret string) (Status, error)
+}
+
+// StartSession asks the Identity Agent for a sign-in. It is an error for the
+// answer to lack a token, a pointer or the secret.
+func StartSession(ctx context.Context, a Agent, r StartRequest) (Started, error) {
+	if r.RequestDisclosures == nil {
+		r.RequestDisclosures = []string{}
 	}
-	body := map[string]any{"audience": o.Audience, "requestDisclosures": disclosures}
-	if o.BrowserKey != "" {
-		body["browserKey"] = o.BrowserKey
-	}
-	if o.FrontEnd != "" {
-		body["frontEnd"] = o.FrontEnd
-	}
-	raw, err := json.Marshal(body)
+	s, err := a.Start(ctx, r)
 	if err != nil {
 		return Started{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b+"/api/login/session/"+escape(o.AssetID), bytes.NewReader(raw))
-	if err != nil {
-		return Started{}, err
+	if s.SessionToken == "" || s.PointerUrl == "" || s.CollectorSecret == "" {
+		return Started{}, fmt.Errorf("login: the Identity Agent at %s answered a sign-in without a token, pointer and secret", a.Scope())
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := client(o.Client).Do(req)
-	if err != nil {
-		return Started{}, fmt.Errorf("login: the Identity Agent at %s could not be reached: %w", b, err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		why := strings.TrimSpace(string(data))
-		if why != "" {
-			why = ": " + why
-		}
-		return Started{}, fmt.Errorf("login: the Identity Agent at %s would not start a sign-in (%d%s)", b, resp.StatusCode, why)
-	}
-	var out struct {
-		SessionToken    string `json:"session_token"`
-		Pointer         string `json:"relay_or_qr_url"`
-		CollectorSecret string `json:"collector_secret"`
-	}
-	if json.Unmarshal(data, &out) != nil || out.SessionToken == "" || out.Pointer == "" || out.CollectorSecret == "" {
-		return Started{}, fmt.Errorf("login: the Identity Agent at %s answered a sign-in without a token, pointer and secret", b)
-	}
-	return Started{SessionToken: out.SessionToken, PointerUrl: out.Pointer, CollectorSecret: out.CollectorSecret}, nil
+	return s, nil
 }
 
 // Spent spends a verified sign-in so the same one signs nobody in twice.
@@ -130,8 +103,6 @@ type Spent interface {
 
 // ConfirmOptions asks how a sign-in went.
 type ConfirmOptions struct {
-	AgentURL     string
-	AssetID      string
 	SessionToken string
 	// CollectorSecret is what StartSession returned. Without it the Identity
 	// Agent reports the state but withholds who signed in.
@@ -141,7 +112,6 @@ type ConfirmOptions struct {
 	Spent Spent
 	// SpentFor is how long a spent sign-in is remembered; DefaultSpentFor when zero.
 	SpentFor time.Duration
-	Client   *http.Client
 	// Now is the clock; time.Now when nil.
 	Now func() time.Time
 }
@@ -185,40 +155,10 @@ var ErrAlreadyUsed = errors.New("login: this sign-in has already been used")
 // ConfirmSession asks the Identity Agent how the sign-in stands. Issue an
 // application session only on Verified. An answer that is not ok, or that
 // verifies nobody, is Pending, never Verified.
-func ConfirmSession(ctx context.Context, o ConfirmOptions) (Confirmed, error) {
-	b := base(o.AgentURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b+"/api/login/session/"+escape(o.AssetID)+"/"+escape(o.SessionToken), nil)
+func ConfirmSession(ctx context.Context, a Agent, o ConfirmOptions) (Confirmed, error) {
+	body, err := a.Status(ctx, o.SessionToken, o.CollectorSecret)
 	if err != nil {
 		return Confirmed{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-	if o.CollectorSecret != "" {
-		req.Header.Set("X-Collector-Secret", o.CollectorSecret)
-	}
-	resp, err := client(o.Client).Do(req)
-	if err != nil {
-		return Confirmed{}, fmt.Errorf("login: the Identity Agent at %s could not be reached: %w", b, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Confirmed{State: Pending}, nil
-	}
-	var body struct {
-		State            string         `json:"state"`
-		AppSessionToken  string         `json:"app_session_token"`
-		Disclosures      map[string]any `json:"disclosures"`
-		Reason           string         `json:"reason"`
-		BrowserKey       string         `json:"browser_key"`
-		FrontEnd         string         `json:"front_end"`
-		IdentityWithheld bool           `json:"identity_withheld"`
-		MemberInfo       *struct {
-			Role        string `json:"role"`
-			DisplayName string `json:"display_name"`
-		} `json:"member_info"`
-	}
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
-	if json.Unmarshal(data, &body) != nil {
-		return Confirmed{State: Pending}, nil
 	}
 	// Verified, but this caller could not collect: pending would spin forever
 	// and verified would hand back an empty identity.
@@ -235,7 +175,7 @@ func ConfirmSession(ctx context.Context, o ConfirmOptions) (Confirmed, error) {
 			if keep <= 0 {
 				keep = DefaultSpentFor
 			}
-			fresh, err := o.Spent.Claim(b+"|"+o.AssetID+"|"+o.SessionToken, now().Add(keep))
+			fresh, err := o.Spent.Claim(a.Scope()+"|"+o.SessionToken, now().Add(keep))
 			if err != nil {
 				return Confirmed{}, fmt.Errorf("login: the spent-sign-in store failed: %w", err)
 			}
@@ -243,11 +183,8 @@ func ConfirmSession(ctx context.Context, o ConfirmOptions) (Confirmed, error) {
 				return Confirmed{}, ErrAlreadyUsed
 			}
 		}
-		c := Confirmed{State: Verified, PairwiseAID: body.AppSessionToken, Disclosures: body.Disclosures, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd}
-		if body.MemberInfo != nil {
-			c.MemberInfo = &MemberInfo{Role: body.MemberInfo.Role, DisplayName: body.MemberInfo.DisplayName}
-		}
-		return c, nil
+		return Confirmed{State: Verified, PairwiseAID: body.AppSessionToken, Disclosures: body.Disclosures,
+			MemberInfo: body.MemberInfo, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd}, nil
 	}
 	if body.State == "declined" {
 		return Confirmed{State: Declined, Reason: body.Reason}, nil

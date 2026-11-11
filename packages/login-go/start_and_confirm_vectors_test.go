@@ -128,8 +128,8 @@ func TestStartMatchesTheSharedVectors(t *testing.T) {
 			return answer(c.Response), nil
 		})}
 		i := c.Input
-		got, err := StartSession(context.Background(), StartOptions{AgentURL: i.AgentURL, AssetID: i.AssetID, Audience: i.Audience,
-			RequestDisclosures: i.RequestDisclosures, BrowserKey: i.BrowserKey, FrontEnd: i.FrontEnd, Client: client})
+		got, err := StartSession(context.Background(), HTTPAgent{URL: i.AgentURL, AssetID: i.AssetID, Client: client}, StartRequest{Audience: i.Audience,
+			RequestDisclosures: i.RequestDisclosures, BrowserKey: i.BrowserKey, FrontEnd: i.FrontEnd})
 		if c.Expect.ErrorContains != "" {
 			if err == nil || !strings.Contains(err.Error(), c.Expect.ErrorContains) {
 				t.Errorf("%s: error %v, want it to contain %q", c.Name, err, c.Expect.ErrorContains)
@@ -157,7 +157,7 @@ func TestConfirmMatchesTheSharedVectors(t *testing.T) {
 			return answer(c.Response), nil
 		})}
 		i := c.Input
-		got, err := ConfirmSession(context.Background(), ConfirmOptions{AgentURL: i.AgentURL, AssetID: i.AssetID, SessionToken: i.SessionToken, CollectorSecret: i.CollectorSecret, Client: client})
+		got, err := ConfirmSession(context.Background(), HTTPAgent{URL: i.AgentURL, AssetID: i.AssetID, Client: client}, ConfirmOptions{SessionToken: i.SessionToken, CollectorSecret: i.CollectorSecret})
 		if c.Expect.ErrorContains != "" {
 			if err == nil || !strings.Contains(err.Error(), c.Expect.ErrorContains) {
 				t.Errorf("%s: error %v, want it to contain %q", c.Name, err, c.Expect.ErrorContains)
@@ -191,8 +191,8 @@ func TestASpentSignInIsRefusedTheSecondTime(t *testing.T) {
 		client := &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
 			return answer(response{Status: 200, Body: raw}), nil
 		})}
-		got, err := ConfirmSession(context.Background(), ConfirmOptions{AgentURL: s.Input.AgentURL, AssetID: s.Input.AssetID,
-			SessionToken: step.SessionToken, CollectorSecret: s.Input.CollectorSecret, Client: client, Spent: store})
+		got, err := ConfirmSession(context.Background(), HTTPAgent{URL: s.Input.AgentURL, AssetID: s.Input.AssetID, Client: client}, ConfirmOptions{
+			SessionToken: step.SessionToken, CollectorSecret: s.Input.CollectorSecret, Spent: store})
 		switch {
 		case step.Expect.ErrorContains != "":
 			if !errors.Is(err, ErrAlreadyUsed) || !strings.Contains(err.Error(), step.Expect.ErrorContains) {
@@ -226,12 +226,13 @@ func TestTheSpentWindowIsCarriedOnTheClaim(t *testing.T) {
 	client := &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
 		return answer(response{Status: 200, Body: json.RawMessage(`{"state":"verified","app_session_token":"EP"}`)}), nil
 	})}
-	o := ConfirmOptions{AgentURL: "https://ia.example", AssetID: "a", SessionToken: "t", Client: client, Spent: rec, Now: func() time.Time { return now }}
-	if _, err := ConfirmSession(context.Background(), o); err != nil {
+	agent := HTTPAgent{URL: "https://ia.example", AssetID: "a", Client: client}
+	o := ConfirmOptions{SessionToken: "t", Spent: rec, Now: func() time.Time { return now }}
+	if _, err := ConfirmSession(context.Background(), agent, o); err != nil {
 		t.Fatal(err)
 	}
 	o.SpentFor = time.Minute
-	if _, err := ConfirmSession(context.Background(), o); err != nil {
+	if _, err := ConfirmSession(context.Background(), agent, o); err != nil {
 		t.Fatal(err)
 	}
 	if !until[0].Equal(now.Add(time.Hour)) || !until[1].Equal(now.Add(time.Minute)) {
@@ -242,3 +243,34 @@ func TestTheSpentWindowIsCarriedOnTheClaim(t *testing.T) {
 type recorder func(string, time.Time)
 
 func (r recorder) Claim(k string, u time.Time) (bool, error) { r(k, u); return true, nil }
+
+// An Agent that is not HTTP gets every check the contract makes: this one stands
+// for a sealed route a utility app's machine uses.
+type sealedAgent struct{ st Status }
+
+func (sealedAgent) Scope() string { return "sealed|app-1" }
+func (sealedAgent) Start(context.Context, StartRequest) (Started, error) {
+	return Started{SessionToken: "t", PointerUrl: "https://ia.example/i/t"}, nil
+}
+func (a sealedAgent) Status(context.Context, string, string) (Status, error) { return a.st, nil }
+
+func TestAnotherTransportGetsTheSameChecks(t *testing.T) {
+	ctx := context.Background()
+	if _, err := StartSession(ctx, sealedAgent{}, StartRequest{}); err == nil || !strings.Contains(err.Error(), "without a token, pointer and secret") {
+		t.Errorf("a start with no secret was accepted: %v", err)
+	}
+	if got, _ := ConfirmSession(ctx, sealedAgent{Status{State: "verified"}}, ConfirmOptions{}); got.State != Pending {
+		t.Errorf("verified with no identity was %s, not pending", got.State)
+	}
+	if _, err := ConfirmSession(ctx, sealedAgent{Status{State: "verified", IdentityWithheld: true}}, ConfirmOptions{}); err == nil {
+		t.Error("a withheld identity was not an error")
+	}
+	store := &InMemorySpent{}
+	v := sealedAgent{Status{State: "verified", AppSessionToken: "EP", BrowserKey: "K"}}
+	if got, err := ConfirmSession(ctx, v, ConfirmOptions{SessionToken: "t", Spent: store}); err != nil || got.BrowserKey != "K" {
+		t.Fatalf("first confirm: %+v, %v", got, err)
+	}
+	if _, err := ConfirmSession(ctx, v, ConfirmOptions{SessionToken: "t", Spent: store}); !errors.Is(err, ErrAlreadyUsed) {
+		t.Errorf("second confirm: %v", err)
+	}
+}
