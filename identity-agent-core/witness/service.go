@@ -145,6 +145,9 @@ type Service struct {
 	sendingMu sync.Mutex
 	sending   map[string]int
 
+	// rearmed holds the events given another wait this run (see rearm).
+	rearmed sync.Map
+
 	// bg tracks the work this service starts on its own, which writes to the
 	// store after the call that started it has returned. See background.
 	bgMu      sync.Mutex
@@ -1064,13 +1067,16 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			continue
 		}
 		said := eventSAID(ev)
-		if f, _ := s.Store.GetFinalization(said); f == nil {
+		f, _ := s.Store.GetFinalization(said)
+		if f == nil {
 			seq, _ := eventSeq(ev)
 			at := threshold
 			if row, ok := atPlace[said]; ok && row.Known {
 				at = s.thresholdFor(row)
 			}
 			s.startFinalization(said, signerAID, seq, at, "", raw)
+		} else if f.State == FinalizeTimeout && f.ReceiptCount == 0 {
+			s.rearm(said, signerAID, raw)
 		}
 	}
 	var wg sync.WaitGroup
@@ -1156,6 +1162,35 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}
 	}
 	return true
+}
+
+// rearm gives an event that timed out with no receipt at all another wait, so
+// that sending it again (this pass does, to any witness whose tip is short of
+// it) can finalize it: an event no designated witness ever held, as an old
+// install's inception may be, is otherwise left timed out for good. Once per
+// event per boot, and the new wait is the usual one, so a witness that stays
+// silent costs one more try per start and no more.
+func (s *Service) rearm(eventSAID, signerAID string, rawEvent []byte) {
+	if _, again := s.rearmed.LoadOrStore(eventSAID, true); again {
+		return
+	}
+	s.receiptMu.Lock()
+	f, _ := s.Store.GetFinalization(eventSAID)
+	if f == nil || f.State != FinalizeTimeout || f.ReceiptCount != 0 {
+		s.receiptMu.Unlock()
+		return
+	}
+	f.State = FinalizePending
+	s.settle(f, rawEvent)
+	f.StartedAt = NowRFC3339()
+	if f.State == FinalizeTimeout {
+		f.State = FinalizePending
+	}
+	_ = s.Store.SaveFinalization(*f)
+	s.receiptMu.Unlock()
+	if f.State != FinalizeFinalized {
+		s.background(func() { s.finalizeLoop(eventSAID) })
+	}
 }
 
 // HoldsThreshold reports whether at least threshold of the designated witnesses
@@ -1637,8 +1672,29 @@ func (s *Service) receive(eventSAID, witnessAID, cesrSig string, rawEvent []byte
 // When the key log cannot be read now, nothing is counted: the receipts stay
 // kept, for when it can be.
 func (s *Service) settle(f *FinalizationState, rawEvent []byte) {
+	row, err := s.witnessing(f.SignerAID, f.EventSAID, rawEvent)
+	s.settleFrom(f, row, err, false)
+}
+
+// settleKeeping is settle for a row whose event is read from the log alone (the
+// deadline and the startup sweep): when the log cannot be read, or does not
+// hold the event, the row keeps the count, threshold and state it had, so a
+// partial row with real receipts does not time out reporting none.
+func (s *Service) settleKeeping(f *FinalizationState) {
+	row, err := s.witnessing(f.SignerAID, f.EventSAID, nil)
+	s.settleFrom(f, row, err, true)
+}
+
+// settleFrom is settle given the witnessing report already read for the event
+// (the sweep reads a key log once for all its events). err is why the report
+// could not be had. With keep, an unreadable report leaves the row as it is;
+// without, nothing is counted against a log that cannot be read.
+func (s *Service) settleFrom(f *FinalizationState, row drivers.EventWitnessing, err error, keep bool) {
+	if err != nil && keep {
+		return
+	}
 	f.ReceiptCount = 0
-	if row, err := s.witnessing(f.SignerAID, f.EventSAID, rawEvent); err == nil {
+	if err == nil {
 		f.ReceiptCount = row.Verified
 		// Always the log's own toad, never one stored when the event was sent.
 		f.Threshold = s.thresholdFor(row)
@@ -1675,7 +1731,7 @@ func (s *Service) startFinalization(eventSAID, signerAID string, seq, threshold 
 	if startedAt == "" {
 		startedAt = NowRFC3339()
 	}
-	f := FinalizationState{EventSAID: eventSAID, SignerAID: signerAID, SequenceNum: seq, Threshold: threshold, StartedAt: startedAt}
+	f := FinalizationState{EventSAID: eventSAID, SignerAID: signerAID, SequenceNum: seq, Threshold: threshold, StartedAt: startedAt, State: FinalizePending}
 	s.settle(&f, rawEvent)
 	_ = s.Store.SaveFinalization(f)
 }
@@ -1728,7 +1784,7 @@ func (s *Service) finalizeLoop(eventSAID string) {
 		s.receiptMu.Unlock()
 		return
 	}
-	s.settle(f, nil)
+	s.settleKeeping(f)
 	if f.State != FinalizeFinalized {
 		f.State = FinalizeTimeout
 	}
@@ -1741,27 +1797,84 @@ func (s *Service) finalizeLoop(eventSAID string) {
 	}
 }
 
-// SettleUnfinalized re-settles, once at startup, every finalization that never
-// finalized. Rows stored before the threshold came from the log hold the cap's
-// majority and stay wrong for good otherwise: nothing re-reads them, and a
-// broadcast skips an event that already has a row. Returns how many were
-// settled.
+// settledFromLogKey is the witness config key recording that every finalization
+// stored before its threshold came from the log has been settled once.
+const settledFromLogKey = "finalizations_settled_from_log"
+
+// StartSettlingUnfinalized runs SettleUnfinalized in the background, counted
+// so that Wait covers it and Stop ends it.
+func (s *Service) StartSettlingUnfinalized() {
+	s.background(func() { s.SettleUnfinalized() })
+}
+
+// SettleUnfinalized re-settles finalizations that never finalized, against
+// their own key logs. Rows stored before the threshold came from the log hold
+// the cap's majority and stay wrong for good otherwise: nothing re-reads them,
+// and a broadcast skips an event that already has a row.
+//
+// Rows are grouped by signer and each key log is read once and walked once
+// (drivers.WitnessingByEvent), however many rows it has. The first run settles
+// every row not finalized and records a marker; later runs look only at
+// pending and partial rows, which are the ones a restart interrupts. A signer
+// whose log cannot be read is left as it is. Returns how many rows were
+// settled. It is meant to run in the background, never in the start path.
 func (s *Service) SettleUnfinalized() int {
+	if s.KeyLogOf == nil {
+		return 0
+	}
 	rows, err := s.Store.ListUnfinalized()
 	if err != nil {
 		log.Printf("[witness] could not list unfinalized events: %v", err)
 		return 0
 	}
-	n := 0
+	done, _ := s.Store.GetConfig(settledFromLogKey)
+	first := done == ""
+	bySigner := map[string][]string{}
 	for _, f := range rows {
-		s.receiptMu.Lock()
-		cur, _ := s.Store.GetFinalization(f.EventSAID)
-		if cur != nil && cur.State != FinalizeFinalized {
-			s.settle(cur, nil)
-			_ = s.Store.SaveFinalization(*cur)
-			n++
+		if first || f.State == FinalizePending || f.State == FinalizePartial {
+			bySigner[f.SignerAID] = append(bySigner[f.SignerAID], f.EventSAID)
 		}
-		s.receiptMu.Unlock()
+	}
+	n := 0
+	for signer, saids := range bySigner {
+		select {
+		case <-s.stopping():
+			return n
+		default:
+		}
+		events, err := s.KeyLogOf(signer)
+		if err != nil || len(events) == 0 {
+			continue
+		}
+		in := drivers.ValidateKELInput{AID: signer, RawEvents: events, Receipts: map[string][]drivers.WitnessReceipt{}}
+		for _, said := range saids {
+			held, _ := s.Contacts.GetWitnessReceipts(said)
+			for _, h := range held {
+				in.Receipts[said] = append(in.Receipts[said], drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
+			}
+		}
+		report := drivers.WitnessingByEvent(in)
+		for _, said := range saids {
+			s.receiptMu.Lock()
+			cur, _ := s.Store.GetFinalization(said)
+			if cur != nil && cur.State != FinalizeFinalized {
+				row, ok := report[said]
+				var rerr error
+				if !ok || !row.Known {
+					rerr = fmt.Errorf("event %s cannot be read in the key log of %s", said, signer)
+				}
+				before := *cur
+				s.settleFrom(cur, row, rerr, true)
+				if *cur != before {
+					_ = s.Store.SaveFinalization(*cur)
+					n++
+				}
+			}
+			s.receiptMu.Unlock()
+		}
+	}
+	if first {
+		_ = s.Store.SetConfig(settledFromLogKey, NowRFC3339())
 	}
 	return n
 }

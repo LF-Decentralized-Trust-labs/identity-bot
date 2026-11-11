@@ -450,8 +450,9 @@ func New(cfg Config) (*CoreServer, error) {
 	}
 	wsvc.KeyLogOf = s.keyLogOf
 	// Events stored before their threshold came from their own log are settled
-	// again once, now that the log can be read.
-	wsvc.SettleUnfinalized()
+	// again, now that the log can be read, in the background: it reads key
+	// logs, which must not hold up starting.
+	wsvc.StartSettlingUnfinalized()
 	// The bootstrap witnesses come from the provider registry, so there is one
 	// list of operators rather than one here and another in the witness engine.
 	witness.BootstrapWitnesses = witness.WitnessesFromRegistry(
