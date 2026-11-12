@@ -1,0 +1,77 @@
+# Windows probe for ADR-074 section 3: does a TPM key with an authorization value
+# behave the way the controller key design needs?
+#
+# RUN IT (Windows PowerShell, a machine with a TPM 2.0, Go installed, from the
+# identity-bot checkout; no administrator rights needed):
+#
+#     powershell -ExecutionPolicy Bypass -File scripts\tpm-authorization-probe.ps1
+#
+# It prints one line per claim, PASS / FAIL / UNKNOWN, and ends with
+# "PROBE RESULT: ALL PASS" or "PROBE RESULT: NOT READY". Send the whole output
+# back. If it says FAIL, do not ship the Windows controller key: the design needs
+# a decision (see the line that failed).
+#
+# WHAT IT DOES
+#   1. builds the probe (identity-agent-core/secureenclave, tag tpmprobe)
+#   2. in your session: creates a key with an authorization value, signs with it
+#   3. as a scheduled task with NO desktop (this is what the core is): signs again
+#   4. in your session: sends ONE wrong value and ONE missing value, reads the
+#      TPM's lockout counter before and after
+#   5. runs the core's own signer end to end (make, reopen, refuse a planted key,
+#      refuse when locked)
+#   6. deletes every key it made
+#
+# COST: step 4 adds one or two failures to the TPM's lockout counter, which
+# Windows Hello shares, and it decays by itself. The probe refuses to run step 4 if
+# fewer than 3 failures remain.
+$ErrorActionPreference = 'Stop'
+$repo = Split-Path -Parent $PSScriptRoot
+$pkg = Join-Path $repo 'identity-agent-core'
+$work = Join-Path $env:TEMP ("tpm-probe-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory -Path $work | Out-Null
+$exe = Join-Path $work 'probe.test.exe'
+$state = Join-Path $work 'state.json'
+$out = Join-Path $work 'task-output.txt'
+
+Push-Location $pkg
+try { go test -c -tags tpmprobe -o $exe ./secureenclave } finally { Pop-Location }
+
+function Run-Phase($phase) {
+    $env:PROBE_PHASE = $phase; $env:PROBE_STATE = $state
+    & $exe -test.run TestTPMAuthorizationProbe -test.v 2>&1 | Tee-Object -Variable lines | Out-Host
+    return $lines
+}
+
+$all = @()
+$all += Run-Phase 'create'
+$all += Run-Phase 'sign'
+
+# The same signing, from a process with no desktop and no prompt available.
+$cmd = "`$env:PROBE_PHASE='sign'; `$env:PROBE_STATE='$state'; & '$exe' -test.run TestTPMAuthorizationProbe -test.v *> '$out'"
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -Command `"$cmd`""
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+$task = 'IdentityAgentTpmProbe'
+Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Force | Out-Null
+Start-ScheduledTask -TaskName $task
+$deadline = (Get-Date).AddSeconds(90)
+do { Start-Sleep -Seconds 2 } while ((Get-ScheduledTask -TaskName $task).State -eq 'Running' -and (Get-Date) -lt $deadline)
+Unregister-ScheduledTask -TaskName $task -Confirm:$false
+if (Test-Path $out) { $nonInteractive = Get-Content $out } else { $nonInteractive = @('PROBE SIGN     FAIL  the non-interactive run produced no output') }
+$nonInteractive | Out-Host
+$all += ($nonInteractive | ForEach-Object { $_ -replace '^PROBE SIGN ', 'PROBE SIGN-NOINTERACTIVE ' })
+
+$all += Run-Phase 'refuse'
+$all += Run-Phase 'core'
+$null = Run-Phase 'cleanup'
+Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+
+Write-Host ''
+Write-Host '---- summary ----'
+$lines = $all | Where-Object { $_ -match '^PROBE ' -and $_ -notmatch '^PROBE info' } | Sort-Object -Unique
+$lines | ForEach-Object { Write-Host $_ }
+$need = @('CREATE', 'SIGN', 'WRONG', 'NONE', 'LOCKOUT', 'CORE', 'CORE-OWN', 'CORE-LOCK')
+$bad = $need | Where-Object { $n = $_; -not ($lines | Where-Object { $_ -match "^PROBE $n\s+PASS" }) }
+$noint = $lines | Where-Object { $_ -match '^PROBE SIGN-NOINTERACTIVE\s+PASS' }
+if (-not $noint) { $bad += 'SIGN-NOINTERACTIVE' }
+if ($bad) { Write-Host "PROBE RESULT: NOT READY ($($bad -join ', '))"; exit 1 }
+Write-Host 'PROBE RESULT: ALL PASS'

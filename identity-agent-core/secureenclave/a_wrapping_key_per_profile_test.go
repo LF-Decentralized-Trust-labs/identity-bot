@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -503,13 +502,18 @@ func TestTheControllerKeyNameIsTheProfilesOwnWhenItHasAGate(t *testing.T) {
 	}
 }
 
-func TestTheUsageAuthDigestIsTheSHA1OfTheHexText(t *testing.T) {
-	d, text := tpmUsageAuth([]byte{0x00, 0xff, 0x10})
-	if text != "00ff10" {
-		t.Fatalf("text %q", text)
+// The core hands the provider the value as hex wide text with a terminator and
+// computes no digest of its own.
+func TestTheUsageAuthIsTheHexTextAsAWideStringWithItsTerminator(t *testing.T) {
+	w := tpmUsageAuthWide([]byte{0x00, 0xff, 0x10})
+	want := []uint16{'0', '0', 'f', 'f', '1', '0', 0}
+	if len(w) != len(want) {
+		t.Fatalf("got %v", w)
 	}
-	if want := sha1.Sum([]byte("00ff10")); d != want {
-		t.Fatalf("digest %x, want SHA-1 of the text %x", d, want)
+	for i := range want {
+		if w[i] != want[i] {
+			t.Fatalf("got %v, want %v", w, want)
+		}
 	}
 }
 

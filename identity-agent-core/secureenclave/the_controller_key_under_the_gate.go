@@ -1,7 +1,6 @@
 package secureenclave
 
 import (
-	"crypto/sha1" // #nosec G505 -- the TPM's usage-authorization digest is SHA-1 by its specification, not a choice
 	"errors"
 	"fmt"
 	"runtime"
@@ -34,8 +33,8 @@ type GateKeyDeriver interface {
 // authorization value (ADR-074: HKDF(GK, "tpm-auth")).
 const tpmAuthInfo = "tpm-auth"
 
-// tpmAuthLen is the bytes derived: the TPM's authorization is the SHA-1 digest of
-// a string, and 32 bytes of key are far more than that can carry.
+// tpmAuthLen is the bytes derived: the provider turns the string into the TPM's
+// 20-byte authorization, and 32 bytes of key are more than that can carry.
 const tpmAuthLen = 32
 
 // controllerKeyNameFor is the name of the controller key inside a platform that
@@ -116,20 +115,19 @@ func tpmAuthorizationFor(dataDir string) ([]byte, error) {
 	return d.DeriveKey(tpmAuthInfo, tpmAuthLen)
 }
 
-// tpmUsageAuth is how the Platform Crypto Provider takes the authorization
-// value: the SHA-1 digest of the value written as text (hex, so no byte of it is
-// one a string API would end on). The same text is what the core supplies when it
-// opens the key. UNVERIFIED ON A TPM: whether the provider hashes the string it
-// is given with or without a terminator is what the Windows probe decides
-// (ADR-074 section 3), and this is the one place that changes if it differs.
-func tpmUsageAuth(auth []byte) (digest [sha1.Size]byte, text string) {
+// tpmUsageAuthWide is the authorization value as the wide string the Platform
+// Crypto Provider is given (NCRYPT_PIN_PROPERTY): the value written in hex, so no
+// byte of it is one a string API would end on, then the terminator. The core
+// hands the provider this same string when the key is made and when it is used,
+// and the provider derives what the TPM keeps; the core computes no digest of its
+// own. The caller zeroes the result.
+func tpmUsageAuthWide(auth []byte) []uint16 {
 	const hexdigits = "0123456789abcdef"
-	b := make([]byte, 0, 2*len(auth))
+	w := make([]uint16, 0, 2*len(auth)+1)
 	for _, c := range auth {
-		b = append(b, hexdigits[c>>4], hexdigits[c&15])
+		w = append(w, uint16(hexdigits[c>>4]), uint16(hexdigits[c&15]))
 	}
-	text = string(b)
-	return sha1.Sum(b), text
+	return append(w, 0)
 }
 
 // controllerKeyIsHardwareHere names the hardware signer this build has for the
