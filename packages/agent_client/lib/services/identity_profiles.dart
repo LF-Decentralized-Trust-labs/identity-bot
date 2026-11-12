@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/accepted_measurements.dart';
 import 'backend_process_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
@@ -244,6 +245,16 @@ class IdentityProfiles {
     if (await activeIsLocked()) return;
 
     final dir = await dataDirectoryForActive();
+
+    // Hand the core the publisher's signed measurement list, as bytes in its
+    // data directory. The core verifies it and decides what to adopt; a list
+    // that cannot be fetched leaves whatever was there, and never stops the
+    // core starting.
+    try {
+      await stageMeasurementList(dir);
+    } catch (e) {
+      debugPrint('[IdentityProfiles] measurement list not refreshed: $e');
+    }
 
     final starter = coreStarter;
     if (starter != null) return starter(dir);

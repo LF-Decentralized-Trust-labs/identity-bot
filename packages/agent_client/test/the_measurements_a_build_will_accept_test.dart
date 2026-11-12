@@ -16,27 +16,13 @@ final _vectors = Directory('../../identity-agent-core/measurementlist/testdata')
 const _keyId = 'test-publisher-1';
 final _now = DateTime.utc(2026, 11, 12, 12);
 
-class _Floor implements MeasurementFloorStore {
-  String? record;
-  @override
-  Future<String?> read() async => record;
-  @override
-  Future<void> write(String r) async => record = r;
-}
-
 Uint8List _file(String name) => File('${_vectors.path}/$name').readAsBytesSync();
 String get _key => File('${_vectors.path}/publisher_key.hex').readAsStringSync().trim();
 
-VerifiedMeasurementList _verify(Uint8List raw, {int min = 0}) => verifyMeasurementList(raw,
-    publisherKeyHex: _key, publisherKeyId: _keyId, now: _now, minSequence: min);
+VerifiedMeasurementList _verify(Uint8List raw, {int min = 0, String seen = ''}) => verifyMeasurementList(raw,
+    publisherKeyHex: _key, publisherKeyId: _keyId, now: _now, minSequence: min, seenDigest: seen);
 
 void main() {
-  test('a build told nothing accepts nothing', () async {
-    expect(bootstrapMeasurements(), isEmpty,
-        reason: 'no policy must mean adopt nothing, never adopt anything');
-    expect(await acceptedMeasurements(kind: 'individual', floorStore: _Floor(), sources: []), isEmpty);
-  });
-
   test('the committed valid list verifies and names what the core names', () {
     final l = _verify(_file('valid.json'));
     expect(l.sequence, 7);
@@ -48,12 +34,13 @@ void main() {
     test('${v['file']}: ${v['note']}', () {
       final raw = _file('negative/${v['file']}');
       final min = (v['min_sequence'] as int?) ?? 0;
+      final seen = (v['seen_digest'] as String?) ?? '';
       final refusal = v['refusal'] as String;
       if (refusal.isNotEmpty) {
-        expect(() => _verify(raw, min: min),
+        expect(() => _verify(raw, min: min, seen: seen),
             throwsA(isA<MeasurementListRefusal>().having((e) => e.code, 'code', refusal)));
       } else {
-        expect(_verify(raw, min: min).measurementsAt('individual', _now).length, v['accepted_for_individual']);
+        expect(_verify(raw, min: min, seen: seen).measurementsAt('individual', _now).length, v['accepted_for_individual']);
       }
     });
   }
@@ -71,37 +58,51 @@ void main() {
         throwsA(isA<MeasurementListRefusal>().having((e) => e.code, 'code', 'ErrMalformed')));
   });
 
-  group('the device\'s policy', () {
-    final bootstrap = ['aa' * 48];
-    Future<List<String>> ask(_Floor f, List<MeasurementListSource> s, {String key = ''}) =>
-        acceptedMeasurements(
-            kind: 'individual', now: _now, publisherKeyHex: key.isEmpty ? _key : key,
-            publisherKeyId: _keyId, sources: s, floorStore: f, bootstrap: bootstrap);
+  group('staging the list for the core', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('staged'));
+    tearDown(() => dir.deleteSync(recursive: true));
+    File staged() => File('${dir.path}/$stagedMeasurementListName');
+    Future<int?> stage(List<MeasurementListSource> s, {String? key}) => stageMeasurementList(dir.path,
+        now: _now, publisherKeyHex: key ?? _key, publisherKeyId: _keyId, sources: s);
 
-    test('a verified list is the policy, is recorded, and the bootstrap is not added', () async {
-      final f = _Floor();
-      final got = await ask(f, [() async => _file('valid.json')]);
-      expect(got, isNotEmpty);
-      expect(got, isNot(contains(bootstrap.first)));
-      expect(f.record, startsWith('7 '));
+    test('a verified list is written where the core reads it, byte for byte', () async {
+      expect(await stage([() async => _file('valid.json')]), 7);
+      expect(staged().readAsBytesSync(), _file('valid.json'));
     });
 
-    test('with no list ever accepted the bootstrap stands', () async {
-      expect(await ask(_Floor(), [() async => _file('negative/tampered.json')]), bootstrap);
+    test('a list that does not verify is never staged', () async {
+      expect(await stage([() async => _file('negative/tampered.json')]), isNull);
+      expect(staged().existsSync(), isFalse);
     });
 
-    test('once a list was accepted a failing list means nothing, never the bootstrap', () async {
-      final f = _Floor();
-      await ask(f, [() async => _file('valid.json')]);
-      expect(await ask(f, [() async => _file('negative/tampered.json')]), isEmpty);
-      expect(await ask(f, [() async => _file('negative/old_sequence.json')]), isEmpty);
-      expect(await ask(f, [() async => null]), isEmpty);
-      expect(await ask(f, [() async => throw Exception('offline')]), isEmpty);
+    test('a bad fetch leaves the good staged list, and an offline one does too', () async {
+      await stage([() async => _file('valid.json')]);
+      expect(await stage([() async => _file('negative/tampered.json')]), 7);
+      expect(await stage([() async => throw Exception('offline')]), 7);
+      expect(await stage([() async => null]), 7);
+      expect(staged().readAsBytesSync(), _file('valid.json'));
+    });
+
+    test('an older list does not replace the staged one', () async {
+      await stage([() async => _file('valid.json')]);
+      expect(await stage([() async => _file('negative/old_sequence.json')]), 7);
+      expect(staged().readAsBytesSync(), _file('valid.json'));
+    });
+
+    test('a different list at the staged sequence does not replace it', () async {
+      await stage([() async => _file('valid.json')]);
+      expect(await stage([() async => _file('negative/same_sequence_different_content.json')]), 7);
+      expect(staged().readAsBytesSync(), _file('valid.json'));
+    });
+
+    test('with no key pinned nothing is staged', () async {
+      expect(await stage([() async => _file('valid.json')], key: ''), isNull);
+      expect(staged().existsSync(), isFalse);
     });
 
     test('a source that fails is skipped for one that verifies', () async {
-      final got = await ask(_Floor(), [() async => throw Exception('offline'), () async => _file('valid.json')]);
-      expect(got, isNotEmpty);
+      expect(await stage([() async => throw Exception('offline'), () async => _file('valid.json')]), 7);
     });
   });
 }
