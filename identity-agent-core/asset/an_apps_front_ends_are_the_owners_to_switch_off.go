@@ -107,9 +107,9 @@ func (a Asset) FrontEndRefusal(kind string) string {
 	case !validFrontEnd(kind):
 		return "this sign-in does not say which front end it is for, 'browser' or 'installed_app'"
 	case !containsKind(a.DeviceFrontEnds, kind):
-		return fmt.Sprintf("this app does not offer a %s front end", kindWords(kind))
+		return fmt.Sprintf("this utility app does not offer a %s front end", kindWords(kind))
 	case containsKind(a.FrontEndsOff, kind):
-		return fmt.Sprintf("the owner of this app has switched off its %s front end", kindWords(kind))
+		return fmt.Sprintf("the owner of this utility app has switched off its %s front end", kindWords(kind))
 	}
 	return ""
 }

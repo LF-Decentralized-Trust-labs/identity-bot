@@ -40,7 +40,7 @@ func refuseFrontEnd(a asset.Asset, kind, browserKey string, fromAPage, installed
 		kind = asset.FrontEndBrowser
 	}
 	if kind == asset.FrontEndInstalledApp && !installedAppKey {
-		return "", http.StatusForbidden, "an installed-app sign-in needs the installed app's own key, and this request has none"
+		return "", http.StatusForbidden, "an installed-app sign-in needs the key of the utility app's installed front end, and this request has none"
 	}
 	if why := a.FrontEndRefusal(kind); why != "" {
 		return "", http.StatusForbidden, why

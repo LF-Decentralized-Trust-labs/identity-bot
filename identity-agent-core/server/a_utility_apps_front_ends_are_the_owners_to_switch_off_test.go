@@ -50,8 +50,8 @@ func TestAnAppIssuesAChallengeForAFrontEndItOffersAndIsNotSwitchedOff(t *testing
 func TestAnAppRefusesAFrontEndItDoesNotOffer(t *testing.T) {
 	w := anAppOffering(t, []string{"browser"}, nil)
 	code, msg := theChallengeFor(w, "", "installed_app")
-	if code != http.StatusForbidden || !strings.Contains(msg, "does not offer") {
-		t.Fatalf("got %d %q, want 403 saying the app does not offer it", code, msg)
+	if code != http.StatusForbidden || !strings.Contains(msg, "utility app does not offer") {
+		t.Fatalf("got %d %q, want 403 saying the utility app does not offer it", code, msg)
 	}
 	// An app that has declared nothing offers nothing.
 	w = anAppOffering(t, nil, nil)
@@ -64,7 +64,7 @@ func TestAnAppRefusesAFrontEndItDoesNotOffer(t *testing.T) {
 func TestAnAppRefusesAFrontEndItsOwnerSwitchedOff(t *testing.T) {
 	w := anAppOffering(t, []string{"browser", "installed_app"}, []string{"browser"})
 	code, msg := theChallengeFor(w, aBrowserKey, "browser")
-	if code != http.StatusForbidden || !strings.Contains(msg, "switched off") {
+	if code != http.StatusForbidden || !strings.Contains(msg, "utility app has switched off") {
 		t.Fatalf("got %d %q, want 403 saying the owner switched it off", code, msg)
 	}
 	if code, msg := theChallengeFor(w, "", "installed_app"); code != 0 {
