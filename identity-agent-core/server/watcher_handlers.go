@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"identity-agent-core/drivers"
 	"log"
 	"net"
 	"net/http"
@@ -288,26 +289,66 @@ func cappedWatcherHints(in []string) []string {
 	return out
 }
 
+// watcherInputFor is what every route hands the watcher: the presented log's
+// parsed records and, beside them, its own signed bytes where it carries them.
+// A log held only as parsed records says which event could not be carried
+// rather than going without a word, and is not proven by this input.
+func watcherInputFor(aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) watcher.VerifyKelInput {
+	in := watcher.VerifyKelInput{
+		AID: aid, KEL: kel, SourceType: source, SourceURL: sourceURL, BootstrapL2: cappedWatcherHints(bootstrap),
+	}
+	if signed, err := drivers.SignedMessagesFromRecords(kel); err == nil {
+		in.Signed = signed
+	} else {
+		in.NotSigned = err.Error()
+	}
+	return in
+}
+
 func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) *watcher.VerifyKelResult {
 	if s.WatcherService == nil || aid == "" || len(kel) == 0 {
 		return nil
 	}
-	res, err := s.WatcherService.VerifyKel(ctx, watcher.VerifyKelInput{
-		AID: aid, KEL: kel, SourceType: source, SourceURL: sourceURL, BootstrapL2: cappedWatcherHints(bootstrap),
-	})
+	in := watcherInputFor(aid, kel, source, sourceURL, bootstrap)
+	res, err := s.WatcherService.VerifyKel(ctx, in)
 	if err != nil {
+		// Refused, not passed over: nil here would send every route on as if the
+		// check had found nothing, and a store fault would then be a way past a fork.
 		log.Printf("[watcher] VerifyKel %s: %v", aid, err)
-		return nil
+		failed := &watcher.VerifyKelResult{
+			OK: false, Blocked: true, AID: aid, SequenceNum: -1, OverallOutcome: "unchecked",
+			Reason: "the check of this key log could not be completed, so it is not trusted: " + err.Error(),
+		}
+		if err := s.WatcherService.RecordCheck(failed); err != nil {
+			log.Printf("[watcher] could not keep the check of %s: %v", aid, err)
+		}
+		return failed
 	}
 	// Kept so a screen can say what was found and when. A failure to keep it
 	// is logged and does not change the verdict the caller acts on.
 	if err := s.WatcherService.RecordCheck(res); err != nil {
 		log.Printf("[watcher] could not keep the check of %s: %v", aid, err)
 	}
-	if res.Blocked {
+	if res.Duplicity() {
 		log.Printf("[watcher] DUPLICITY blocked aid=%s seq=%d reason=%s", aid, res.SequenceNum, res.Reason)
 	}
 	return res
+}
+
+// watchedLog runs the watcher on a presented log before anything is verified or
+// kept from it, and returns the log to go on with. A standing watcher holding
+// validly signed later events (or a recovery rotation replacing the presented
+// log's later interactions) shows the presenter's key state is stale: a
+// rotation may have retired the key the log ends on, so what is verified or
+// stored afterwards must be judged against the latest log, which is the
+// watcher's evidence checked here, not taken on its word.
+func (s *CoreServer) watchedLog(ctx context.Context, aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) ([]map[string]interface{}, *watcher.VerifyKelResult) {
+	res := s.runWatcherOnKel(ctx, aid, kel, source, sourceURL, bootstrap)
+	if res != nil && !res.Stopped() && len(res.LatestRecords) > 0 {
+		log.Printf("[watcher] %s: a watcher holds later signed events; going on with the log to sequence %d", aid, res.LatestSeq)
+		return res.LatestRecords, res
+	}
+	return kel, res
 }
 
 // handleWatcherOptOutGet says whether this agent's watcher is silent about an
@@ -359,12 +400,26 @@ func (s *CoreServer) handleWatcherOptOutSet(w http.ResponseWriter, r *http.Reque
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"aid": req.AID, "opted_out": *req.OptedOut})
 }
 
-// writeDuplicity refuses a contact whose key history the watcher found forked.
+// writeDuplicity refuses a contact whose key history a watcher proved forked.
 // The code and aid are for the app, which words the refusal itself; error and
 // details are for a log or a developer, and "details" is the technical reason.
 func writeDuplicity(w http.ResponseWriter, aid, reason string) {
 	jsonreply.Write(w, http.StatusConflict, map[string]interface{}{
 		"error": "KEL duplicity detected", "details": reason,
 		"code": "duplicity", "aid": aid,
+	})
+}
+
+// writeStopped refuses a contact a check stopped. A proven fork is answered as
+// duplicity; a check that could not be completed is answered as "unchecked" (or
+// "unreadable"), because the identity has not been shown to have done anything.
+func writeStopped(w http.ResponseWriter, aid string, res *watcher.VerifyKelResult) {
+	if res.Duplicity() {
+		writeDuplicity(w, aid, res.Reason)
+		return
+	}
+	jsonreply.Write(w, http.StatusConflict, map[string]interface{}{
+		"error": "The key log could not be checked", "details": res.Reason,
+		"code": res.RefusalCode(), "aid": aid,
 	})
 }

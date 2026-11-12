@@ -2897,6 +2897,21 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 	if cred.Issuer != "" {
 		issuerKelEvents = s.issuerLogForVerification(cred.Issuer)
 	}
+	// The watcher looks at the issuer's log first, so what is verified below is
+	// judged against the latest key state, and a log that forks is refused
+	// before anything is.
+	if issuerKelEvents != nil && cred.Issuer != "" {
+		var wRes *watcher.VerifyKelResult
+		issuerKelEvents, wRes = s.watchedLog(r.Context(), cred.Issuer, issuerKelEvents, watcher.SourceCredential, "", nil)
+		if wRes != nil && wRes.Stopped() {
+			if wRes.Duplicity() {
+				writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
+			} else {
+				writeError(w, http.StatusConflict, "Issuer KEL could not be checked", wRes.Reason)
+			}
+			return
+		}
+	}
 
 	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
 	issuerKelEvents = issuance.issuerKel
@@ -2917,16 +2932,6 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
 		return
-	}
-
-	if issuerKelEvents != nil {
-		issuerAid := cred.Issuer
-		if issuerAid != "" {
-			if wRes := s.runWatcherOnKel(r.Context(), issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil); wRes != nil && wRes.Blocked {
-				writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
-				return
-			}
-		}
 	}
 
 	reply := struct {
@@ -4081,6 +4086,18 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	// anything in the log was signed. What remains is that the fields refer to
 	// each other consistently, which a forged log does too — because whoever
 	// forged it wrote every one of those fields.
+	// A standing watcher sees the log before it is checked or kept: a fork is
+	// refused here, and a log a watcher shows to be stale is replaced by the
+	// latest one.
+	if kelCount > 0 {
+		var wRes *watcher.VerifyKelResult
+		oobiData.KEL, wRes = s.watchedLog(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers)
+		if wRes != nil && wRes.Stopped() {
+			writeStopped(w, oobiData.AID, wRes)
+			return
+		}
+		kelCount = len(oobiData.KEL)
+	}
 	kelVerified := false
 	witnessed := false
 	currentPublicKey := oobiData.PublicKey
@@ -4135,13 +4152,6 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 					"the key history at that address does not carry on from the one this agent already trusts for that identity")
 				return
 			}
-		}
-	}
-
-	if kelCount > 0 {
-		if wRes := s.runWatcherOnKel(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers); wRes != nil && wRes.Blocked {
-			writeDuplicity(w, oobiData.AID, wRes.Reason)
-			return
 		}
 	}
 
@@ -4247,6 +4257,19 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	// with it. See the note on the other resolve path: the parsed events alone
 	// cannot show that the inception derives this identifier, nor that anything
 	// was signed, and a forged log satisfies everything that remains.
+	// The same check the resolve path makes, and before the log is checked or
+	// kept, because this is the path that keeps the contact: a log that forks must
+	// not become a contact because the person went straight to adding it, and a
+	// log a watcher shows to be stale is replaced by the latest one.
+	if len(oobiData.KEL) > 0 {
+		var wRes *watcher.VerifyKelResult
+		oobiData.KEL, wRes = s.watchedLog(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers)
+		if wRes != nil && wRes.Stopped() {
+			writeStopped(w, oobiData.AID, wRes)
+			return
+		}
+	}
+
 	kelVerified := false
 	currentPublicKey := oobiData.PublicKey
 	if s.KeriDriver != nil && len(oobiData.KEL) > 0 {
@@ -4281,16 +4304,6 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-		}
-	}
-
-	// The same check the resolve path makes, because this is the path that keeps
-	// the contact: a log that forks must not become a contact because the person
-	// went straight to adding it.
-	if len(oobiData.KEL) > 0 {
-		if wRes := s.runWatcherOnKel(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers); wRes != nil && wRes.Blocked {
-			writeDuplicity(w, oobiData.AID, wRes.Reason)
-			return
 		}
 	}
 

@@ -11,8 +11,17 @@
 //
 //   - [SequenceNumber]: reading a key event's sequence number, which KERI
 //     writes in hexadecimal;
+//
 //   - [KelDigestAtSeq] and [CurrentSeq]: the digest of a key log up to a
 //     sequence number, which a watcher publishes and a verifier compares.
+//
+//   - [DigestStatement] and [DigestStatementWithRival]: the text a watcher signs
+//     when it answers a digest, including whether it holds a rival branch
+//     (kel-digest-statement-vectors.json);
+//
+//   - [KelLogContractFixture]: one key log as a watcher is sent it and serves
+//     it, which an agent's fetch of a log and a watcher's serving of it are both
+//     tested against.
 //
 // The digest is pinned by kel-digest-vectors.json, which is part of this
 // package so that any other implementation can test itself against the same

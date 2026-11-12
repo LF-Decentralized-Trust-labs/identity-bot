@@ -1213,6 +1213,41 @@ CREATE TABLE IF NOT EXISTS watcher_contact_check (
 -- is one ADD COLUMN, so it can be run again.
 ALTER TABLE duplicity_alerts ADD COLUMN kind TEXT NOT NULL DEFAULT 'duplicity';
 `},
+	{
+		Version:     56,
+		Description: "An alert keeps the evidence it rests on: the two signed events, or the faulty watcher's reply",
+		SQL: `
+-- JSON, empty for an alert stored before this one. For a proven duplicity it holds
+-- both events at the contested place with their controller signatures, so anybody
+-- can check the fork without trusting this agent; for an alert about a watcher it
+-- holds why that watcher's answer was set aside.
+ALTER TABLE duplicity_alerts ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '';
+`},
+	{
+		Version:     57,
+		Description: "Remember whether a first sighting of a key log was of a log its own controller signed",
+		SQL: `
+-- 1 when the log first seen verified (self-certifying, every event signed by the
+-- key in force), 0 when it came as bare records. Only a proven sighting may be
+-- contradicted by a later log: a digest planted from a made-up log must never get
+-- the identity's real log refused.
+ALTER TABLE kel_first_seen ADD COLUMN proven INTEGER NOT NULL DEFAULT 0;
+`},
+	{
+		Version:     58,
+		Description: "Keep the signed key log this agent last accepted for each contact, so a later log can be judged against it with KERI's superseding rules",
+		SQL: `
+-- JSON array of the log's signed messages (base64, one per event, in order), as
+-- keri.ValidateSignedKEL judges them. Only a log that verified is kept. A digest
+-- cannot say whether two logs that differ at one place are duplicity or a
+-- recovery rotation replacing interactions, and the events can.
+CREATE TABLE IF NOT EXISTS kel_seen_log (
+    aid TEXT PRIMARY KEY,
+    messages_json TEXT NOT NULL,
+    sequence_num INTEGER NOT NULL,
+    saved_at TEXT NOT NULL
+);
+`},
 }
 
 // execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD

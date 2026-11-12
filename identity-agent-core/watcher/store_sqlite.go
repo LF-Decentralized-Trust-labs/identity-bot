@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -21,16 +22,18 @@ func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
 	_, err := s.db.Exec(`
 		INSERT INTO kel_first_seen (
 			aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
-			seen_count, source_type, source_url
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			seen_count, source_type, source_url, proven
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, sequence_num) DO UPDATE SET
-			kel_digest = excluded.kel_digest,
+			kel_digest = CASE WHEN kel_first_seen.proven = 1 AND excluded.proven = 0
+				THEN kel_first_seen.kel_digest ELSE excluded.kel_digest END,
+			proven = MAX(kel_first_seen.proven, excluded.proven),
 			last_confirmed_at = excluded.last_confirmed_at,
 			seen_count = kel_first_seen.seen_count + 1`,
 		rec.AID, rec.SequenceNum, rec.KelDigest,
 		rec.FirstSeenAt.UTC().Format(time.RFC3339),
 		rec.LastConfirmedAt.UTC().Format(time.RFC3339),
-		rec.SeenCount, string(rec.SourceType), rec.SourceURL,
+		rec.SeenCount, string(rec.SourceType), rec.SourceURL, boolToInt(rec.Proven),
 	)
 	return err
 }
@@ -38,7 +41,7 @@ func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
 func (s *SQLiteStore) getFirstSeen(aid string, seq int) (*FirstSeenRecord, error) {
 	row := s.db.QueryRow(`
 		SELECT aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
-		       seen_count, source_type, source_url
+		       seen_count, source_type, source_url, proven
 		FROM kel_first_seen WHERE aid = ? AND sequence_num = ?`, aid, seq)
 	return scanFirstSeen(row)
 }
@@ -46,7 +49,7 @@ func (s *SQLiteStore) getFirstSeen(aid string, seq int) (*FirstSeenRecord, error
 func (s *SQLiteStore) listFirstSeen(aid string) ([]FirstSeenRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
-		       seen_count, source_type, source_url
+		       seen_count, source_type, source_url, proven
 		FROM kel_first_seen WHERE aid = ? ORDER BY sequence_num`, aid)
 	if err != nil {
 		return nil, err
@@ -72,11 +75,11 @@ func (s *SQLiteStore) InsertDuplicityAlert(alert DuplicityAlert) (int64, error) 
 	// same one seen again within the same second is the same alert.
 	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO duplicity_alerts (
-			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note, kind
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note, kind, evidence_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		alert.AID, alert.SequenceNum, alert.OurDigest, alert.TheirDigest,
 		alert.SourceURL, detectedAt,
-		boolToInt(alert.Resolved), alert.ResolutionNote, alert.Kind,
+		boolToInt(alert.Resolved), alert.ResolutionNote, alert.Kind, alert.Evidence,
 	)
 	if err != nil {
 		return 0, err
@@ -103,7 +106,7 @@ func (s *SQLiteStore) listDuplicityAlerts(aid string) ([]DuplicityAlert, error) 
 }
 
 const alertColumns = `SELECT id, aid, sequence_num, our_digest, their_digest, COALESCE(source_url, ''),
-		       detected_at, COALESCE(resolved, 0), COALESCE(resolution_note, ''), COALESCE(kind, 'duplicity'),
+		       detected_at, COALESCE(resolved, 0), COALESCE(resolution_note, ''), COALESCE(kind, 'duplicity'), COALESCE(evidence_json, ''),
 		       COALESCE((SELECT acknowledged_at FROM watcher_alert_ack WHERE alert_id = duplicity_alerts.id), '')`
 
 func (s *SQLiteStore) listAllAlerts() ([]DuplicityAlert, error) {
@@ -134,7 +137,7 @@ func scanAlerts(rows *sql.Rows) ([]DuplicityAlert, error) {
 		var detected, acked string
 		var resolved int
 		if err := rows.Scan(&a.ID, &a.AID, &a.SequenceNum, &a.OurDigest, &a.TheirDigest,
-			&a.SourceURL, &detected, &resolved, &a.ResolutionNote, &a.Kind, &acked); err != nil {
+			&a.SourceURL, &detected, &resolved, &a.ResolutionNote, &a.Kind, &a.Evidence, &acked); err != nil {
 			return nil, err
 		}
 		a.DetectedAt, _ = time.Parse(time.RFC3339, detected)
@@ -280,6 +283,47 @@ func (s *SQLiteStore) PruneIntermediate(aid string, keepSeqs []int) error {
 	return err
 }
 
+func (s *SQLiteStore) getSeenLog(aid string) ([][]byte, error) {
+	var js string
+	err := s.db.QueryRow(`SELECT messages_json FROM kel_seen_log WHERE aid = ?`, aid).Scan(&js)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var enc []string
+	if err := json.Unmarshal([]byte(js), &enc); err != nil {
+		return nil, fmt.Errorf("the kept log of %s does not read: %w", aid, err)
+	}
+	out := make([][]byte, 0, len(enc))
+	for _, e := range enc {
+		b, err := base64.StdEncoding.DecodeString(e)
+		if err != nil {
+			return nil, fmt.Errorf("the kept log of %s does not read: %w", aid, err)
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) saveSeenLog(aid string, messages [][]byte, seq int, at time.Time) error {
+	enc := make([]string, 0, len(messages))
+	for _, m := range messages {
+		enc = append(enc, base64.StdEncoding.EncodeToString(m))
+	}
+	js, err := json.Marshal(enc)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO kel_seen_log (aid, messages_json, sequence_num, saved_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(aid) DO UPDATE SET messages_json = excluded.messages_json,
+			sequence_num = excluded.sequence_num, saved_at = excluded.saved_at`,
+		aid, string(js), seq, at.UTC().Format(time.RFC3339))
+	return err
+}
+
 func (s *SQLiteStore) PruneStale(before time.Time) (int, error) {
 	res, err := s.db.Exec(`
 		DELETE FROM kel_first_seen
@@ -292,14 +336,19 @@ func (s *SQLiteStore) PruneStale(before time.Time) (int, error) {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+	// A kept log outlives nothing it was kept for.
+	if _, err := s.db.Exec(`DELETE FROM kel_seen_log WHERE aid NOT IN (SELECT aid FROM kel_first_seen)`); err != nil {
+		return int(n), err
+	}
 	return int(n), nil
 }
 
 func scanFirstSeen(row *sql.Row) (*FirstSeenRecord, error) {
 	var rec FirstSeenRecord
 	var firstSeen, lastConfirmed, sourceType string
+	var proven int
 	if err := row.Scan(&rec.AID, &rec.SequenceNum, &rec.KelDigest,
-		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL); err != nil {
+		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL, &proven); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -308,19 +357,22 @@ func scanFirstSeen(row *sql.Row) (*FirstSeenRecord, error) {
 	rec.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeen)
 	rec.LastConfirmedAt, _ = time.Parse(time.RFC3339, lastConfirmed)
 	rec.SourceType = SourceType(sourceType)
+	rec.Proven = proven != 0
 	return &rec, nil
 }
 
 func scanFirstSeenRow(rows *sql.Rows) (*FirstSeenRecord, error) {
 	var rec FirstSeenRecord
 	var firstSeen, lastConfirmed, sourceType string
+	var proven int
 	if err := rows.Scan(&rec.AID, &rec.SequenceNum, &rec.KelDigest,
-		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL); err != nil {
+		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL, &proven); err != nil {
 		return nil, err
 	}
 	rec.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeen)
 	rec.LastConfirmedAt, _ = time.Parse(time.RFC3339, lastConfirmed)
 	rec.SourceType = SourceType(sourceType)
+	rec.Proven = proven != 0
 	return &rec, nil
 }
 

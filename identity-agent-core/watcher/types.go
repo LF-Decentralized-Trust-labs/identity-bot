@@ -29,6 +29,10 @@ type FirstSeenRecord struct {
 	SeenCount       int
 	SourceType      SourceType
 	SourceURL       string
+	// Proven is whether the log first seen verified under its own controller's
+	// signatures. A digest from a log that did not is remembered but never
+	// contradicted into a refusal.
+	Proven bool
 }
 
 // DuplicityAlert is an immutable fork-detection audit record.
@@ -36,6 +40,10 @@ type FirstSeenRecord struct {
 const (
 	AlertKindDuplicity  = "duplicity"
 	AlertKindEscalation = "escalation"
+	// AlertKindWatcher is about a standing watcher, not about the contact: its
+	// answer did not hold up when checked (its log does not verify, or does not
+	// match its own digest). The contact is not held for it.
+	AlertKindWatcher = "watcher"
 )
 
 type DuplicityAlert struct {
@@ -52,6 +60,11 @@ type DuplicityAlert struct {
 	// AlertKindEscalation (the standing watcher disagreed: shown, never blocks). Empty means
 	// duplicity.
 	Kind string
+	// Evidence is what the alert rests on, as JSON (see Evidence in
+	// proof_of_duplicity.go): for duplicity the two signed events at the
+	// contested place, for a watcher alert why its answer was set aside. Empty
+	// on an alert that was raised without any.
+	Evidence string
 	// AcknowledgedAt is empty until the owner has seen the alert. An alert
 	// stays one until it is resolved.
 	AcknowledgedAt time.Time
@@ -64,8 +77,14 @@ type DigestResponse struct {
 	Digest         *string `json:"digest"`
 	ObservedSince  *string `json:"observed_since"`
 	FirstSeenAt    *string `json:"first_seen_at"`
-	SignedBy       string  `json:"signed_by,omitempty"`
-	Signature      string  `json:"signature,omitempty"`
+	// RivalAtOrBelow says the watcher also holds a validly signed event that
+	// conflicts with the one it holds at that place or below it. It is signed
+	// with the rest of the answer (witnessproto.DigestStatementWithRival), and
+	// when it is set the agent asks for the watcher's log, since the digest of
+	// the branch it matched cannot show the other one.
+	RivalAtOrBelow bool   `json:"rival_at_or_below,omitempty"`
+	SignedBy       string `json:"signed_by,omitempty"`
+	Signature      string `json:"signature,omitempty"`
 }
 
 // KelCheckRequest is the watcher /public/kel-check contract.
@@ -101,8 +120,14 @@ type SourceOutcome struct {
 
 // VerifyKelInput is passed from OOBI/credential hooks.
 type VerifyKelInput struct {
-	AID         string
-	KEL         []map[string]interface{}
+	AID string
+	KEL []map[string]interface{}
+	// Signed is the presented log's own signed bytes, one message per event, as
+	// keri.ValidateSignedKEL judges them. Empty when the route holds only parsed
+	// records; NotSigned then says which event could not be carried, and the log
+	// is not proven by this input.
+	Signed      [][]byte
+	NotSigned   string
 	SourceType  SourceType
 	SourceURL   string
 	BootstrapL2 []string // OOBI watchers hints (advisory)
@@ -122,9 +147,20 @@ type VerifyKelResult struct {
 	SequenceNum    int
 	Digest         string
 	OverallOutcome string
-	sourcesQueried []SourceOutcome
-	duplicityAlert *DuplicityAlert
-	firstContact   bool
+	// Latest is set when a standing watcher held validly signed later events
+	// than the log presented (or a recovery rotation replacing its later
+	// interactions): the verified log with them admitted, as signed messages,
+	// the keys now in force and its last sequence number. A caller verifies
+	// anything signed against these, not against the presented log's keys,
+	// which a rotation may have retired.
+	Latest          [][]byte
+	LatestKeys      []string
+	LatestRecords   []map[string]interface{} // the same log as records, in the shape callers hold
+	LatestSeq       int
+	FlaggedWatchers []string // standing watchers whose answer did not hold up
+	sourcesQueried  []SourceOutcome
+	duplicityAlert  *DuplicityAlert
+	firstContact    bool
 }
 
 // Verdicts of a check of one identity's key log.
@@ -133,6 +169,10 @@ const (
 	VerdictDuplicity  = "duplicity"  // two histories were seen for the same event
 	VerdictUnreadable = "unreadable" // the log could not be placed
 	VerdictEscalated  = "escalated"  // the standing watcher disagreed; shown to the owner, nothing was blocked
+	// VerdictUnchecked: the check could not be completed (a fault in what this
+	// agent keeps, or a later log whose keys could not be handed on), so the log
+	// is refused for now. Not a finding about the identity.
+	VerdictUnchecked = "unchecked"
 )
 
 // Outcomes a source gave in a check, as the owner is told them. A source's
@@ -142,6 +182,9 @@ const (
 	OutcomeDisagrees   = "disagrees"
 	OutcomeNoAnswer    = "no_answer"   // reached, but had not seen this identity
 	OutcomeUnreachable = "unreachable" // could not be asked
+	OutcomeAhead       = "ahead"       // holds validly signed later events: the presented log was stale
+	OutcomeBehind      = "behind"      // holds an older branch that a recovery rotation supersedes
+	OutcomeFaulty      = "faulty"      // its answer did not hold up when checked
 )
 
 // CheckSource is what one source said in the newest check of an identity.
@@ -165,6 +208,26 @@ type ContactCheck struct {
 	Sources   []CheckSource `json:"sources"`
 }
 
+// Stopped says a caller must not go ahead on this result: the log forks, proven
+// (Blocked).
+func (r *VerifyKelResult) Stopped() bool { return r.Blocked }
+
+// Duplicity says the stop is a proven fork. A stop for any other reason (the
+// check could not be completed, the log could not be read, a later log could not
+// be handed on) is not a finding about the identity and is not worded as one.
+func (r *VerifyKelResult) Duplicity() bool {
+	return r.Blocked && r.Check().Verdict == VerdictDuplicity
+}
+
+// RefusalCode is the code a route answers with when it stops: "duplicity" for a
+// proven fork, otherwise the check's own verdict ("unchecked", "unreadable").
+func (r *VerifyKelResult) RefusalCode() string {
+	if r.Duplicity() {
+		return "duplicity"
+	}
+	return r.Check().Verdict
+}
+
 // Check summarises a result for the owner. The per-source detail is folded here,
 // at the one place it is read, so what leaves the package is the summary and
 // not the observation.
@@ -174,6 +237,8 @@ func (r *VerifyKelResult) Check() ContactCheck {
 		Verdict: VerdictConfirmed, Reason: r.Reason, Sources: []CheckSource{},
 	}
 	switch {
+	case r.OverallOutcome == "unchecked" || r.OverallOutcome == "stale":
+		c.Verdict = VerdictUnchecked
 	case r.OverallOutcome == "unreadable":
 		c.Verdict = VerdictUnreadable
 	case r.Blocked:
@@ -196,8 +261,14 @@ func (r *VerifyKelResult) Check() ContactCheck {
 		switch so.Outcome {
 		case "first_seen", "match", "confirmed":
 			cs.Outcome = OutcomeAgrees
-		case "mismatch":
+		case "mismatch", "fork":
 			cs.Outcome = OutcomeDisagrees
+		case "ahead", "superseded":
+			cs.Outcome = OutcomeAhead
+		case "behind":
+			cs.Outcome = OutcomeBehind
+		case "faulty":
+			cs.Outcome = OutcomeFaulty
 		case "unavailable", "unreachable", "error":
 			cs.Outcome = OutcomeUnreachable
 		default:

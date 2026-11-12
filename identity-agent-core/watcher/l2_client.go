@@ -109,9 +109,72 @@ func (c *L2Client) verifyAnswer(r *DigestResponse, aid string, seq int) error {
 	if !trusted {
 		return fmt.Errorf("%s is not a watcher this agent trusts", r.SignedBy)
 	}
-	stmt, err := witnessproto.DigestStatement(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince)
+	stmt, err := witnessproto.DigestStatementWithRival(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince, r.RivalAtOrBelow)
 	if err != nil {
 		return err
 	}
 	return drivers.VerifyReceipt(r.SignedBy, stmt, r.Signature)
+}
+
+// logURL is where a watcher whose digest address is digestURL serves the key log
+// it holds for aid.
+func logURL(digestURL, aid string) (string, error) {
+	u, err := url.Parse(strings.TrimRight(digestURL, "/"))
+	if err != nil {
+		return "", err
+	}
+	p := strings.TrimSuffix(u.Path, "/public/kel-digest")
+	p = strings.TrimSuffix(p, "/api")
+	u.Path = strings.TrimRight(p, "/") + "/witness/kel/" + url.PathEscape(aid)
+	u.RawQuery = ""
+	return u.String(), nil
+}
+
+// FetchLog asks a watcher for the key log it holds for aid, with the controller
+// signatures and any rival events it kept. Nothing in the answer is believed:
+// it is judged by judgeWatcherLog, which verifies every signature itself, so
+// the answer need not be signed and a watcher that cannot be reached or hands
+// back something unreadable is simply one that has shown nothing.
+func (c *L2Client) FetchLog(ctx context.Context, digestURL, aid string) (*WatcherLog, error) {
+	target, err := logURL(digestURL, aid)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("key log from %s: HTTP %d", req.URL.Host, resp.StatusCode)
+	}
+	body, err := boundedread.All(resp.Body, boundedread.Document)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		KEL         []map[string]interface{} `json:"kel"`
+		Conflicting []map[string]interface{} `json:"conflicting"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	var log WatcherLog
+	if len(out.KEL) > 0 {
+		if log.Messages, err = drivers.SignedMessagesFromRecords(out.KEL); err != nil {
+			// Its log cannot be read as signed events: it has shown nothing.
+			return nil, fmt.Errorf("key log from %s: %w", req.URL.Host, err)
+		}
+		log.Records = out.KEL
+	}
+	for _, rec := range out.Conflicting {
+		if m, err := drivers.SignedMessagesFromRecords([]map[string]interface{}{rec}); err == nil {
+			log.Rival = append(log.Rival, m...)
+		}
+	}
+	return &log, nil
 }

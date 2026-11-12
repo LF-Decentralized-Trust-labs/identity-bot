@@ -27,7 +27,7 @@ func newRepeatContact(t *testing.T, peerMatches bool) *repeatContact {
 	url, hosted := servedBy(t, &k, nil)
 	ws := storedService(t)
 	ws.L2 = clientTrusting(k)
-	_ = ws.Store.SetConfig("default_l2_url", url)
+	_ = setStanding(ws, url)
 	var events []string
 	ws.OnEvent = func(typ string, _ map[string]interface{}) { events = append(events, typ) }
 
@@ -168,31 +168,21 @@ func TestContactsAreNotAskedWhenTheirAnswerChangesNothing(t *testing.T) {
 		t.Fatalf("hosted watcher that has not met him: %+v asked=%d", res, *rc.asked)
 	}
 
-	// A repeat L1 mismatch blocks, with no question asked.
-	rc = newRepeatContact(t, true)
-	rc.kel = []map[string]interface{}{{"v": "KERI10JSON000256_", "t": "icp", "i": "EBob", "s": "0", "k": []string{"Dfork"}}}
-	if res := rc.again(t); !res.Blocked || *rc.asked != 0 {
-		t.Fatalf("fork: %+v asked=%d", res, *rc.asked)
-	}
+	// (A repeat L1 mismatch that blocks asks nobody either; it needs signed logs
+	// on both sides, see the_first_sighting_must_be_proven_to_refuse_test.go.)
 }
 
-// First contact where the hosted watcher disagrees still blocks, and asks nobody.
-func TestAFirstContactConflictBlocksWithoutAskingAContact(t *testing.T) {
+// First contact where the hosted watcher disagrees and cannot show why blocks
+// nothing and asks nobody: it is shown, not acted on.
+func TestAFirstContactDisagreementWithNoProofIsShownNotBlocked(t *testing.T) {
 	rc := newRepeatContact(t, true)
-	other := []map[string]interface{}{{"v": "KERI10JSON000256_", "t": "icp", "i": "ENew", "s": "0"}}
-	d, err := rc.ws.VerifyKel(context.Background(), VerifyKelInput{AID: "ENew", KEL: other, SourceType: SourceOOBI, SourceURL: rc.source})
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen(t, rc.hosted, "ENew2", 0, "x") // unrelated
-	_ = d
 	seen(t, rc.hosted, "EThird", 0, "Edifferent")
 	third := []map[string]interface{}{{"v": "KERI10JSON000256_", "t": "icp", "i": "EThird", "s": "0"}}
 	res, err := rc.ws.VerifyKel(context.Background(), VerifyKelInput{AID: "EThird", KEL: third, SourceType: SourceOOBI, SourceURL: rc.source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Blocked || *rc.asked != 0 {
+	if res.Blocked || !res.OK || res.OverallOutcome != "escalated" || *rc.asked != 0 {
 		t.Fatalf("%+v asked=%d", res, *rc.asked)
 	}
 }

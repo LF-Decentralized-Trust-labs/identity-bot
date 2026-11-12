@@ -141,25 +141,24 @@ func TestAnAnswerNoTrustedWatcherSignedIsUnavailable(t *testing.T) {
 // refusal below is known to come from the signature and nothing else.
 func TestASpoofedAnswerCannotBlockAnIdentity(t *testing.T) {
 	trusted, attacker := newTestWatcherKey(1), newTestWatcherKey(9)
-	aid := "EHonest000000000000000000000000000000000000"
+	honest, rival := twoHistories(t)
 	run := func(signer *testWatcherKey) *VerifyKelResult {
-		// The serving watcher itself holds a different digest, so what a trusted
+		// The serving watcher itself holds the rival history, so what a trusted
 		// signer signs is the conflicting answer.
-		url, serving := servedBy(t, signer, nil)
-		seen(t, serving, aid, 2, "ffff")
+		url := aWatcherHolding(t, signer, rival).URL
 		ws, _ := migratedWatcher(t)
 		ws.L2 = clientTrusting(trusted)
-		if err := ws.Store.SetConfig("default_l2_url", url); err != nil {
+		if err := setStanding(ws, url); err != nil {
 			t.Fatal(err)
 		}
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
+		res, err := ws.VerifyKel(context.Background(), presenting(t, honest, SourceOOBI))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return res
 	}
 	if res := run(&trusted); !res.Blocked {
-		t.Fatal("control: a trusted watcher's conflicting answer should still block on first contact")
+		t.Fatal("control: a trusted watcher's proven conflicting history should block on first contact")
 	}
 	for name, signer := range map[string]*testWatcherKey{"unsigned": nil, "attacker": &attacker} {
 		if res := run(signer); res.Blocked || !res.OK {
@@ -272,7 +271,7 @@ func TestAGenuineAnswerForAnotherQuestionIsNotAnAnswerToThisOne(t *testing.T) {
 		// And it cannot make the identity look duplicitous.
 		ws, _ := migratedWatcher(t)
 		ws.L2 = clientTrusting(trusted)
-		if err := ws.Store.SetConfig("default_l2_url", srv.URL); err != nil {
+		if err := setStanding(ws, srv.URL); err != nil {
 			t.Fatal(err)
 		}
 		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
@@ -349,18 +348,19 @@ func TestTheSharedVectorSignaturesVerifyThroughTheClientsOwnCheck(t *testing.T) 
 		Digest    *string `json:"digest"`
 		FirstSeen *string `json:"first_seen_at"`
 		Observed  *string `json:"observed_since"`
+		Rival     bool    `json:"rival_at_or_below"`
 		SignedBy  string  `json:"signed_by"`
 		Signature string  `json:"signature"`
 	}
 	if err := json.Unmarshal(raw, &vs); err != nil {
 		t.Fatal(err)
 	}
-	if len(vs) < 2 {
+	if len(vs) < 5 {
 		t.Fatal("the vectors have lost cases")
 	}
 	for _, v := range vs {
 		c := &L2Client{TrustedSigners: func() []string { return []string{v.SignedBy} }}
-		r := &DigestResponse{AID: v.AID, SequenceNumber: v.Seq, Digest: v.Digest, FirstSeenAt: v.FirstSeen, ObservedSince: v.Observed, SignedBy: v.SignedBy, Signature: v.Signature}
+		r := &DigestResponse{AID: v.AID, SequenceNumber: v.Seq, Digest: v.Digest, FirstSeenAt: v.FirstSeen, ObservedSince: v.Observed, RivalAtOrBelow: v.Rival, SignedBy: v.SignedBy, Signature: v.Signature}
 		if err := c.verifyAnswer(r, v.AID, v.Seq); err != nil {
 			t.Errorf("%s: %v", v.Name, err)
 		}

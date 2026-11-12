@@ -22,12 +22,26 @@ const DigestStatementTag = "kel-digest-response/v1"
 //	digest=<digest, or - when the watcher has not seen that event>
 //	first_seen_at=<RFC 3339 UTC, or ->
 //	observed_since=<RFC 3339 UTC, or ->
+//	rival_at_or_below=true      (this line only when it is true)
+//
+// The last line says the watcher holds a validly signed event that conflicts
+// with the one it holds at that place or below it, which a digest of its own
+// branch cannot show; a client that sees it asks for the watcher's log. It is
+// written only when true, so an answer without a rival is the same text it has
+// always been, and an answer that has one cannot be altered into one that does
+// not, or the other way, without breaking the signature.
 //
 // Each line ends with a line feed, the last included. A field that is absent is
 // written as "-" and is never empty; a field holding a line break, a control
 // character or a lone "-" is refused, because any of them would let two
 // different answers share one statement.
 func DigestStatement(aid string, seq int, digest, firstSeenAt, observedSince *string) (string, error) {
+	return DigestStatementWithRival(aid, seq, digest, firstSeenAt, observedSince, false)
+}
+
+// DigestStatementWithRival is DigestStatement for an answer that also says
+// whether the watcher holds a rival event at or below the place asked about.
+func DigestStatementWithRival(aid string, seq int, digest, firstSeenAt, observedSince *string, rival bool) (string, error) {
 	if seq < 0 {
 		return "", fmt.Errorf("a sequence number is not negative")
 	}
@@ -58,6 +72,9 @@ func DigestStatement(aid string, seq int, digest, firstSeenAt, observedSince *st
 			}
 		}
 		b.WriteString(f.name + "=" + v + "\n")
+	}
+	if rival {
+		b.WriteString("rival_at_or_below=true\n")
 	}
 	return b.String(), nil
 }

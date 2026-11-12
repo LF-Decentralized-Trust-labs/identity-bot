@@ -12,6 +12,10 @@ type Store interface {
 	// read a first-seen record or a duplicity alert without the check.
 	getFirstSeen(aid string, seq int) (*FirstSeenRecord, error)
 	listFirstSeen(aid string) ([]FirstSeenRecord, error)
+	// getSeenLog and saveSeenLog are the signed log last accepted for an
+	// identity (messages in order; nil when none is kept).
+	getSeenLog(aid string) ([][]byte, error)
+	saveSeenLog(aid string, messages [][]byte, seq int, at time.Time) error
 	InsertDuplicityAlert(alert DuplicityAlert) (int64, error)
 	listDuplicityAlerts(aid string) ([]DuplicityAlert, error)
 	// getAlert, listAllAlerts and getContactCheck are unexported for the same

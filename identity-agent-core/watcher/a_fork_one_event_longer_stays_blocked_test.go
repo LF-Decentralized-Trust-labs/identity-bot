@@ -7,87 +7,97 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/store"
 )
 
 const deadWatcherURL = "http://127.0.0.1:1/public/kel-digest"
 
-// aBlockedForkAt3Events sets up the case a retry must not get through: the
-// standing watcher holds a different digest at position 2, so a 3-event log is
-// blocked and an alert is kept.
-func aBlockedForkAt3Events(t *testing.T) (ws *Service, aid, url string, try func(n int) *VerifyKelResult) {
+// twoHistories is one identity's key log taken two ways from its second event:
+// honest and rival are each correctly signed by the one controller, three events
+// long, and differ at place 2.
+func twoHistories(t *testing.T) (honest, rival *signedlog.Log) {
 	t.Helper()
-	trusted := newTestWatcherKey(1)
-	aid = "EHonest000000000000000000000000000000000000"
-	url, serving := servedBy(t, &trusted, nil)
-	seen(t, serving, aid, 2, "ffff")
-	ws, _ = migratedWatcher(t)
-	ws.L2 = clientTrusting(trusted)
-	if err := ws.Store.SetConfig("default_l2_url", url); err != nil {
+	base := signedlog.Incept(t, signedlog.NewKeys(t, 3)).Interact("first")
+	return base.Fork().Interact("honest"), base.Fork().Interact("rival")
+}
+
+// aBlockedFork is the case a retry must not get through: the standing watcher
+// shows a validly signed rival event at place 2, so the 3-event honest log is
+// blocked on proof and an alert is kept.
+type aBlockedFork struct {
+	ws      *Service
+	honest  *signedlog.Log
+	rival   *signedlog.Log
+	trusted testWatcherKey
+	url     string
+}
+
+func newBlockedFork(t *testing.T) *aBlockedFork {
+	t.Helper()
+	f := &aBlockedFork{trusted: newTestWatcherKey(1)}
+	f.honest, f.rival = twoHistories(t)
+	f.url = aWatcherHolding(t, &f.trusted, f.rival).URL
+	f.ws, _ = migratedWatcher(t)
+	f.ws.L2 = clientTrusting(f.trusted)
+	if err := setStanding(f.ws, f.url); err != nil {
 		t.Fatal(err)
 	}
-	try = func(n int) *VerifyKelResult {
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, n), SourceType: SourceOOBI})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
-	if !try(3).Blocked {
+	if !f.try(t, 3).Blocked {
 		t.Fatal("control: the 3-event log must be blocked the first time")
 	}
-	return ws, aid, url, try
+	return f
+}
+
+// grown is the honest log carried on to n events (or cut back to n).
+func (f *aBlockedFork) grown(n int) *signedlog.Log {
+	l := f.honest.Fork()
+	for l.Len() < n {
+		l.Interact("more")
+	}
+	return l.Cut(n)
+}
+
+func (f *aBlockedFork) try(t *testing.T, n int) *VerifyKelResult {
+	t.Helper()
+	res, err := f.ws.VerifyKel(context.Background(), presenting(t, f.grown(n), SourceOOBI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
 }
 
 // The same fork offered one event longer has a new tip nobody has seen, so
 // matching the alert on the tip alone let it through.
 func TestAForkOneEventLongerIsBlockedWhetherOrNotTheWatcherIsReachable(t *testing.T) {
-	ws, _, _, try := aBlockedForkAt3Events(t)
-	if res := try(4); !res.Blocked {
+	f := newBlockedFork(t)
+	if res := f.try(t, 4); !res.Blocked {
 		t.Fatalf("one event longer, watcher reachable: got through (%s)", res.OverallOutcome)
 	}
-	if err := ws.Store.SetConfig("default_l2_url", deadWatcherURL); err != nil {
+	if err := f.ws.Store.SetConfig("default_l2_url", deadWatcherURL); err != nil {
 		t.Fatal(err)
 	}
-	if res := try(4); !res.Blocked {
+	if res := f.try(t, 4); !res.Blocked {
 		t.Fatalf("one event longer, watcher unreachable: got through (%s)", res.OverallOutcome)
 	}
-	if res := try(5); !res.Blocked {
+	if res := f.try(t, 5); !res.Blocked {
 		t.Fatal("two events longer, watcher unreachable: got through")
 	}
-	if res := try(3); !res.Blocked {
+	if res := f.try(t, 3); !res.Blocked {
 		t.Fatal("the same log, watcher unreachable: got through")
 	}
 }
 
-// Only the standing watcher now saying match, at the alert's own sequence
-// number, lets the longer log pass without the owner resolving.
+// The watcher now holding exactly the honest history, a longer honest log
+// passes without the owner resolving: the open alert is about a history the
+// watcher no longer shows.
 func TestALongerLogPassesWhenTheStandingWatcherNowMatchesAtTheAlertedSequence(t *testing.T) {
-	trusted := newTestWatcherKey(1)
-	aid := "EHonest000000000000000000000000000000000000"
-	url, serving := servedBy(t, &trusted, nil)
-	seen(t, serving, aid, 2, "ffff")
-	ws, _ := migratedWatcher(t)
-	ws.L2 = clientTrusting(trusted)
-	_ = ws.Store.SetConfig("default_l2_url", url)
-	run := func(n int) *VerifyKelResult {
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, n), SourceType: SourceOOBI})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
-	if !run(3).Blocked {
-		t.Fatal("control: blocked first")
-	}
-	ours, err := witnessproto.KelDigestAtSeq(keyLog(aid, 3), 2)
-	if err != nil {
+	f := newBlockedFork(t)
+	url := aWatcherHolding(t, &f.trusted, f.grown(4)).URL
+	if err := setStanding(f.ws, url); err != nil {
 		t.Fatal(err)
 	}
-	seen(t, serving, aid, 2, ours) // the watcher now holds the digest this log carries at position 2
-	tip, _ := witnessproto.KelDigestAtSeq(keyLog(aid, 4), 3)
-	seen(t, serving, aid, 3, tip) // and at the longer log's tip
-	if res := run(4); res.Blocked {
+	if res := f.try(t, 4); res.Blocked {
 		t.Fatalf("the watcher agrees at the alerted sequence, yet blocked: %s", res.Reason)
 	}
 }
@@ -96,26 +106,26 @@ func TestALongerLogPassesWhenTheStandingWatcherNowMatchesAtTheAlertedSequence(t 
 // unreachable retry has no digest from them), so resolving one left the log
 // blocked by the rest.
 func TestRetriesOfAForkAddNoAlertAndOneResolveFreesTheLog(t *testing.T) {
-	ws, aid, _, try := aBlockedForkAt3Events(t)
+	f := newBlockedFork(t)
 	time.Sleep(2100 * time.Millisecond) // past the second the alert's identity includes
-	if !try(3).Blocked || !try(4).Blocked {
+	if !f.try(t, 3).Blocked || !f.try(t, 4).Blocked {
 		t.Fatal("a retry got through")
 	}
-	if err := ws.Store.SetConfig("default_l2_url", deadWatcherURL); err != nil {
+	if err := f.ws.Store.SetConfig("default_l2_url", deadWatcherURL); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	if !try(3).Blocked || !try(4).Blocked {
+	if !f.try(t, 3).Blocked || !f.try(t, 4).Blocked {
 		t.Fatal("an unreachable retry got through")
 	}
-	alerts, _ := ws.DisclosableAlerts(aid)
+	alerts, _ := f.ws.DisclosableAlerts(f.honest.AID)
 	if len(alerts) != 1 {
 		t.Fatalf("%d alerts after retries, want the one", len(alerts))
 	}
-	if err := ws.ResolveAlert(alerts[0].ID, "confirmed with them"); err != nil {
+	if err := f.ws.ResolveAlert(alerts[0].ID, "confirmed with them"); err != nil {
 		t.Fatal(err)
 	}
-	if res := try(4); res.Blocked {
+	if res := f.try(t, 4); res.Blocked {
 		t.Fatalf("resolved once, still blocked: %s", res.Reason)
 	}
 }
@@ -179,34 +189,16 @@ func TestTheStoreResolvesAnAlertOnlyOnce(t *testing.T) {
 }
 
 // A fork that split before the tip it was first blocked at, offered on retry
-// with the standing watcher unreachable: it has no first sighting and cannot
-// give the digest at the alert's sequence, so only the open alert holds it.
+// with the standing watcher unreachable: only the open alert holds it.
 func TestAShorterForkIsBlockedWhileAnAlertIsOpenAndTheWatcherIsUnreachable(t *testing.T) {
-	trusted := newTestWatcherKey(1)
-	aid := "EHonest000000000000000000000000000000000000"
-	url, serving := servedBy(t, &trusted, nil)
-	seen(t, serving, aid, 1, "eeee")
-	seen(t, serving, aid, 2, "ffff")
-	ws, _ := migratedWatcher(t)
-	ws.L2 = clientTrusting(trusted)
-	_ = ws.Store.SetConfig("default_l2_url", url)
-	run := func(n int) *VerifyKelResult {
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, n), SourceType: SourceOOBI})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
-	if r := run(3); !r.Blocked || r.duplicityAlert == nil || r.duplicityAlert.SequenceNum != 2 {
-		t.Fatalf("control: want blocked with an alert at seq 2, got %+v", r)
-	}
-	_ = ws.Store.SetConfig("default_l2_url", deadWatcherURL)
-	if r := run(2); !r.Blocked {
+	f := newBlockedFork(t)
+	_ = f.ws.Store.SetConfig("default_l2_url", deadWatcherURL)
+	if r := f.try(t, 2); !r.Blocked {
 		t.Fatalf("cut to seq 1, watcher unreachable: got through (%s)", r.OverallOutcome)
 	}
-	// Reachable again but disagreeing at the tip: still held.
-	_ = ws.Store.SetConfig("default_l2_url", url)
-	if r := run(2); !r.Blocked {
+	// Reachable again and showing the rival: it is still the same fork.
+	_ = setStanding(f.ws, f.url)
+	if r := f.try(t, 2); !r.Blocked {
 		t.Fatalf("cut to seq 1, watcher disagrees: got through (%s)", r.OverallOutcome)
 	}
 }
@@ -214,57 +206,16 @@ func TestAShorterForkIsBlockedWhileAnAlertIsOpenAndTheWatcherIsUnreachable(t *te
 // With an open alert a log passes only when the standing watcher matches at the
 // tip and at the alert's sequence when the log reaches it.
 func TestWithAnOpenAlertBothTheTipAndTheAlertedSequenceMustMatch(t *testing.T) {
-	trusted := newTestWatcherKey(1)
-	aid := "EHonest000000000000000000000000000000000000"
-	url, serving := servedBy(t, &trusted, nil)
-	seen(t, serving, aid, 2, "ffff")
-	ws, _ := migratedWatcher(t)
-	ws.L2 = clientTrusting(trusted)
-	_ = ws.Store.SetConfig("default_l2_url", url)
-	run := func(n int) *VerifyKelResult {
-		res, _ := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, n), SourceType: SourceOOBI})
-		return res
+	f := newBlockedFork(t)
+	// A watcher whose log matches the honest log at the tip but whose digest at the
+	// alerted place still differs cannot be built from one log; the digest at 2
+	// is the rival's here, and the tip is not held at all.
+	if r := f.try(t, 4); !r.Blocked {
+		t.Fatal("the alerted sequence still differs: got through")
 	}
-	if !run(3).Blocked {
-		t.Fatal("control")
-	}
-	tip4, _ := witnessproto.KelDigestAtSeq(keyLog(aid, 4), 3)
-	seen(t, serving, aid, 3, tip4) // tip matches, alerted seq 2 still differs
-	if r := run(4); !r.Blocked {
-		t.Fatal("tip matched but the alerted sequence did not: got through")
-	}
-	at2, _ := witnessproto.KelDigestAtSeq(keyLog(aid, 4), 2)
-	seen(t, serving, aid, 2, at2)
-	if r := run(4); r.Blocked {
+	url := aWatcherHolding(t, &f.trusted, f.grown(4)).URL
+	_ = setStanding(f.ws, url)
+	if r := f.try(t, 4); r.Blocked {
 		t.Fatalf("both matched, yet blocked: %s", r.Reason)
-	}
-}
-
-// recordDuplicity's reuse of an open alert is a backstop the retry path no
-// longer reaches, so it is exercised directly.
-func TestRecordDuplicityReusesTheOpenAlertForTheSameLog(t *testing.T) {
-	ws, _ := aFreshService(t)
-	id1, a1, err := ws.recordDuplicity("EA", 2, "a", "u", nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id2, a2, err := ws.recordDuplicity("EA", 2, "a", "u", nil, nil)
-	if err != nil || id1 != id2 || a1.ID != a2.ID {
-		t.Fatalf("a second alert was added: %d %d %v", id1, id2, err)
-	}
-	if all, _ := ws.Store.listDuplicityAlerts("EA"); len(all) != 1 {
-		t.Fatalf("%d alerts", len(all))
-	}
-}
-
-// An escalated check keeps its verdict, and a block outranks it.
-func TestAnEscalatedCheckKeepsItsVerdict(t *testing.T) {
-	r := &VerifyKelResult{AID: "EA", OK: true, OverallOutcome: "escalated"}
-	if v := r.Check().Verdict; v != VerdictEscalated {
-		t.Fatalf("verdict %q", v)
-	}
-	r.Blocked, r.OverallOutcome = true, "duplicity"
-	if v := r.Check().Verdict; v != VerdictDuplicity {
-		t.Fatalf("a block read as %q", v)
 	}
 }

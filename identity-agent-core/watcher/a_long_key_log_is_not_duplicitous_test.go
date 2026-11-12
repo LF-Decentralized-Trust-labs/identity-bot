@@ -106,8 +106,15 @@ func TestAnObservationRecordedWithADecimalSequenceIsForgotten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !before.Blocked {
-		t.Fatal("the stale observation did not make the identity look duplicitous, so this test proves nothing")
+	// The log is unsigned, so the stale observation is shown, not refused on.
+	if before.Blocked || before.OverallOutcome != "escalated" {
+		t.Fatalf("the stale observation did not make the identity look different, so this test proves nothing: %+v", before)
+	}
+
+	// The alert the old reading raised from it.
+	stale, _ := ws.Store.getFirstSeen(aid, 9)
+	if _, _, err := ws.recordDuplicity(aid, 9, before.Digest, "", stale, nil, ""); err != nil {
+		t.Fatal(err)
 	}
 
 	// Upgrade: the migration runs on a database that has not had it.

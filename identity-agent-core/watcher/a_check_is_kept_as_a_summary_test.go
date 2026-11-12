@@ -139,42 +139,30 @@ func TestAnOpenAlertAtASequenceKeepsBlockingUntilResolved(t *testing.T) {
 	}
 }
 
-// The case the first-contact rule alone let through: the standing watcher
-// disagrees, the first try is blocked, and the same log offered again must be
-// blocked too. Only the owner resolving the alert lets it pass.
+// The case the first-contact rule alone let through: a watcher proves the fork,
+// the first try is blocked, and the same log offered again must be blocked too.
+// Only the owner resolving the alert lets it pass.
 func TestTheSameForkedLogOfferedAgainIsStillBlockedUntilResolved(t *testing.T) {
-	trusted := newTestWatcherKey(1)
-	aid := "EHonest000000000000000000000000000000000000"
-	url, serving := servedBy(t, &trusted, nil)
-	seen(t, serving, aid, 2, "ffff")
-	ws, _ := migratedWatcher(t)
-	ws.L2 = clientTrusting(trusted)
-	if err := ws.Store.SetConfig("default_l2_url", url); err != nil {
-		t.Fatal(err)
-	}
-	try := func() *VerifyKelResult {
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
-	if !try().Blocked {
-		t.Fatal("control: the first try must be blocked")
-	}
-	if !try().Blocked {
+	f := newBlockedFork(t)
+	if !f.try(t, 3).Blocked {
 		t.Fatal("a second try of the same log got through")
 	}
-	alerts, _ := ws.DisclosableAlerts(aid)
+	alerts, _ := f.ws.DisclosableAlerts(f.honest.AID)
 	if len(alerts) == 0 {
 		t.Fatal("no alert kept")
 	}
 	for _, a := range alerts {
-		if err := ws.ResolveAlert(a.ID, "confirmed with them in person"); err != nil {
+		if err := f.ws.ResolveAlert(a.ID, "confirmed with them in person"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if res := try(); res.Blocked {
+	// Resolved: the watcher still proves the fork, so it is blocked on that proof
+	// and a new alert is raised, until the watcher no longer shows it.
+	url := aWatcherHolding(t, &f.trusted, f.honest).URL
+	if err := setStanding(f.ws, url); err != nil {
+		t.Fatal(err)
+	}
+	if res := f.try(t, 3); res.Blocked {
 		t.Fatalf("a resolved alert still blocks: %s", res.Reason)
 	}
 }
@@ -182,29 +170,11 @@ func TestTheSameForkedLogOfferedAgainIsStillBlockedUntilResolved(t *testing.T) {
 // The probe from review: the first try is blocked, the standing watcher then
 // becomes unreachable, and the retry must not confirm the forked log.
 func TestAForkedLogStaysBlockedOnARetryWhileTheStandingWatcherIsUnreachable(t *testing.T) {
-	trusted := newTestWatcherKey(1)
-	aid := "EHonest000000000000000000000000000000000000"
-	url, serving := servedBy(t, &trusted, nil)
-	seen(t, serving, aid, 2, "ffff")
-	ws, _ := migratedWatcher(t)
-	ws.L2 = clientTrusting(trusted)
-	if err := ws.Store.SetConfig("default_l2_url", url); err != nil {
+	f := newBlockedFork(t)
+	if err := f.ws.Store.SetConfig("default_l2_url", "http://127.0.0.1:1/public/kel-digest"); err != nil {
 		t.Fatal(err)
 	}
-	try := func() *VerifyKelResult {
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
-	if !try().Blocked {
-		t.Fatal("control: the first try must be blocked")
-	}
-	if err := ws.Store.SetConfig("default_l2_url", "http://127.0.0.1:1/public/kel-digest"); err != nil {
-		t.Fatal(err)
-	}
-	res := try()
+	res := f.try(t, 3)
 	if !res.Blocked || res.OverallOutcome == "confirmed" {
 		t.Fatalf("an unreachable standing watcher let a forked log through: blocked=%v outcome=%s", res.Blocked, res.OverallOutcome)
 	}
