@@ -39,6 +39,7 @@
 //	    "ovmf_sha256": "<64 lowercase hex>",    // the pinned firmware
 //	    "vcpus": 1,
 //	    "cpu_model": "EPYC-v4",
+//	    "guest_features": "0x1",              // optional
 //	    "cmdline_sha256": "<64 lowercase hex>", // the measured kernel command line
 //	    "kernel_sha256": "<64 hex, optional>",
 //	    "initrd_sha256": "<64 hex, optional>",
@@ -155,9 +156,11 @@ type Policy struct {
 // ComputedFrom is what a measurement was computed from. Everything here is
 // public, and with the published image anyone can recompute the measurement.
 type ComputedFrom struct {
-	OVMFSHA256    string `json:"ovmf_sha256"`
-	VCPUs         int    `json:"vcpus"`
-	CPUModel      string `json:"cpu_model"`
+	OVMFSHA256 string `json:"ovmf_sha256"`
+	VCPUs      int    `json:"vcpus"`
+	CPUModel   string `json:"cpu_model"`
+	// GuestFeatures is the SNP guest feature word, e.g. "0x1" (optional).
+	GuestFeatures string `json:"guest_features,omitempty"`
 	CmdlineSHA256 string `json:"cmdline_sha256"`
 	KernelSHA256  string `json:"kernel_sha256,omitempty"`
 	InitrdSHA256  string `json:"initrd_sha256,omitempty"`
