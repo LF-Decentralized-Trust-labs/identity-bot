@@ -1,9 +1,13 @@
 package watcher
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
+
+	keri "github.com/grapeid/keri-go"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"identity-agent-core/drivers"
@@ -355,5 +359,137 @@ func TestReverifyDoesNotAcceptARecoveryAsAFork(t *testing.T) {
 	none.Identifier = ""
 	if none.Reverify() == nil {
 		t.Error("evidence naming no identity re-verified")
+	}
+}
+
+// When the key state in force is held only in a log that cannot be handed on as
+// records, nothing is verified against the presented (possibly retired) one: the
+// contact is stopped, and shown as unchecked, which is not a finding of
+// duplicity. Here the kept recovered log has material after its signatures that
+// keri-go reads and the record shape cannot carry.
+//
+// Fails when that case lets the retired branch through.
+func TestAKeptLogThatCannotBeHandedOnStopsTheRetiredBranchAsUnchecked(t *testing.T) {
+	trusted := newTestWatcherKey(1)
+	_, stale, recovered := aRecoveryAfterATheft(t)
+	ws := serviceAsking(t, trusted, aWatcherHolding(t, &trusted, nil).URL)
+	if r := verifying(t, ws, recovered); !r.OK {
+		t.Fatalf("control: %+v", r)
+	}
+	kept, err := drivers.SignedMessagesFromRecords(recovered.Records())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept[len(kept)-1] = append(append([]byte(nil), kept[len(kept)-1]...), "-BAA"...)
+	if _, err := keri.ValidateSignedKEL(kept); err != nil {
+		t.Fatalf("control: the log must still verify: %v", err)
+	}
+	if err := ws.Store.saveSeenLog(recovered.AID, kept, len(kept)-1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	r := verifying(t, ws, stale)
+	if !r.Blocked || r.OK || r.OverallOutcome != "stale" {
+		t.Fatalf("the retired branch was let through: blocked=%v ok=%v outcome=%s", r.Blocked, r.OK, r.OverallOutcome)
+	}
+	if r.Duplicity() || r.Check().Verdict != VerdictUnchecked {
+		t.Fatalf("a log that could not be handed on is shown as %s", r.Check().Verdict)
+	}
+}
+
+// A presented log counts as proven only if it verifies and is the identity it is
+// presented as. One that does not is remembered but never founds a sighting that
+// refuses a later log.
+//
+// Fails when the verification of the presented log is skipped.
+func TestAPresentedLogThatDoesNotVerifyIsNotRememberedAsProven(t *testing.T) {
+	trusted := newTestWatcherKey(1)
+	honest, _ := twoHistories(t)
+	ws := serviceAsking(t, trusted, aWatcherHolding(t, &trusted, nil).URL)
+
+	forged := presenting(t, honest, SourceOOBI)
+	bad := make([]map[string]interface{}, len(forged.KEL))
+	for i, rec := range forged.KEL {
+		c := map[string]interface{}{}
+		for k, v := range rec {
+			c[k] = v
+		}
+		bad[i] = c
+	}
+	// A signature that is well formed and wrong.
+	zero, _ := keri.EncodeIndexedSignature(make([]byte, 64), keri.SignaturePlace{})
+	bad[len(bad)-1]["cesr_signature"] = zero
+	delete(bad[len(bad)-1], "cesr_signatures")
+	forged.KEL = bad
+	signed, err := drivers.SignedMessagesFromRecords(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged.Signed = signed
+	if _, err := ws.VerifyKel(context.Background(), forged); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := ws.Store.getFirstSeen(honest.AID, honest.Len()-1)
+	if err != nil || fs == nil {
+		t.Fatalf("first seen: %v", err)
+	}
+	if fs.Proven {
+		t.Fatal("a log whose last signature is wrong was remembered as proven")
+	}
+
+	// The same log presented as another identity is not proven either.
+	other := presenting(t, honest, SourceOOBI)
+	other.AID = "ESomeoneElse"
+	if _, err := ws.VerifyKel(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	if fs, _ := ws.Store.getFirstSeen("ESomeoneElse", honest.Len()-1); fs != nil && fs.Proven {
+		t.Fatal("a log presented as another identity was remembered as proven")
+	}
+}
+
+// A watcher holding a recovery rotation where the presented log holds the
+// thief's interaction is answered as having superseded it, and one holding
+// only later events as ahead: the owner's screen and the log say which.
+//
+// Fails when the recovery case is reported as an ordinary later log.
+func TestASupersedingWatcherIsNamedAsSuchAndALaterOneAsAhead(t *testing.T) {
+	trusted := newTestWatcherKey(1)
+	base, stale, recovered := aRecoveryAfterATheft(t)
+	outcome := func(held, presented *signedlog.Log) string {
+		t.Helper()
+		ws := serviceAsking(t, trusted, aWatcherHolding(t, &trusted, held).URL)
+		r := verifying(t, ws, presented)
+		if r.Blocked || !r.OK {
+			t.Fatalf("blocked=%v %s", r.Blocked, r.Reason)
+		}
+		for _, so := range r.sourcesQueried {
+			if so.Type == "L2_standing" {
+				return so.Outcome
+			}
+		}
+		t.Fatalf("no standing source: %+v", r.sourcesQueried)
+		return ""
+	}
+	if got := outcome(recovered, stale); got != "superseded" {
+		t.Errorf("a watcher holding the recovery is reported as %q, want superseded", got)
+	}
+	if got := outcome(base.Fork().Interact("more"), base); got != "ahead" {
+		t.Errorf("a watcher holding later events is reported as %q, want ahead", got)
+	}
+}
+
+// A watcher that serves another identity's log under this identity's name is
+// flagged as faulty, and the contact it said nothing true about goes ahead.
+func TestAWatcherServingAnotherIdentitysLogIsFlagged(t *testing.T) {
+	trusted := newTestWatcherKey(1)
+	honest, rival := twoHistories(t)
+	someoneElse := recordsOf(signedlog.Incept(t, signedlog.NewKeys(t, 3)).Interact("a").Interact("b"))
+	// Its digests are those of a different branch of this identity, so it is asked
+	// for its log, and the log it hands over is somebody else's.
+	w := aWatcherHolding(t, &trusted, rival)
+	w.Alter = func([]map[string]interface{}) []map[string]interface{} { return someoneElse }
+	r := verifying(t, serviceAsking(t, trusted, w.URL), honest)
+	if r.Blocked || !r.OK || len(r.FlaggedWatchers) == 0 {
+		t.Fatalf("blocked=%v ok=%v flagged=%v %s", r.Blocked, r.OK, r.FlaggedWatchers, r.Reason)
 	}
 }
