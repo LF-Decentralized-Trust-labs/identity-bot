@@ -24,10 +24,12 @@ package secureenclave
 // DIFFERENT key from the attestation key (signing and decryption never share a
 // key). No user-presence requirement: the agent runs headless/always-on;
 // per-action consent is the authorization layer's job, not storage's.
-static const UInt8 kSeedWrapKeyTag[] = "org.identitybot.seedwrap.v1";
-
-static SecKeyRef sw_findOrCreateKey(void) {
-    CFDataRef tag = CFDataCreate(NULL, kSeedWrapKeyTag, sizeof(kSeedWrapKeyTag) - 1);
+//
+// The tag names the key. A profile has a tag of its own (ADR-074 section 3), made
+// by ProfileKeyName; the device-wide tag below is the one every seed written
+// before that was wrapped under, and it is still what such a seed opens with.
+static SecKeyRef sw_findOrCreateKey(const uint8_t *tagBytes, size_t tagLen) {
+    CFDataRef tag = CFDataCreate(NULL, tagBytes, (CFIndex)tagLen);
     if (!tag) return NULL;
 
     CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -130,14 +132,29 @@ import (
 	"unsafe"
 )
 
+// iosSeedWrapKeyTag is the device-wide key's tag: what every seed written before
+// the per-profile key was wrapped under.
+const iosSeedWrapKeyTag = "org.identitybot.seedwrap.v1"
+
 type darwinSeedWrapper struct {
 	mu    sync.Mutex
+	tag   string
 	key   C.SecKeyRef
 	ready bool
 }
 
 func newPlatformSeedWrapper() SeedWrapper {
-	return &darwinSeedWrapper{}
+	return &darwinSeedWrapper{tag: iosSeedWrapKeyTag}
+}
+
+// KeyNameFor and ForKey make this a per-profile wrapper (PerProfileKeys): the
+// keychain tag of the profile's own Secure Enclave key.
+func (w *darwinSeedWrapper) KeyNameFor(profile string) string {
+	return ProfileKeyName(iosSeedWrapKeyTag, profile)
+}
+
+func (w *darwinSeedWrapper) ForKey(name string) SeedWrapper {
+	return &darwinSeedWrapper{tag: name}
 }
 
 func (w *darwinSeedWrapper) ensureKey() error {
@@ -146,7 +163,11 @@ func (w *darwinSeedWrapper) ensureKey() error {
 	if w.ready {
 		return nil
 	}
-	key := C.sw_findOrCreateKey()
+	tag := []byte(w.tag)
+	if len(tag) == 0 {
+		return fmt.Errorf("secure enclave seed-wrap key has no name")
+	}
+	key := C.sw_findOrCreateKey((*C.uint8_t)(unsafe.Pointer(&tag[0])), C.size_t(len(tag)))
 	if key == 0 {
 		return fmt.Errorf("secure enclave seed-wrap key unavailable")
 	}

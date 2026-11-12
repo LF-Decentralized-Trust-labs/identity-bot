@@ -1,10 +1,16 @@
 package lockgate
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sync"
+
+	"golang.org/x/crypto/hkdf"
 
 	"identity-agent-core/secureenclave"
 )
@@ -69,6 +75,30 @@ func (s sealer) Open(sealed []byte) ([]byte, error) {
 	return Open(k, p, sealed)
 }
 
+// DeriveKey is HKDF-SHA256 of GK with info as the purpose, n bytes. GK does not
+// leave the package: the secureenclave package asks for what it needs from it
+// (the TPM authorization value of a desktop's controller key is
+// DeriveKey("tpm-auth"), ADR-074 section 3), and works on a copy that is zeroed
+// here, as Seal does.
+func (s sealer) DeriveKey(info string, n int) ([]byte, error) {
+	if info == "" || n <= 0 || n > 64 {
+		return nil, errors.New("a derived key needs a purpose and a length of 1 to 64 bytes")
+	}
+	_, k, err := s.key()
+	if err != nil {
+		return nil, err
+	}
+	defer k.Zero()
+	if !k.Valid() {
+		return nil, fmt.Errorf("a gate key is %d bytes, got %d", KeyLen, len(k))
+	}
+	out := make([]byte, n)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, k, nil, []byte(info)), out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // lookup is what secureenclave asks, per data directory.
 func lookup(dataDir string) (secureenclave.GateSealer, bool) {
 	if !(&Profile{dir: dataDir}).Gated() {
@@ -87,12 +117,34 @@ func lookup(dataDir string) (secureenclave.GateSealer, bool) {
 // open. Call once at start; returns the function that undoes it.
 func Install() (restore func()) {
 	r1 := secureenclave.UseGate(lookup)
+	r3 := secureenclave.UseProfileLookup(profileOfDataDir)
 	r2 := secureenclave.UseGateRequirement(func(dataDir string) bool {
 		requiredMu.RLock()
 		defer requiredMu.RUnlock()
 		return required[dataDir]
 	})
-	return func() { r2(); r1() }
+	return func() { r3(); r2(); r1() }
+}
+
+// profileOfDataDir names the profile whose gate is at dataDir, for the hardware
+// key that profile has of its own: the open one from the ring, a locked one from
+// its record. "" means no gate there, so the device-wide key.
+func profileOfDataDir(dataDir string) string {
+	ringMu.RLock()
+	h, ok := ring[dataDir]
+	ringMu.RUnlock()
+	if ok {
+		return h.profile
+	}
+	b, err := os.ReadFile(filepath.Join(dataDir, gateDirName, recordFile))
+	if err != nil {
+		return ""
+	}
+	var r record
+	if json.Unmarshal(b, &r) != nil {
+		return ""
+	}
+	return r.Profile
 }
 
 var (

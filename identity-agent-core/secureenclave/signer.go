@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/atomicfile"
 	"os"
@@ -24,11 +25,27 @@ type PlatformSigner interface {
 
 // NewPlatformSigner selects the best available signer for this host.
 func NewPlatformSigner(dataDir string) PlatformSigner {
+	// A locked identity's controller key is unusable, and says so. It must not
+	// fall through to the software signer below: that is a different key, kept in
+	// a plain file, and a machine that quietly signs with it has become another
+	// machine (ADR-074 section 3).
+	if _, _, err := theGateForThisSeed(dataDir); errors.Is(err, ErrIdentityLocked) {
+		if platform, label := controllerKeyIsHardwareHere(); platform != "" {
+			return lockedControllerKey{platform: platform, label: label}
+		}
+	}
 	if s := newDarwinSecureEnclaveSigner(dataDir); s != nil && s.Available() {
 		return s
 	}
-	if s := newTPMSigner(); s != nil && s.Available() {
-		return s
+	if s := newTPMSigner(); s != nil {
+		if p, ok := s.(interface {
+			forProfileAt(dataDir string) PlatformSigner
+		}); ok {
+			s = p.forProfileAt(dataDir)
+		}
+		if s.Available() {
+			return s
+		}
 	}
 	if s := newStrongBoxSigner(); s != nil && s.Available() {
 		return s

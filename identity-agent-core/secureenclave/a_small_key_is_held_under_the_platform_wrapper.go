@@ -31,6 +31,9 @@ type heldKeyEnvelope struct {
 	Protection string `json:"protection,omitempty"`
 	Why        string `json:"why,omitempty"`
 	Holder     string `json:"holder"`
+	// WrapKey names the per-profile hardware key the key is wrapped under, "" for
+	// the device-wide one (a_wrapping_key_per_profile.go).
+	WrapKey string `json:"wrap_key,omitempty"`
 }
 
 // ErrNotAHeldKey is OpenKeyHeldUnderTheWrapper's answer to bytes that are not
@@ -42,10 +45,17 @@ var ErrNotAHeldKey = errors.New("not a held-key envelope")
 // use and is bound into the envelope, so an envelope for one use does not open
 // as another's.
 func KeyToHoldUnderTheWrapper(dataDir, what string, key []byte) ([]byte, error) {
+	return KeyToHoldUnderTheProfilesWrapper(dataDir, "", what, key)
+}
+
+// KeyToHoldUnderTheProfilesWrapper is KeyToHoldUnderTheWrapper under the
+// hardware key of the named profile, where the platform holds one per profile.
+// An empty profile, or a platform with one key, is the device-wide key.
+func KeyToHoldUnderTheProfilesWrapper(dataDir, profile, what string, key []byte) ([]byte, error) {
 	if len(key) == 0 {
 		return nil, fmt.Errorf("no key to hold")
 	}
-	w := platformSeedWrapper()
+	w, wrapKey := wrapperAndKeyForProfile(platformSeedWrapper(), profile)
 	env := heldKeyEnvelope{V: 1, Wrap: seedWrapNone, Key: base64.StdEncoding.EncodeToString(key),
 		Protection: ProtectionUnwrapped, Why: whyNotWrappedAt(dataDir), Holder: holderHeldKey + ":" + what}
 	if wrapperWorksAt(w, dataDir) {
@@ -54,6 +64,7 @@ func KeyToHoldUnderTheWrapper(dataDir, what string, key []byte) ([]byte, error) 
 			return nil, err
 		}
 		env.Wrap, env.Key, env.Protection, env.Why = w.Scheme(), base64.StdEncoding.EncodeToString(blob), protection, why
+		env.WrapKey = wrapKey
 	} else {
 		log.Printf("[secureenclave] the %s key is held UNWRAPPED: %s", what, env.Why)
 	}
@@ -81,6 +92,9 @@ func OpenKeyHeldUnderTheWrapper(what string, held []byte) (key []byte, wrapped b
 	w := platformSeedWrapper()
 	if w == nil || !wrapperOpensScheme(w, env.Wrap) {
 		return nil, true, fmt.Errorf("the %s key is wrapped with %q, which this build/platform cannot open", what, env.Wrap)
+	}
+	if w, err = wrapperThatOpens(w, env.WrapKey); err != nil {
+		return nil, true, err
 	}
 	if k, err = w.Unwrap(k); err != nil {
 		return nil, true, fmt.Errorf("%s key unwrap failed (%s): %w", what, env.Wrap, err)

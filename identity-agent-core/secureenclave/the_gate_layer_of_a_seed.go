@@ -95,7 +95,11 @@ func ReSealRootSeed(dataDir string, open, seal func([]byte) ([]byte, error)) err
 		if w == nil || !wrapperOpensScheme(w, env.Wrap) {
 			return fmt.Errorf("root seed is wrapped with %q, which this build cannot open", env.Wrap)
 		}
-		if blob, err = w.Unwrap(blob); err != nil {
+		kw, kerr := wrapperThatOpens(w, env.Key)
+		if kerr != nil {
+			return kerr
+		}
+		if blob, err = kw.Unwrap(blob); err != nil {
 			return fmt.Errorf("root seed unwrap failed: %w", err)
 		}
 	}

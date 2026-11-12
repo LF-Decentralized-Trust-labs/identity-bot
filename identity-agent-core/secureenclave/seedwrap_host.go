@@ -119,8 +119,89 @@ func declaredSeedWrapHost() SeedWrapHost {
 	return seedWrapHost
 }
 
-// hostedSeedWrapper is the app's wrapper as the seam sees it.
-type hostedSeedWrapper struct{ host SeedWrapHost }
+// ProfileSeedWrapHost is what an app implements, besides SeedWrapHost, to hold a
+// Keystore key per profile (ADR-074 section 3): the same three calls, each
+// naming the Keystore alias the key is under. The app makes the key under that
+// alias on first use, with the same properties and the same attestation
+// challenge as the device-wide key. An app that registers none keeps one key for
+// every profile, as before, and says so by registering nothing.
+type ProfileSeedWrapHost interface {
+	AvailableFor(alias string) bool
+	AttestationChainFor(alias string) []byte
+	UnwrapKeyFor(alias string, wrapped []byte) ([]byte, error)
+}
+
+// androidSeedAliasBase is the Keystore alias prefix of a profile's key.
+const androidSeedAliasBase = "identity-agent-seed-wrap"
+
+var seedWrapProfileHost ProfileSeedWrapHost
+
+// DeclareProfileSeedWrapHost registers the app's per-profile wrapper. Called
+// through mobilecore before the server starts, beside DeclareSeedWrapHost.
+// Passing nil removes it.
+func DeclareProfileSeedWrapHost(h ProfileSeedWrapHost) {
+	seedWrapHostMu.Lock()
+	seedWrapProfileHost = h
+	verifiedLevel, verifiedCaveat = "", ""
+	seedWrapHostMu.Unlock()
+}
+
+func declaredProfileSeedWrapHost() ProfileSeedWrapHost {
+	seedWrapHostMu.RLock()
+	defer seedWrapHostMu.RUnlock()
+	return seedWrapProfileHost
+}
+
+// hostedSeedWrapper is the app's wrapper as the seam sees it. With an alias it
+// is the app's key of that name, reached through the per-profile host.
+type hostedSeedWrapper struct {
+	host  SeedWrapHost
+	alias string
+}
+
+// KeyNameFor and ForKey make this a per-profile wrapper (PerProfileKeys) when
+// the app has registered a per-profile host. With none, KeyNameFor is empty and
+// every profile uses the device-wide key.
+func (w hostedSeedWrapper) KeyNameFor(profile string) string {
+	if declaredProfileSeedWrapHost() == nil {
+		return ""
+	}
+	return ProfileKeyName(androidSeedAliasBase, profile)
+}
+
+func (w hostedSeedWrapper) ForKey(name string) SeedWrapper {
+	return hostedSeedWrapper{host: w.host, alias: name}
+}
+
+// The three calls the host makes, to the device-wide key or the alias's.
+func (w hostedSeedWrapper) hostAvailable() bool {
+	if w.alias == "" {
+		return w.host.Available()
+	}
+	h := declaredProfileSeedWrapHost()
+	return h != nil && h.AvailableFor(w.alias)
+}
+
+func (w hostedSeedWrapper) hostChain() []byte {
+	if w.alias == "" {
+		return w.host.AttestationChain()
+	}
+	if h := declaredProfileSeedWrapHost(); h != nil {
+		return h.AttestationChainFor(w.alias)
+	}
+	return nil
+}
+
+func (w hostedSeedWrapper) hostUnwrapKey(wrapped []byte) ([]byte, error) {
+	if w.alias == "" {
+		return w.host.UnwrapKey(wrapped)
+	}
+	h := declaredProfileSeedWrapHost()
+	if h == nil {
+		return nil, fmt.Errorf("the app registered no per-profile seed wrapper, so key %q cannot be used", w.alias)
+	}
+	return h.UnwrapKeyFor(w.alias, wrapped)
+}
 
 // declaredHostSeedWrapper is the wrapper for whatever the app registered, or nil
 // when it registered nothing.
@@ -157,7 +238,7 @@ func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 }
 
 func (w hostedSeedWrapper) checkAttestation() (*AndroidKeyFacts, error) {
-	chain := w.host.AttestationChain()
+	chain := w.hostChain()
 	if len(chain) == 0 {
 		return nil, notAttested("the app supplied no attestation chain")
 	}
@@ -201,7 +282,7 @@ func (w hostedSeedWrapper) Scheme() string {
 	seedWrapHostMu.RUnlock()
 	if level == "" {
 		level = "unattested"
-		if chain, err := splitChain(w.host.AttestationChain()); err == nil {
+		if chain, err := splitChain(w.hostChain()); err == nil {
 			if f, err := readKeyDescription(chain[0]); err == nil {
 				level = f.LevelName()
 			}
@@ -242,7 +323,7 @@ func (w hostedSeedWrapper) opensScheme(scheme string) bool {
 // the phone's key protection usable, AND the key's attestation proves it was
 // generated in a TEE or StrongBox and suits the seed.
 func (w hostedSeedWrapper) Available() bool {
-	if !detectCapability().RootKeyPermitted() || !w.host.Available() {
+	if !detectCapability().RootKeyPermitted() || !w.hostAvailable() {
 		return false
 	}
 	_, err := w.attested()
@@ -258,7 +339,7 @@ func (w hostedSeedWrapper) whyNotAttested() string {
 }
 
 func (w hostedSeedWrapper) Wrap(plain []byte) ([]byte, error) {
-	if !detectCapability().RootKeyPermitted() || !w.host.Available() {
+	if !detectCapability().RootKeyPermitted() || !w.hostAvailable() {
 		return nil, fmt.Errorf("the app's seed wrapper is not usable")
 	}
 	f, err := w.attested()
@@ -306,7 +387,7 @@ func (w hostedSeedWrapper) Unwrap(blob []byte) ([]byte, error) {
 		return nil, fmt.Errorf("the wrapped seed is cut off")
 	}
 	sealedKey, rest := blob[3:3+n], blob[3+n:]
-	dek, err := w.host.UnwrapKey(sealedKey)
+	dek, err := w.hostUnwrapKey(sealedKey)
 	if err != nil {
 		return nil, fmt.Errorf("the hardware key would not open the data key: %w", err)
 	}

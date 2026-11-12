@@ -139,6 +139,9 @@ type seedEnvelope struct {
 	// Gate names the gate layer the blob is sealed under before the hardware
 	// wrap (ADR-074). Empty on a v1 envelope.
 	Gate string `json:"gate,omitempty"`
+	// Key names the per-profile hardware key the blob is wrapped under (ADR-074
+	// section 3). Empty is the device-wide key every earlier envelope used.
+	Key string `json:"key,omitempty"`
 }
 
 const (
@@ -279,6 +282,9 @@ func storeSeedSealedBy(dataDir string, seed []byte, w SeedWrapper, requireWrap b
 		toStore, gateName = sealed, gateScheme
 	}
 
+	// The hardware key is the profile's own where the platform can name one.
+	w, wrapKey := wrapperAndKeyFor(w, dataDir)
+
 	// Why an unwrapped envelope is being written, said in the file itself.
 	why := whyNotWrapped()
 	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore),
@@ -307,7 +313,7 @@ func storeSeedSealedBy(dataDir string, seed []byte, w SeedWrapper, requireWrap b
 			return err
 		}
 		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
-			Protection: protection, Why: why, Holder: holder, Gate: gateName}
+			Protection: protection, Why: why, Holder: holder, Gate: gateName, Key: wrapKey}
 		if gateName != "" {
 			env.V = 2
 		}
@@ -623,6 +629,12 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 	w := platformSeedWrapper()
 	if w == nil || !wrapperOpensScheme(w, env.Wrap) {
 		return nil, fmt.Errorf("root seed is wrapped with %q, which this build/platform cannot open — restore from a backup archive with the seed phrase", env.Wrap)
+	}
+	// Under the key it was written under: the profile's own, or the device-wide
+	// one an earlier envelope names by leaving it empty.
+	w, err = wrapperThatOpens(w, env.Key)
+	if err != nil {
+		return nil, err
 	}
 	seed, err := w.Unwrap(blob)
 	if err != nil {

@@ -55,11 +55,11 @@ func (p *Profile) changeLocked(old, new GK, secret *secretRecord) error {
 	if err := p.mustHaveHardwareLayer(); err != nil {
 		return err
 	}
-	wo, err := secureenclave.KeyToHoldUnderTheWrapper(p.dir, useChangeOld+":"+p.id, old)
+	wo, err := secureenclave.KeyToHoldUnderTheProfilesWrapper(p.dir, p.id, useChangeOld+":"+p.id, old)
 	if err != nil {
 		return err
 	}
-	wn, err := secureenclave.KeyToHoldUnderTheWrapper(p.dir, useChangeNew+":"+p.id, new)
+	wn, err := secureenclave.KeyToHoldUnderTheProfilesWrapper(p.dir, p.id, useChangeNew+":"+p.id, new)
 	if err != nil {
 		return err
 	}

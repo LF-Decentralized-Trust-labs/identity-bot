@@ -110,7 +110,7 @@ func TestAMachineKeepsItsKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		fresh := newSepSigner(bad).(*sepSigner)
-		if _, err := fresh.read(); err == nil {
+		if _, _, err := fresh.read(); err == nil {
 			t.Fatal("a truncated key file must be refused rather than restored")
 		}
 	})

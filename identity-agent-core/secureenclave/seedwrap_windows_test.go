@@ -60,7 +60,7 @@ func TestTPMWrappedSeedOpensAfterTheKeyHandleIsClosedAndReopened(t *testing.T) {
 	// Open the persisted key by name and free it, twice: the key must still be
 	// there after its handle is gone, and not be recreated under the same name.
 	for i := 0; i < 2; i++ {
-		provider, key, err := openSeedKey()
+		provider, key, err := openSeedKey(tpmSeedWrapKeyName)
 		if err != nil {
 			t.Fatalf("reopen %d: %v", i, err)
 		}

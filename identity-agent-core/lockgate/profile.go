@@ -190,7 +190,7 @@ func (p *Profile) writeHeld(file, use string, gk GK) error {
 	if err := p.mustHaveHardwareLayer(); err != nil {
 		return err
 	}
-	held, err := secureenclave.KeyToHoldUnderTheWrapper(p.dir, use+":"+p.id, gk)
+	held, err := secureenclave.KeyToHoldUnderTheProfilesWrapper(p.dir, p.id, use+":"+p.id, gk)
 	if err != nil {
 		return err
 	}

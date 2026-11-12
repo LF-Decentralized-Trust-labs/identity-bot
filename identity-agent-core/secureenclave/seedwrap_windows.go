@@ -62,6 +62,9 @@ type bcryptOAEPPaddingInfo struct {
 
 type tpmSeedWrapper struct {
 	proof provenOnce
+	// keyName is the key inside the provider this wrapper uses: the device-wide
+	// one, or a profile's own (ADR-074 section 3).
+	keyName string
 }
 
 // seedKeyMu serialises opening-or-creating the key across every caller in the
@@ -69,7 +72,15 @@ type tpmSeedWrapper struct {
 // and both try to create it.
 var seedKeyMu sync.Mutex
 
-func newPlatformSeedWrapper() SeedWrapper { return &tpmSeedWrapper{} }
+func newPlatformSeedWrapper() SeedWrapper { return &tpmSeedWrapper{keyName: tpmSeedWrapKeyName} }
+
+// KeyNameFor and ForKey make this a per-profile wrapper (PerProfileKeys): the
+// profile's own TPM key, named inside the Platform Crypto Provider.
+func (w *tpmSeedWrapper) KeyNameFor(profile string) string {
+	return ProfileKeyName(tpmSeedWrapKeyName, profile)
+}
+
+func (w *tpmSeedWrapper) ForKey(name string) SeedWrapper { return &tpmSeedWrapper{keyName: name} }
 
 func (w *tpmSeedWrapper) Scheme() string { return tpmSeedScheme }
 
@@ -90,7 +101,7 @@ func (w *tpmSeedWrapper) Available() bool {
 
 // openSeedKey opens the wrapping key, making it the first time. The caller frees
 // the key and the provider.
-func openSeedKey() (provider, key windows.Handle, err error) {
+func openSeedKey(keyName string) (provider, key windows.Handle, err error) {
 	seedKeyMu.Lock()
 	defer seedKeyMu.Unlock()
 	provider, err = openProvider()
@@ -98,7 +109,7 @@ func openSeedKey() (provider, key windows.Handle, err error) {
 		return 0, 0, err
 	}
 	free := func() { procFreeObject.Call(uintptr(provider)) }
-	name, err := windows.UTF16PtrFromString(tpmSeedWrapKeyName)
+	name, err := windows.UTF16PtrFromString(keyName)
 	if err != nil {
 		free()
 		return 0, 0, err
@@ -204,7 +215,7 @@ func (w *tpmSeedWrapper) Wrap(plain []byte) ([]byte, error) {
 	if len(plain) == 0 {
 		return nil, fmt.Errorf("empty seed")
 	}
-	provider, key, err := openSeedKey()
+	provider, key, err := openSeedKey(w.keyName)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +245,7 @@ func (w *tpmSeedWrapper) Unwrap(blob []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	provider, key, err := openSeedKey()
+	provider, key, err := openSeedKey(w.keyName)
 	if err != nil {
 		return nil, err
 	}

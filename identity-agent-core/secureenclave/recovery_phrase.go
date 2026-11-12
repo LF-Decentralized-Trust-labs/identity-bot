@@ -84,6 +84,9 @@ type phraseEnvelope struct {
 	// it was encrypted here (a gated profile): it opens only while the identity
 	// is open.
 	Gate string `json:"gate,omitempty"`
+	// WrapKey names the per-profile hardware key the data key is wrapped under,
+	// "" for the device-wide one (a_wrapping_key_per_profile.go).
+	WrapKey string `json:"wrap_key,omitempty"`
 }
 
 func recoveryPhrasePath(dataDir string) string {
@@ -166,6 +169,7 @@ func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedW
 	// a wrapper that works), not its founding rule: where an identity may be
 	// founded is a question about the identity, and a phrase that exists must be
 	// protected wherever it exists.
+	w, wrapKey := wrapperAndKeyFor(w, dataDir)
 	works := wrapperWorksAt(w, dataDir)
 	if requireWrap && !rootSeedMayLiveHere(detectCapability(), works, false) {
 		reason := "its key protection is not proven usable"
@@ -212,6 +216,7 @@ func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedW
 			protection = ProtectionSealedVolume
 		}
 		env.Wrap, env.Key, env.Protection, env.Why = w.Scheme(), base64.StdEncoding.EncodeToString(blob), protection, ""
+		env.WrapKey = wrapKey
 	}
 	if requireWrap && env.Wrap == seedWrapNone {
 		return cannotLiveHere(detectCapability(), "the recovery phrase would have been written unwrapped")
@@ -311,6 +316,9 @@ func phraseDataKey(env phraseEnvelope) ([]byte, error) {
 	w := platformSeedWrapper()
 	if w == nil || w.Scheme() != env.Wrap {
 		return nil, fmt.Errorf("the recovery phrase is wrapped with %q, which this build/platform cannot open", env.Wrap)
+	}
+	if w, err = wrapperThatOpens(w, env.WrapKey); err != nil {
+		return nil, err
 	}
 	if key, err = w.Unwrap(key); err != nil {
 		return nil, fmt.Errorf("recovery phrase unwrap failed (%s): %w", env.Wrap, err)
