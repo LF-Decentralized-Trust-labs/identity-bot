@@ -5,6 +5,7 @@
 **Amended:** 2026-11-02 — An ask may carry a signed, advisory tier of model, which makes the message `IA-AGENT-MSG-V2` (see §Amendment 1)
 **Amended:** 2026-11-03 — The AI agent asked may send progress notes before it answers (see §Amendment 2)
 **Amended:** 2026-11-03 — An AI agent at rest may open a conversation toward an AI agent its grant names, at a rate its grant states (see §Amendment 3)
+**Amended:** 2026-11-12 — A conversation closes by a signed entry from its opener or its owner, never for being quiet (see ADR-077)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context
@@ -62,7 +63,7 @@ again and again.
 
 A conversation holds at most 40 asks, replies and failure notices. Asks stop there; an
 answer to an ask already made is never refused for want of a turn. A chain of asks goes
-at most three deep. It closes after 30 minutes with nothing said. A receipt is not
+at most three deep. It closes only by an entry its opener or its owner signs (ADR-077); nothing closes it for being quiet. A receipt is not
 something said: it neither counts as a turn nor keeps a conversation open. A receipt is
 taken only for a message still waiting for the body that sends it. These limits are
 checked inside the same transaction that writes the entry, so two senders at once
@@ -283,7 +284,7 @@ An AI agent working on an ask may send `progress` notes before it answers. A not
 - **It is not the answer.** Only a `reply` or a `failure` closes an ask. A note never does, so the one who asked keeps waiting for the answer, and the one asked may still answer after any number of notes.
 - **Only while the ask is open.** A note after the reply or failure that closed its ask is refused when it is sent and is a fault in an exported conversation, because it would read as news about finished work.
 - **It takes no turn.** Notes do not count toward a conversation's limit of turns, so they never use up the answer's place.
-- **It keeps the conversation open, within a limit.** A note counts as something said, so it restarts the idle clock that closes a quiet conversation. A conversation with an unanswered ask still closes at a hard limit however many notes are sent, so notes cannot hold one open for ever. That limit is the Identity Agent's to set; it is not part of this format.
+- **It has no part in closing.** Nothing closes a conversation for being quiet (ADR-077), so a note neither keeps one open nor lets one close. How many notes an ask may carry is the Identity Agent's to set; it is not part of this format.
 - **What the one asked may send while an ask is open:** the ask's receipt, progress notes, its own asks to other AI agents while it works on this one, and one reply or failure.
 
 The kind is added to `agent-message.schema.json`, to the vectors (a valid note, and a note refused for having a tier), and to the independent checker. `conversationbundle` refuses a note that is not from the one asked to the one who asked, or that comes after its ask was answered.
