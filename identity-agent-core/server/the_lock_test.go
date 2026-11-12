@@ -20,8 +20,13 @@ import (
 	"identity-agent-core/secureenclave/seedwraptest"
 )
 
+// aGatedCore is a phone-role core (root-device gate). The platform is set to ios
+// while it starts, because on a Mac or Windows computer the core ignores a
+// requested mode and is always a controller.
 func aGatedCore(t *testing.T, dir string) (*CoreServer, http.Handler) {
 	t.Helper()
+	defer func(prev string) { thisPlatformGOOS = prev }(thisPlatformGOOS)
+	thisPlatformGOOS = "ios"
 	cfg := DefaultConfig()
 	cfg.DataDir = dir
 	cfg.LocalOwnerSecret = testOwnerSecret

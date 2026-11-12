@@ -2,12 +2,10 @@ package lockgate
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"golang.org/x/crypto/hkdf"
@@ -127,25 +125,21 @@ func Install() (restore func()) {
 	return func() { r4(); r3(); r2(); r1() }
 }
 
-// profileOfDataDir names the profile whose gate is at dataDir, for the hardware
-// key that profile has of its own: the open one from the ring, a locked one from
-// its record. "" means no gate there, so the device-wide key.
+// profileOfDataDir names the profile whose gate is open at dataDir, for the
+// hardware key that profile has of its own. It answers only from the ring, which
+// the core filled in memory from the profile id it was started with. It never
+// reads gate.json: that file is plain, and same-user code can edit it to name
+// another profile and so point this one at that profile's hardware key.
+// "" means no open gate there, so the device-wide key. A locked profile cannot be
+// written to (the store is refused), and opening what is already written uses
+// the key named in the envelope, so nothing needs a locked profile's name.
 func profileOfDataDir(dataDir string) string {
 	ringMu.RLock()
-	h, ok := ring[dataDir]
-	ringMu.RUnlock()
-	if ok {
+	defer ringMu.RUnlock()
+	if h, ok := ring[dataDir]; ok {
 		return h.profile
 	}
-	b, err := os.ReadFile(filepath.Join(dataDir, gateDirName, recordFile))
-	if err != nil {
-		return ""
-	}
-	var r record
-	if json.Unmarshal(b, &r) != nil {
-		return ""
-	}
-	return r.Profile
+	return ""
 }
 
 var (

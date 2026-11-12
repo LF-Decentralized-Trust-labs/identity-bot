@@ -109,3 +109,58 @@ func TestTheGateDerivesTheTPMAuthorizationFromGKAndRefusesWhenLocked(t *testing.
 		t.Fatal("a locked profile derived a key")
 	}
 }
+
+// gate.json is a plain file that same-user code can edit. Editing the profile
+// name in it must not point a profile at another profile's hardware key: the
+// name comes from the open gate in memory, never from the file. Before this,
+// a profile whose record was edited to say "profile-b" was named profile-b.
+func TestAnEditedGateRecordCannotPointAProfileAtAnotherProfilesKey(t *testing.T) {
+	seedwraptest.ThisMachineHoldsAKeyPerProfile(t)
+	t.Cleanup(Install())
+	dir := t.TempDir()
+	s := NewSession(OpenProfile(dir, "profile-a"), &Gate{Mode: ModePhone})
+	t.Cleanup(func() { drop(dir) })
+	if err := s.Found(); err != nil {
+		t.Fatal(err)
+	}
+	edit := func() {
+		raw, err := os.ReadFile(filepath.Join(dir, "gate", recordFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		m["profile"] = "profile-b"
+		out, _ := json.Marshal(m)
+		if err := os.WriteFile(filepath.Join(dir, "gate", recordFile), out, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit()
+	if got := profileOfDataDir(dir); got != "profile-a" {
+		t.Fatalf("open, with the record edited, the profile is %q, want profile-a", got)
+	}
+	// What gets stored is under profile A's key, not B's.
+	if err := secureenclave.StoreIdentityRootSeed(dir, bytes.Repeat([]byte{7}, 32)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "secureenclave", "root_seed.key"))
+	var env struct {
+		Key string `json:"key"`
+	}
+	_ = json.Unmarshal(raw, &env)
+	if want := secureenclave.ProfileKeyName("test-seed-key", "profile-a"); env.Key != want {
+		t.Fatalf("the seed is under %q, want %q", env.Key, want)
+	}
+	// Locked, the file is still not believed.
+	drop(dir)
+	if got := profileOfDataDir(dir); got != "" {
+		t.Fatalf("locked, the profile is %q from the file, want none", got)
+	}
+	// And a locked profile takes no write at all.
+	if err := secureenclave.StoreIdentityRootSeed(dir, bytes.Repeat([]byte{9}, 32)); err == nil {
+		t.Fatal("a locked profile took a seed")
+	}
+}

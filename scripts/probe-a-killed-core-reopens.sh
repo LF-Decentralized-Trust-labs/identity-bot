@@ -13,13 +13,21 @@
 #
 #   scripts/probe-a-killed-core-reopens.sh
 #
-# This script is bash and so does not run on Windows. The same kill and reopen,
-# against a real child process killed by the operating system, is
+# LINUX ONLY. IDENTITY_AGENT_GATE_MODE=root-device is honoured only on Linux: a
+# Mac or Windows core ignores it and is always a controller, whose log-in needs a
+# voucher this script does not sign, so on a Mac it fails at "a passing log-in
+# opens it". The portable version of the same kill and reopen, against a real
+# child process killed by the operating system, is
 # TestAKilledCoreReopensWhenLoggedInAndStaysLockedWhenNot in
 # identity-agent-core/server, which runs on macOS, Linux and Windows.
 #
 # Exit 0 every step held; exit 1 one did not, and which is printed.
 set -uo pipefail
+
+if [ "$(uname -s)" != Linux ]; then
+  echo "this probe runs on Linux only; on this OS run: go test -run TestAKilledCoreReopens ./identity-agent-core/server" >&2
+  exit 2
+fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"

@@ -29,6 +29,7 @@ func TestTheKillableCoreProcess(t *testing.T) {
 	if dir == "" {
 		t.Skip("only run as the child of TestAKilledCoreReopensWhenLoggedInAndStaysLockedWhenNot")
 	}
+	thisPlatformGOOS = "ios" // a phone-role core on any machine; this process is the child only
 	cfg := DefaultConfig()
 	cfg.DataDir = filepath.Join(dir, "profile-a")
 	cfg.LocalOwnerSecret = testOwnerSecret
