@@ -68,7 +68,7 @@ Only pairwise AIDs are published — never the agent's root AID — keeping the 
 ### Positive
 
 - **The network is the agents.** Witnessing, watching, and relaying are performed by the same always-on Identity Agents that use them — no platform tier required for the core trust roles.
-- **Duplicity caught without false positives.** The L1-authoritative, conservative blocking rule means a flaky shared watcher or peer never blocks a legitimate identity; L2/L3 only escalate.
+- **Duplicity caught without false positives.** A flaky or lying watcher or peer never blocks a legitimate identity: a standing watcher refuses a contact only by showing two events the controller signed at one place (ADR-075), and otherwise L2/L3 only escalate.
 - **Reachability without lock-in.** The relay protocol is open and discovery-driven; relays and standing watchers are interchangeable providers, not dependencies.
 - **Resolvable identities, protected root.** `did:webs` publishing makes pairwise AIDs resolvable over plain HTTPS while the root AID stays off the public web.
 

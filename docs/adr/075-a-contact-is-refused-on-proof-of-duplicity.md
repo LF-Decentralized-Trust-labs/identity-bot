@@ -75,12 +75,38 @@ question to put to a watcher that disagrees is not "how many of you agree" but
    saw the log through that place, from its own observations.
 
 The agent's own record still refuses a repeat contact whose log differs from the
-one this agent first saw (L1), as before.
+one this agent first saw (L1), but only when both logs verify under their own
+controller's signatures. A first sighting from a log that proved nothing is
+remembered but marked unproven: a later log that verifies replaces it, and a log
+that does not never contradicts it into a refusal, so showing an agent a made-up
+log for somebody else's identifier cannot get that identifier refused. The agent
+keeps the digest of what it first saw, not the events, so this refusal still
+rests on the digest and not on shown evidence; keeping the first-seen signed log
+would make it provable.
 
 ## Consequences
 
 - With one standing watcher, which is how an agent runs today, a real fork shown
   by that watcher refuses, and a watcher that is wrong cannot refuse anybody.
+- Proof here is controller signatures only: the inception is self-certifying and
+  every event is signed by the key in force. Witness receipts are not checked,
+  because two events at one place that the controller signed are duplicity
+  whatever witnesses received. A log that needs several controller signatures is
+  not proven by a watcher that serves one signature per event, so it shows as
+  unprovable and may flag that watcher; the hosted watcher does not yet serve
+  every signature.
+- A rival event signed under a key a later establishment event has retired still
+  counts as a fork, as in keripy: it was validly signed by the controller's key
+  when that key was in force. Whether a retired key's holder may be made to look
+  like the controller's duplicity is an open question.
+- Two watchers that are each ahead of the presented log on different branches
+  are not compared with each other; the longer is adopted.
+- A watcher that gives another digest while holding exactly the presented events
+  is shown to the owner and not flagged, since the two sides may digest different
+  renderings of the same events.
+- A watcher whose log is too long to fetch (the read is bounded), that would not
+  show its log, or that served it without signed bytes is unprovable, so it
+  refuses nothing.
 - A watcher that matches the presented log but also holds a rival branch is not
   asked for its log, since its digest says nothing of rivals; a fork it saw is
   shown to whoever presents the rival branch.
