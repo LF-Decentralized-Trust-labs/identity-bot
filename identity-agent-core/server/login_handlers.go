@@ -685,6 +685,16 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
 	}
+	// The watcher looks at the issuer's log first (matters for third-party
+	// issuers): a fork is refused before anything is verified, and what is
+	// verified is judged against the latest key state.
+	if issuerAid != "" {
+		var wRes *watcher.VerifyKelResult
+		issuerKelEvents, wRes = s.watchedLog(ctx, issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil)
+		if wRes != nil && wRes.Stopped() {
+			return false, issuerAid, "issuer KEL duplicity: " + wRes.Reason
+		}
+	}
 	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
 	issuerKelEvents = issuance.issuerKel
 	result, err := s.verifyCredentialHere(&drivers.DriverVerifyCredentialRequest{
@@ -705,10 +715,6 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 			reason = strings.Join(result.Errors, "; ")
 		}
 		return false, issuerAid, reason
-	}
-	// Watcher: reject if the issuer's KEL shows duplicity (matters for third-party issuers).
-	if wRes := s.runWatcherOnKel(ctx, issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil); wRes != nil && wRes.Blocked {
-		return false, issuerAid, "issuer KEL duplicity: " + wRes.Reason
 	}
 	return true, issuerAid, ""
 }

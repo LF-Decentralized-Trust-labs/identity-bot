@@ -1213,6 +1213,16 @@ CREATE TABLE IF NOT EXISTS watcher_contact_check (
 -- is one ADD COLUMN, so it can be run again.
 ALTER TABLE duplicity_alerts ADD COLUMN kind TEXT NOT NULL DEFAULT 'duplicity';
 `},
+	{
+		Version:     56,
+		Description: "An alert keeps the evidence it rests on: the two signed events, or the faulty watcher's reply",
+		SQL: `
+-- JSON, empty for an alert stored before this one. For a proven duplicity it holds
+-- both events at the contested place with their controller signatures, so anybody
+-- can check the fork without trusting this agent; for an alert about a watcher it
+-- holds why that watcher's answer was set aside.
+ALTER TABLE duplicity_alerts ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD

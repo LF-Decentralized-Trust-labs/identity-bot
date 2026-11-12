@@ -23,6 +23,8 @@ type aGateWorld struct {
 	issuer string
 	holder string // the identity signing in, and the credential's issuee
 	acdc   string // the credential's body as issued, base64
+	// issuerKey is the one key that signed every event of the issuer's log.
+	issuerKey string
 }
 
 // Where the agent holds the issuer's key log.
@@ -198,7 +200,7 @@ func aGateWorldWhere(t *testing.T, issueeIsSigner bool, held issuerLogHeld, how 
 	if err := s.initLoginHandler(); err != nil {
 		t.Fatal(err)
 	}
-	return &aGateWorld{s: s, schema: schema, issuer: issuer.AID, holder: holder.AID, acdc: issued.AcdcJsonB64}
+	return &aGateWorld{s: s, schema: schema, issuer: issuer.AID, holder: holder.AID, acdc: issued.AcdcJsonB64, issuerKey: ipub}
 }
 
 // gateKeys holds the signers newKeyPair made, so an issuer engine can sign.

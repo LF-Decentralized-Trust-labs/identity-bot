@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"identity-agent-core/drivers"
 	"log"
 	"net"
 	"net/http"
@@ -288,13 +289,28 @@ func cappedWatcherHints(in []string) []string {
 	return out
 }
 
+// watcherInputFor is what every route hands the watcher: the presented log's
+// parsed records and, beside them, its own signed bytes where it carries them.
+// A log held only as parsed records says which event could not be carried
+// rather than going without a word, and is not proven by this input.
+func watcherInputFor(aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) watcher.VerifyKelInput {
+	in := watcher.VerifyKelInput{
+		AID: aid, KEL: kel, SourceType: source, SourceURL: sourceURL, BootstrapL2: cappedWatcherHints(bootstrap),
+	}
+	if signed, err := drivers.SignedMessagesFromRecords(kel); err == nil {
+		in.Signed = signed
+	} else {
+		in.NotSigned = err.Error()
+	}
+	return in
+}
+
 func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) *watcher.VerifyKelResult {
 	if s.WatcherService == nil || aid == "" || len(kel) == 0 {
 		return nil
 	}
-	res, err := s.WatcherService.VerifyKel(ctx, watcher.VerifyKelInput{
-		AID: aid, KEL: kel, SourceType: source, SourceURL: sourceURL, BootstrapL2: cappedWatcherHints(bootstrap),
-	})
+	in := watcherInputFor(aid, kel, source, sourceURL, bootstrap)
+	res, err := s.WatcherService.VerifyKel(ctx, in)
 	if err != nil {
 		log.Printf("[watcher] VerifyKel %s: %v", aid, err)
 		return nil
@@ -308,6 +324,22 @@ func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[
 		log.Printf("[watcher] DUPLICITY blocked aid=%s seq=%d reason=%s", aid, res.SequenceNum, res.Reason)
 	}
 	return res
+}
+
+// watchedLog runs the watcher on a presented log before anything is verified or
+// kept from it, and returns the log to go on with. A standing watcher holding
+// validly signed later events (or a recovery rotation replacing the presented
+// log's later interactions) shows the presenter's key state is stale: a
+// rotation may have retired the key the log ends on, so what is verified or
+// stored afterwards must be judged against the latest log, which is the
+// watcher's evidence checked here, not taken on its word.
+func (s *CoreServer) watchedLog(ctx context.Context, aid string, kel []map[string]interface{}, source watcher.SourceType, sourceURL string, bootstrap []string) ([]map[string]interface{}, *watcher.VerifyKelResult) {
+	res := s.runWatcherOnKel(ctx, aid, kel, source, sourceURL, bootstrap)
+	if res != nil && !res.Stopped() && len(res.LatestRecords) > 0 {
+		log.Printf("[watcher] %s: a watcher holds later signed events; going on with the log to sequence %d", aid, res.LatestSeq)
+		return res.LatestRecords, res
+	}
+	return kel, res
 }
 
 // handleWatcherOptOutGet says whether this agent's watcher is silent about an
@@ -359,7 +391,7 @@ func (s *CoreServer) handleWatcherOptOutSet(w http.ResponseWriter, r *http.Reque
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"aid": req.AID, "opted_out": *req.OptedOut})
 }
 
-// writeDuplicity refuses a contact whose key history the watcher found forked.
+// writeDuplicity refuses a contact whose key history a watcher proved forked.
 // The code and aid are for the app, which words the refusal itself; error and
 // details are for a log or a developer, and "details" is the technical reason.
 func writeDuplicity(w http.ResponseWriter, aid, reason string) {

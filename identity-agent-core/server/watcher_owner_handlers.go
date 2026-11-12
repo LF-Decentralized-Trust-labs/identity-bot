@@ -64,6 +64,11 @@ type watcherAlertJSON struct {
 	Kind           string `json:"kind"`
 	Resolved       bool   `json:"resolved"`
 	ResolutionNote string `json:"resolution_note,omitempty"`
+	// Evidence is what the alert rests on (see watcher.Evidence): for a duplicity
+	// the two signed events at the contested place, which anybody can verify; for
+	// an alert about a watcher, why its answer was set aside. It holds events and
+	// reasons, never a digest.
+	Evidence json.RawMessage `json:"evidence,omitempty"`
 }
 
 // kindOf names the kind an alert has; one stored before kinds existed is a duplicity.
@@ -79,6 +84,9 @@ func alertJSON(a watcher.DuplicityAlert) watcherAlertJSON {
 		ID: a.ID, AID: a.AID, SequenceNum: a.SequenceNum,
 		DetectedAt: a.DetectedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		SourceURL:  a.SourceURL, Kind: kindOf(a), Resolved: a.Resolved, ResolutionNote: a.ResolutionNote,
+	}
+	if a.Evidence != "" && json.Valid([]byte(a.Evidence)) {
+		out.Evidence = json.RawMessage(a.Evidence)
 	}
 	if !a.AcknowledgedAt.IsZero() {
 		out.Acknowledged = true
@@ -105,7 +113,7 @@ func (s *CoreServer) handleWatcherStatus(w http.ResponseWriter, r *http.Request)
 		jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 			"running": false, "state": "off",
 			"shipped_trusted": []string{}, "added_trusted": []string{},
-			"hints": []string{}, "open_alerts": 0, "open_escalations": 0,
+			"hints": []string{}, "open_alerts": 0, "open_escalations": 0, "open_watcher_flags": 0,
 		})
 		return
 	}
@@ -116,7 +124,7 @@ func (s *CoreServer) handleWatcherStatus(w http.ResponseWriter, r *http.Request)
 	if len(added)+len(shipped) == 0 {
 		state = "own_record_only"
 	}
-	open, openEscalations := 0, 0 // counted apart: only a duplicity alert blocks
+	open, openEscalations, openWatcherFlags := 0, 0, 0 // counted apart: only a duplicity alert blocks
 	alerts, err := svc.DisclosableAllAlerts()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
@@ -126,9 +134,12 @@ func (s *CoreServer) handleWatcherStatus(w http.ResponseWriter, r *http.Request)
 		if a.Resolved {
 			continue
 		}
-		if kindOf(a) == watcher.AlertKindEscalation {
+		switch kindOf(a) {
+		case watcher.AlertKindEscalation:
 			openEscalations++
-		} else {
+		case watcher.AlertKindWatcher:
+			openWatcherFlags++
+		default:
 			open++
 		}
 	}
@@ -141,6 +152,7 @@ func (s *CoreServer) handleWatcherStatus(w http.ResponseWriter, r *http.Request)
 		"standing_url":    svc.DefaultL2URL(),
 		"shipped_trusted": shipped, "added_trusted": added,
 		"hints": hints, "open_alerts": open, "open_escalations": openEscalations,
+		"open_watcher_flags": openWatcherFlags,
 	})
 }
 

@@ -72,11 +72,11 @@ func (s *SQLiteStore) InsertDuplicityAlert(alert DuplicityAlert) (int64, error) 
 	// same one seen again within the same second is the same alert.
 	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO duplicity_alerts (
-			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note, kind
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note, kind, evidence_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		alert.AID, alert.SequenceNum, alert.OurDigest, alert.TheirDigest,
 		alert.SourceURL, detectedAt,
-		boolToInt(alert.Resolved), alert.ResolutionNote, alert.Kind,
+		boolToInt(alert.Resolved), alert.ResolutionNote, alert.Kind, alert.Evidence,
 	)
 	if err != nil {
 		return 0, err
@@ -103,7 +103,7 @@ func (s *SQLiteStore) listDuplicityAlerts(aid string) ([]DuplicityAlert, error) 
 }
 
 const alertColumns = `SELECT id, aid, sequence_num, our_digest, their_digest, COALESCE(source_url, ''),
-		       detected_at, COALESCE(resolved, 0), COALESCE(resolution_note, ''), COALESCE(kind, 'duplicity'),
+		       detected_at, COALESCE(resolved, 0), COALESCE(resolution_note, ''), COALESCE(kind, 'duplicity'), COALESCE(evidence_json, ''),
 		       COALESCE((SELECT acknowledged_at FROM watcher_alert_ack WHERE alert_id = duplicity_alerts.id), '')`
 
 func (s *SQLiteStore) listAllAlerts() ([]DuplicityAlert, error) {
@@ -134,7 +134,7 @@ func scanAlerts(rows *sql.Rows) ([]DuplicityAlert, error) {
 		var detected, acked string
 		var resolved int
 		if err := rows.Scan(&a.ID, &a.AID, &a.SequenceNum, &a.OurDigest, &a.TheirDigest,
-			&a.SourceURL, &detected, &resolved, &a.ResolutionNote, &a.Kind, &acked); err != nil {
+			&a.SourceURL, &detected, &resolved, &a.ResolutionNote, &a.Kind, &a.Evidence, &acked); err != nil {
 			return nil, err
 		}
 		a.DetectedAt, _ = time.Parse(time.RFC3339, detected)

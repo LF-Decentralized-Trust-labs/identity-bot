@@ -192,30 +192,24 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	}
 	result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
 
-	// L2-standing query (default the commercial witness/watcher service)
-	l2URL := s.DefaultL2URL()
-	l2Resp, latency, l2Err := s.L2.QueryDigest(ctx, l2URL, in.AID, seq)
-	l2Outcome := "unknown"
-	if l2Err != nil {
-		l2Outcome = "unavailable"
+	// Every standing watcher is asked. The first is the default one, whose
+	// answer the rest of this pipeline (open alerts, escalation) is built on.
+	// A watcher whose digest differs is then asked for its log and judged on
+	// it: what it can prove is acted on, what it cannot is shown.
+	answers := s.askStanding(ctx, in.AID, seq, digest, result)
+	for i := range answers {
+		s.judge(ctx, in, &answers[i])
 		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
-			Type: "L2_standing", URL: l2URL, Outcome: "unavailable",
+			Type: "L2_standing", URL: answers[i].w.URL, Outcome: answers[i].outcome,
 		})
-		s.emit("kel_l2_query_latency", map[string]interface{}{
-			"url": l2URL, "error": l2Err.Error(), "latency_ms": latency.Milliseconds(),
-		})
-	} else {
-		ms := int(latency.Milliseconds())
-		if l2Resp.Digest == nil {
-			l2Outcome = "unknown"
-		} else if *l2Resp.Digest == digest {
-			l2Outcome = "match"
-		} else {
-			l2Outcome = "mismatch"
+	}
+	l2URL, l2Outcome, l2Resp := answers[0].w.URL, answers[0].outcome, answers[0].resp
+	var fork *standingAnswer
+	for i := range answers {
+		if answers[i].outcome == "fork" {
+			fork = &answers[i]
+			break
 		}
-		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
-			Type: "L2_standing", URL: l2URL, Outcome: l2Outcome, LatencyMs: ms,
-		})
 	}
 
 	// Bootstrap hints — advisory only (never block alone)
@@ -239,17 +233,22 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		})
 	}
 
-	// Blocking: repeat L1 mismatch, or first-contact L1+L2-standing conflict (≥2 sources).
+	// Blocking: this agent's own record of the contact differs from what it is
+	// shown, or a standing watcher proved two histories: two validly signed
+	// events at one place, which one watcher's evidence is enough to show.
 	shouldBlock := false
 	blockReason := ""
 	var heldAlert *DuplicityAlert
+	var evidence string
 	if l1Outcome == "mismatch" {
 		shouldBlock = true
 		blockReason = "L1 digest mismatch at same sequence"
-	} else if firstContact && l2Outcome == "mismatch" {
+	} else if fork != nil {
 		shouldBlock = true
-		blockReason = "first-contact L1 vs L2-standing digest conflict"
-	} else if held := s.forkedByOpenAlert(ctx, in, l2URL, seq, l2Outcome); held != nil {
+		blockReason = "proof of duplicity: " + fork.proof.Reason
+		l2URL, l2Resp = fork.w.URL, fork.resp
+		evidence = fork.proof.Evidence.json()
+	} else if held := s.forkedByOpenAlert(ctx, in, answers, seq); held != nil {
 		// Not only the first time: the first sighting is recorded before this
 		// verdict, so a second try finds this agent's own record agreeing and
 		// would pass a log the standing watcher disagrees with. And not only the
@@ -266,10 +265,15 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		blockReason = "first-contact L1 vs L2-standing digest conflict"
 	}
 
-	// The hosted watcher disagrees with a record this agent holds and agrees
-	// with, on a repeat contact. That is one operator against this agent's own
-	// memory: not proof of anything, so it blocks nothing, but the owner is told.
-	escalate := !shouldBlock && !firstContact && l1Outcome == "match" && l2Outcome == "mismatch"
+	// A watcher that disagrees and cannot show why. That is one watcher against
+	// what this log says, not proof of anything, so it blocks nothing; the owner
+	// is told rather than left to find out. (One that can show its log is judged
+	// above: a fork blocks, and one whose answer does not hold up is flagged below.)
+	unproven := false
+	for _, an := range answers {
+		unproven = unproven || an.outcome == "mismatch"
+	}
+	escalate := !shouldBlock && unproven
 
 	// L3 — the contacts the owner chose, when the owner turned peer checks on.
 	//
@@ -278,7 +282,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// never quiets or changes the escalation, because the contact able to answer
 	// is the identity's own controller, which is also the party that showed this
 	// agent the branch in question.
-	if escalate {
+	if escalate && !firstContact {
 		peerOutcomes, _ := s.crossCheckPeers(ctx, in.AID, seq, digest, in.SourceURL)
 		result.sourcesQueried = append(result.sourcesQueried, peerOutcomes...)
 	}
@@ -289,7 +293,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		alert := heldAlert
 		if alert == nil {
 			var err error
-			if _, alert, err = s.recordDuplicity(in.AID, seq, digest, l2URL, existing, l2Resp); err != nil {
+			if _, alert, err = s.recordDuplicity(in.AID, seq, digest, l2URL, existing, l2Resp, evidence); err != nil {
 				return nil, err
 			}
 		}
@@ -305,16 +309,35 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		return result, nil
 	}
 
-	if firstContact && l1Outcome == "first_seen" && (l2Outcome == "match" || l2Outcome == "unknown") {
+	if firstContact && l1Outcome == "first_seen" && !escalate && (l2Outcome == "match" || l2Outcome == "unknown") {
 		s.emit("kel_first_contact_confirmed", map[string]interface{}{"aid": in.AID, "seq": seq})
 	}
 
 	result.OK = true
 	result.OverallOutcome = "confirmed"
+	// A watcher whose answer did not hold up is raised as an alert about the
+	// watcher, not the contact, which goes ahead.
+	for _, an := range answers {
+		switch an.outcome {
+		case "faulty":
+			s.flagWatcher(in.AID, seq, digest, an)
+			result.FlaggedWatchers = append(result.FlaggedWatchers, an.w.URL)
+		case "ahead", "superseded":
+			// The watcher holds validly signed later events: the presented log
+			// showed a stale key state. Handed back for the caller to adopt before
+			// it verifies anything signed.
+			if result.Latest == nil || len(an.proof.LatestMessages) > len(result.Latest) {
+				result.Latest = an.proof.LatestMessages
+				result.LatestKeys = an.proof.Latest.Keys
+				result.LatestRecords = an.proof.LatestRecords
+				result.LatestSeq = int(an.proof.Latest.State().SN())
+			}
+			result.Reason = an.proof.Reason
+		}
+	}
 	if escalate {
-		// Not a block: this agent's own record agrees with what it was just shown.
-		// But the hosted watcher holds a different digest, so the owner is told
-		// rather than left to find out, whatever a contact says.
+		// Not a block: no proof. But a watcher holds a different digest, so the
+		// owner is told rather than left to find out, whatever a contact says.
 		result.OverallOutcome = "escalated"
 		s.escalate(in.AID, seq)
 	}
@@ -360,7 +383,7 @@ func isDuplicity(a DuplicityAlert) bool { return a.Kind == "" || a.Kind == Alert
 // and may not be able to compute the alerted digest, so only a positive answer
 // from the standing watcher lets it through. An unreachable watcher cannot be
 // used to wait the block out.
-func (s *Service) forkedByOpenAlert(ctx context.Context, in VerifyKelInput, l2URL string, seq int, l2Outcome string) *DuplicityAlert {
+func (s *Service) forkedByOpenAlert(ctx context.Context, in VerifyKelInput, answers []standingAnswer, seq int) *DuplicityAlert {
 	alerts, err := s.Store.listDuplicityAlerts(in.AID)
 	if err != nil {
 		return nil
@@ -374,9 +397,18 @@ func (s *Service) forkedByOpenAlert(ctx context.Context, in VerifyKelInput, l2UR
 	if len(open) == 0 {
 		return nil
 	}
-	if l2Outcome != "match" {
+	// The default watcher must positively match. Any other standing watcher
+	// that disagrees also keeps the log blocked, but one that is silent or
+	// unreachable does not: it was never required to answer.
+	if answers[0].outcome != "match" {
 		a := open[0]
 		return &a
+	}
+	for _, an := range answers[1:] {
+		if an.outcome == "mismatch" || an.outcome == "fork" {
+			a := open[0]
+			return &a
+		}
 	}
 	for _, a := range open {
 		if a.SequenceNum == seq {
@@ -386,16 +418,20 @@ func (s *Service) forkedByOpenAlert(ctx context.Context, in VerifyKelInput, l2UR
 		if err != nil {
 			continue // the log does not reach that far
 		}
-		if resp, _, err := s.L2.QueryDigest(ctx, l2URL, in.AID, a.SequenceNum); err != nil ||
-			resp == nil || resp.Digest == nil || *resp.Digest != d {
-			a := a
-			return &a
+		for i, an := range answers {
+			resp, _, err := s.L2.QueryDigest(ctx, an.w.URL, in.AID, a.SequenceNum)
+			agrees := err == nil && resp != nil && resp.Digest != nil && *resp.Digest == d
+			disagrees := err == nil && resp != nil && resp.Digest != nil && *resp.Digest != d
+			if (i == 0 && !agrees) || (i > 0 && disagrees) {
+				a := a
+				return &a
+			}
 		}
 	}
 	return nil
 }
 
-func (s *Service) recordDuplicity(aid string, seq int, ourDigest, sourceURL string, existing *FirstSeenRecord, l2 *DigestResponse) (int64, *DuplicityAlert, error) {
+func (s *Service) recordDuplicity(aid string, seq int, ourDigest, sourceURL string, existing *FirstSeenRecord, l2 *DigestResponse, evidence string) (int64, *DuplicityAlert, error) {
 	// A retry of a log already alerted is the same alert, not another one to
 	// resolve: the owner closes it once and the log passes.
 	if open := s.openAlert(aid, seq, ourDigest); open != nil {
@@ -411,7 +447,7 @@ func (s *Service) recordDuplicity(aid string, seq int, ourDigest, sourceURL stri
 	alert := DuplicityAlert{
 		AID: aid, SequenceNum: seq,
 		OurDigest: ourDigest, TheirDigest: their,
-		SourceURL: sourceURL, DetectedAt: s.now().UTC(),
+		SourceURL: sourceURL, DetectedAt: s.now().UTC(), Evidence: evidence,
 	}
 	id, err := s.Store.InsertDuplicityAlert(alert)
 	if err != nil {
@@ -706,6 +742,29 @@ func (s *Service) escalate(aid string, seq int) {
 	s.emit("kel_l3_escalation", map[string]interface{}{
 		"aid": aid, "seq": seq, "reason": "the hosted watcher disagrees with this agent's record",
 	})
+}
+
+// flagWatcher raises an alert about a standing watcher whose answer did not hold
+// up: the alert is about the watcher (its URL), not the contact, and holds
+// nothing up. One alert is kept per watcher and sequence number however often
+// the same answer is met.
+func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAnswer) {
+	their := ""
+	if an.resp != nil && an.resp.Digest != nil {
+		their = *an.resp.Digest
+	}
+	alerts, _ := s.Store.listDuplicityAlerts(aid)
+	for _, a := range alerts {
+		if a.Kind == AlertKindWatcher && !a.Resolved && a.SourceURL == an.w.URL && a.SequenceNum == seq && a.TheirDigest == their {
+			return
+		}
+	}
+	_, _ = s.Store.InsertDuplicityAlert(DuplicityAlert{
+		AID: aid, SequenceNum: seq, OurDigest: digest, TheirDigest: their,
+		SourceURL: an.w.URL, DetectedAt: s.now().UTC(), Kind: AlertKindWatcher,
+		Evidence: Evidence{Kind: "watcher", SequenceNum: seq, Watcher: an.w.URL, Why: an.proof.Reason}.json(),
+	})
+	s.emit("kel_watcher_flagged", map[string]interface{}{"aid": aid, "seq": seq, "watcher": an.w.URL, "why": an.proof.Reason})
 }
 
 // AnchorAlertToKEL anchors a duplicity alert SAID to the verifier KEL (D12 default-on).

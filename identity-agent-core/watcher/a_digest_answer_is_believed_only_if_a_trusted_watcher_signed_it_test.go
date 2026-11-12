@@ -141,25 +141,24 @@ func TestAnAnswerNoTrustedWatcherSignedIsUnavailable(t *testing.T) {
 // refusal below is known to come from the signature and nothing else.
 func TestASpoofedAnswerCannotBlockAnIdentity(t *testing.T) {
 	trusted, attacker := newTestWatcherKey(1), newTestWatcherKey(9)
-	aid := "EHonest000000000000000000000000000000000000"
+	honest, rival := twoHistories(t)
 	run := func(signer *testWatcherKey) *VerifyKelResult {
-		// The serving watcher itself holds a different digest, so what a trusted
+		// The serving watcher itself holds the rival history, so what a trusted
 		// signer signs is the conflicting answer.
-		url, serving := servedBy(t, signer, nil)
-		seen(t, serving, aid, 2, "ffff")
+		url := aWatcherHolding(t, signer, rival).URL
 		ws, _ := migratedWatcher(t)
 		ws.L2 = clientTrusting(trusted)
-		if err := ws.Store.SetConfig("default_l2_url", url); err != nil {
+		if err := setStanding(ws, url); err != nil {
 			t.Fatal(err)
 		}
-		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
+		res, err := ws.VerifyKel(context.Background(), presenting(t, honest, SourceOOBI))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return res
 	}
 	if res := run(&trusted); !res.Blocked {
-		t.Fatal("control: a trusted watcher's conflicting answer should still block on first contact")
+		t.Fatal("control: a trusted watcher's proven conflicting history should block on first contact")
 	}
 	for name, signer := range map[string]*testWatcherKey{"unsigned": nil, "attacker": &attacker} {
 		if res := run(signer); res.Blocked || !res.OK {
@@ -272,7 +271,7 @@ func TestAGenuineAnswerForAnotherQuestionIsNotAnAnswerToThisOne(t *testing.T) {
 		// And it cannot make the identity look duplicitous.
 		ws, _ := migratedWatcher(t)
 		ws.L2 = clientTrusting(trusted)
-		if err := ws.Store.SetConfig("default_l2_url", srv.URL); err != nil {
+		if err := setStanding(ws, srv.URL); err != nil {
 			t.Fatal(err)
 		}
 		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
