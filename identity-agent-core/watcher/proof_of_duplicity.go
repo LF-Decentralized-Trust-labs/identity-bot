@@ -209,20 +209,15 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log at place " +
 				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error()}, true
 		}
-		// The held event may be the one a recovery rotation retires, or the rival
-		// may be: a recovery rotation replaces the interactions after the last
+		// The rival may be what a recovery rotation the presented log holds at this
+		// place retires: a recovery rotation replaces the interactions after the last
 		// establishment event, and an interaction the retired key signed there is
-		// not a second history, whichever of the two logs holds the rotation
-		// (keripy does not call it duplicity either).
+		// not a second history, whether the watcher holds it in its log or kept it
+		// as a rival (keripy does not call it duplicity either). The case where the
+		// watcher's log carries the rotation is the admission above, which supersedes.
 		if int(ev.SN) < len(msgs) && recoveryRetires(msgs[:ev.SN], message, msgs[ev.SN]) {
 			return &proof{Kind: proofWatcherBehind, Reason: "the presented log holds a recovery rotation " +
 				"at place " + fmt.Sprint(ev.SN) + " that supersedes what the watcher holds"}, true
-		}
-		if int(ev.SN) < len(msgs) {
-			if adm, err := theirLog.Admit(msgs[ev.SN]); err == nil && adm.Supersedes > 0 {
-				return &proof{Kind: proofWatcherBehind, Reason: "the presented log holds a recovery rotation " +
-					"at place " + fmt.Sprint(ev.SN) + " that supersedes what the watcher holds"}, true
-			}
 		}
 		prior := make([]string, 0, ev.SN)
 		for _, m := range msgs[:ev.SN] {
