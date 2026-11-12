@@ -119,14 +119,66 @@ func TestALinuxCoreAndABoxAreNotGated(t *testing.T) {
 	if err := secureenclave.StoreIdentityRootSeed(s.DataDir, make([]byte, 32)); err != nil {
 		t.Fatalf("a box stores its seed as before: %v", err)
 	}
-	// A box identity on any platform.
+}
+
+// Fix E: a planted box_identity.json does not turn off the gate on a Mac, and
+// does not leave a new iOS, Android or Windows profile without one.
+func TestAPlantedBoxIdentityFileDoesNotRemoveTheGateOnAnyDesktopOrPhone(t *testing.T) {
+	seedwraptest.ThisMachineCanProtectASeed(t)
+	for goos, mode := range map[string]string{"darwin": "controller", "windows": "controller", "ios": "root-device", "android": "root-device"} {
+		t.Run("new profile "+goos, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, boxIdentityFile), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			s, h := aCoreOn(t, goos, dir)
+			if st := stateOf(t, h); st.State == "ungated" {
+				t.Fatalf("a planted box file left a new %s profile ungated: %+v", goos, st)
+			}
+			if _, err := os.Stat(filepath.Join(s.DataDir, "gate")); err != nil {
+				t.Fatalf("no gate was made on %s: %v", goos, err)
+			}
+			if s.lock.sess.G.Mode != lockgate.Mode(mode) {
+				t.Fatalf("%s mode %q", goos, s.lock.sess.G.Mode)
+			}
+		})
+	}
+}
+
+func TestAPlantedBoxIdentityFileOnAGatedMacKeepsTheVoucherRequirement(t *testing.T) {
+	seedwraptest.ThisMachineCanProtectASeed(t)
 	dir := t.TempDir()
+	s, h := aCoreOn(t, "darwin", dir)
+	askTheLock(t, h, http.MethodPost, "/api/lock/lock", "", true)
+	s.Stop()
 	if err := os.WriteFile(filepath.Join(dir, boxIdentityFile), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, h = aCoreOn(t, "darwin", dir)
-	if st := stateOf(t, h); st.State != "ungated" {
-		t.Fatalf("a core with a box identity was gated: %+v", st)
+	s2, h2 := aCoreOn(t, "darwin", dir)
+	if s2.lock.sess.G.Mode != lockgate.ModeController {
+		t.Fatalf("mode became %q", s2.lock.sess.G.Mode)
+	}
+	if w := askTheLock(t, h2, http.MethodPost, "/api/lock/unlock", aLogIn(80), true); w.Code == http.StatusOK {
+		t.Fatalf("an unlock with no voucher answered 200 after a box file was planted")
+	}
+}
+
+// Fix F: on a Mac or Windows computer a requested mode other than controller is
+// ignored; on Linux the box is still ungated.
+func TestAMacOrWindowsCoreIgnoresARequestedRootMode(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows"} {
+		defer func(prev string) { thisPlatformGOOS = prev }(thisPlatformGOOS)
+		thisPlatformGOOS = goos
+		s := &CoreServer{}
+		for _, asked := range []lockgate.Mode{lockgate.ModePhone, lockgate.ModeNone} {
+			if got := s.theGateModeFor(Config{DataDir: t.TempDir(), GateMode: asked}); got != lockgate.ModeController {
+				t.Fatalf("%s asked %q got %q", goos, asked, got)
+			}
+		}
+	}
+	thisPlatformGOOS = "linux"
+	if got := (&CoreServer{}).theGateModeFor(Config{DataDir: t.TempDir()}); got != lockgate.ModeNone {
+		t.Fatalf("linux %q", got)
 	}
 }
 

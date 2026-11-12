@@ -1,6 +1,7 @@
 package lockgate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,5 +165,43 @@ func TestAProfileThatMustBeGatedRefusesASeedWhileItHasNoGate(t *testing.T) {
 	}
 	if err := secureenclave.StoreIdentityRootSeed(dir, make([]byte, 32)); err != nil {
 		t.Fatalf("once gated it stores: %v", err)
+	}
+}
+
+// Android: the app registers its keystore host after the core started, so
+// founding the gate failed at start. The first seed stored retries it, instead of
+// refusing until the next start.
+func TestAGateThatCouldNotBeFoundedAtStartIsFoundedWhenTheHostIsRegistered(t *testing.T) {
+	seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}, false)
+	r := secureenclave.UseFoundingVerdict(func() secureenclave.FoundingVerdict {
+		return secureenclave.FoundingVerdict{Permitted: true, Platform: "test"}
+	})
+	t.Cleanup(r)
+	t.Cleanup(Install())
+	dir := t.TempDir()
+	s := NewSession(OpenProfile(dir, "profile-a"), &Gate{Mode: ModePhone})
+	t.Cleanup(func() { drop(dir) })
+	RequireFounding(dir, s)
+	if err := s.Found(); !errors.Is(err, ErrHardwareLayerMissing) {
+		t.Fatalf("founding with no host should fail, got %v", err)
+	}
+	if err := secureenclave.StoreIdentityRootSeed(dir, make([]byte, 32)); err == nil {
+		t.Fatal("a seed was stored with no host and no gate")
+	}
+	if s.P.Gated() {
+		t.Fatal("gated without a host")
+	}
+
+	// The app registers its host.
+	restore := secureenclave.UseSeedWrapper(seedwraptest.Wrapper{Works: true})
+	t.Cleanup(restore)
+	if err := secureenclave.StoreIdentityRootSeed(dir, make([]byte, 32)); err != nil {
+		t.Fatalf("the store did not retry the founding: %v", err)
+	}
+	if !s.P.Gated() || s.State() != StateOpen {
+		t.Fatalf("the retry did not leave an open gated profile: %s", s.State())
+	}
+	if !secureenclave.TheStoredSeedIsUnderAGate(dir) {
+		t.Fatal("the seed was stored outside the gate")
 	}
 }

@@ -54,6 +54,20 @@ secret            = root seed (phone) | controller-key blob (desktop)
 - **The gate layer** seals the secret under `GK`, a 32-byte key (AES-256-GCM under `HKDF(GK, profile id)`). **`GK` is released only by the gate, and only for a passing provider result.** On the device `GK` rests only in the two sealed copies below: the gate's own, and, while logged in, the device-held copy, deleted at log-out.
 - **The gate is one interface in the core**, `Gate.Release(profile, ProviderResult) (GK, error)`, where a `ProviderResult` carries the profile, level, score, time, a nonce and, on a desktop, the voucher. It releases only if the score is at least `permission.DefaultMinimumScore` and the result is fresh. A real provider replaces the placeholder behind `authprovider` without touching the envelope or the gate's callers.
 - **A desktop's voucher is good for one log-in.** The root device signs `authprovider.CanonicalUnlockVoucherStatement`: the authentication statement under its own first line (`IA-UNLOCK-VOUCHER-V1`) with the log-in's nonce on the last line, so a voucher cannot be reused under a fresh nonce and a statement made for a request cannot be spent as a log-in. Spent nonces are kept in the profile's directory, so a core restart does not reopen the window.
+
+  **The exact format** (pinned by `TestAnUnlockVoucherStatementHasOneFixedForm` in `identity-agent-core/lockgate`): the UTF-8 text below, lines joined by `\n`, no trailing newline, then signed Ed25519 by the root device's key and written as a CESR qb64 signature (the form `login.SignString` produces):
+
+  ```
+  IA-UNLOCK-VOUCHER-V1
+  <agent AID>
+  <controller identifier of the desktop>
+  <level: an authprovider.Level, e.g. authenticated>
+  <time, UTC, RFC 3339, e.g. 2026-11-11T09:30:00Z>
+  <score, decimal integer>
+  <the log-in's nonce, at least 16 characters>
+  ```
+
+  Test vector: for agent `EAgent`, controller `BController`, level `authenticated`, time `2026-11-11T09:30:00Z`, score `80`, nonce `0123456789abcdef0123`, and a root-device seed of 32 bytes of `0x07` (public key, base64, `6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=`), the signature is `0BB4IoJbFHyiLBuHxVETVS81OvwMc_7FNxSmsraaYotvenZaI16UUzzMiiskhd114Qb5-R3auaTWSfy0A-zAUl0F`. A change to any of this is a new first line, never an edit.
 - **Changing the identity secret is journalled.** The new record and both keys are written down (under the hardware wrapper) before anything changes, and the change is then completed in a repeatable order: re-seal, write the record, write the device-held copy, delete the journal. A journal found at start is finished, never undone.
 - **The recovery phrase and the backup credential key are sealed under `GK` too**, as the seed is: a locked identity neither reads nor writes them, and a change of the identity secret re-seals them with the seed.
 - **`GK` rests in two items on a device, both under the platform's hardware key with no user-presence requirement (section 3).**
@@ -207,13 +221,14 @@ Every SQLite database in the profile is opened through `sqlitedb.Open`, so that 
 - `lock_class` (`none`, `app_only`, `secret_bound`, and `gate_unreadable` for a gated profile whose record is missing or unreadable) and the statement a screen shows; `provider_bound` is named and cannot be reached yet. `secret_bound` is reported only while the recovery phrase and the backup key are held under `GK`; otherwise `app_only`
 - a profile is gated when its stored seed is a version 2 envelope with a gate layer, even if its gate record is gone: it stays locked and is never taken for one made before locking existed
 - the recovery phrases and the backup credential key sealed under `GK`, re-sealed with the seed when the identity secret changes
-- a desktop core (macOS, Windows) is a controller by default and refuses an unlock with no voucher from its root device, which names this machine's controller identifier; a Linux core and any core with a box identity is not gated when founded; the public `GET /api/health` is answered while locked
+- a desktop core (macOS, Windows) is a controller by default and refuses an unlock with no voucher from its root device, which names this machine's controller identifier; only a Linux core (the black box, a development box) may be ungated when founded, decided from the platform first: a box identity file or an asked-for mode on a Mac, Windows, iOS or Android core is ignored and logged, a development build's `IDENTITY_AGENT_GATE_MODE` on a Mac or Windows computer accepts only `controller`, and a gated profile never becomes a phone; the public `GET /api/health` is answered while locked
 - the optional identity secret, with the delay counted before any key-stretching
 - a log-out whose deletion fails reports the identity as still open
 - a hardware key per profile in each wrapper: the iOS keychain tag, the Android Keystore alias (the app registers a per-profile host beside the device-wide one; with none, every profile keeps the one key) and the Windows TPM key name, each made by `ProfileKeyName` and recorded in what it wrapped (the seed envelope's `key`, a held key's and a recovery phrase's `wrap_key`). macOS makes a key per wrap already. An envelope with no name opens under the device-wide key, which is not deleted
 - a desktop's controller key under `GK`: the macOS key blob is sealed under it (a locked profile's blob on disk is ciphertext and the profile gets a signer that signs nothing, never the software signer), and the Windows TPM key is the profile's own with authorization value `HKDF(GK, "tpm-auth")`. **Written, not run:** the macOS enclave file compiles only on a Mac and the Windows TPM property names are unverified until the probe (section 3)
 
 **Not built:**
+- a root device that signs `IA-UNLOCK-VOUCHER-V1`: nothing outside the tests does yet. Until one does, a desktop (macOS, Windows) founded after this change cannot be reopened once it is logged out, because it cannot get a voucher. The signer is logged as later work
 - the optional inactivity timeout (section 5)
 - stopping the core on a lock: secrets are zeroed and the core refuses requests, but the process keeps running, and the relay, witnessing and add-ons keep running with whatever key material they cached, until the app ends the process (section 5 is not met until it does or the work is stopped)
 - hiding all but the name of a locked identity in the list of identities (section 5): the recovery-phrase and backup-key files are sealed, but other files in a locked profile directory are readable until data at rest (section 7) is built

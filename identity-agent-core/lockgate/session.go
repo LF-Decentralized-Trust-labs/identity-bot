@@ -118,12 +118,13 @@ func lookup(dataDir string) (secureenclave.GateSealer, bool) {
 func Install() (restore func()) {
 	r1 := secureenclave.UseGate(lookup)
 	r3 := secureenclave.UseProfileLookup(profileOfDataDir)
+	r4 := secureenclave.UseGateFounder(foundAgain)
 	r2 := secureenclave.UseGateRequirement(func(dataDir string) bool {
 		requiredMu.RLock()
 		defer requiredMu.RUnlock()
 		return required[dataDir]
 	})
-	return func() { r3(); r2(); r1() }
+	return func() { r4(); r3(); r2(); r1() }
 }
 
 // profileOfDataDir names the profile whose gate is at dataDir, for the hardware
@@ -159,6 +160,38 @@ func Require(dataDir string) {
 	requiredMu.Lock()
 	required[dataDir] = true
 	requiredMu.Unlock()
+}
+
+// RequireFounding is Require, and also says how to make the gate: the session
+// whose Found failed. A store that finds the gate still missing calls it once
+// before refusing, so a gate that could not be made at start (the app had not
+// yet registered its keystore host) is made when the seed is stored, and the
+// order the app did things in does not matter.
+func RequireFounding(dataDir string, s *Session) {
+	Require(dataDir)
+	foundersMu.Lock()
+	founders[dataDir] = s
+	foundersMu.Unlock()
+}
+
+var (
+	foundersMu sync.Mutex
+	founders   = map[string]*Session{}
+)
+
+// foundAgain retries the founding for dataDir. Serialised, and a gate made in
+// the meantime is a success.
+func foundAgain(dataDir string) error {
+	foundersMu.Lock()
+	defer foundersMu.Unlock()
+	s := founders[dataDir]
+	if s == nil {
+		return secureenclave.ErrGateRequired
+	}
+	if s.P.Gated() {
+		return nil
+	}
+	return s.Found()
 }
 
 func hold(dataDir, profile string, gk GK) {
@@ -273,6 +306,13 @@ func (s *Session) Unlock(r ProviderResult, secret string) error {
 func (s *Session) Lock() error {
 	if s.State() == StateUngated {
 		return ErrNoGate
+	}
+	// A change a crash cut short holds the new key under the device's wrapper
+	// alone, until it is finished. Finished before the log-out, so a logged-out
+	// identity leaves nothing behind that opens it without the provider. If it
+	// cannot be finished the identity is reported as still open.
+	if err := s.P.FinishPendingChange(); err != nil {
+		return fmt.Errorf("%w: a change of the identity secret could not be finished first: %v", ErrNotLoggedOut, err)
 	}
 	if err := s.P.DeleteDeviceHeld(); err != nil {
 		return fmt.Errorf("%w: %v", ErrNotLoggedOut, err)

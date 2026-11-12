@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -339,8 +340,12 @@ func gateModeFromTheEnvironment() lockgate.Mode {
 	if !buildmode.IsDev() {
 		return ""
 	}
-	switch m := lockgate.Mode(os.Getenv("IDENTITY_AGENT_GATE_MODE")); m {
-	case lockgate.ModePhone, lockgate.ModeController:
+	m := lockgate.Mode(os.Getenv("IDENTITY_AGENT_GATE_MODE"))
+	switch {
+	case m == lockgate.ModeController:
+		return m
+	case m == lockgate.ModePhone && runtime.GOOS != "darwin" && runtime.GOOS != "windows":
+		// A Mac or Windows computer is never a root: it would score itself.
 		return m
 	}
 	return ""

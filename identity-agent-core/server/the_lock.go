@@ -330,17 +330,16 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 	if id == "" {
 		id = filepath.Base(cfg.DataDir)
 	}
-	mode := cfg.GateMode
-	if mode == "" {
-		mode = s.theGateModeOfThisPlatform(cfg.DataDir)
-	}
+	mode := s.theGateModeFor(cfg)
 	p := lockgate.OpenProfile(cfg.DataDir, id)
 	if mode == lockgate.ModeNone && !p.Gated() {
-		// A black-box server, or a development box: not gated, and said so.
+		// A Linux core (the black box or a development box): not gated, and said so.
 		return
 	}
 	if mode == lockgate.ModeNone {
-		mode = lockgate.ModePhone
+		// A Linux profile that already has a gate keeps one, and the stricter
+		// kind: it never becomes a phone, which would score itself.
+		mode = lockgate.ModeController
 	}
 	g := &lockgate.Gate{Mode: mode, VerifyVoucher: lockgate.VoucherFromRootDevice(s.theKeyEntitledToVouch,
 		s.thisIdentityAgentsIdentifier, s.thisMachinesControllerIdentifier)}
@@ -353,7 +352,7 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 	case !aSeedIsStoredAt(cfg.DataDir):
 		// Made now: it must be gated before it stores anything. If Found fails
 		// the store refuses (not ungated forever), and the next start retries.
-		lockgate.Require(cfg.DataDir)
+		lockgate.RequireFounding(cfg.DataDir, sess)
 		if err := sess.Found(); err != nil {
 			log.Printf("[identity-agent-core] this identity has no gate and is NOT locked by anything: %v", err)
 		}
@@ -368,22 +367,46 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 // a test can be a desktop on any machine.
 var thisPlatformGOOS = runtime.GOOS
 
-// theGateModeOfThisPlatform is the role this core has when the app did not say:
-// a Mac or Windows computer is a controller whose log-in must be vouched for by
-// its person's root device (a machine may not score itself, ADR-074 section 2);
-// a phone holds the root; a sealed black-box server, or any Linux core or core
-// with a box identity, is not gated when founded.
-func (s *CoreServer) theGateModeOfThisPlatform(dataDir string) lockgate.Mode {
-	if _, err := os.Stat(filepath.Join(dataDir, boxIdentityFile)); err == nil || s.boxIdentity != nil {
-		return lockgate.ModeNone
+// theGateModeFor decides the mode from the platform first. What the app or the
+// environment asked for can only add a gate on Linux; on a Mac or Windows
+// computer only controller is accepted, and on a phone only root-device. A box
+// identity (a file a process could plant, or one this core made) counts only on
+// Linux: anywhere else it is ignored and logged.
+func (s *CoreServer) theGateModeFor(cfg Config) lockgate.Mode {
+	platform := s.theGateModeOfThisPlatform(cfg.DataDir)
+	asked := cfg.GateMode
+	if asked == "" || asked == platform {
+		return platform
 	}
 	switch thisPlatformGOOS {
+	case "darwin", "windows", "ios", "android":
+		log.Printf("[identity-agent-core] ignoring the requested gate mode %q: this platform is always %q", asked, platform)
+		return platform
+	}
+	return asked
+}
+
+// theGateModeOfThisPlatform is the role this core has when nobody said: a Mac or
+// Windows computer is a controller whose log-in must be vouched for by its
+// person's root device (a machine may not score itself, ADR-074 section 2); a
+// phone holds the root; only a Linux core (the sealed black box, or a
+// development box) may be ModeNone.
+func (s *CoreServer) theGateModeOfThisPlatform(dataDir string) lockgate.Mode {
+	switch thisPlatformGOOS {
 	case "darwin", "windows":
+		s.noteAnIgnoredBoxIdentity(dataDir)
 		return lockgate.ModeController
 	case "ios", "android":
+		s.noteAnIgnoredBoxIdentity(dataDir)
 		return lockgate.ModePhone
 	}
 	return lockgate.ModeNone
+}
+
+func (s *CoreServer) noteAnIgnoredBoxIdentity(dataDir string) {
+	if _, err := os.Stat(filepath.Join(dataDir, boxIdentityFile)); err == nil || s.boxIdentity != nil {
+		log.Printf("[identity-agent-core] a box identity is present but this is not a black box: ignored, the gate stays")
+	}
 }
 
 // thisMachinesControllerIdentifier is the identifier this computer signs as a
@@ -486,7 +509,7 @@ func lockStatement(class lockgate.LockClass, hardware bool) string {
 	case lockgate.ClassAppOnly:
 		return "This identity is locked by the app only. Nothing measures who is logging in yet, so the lock is not protection against someone using this device as you." + noHW
 	case lockgate.ClassSecretBound:
-		return "This identity is locked by the app and by a secret only you know. Wrong secrets are slowed down in this app, but a program running as you on this device can still try secrets offline without the slowing." + noHW
+		return "This identity is locked by the app and by a secret only you know. Wrong secrets are slowed down in this app, but a program running as you on this device can still try secrets offline without the slowing. After a crash while the secret was being changed, the new lock key is also kept under this device's hardware key until the next start or log-out finishes the change." + noHW
 	case lockgate.ClassProviderBound:
 		return "This identity is locked until the authentication provider confirms it is you."
 	case lockgate.ClassBroken:

@@ -49,6 +49,18 @@ var ErrGateRequired = errors.New("this identity must have a gate before it store
 // gateRequiredFor says a profile must be gated before anything is stored in it.
 var gateRequiredFor = func(dataDir string) bool { return false }
 
+// gateFounderFor makes the gate for a profile that must have one and does not:
+// the retry of a founding that failed at start, for example on Android when the
+// app registered its keystore host after the core started.
+var gateFounderFor = func(dataDir string) error { return ErrGateRequired }
+
+// UseGateFounder installs the retry, and returns the function that undoes it.
+func UseGateFounder(f func(dataDir string) error) (restore func()) {
+	prev := gateFounderFor
+	gateFounderFor = f
+	return func() { gateFounderFor = prev }
+}
+
 // UseGateRequirement installs the lookup that says which profiles must have a
 // gate before a seed is stored, and returns the function that undoes it.
 func UseGateRequirement(f func(dataDir string) bool) (restore func()) {
@@ -62,7 +74,13 @@ func UseGateRequirement(f func(dataDir string) bool) (restore func()) {
 func theGateForThisSeedToStore(dataDir string) (GateSealer, bool, error) {
 	s, gated, err := theGateForThisSeed(dataDir)
 	if err == nil && !gated && gateRequiredFor(dataDir) {
-		return nil, false, ErrGateRequired
+		// Founding the gate failed at start. Try again now: whatever it needed
+		// (the app's keystore host) is registered by the time a seed is stored,
+		// whatever order the app did things in.
+		if ferr := gateFounderFor(dataDir); ferr != nil {
+			return nil, false, fmt.Errorf("%w: %v", ErrGateRequired, ferr)
+		}
+		return theGateForThisSeed(dataDir)
 	}
 	return s, gated, err
 }
