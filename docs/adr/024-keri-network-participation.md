@@ -31,12 +31,12 @@ The watcher (`watcher.Service`, `identity-agent-core/watcher/`) detects duplicit
 | Layer | Role | Source |
 |---|---|---|
 | **L1** | Self-watch: store the first-seen KEL digest per (AID, seq) locally | the agent's own store |
-| **L2** | Since-inception / standing: query a shared commercial watcher for the consensus digest | `watcher.grapeid.org/public/kel-digest` |
+| **L2** | Since-inception / standing: query a shared standing watcher for its digest | a numbered standing-watcher host's `/public/kel-digest` (`DefaultL2DigestURL`) |
 | **L3** | Peer duplicity detection: cross-check the digest with peer agents | a peer's `/public/kel-check` |
 
 L1 records first-seen digests (`RecordFirstSeen`) and compares incoming digests against them (`VerifyKel`). L2 (`L2Client.QueryDigest`) fetches a signed standing digest from a shared watcher. L3 (`L3Client.CrossCheck`) asks peers whether their first-seen digest matches.
 
-The blocking rule is deliberately conservative: duplicity **blocks** only on (a) a repeat L1 mismatch — a different digest at a sequence we've already seen — or (b) a first-contact conflict between L1 and the L2 standing digest. L2/L3 mismatches alone never block; they only raise an escalation. Detected duplicity is recorded as a `DuplicityAlert` and anchored to the agent's own KEL (default-on) so the alert itself is tamper-evident. The verdict is a `VerifyKelResult` carrying the per-source outcomes and any alert.
+The blocking rule is deliberately conservative: duplicity **blocks** only on (a) a repeat L1 mismatch — a different digest at a sequence we've already seen — or (b) proof of duplicity from a standing watcher (ADR-075). A digest mismatch alone from L2 or L3 never blocks; it raises an escalation. Detected duplicity is recorded as a `DuplicityAlert` and anchored to the agent's own KEL (default-on) so the alert itself is tamper-evident. The verdict is a `VerifyKelResult` carrying the per-source outcomes and any alert.
 
 ### Relay client — the IA side of an open URL-relay protocol
 
@@ -69,7 +69,7 @@ Only pairwise AIDs are published — never the agent's root AID — keeping the 
 
 - **The network is the agents.** Witnessing, watching, and relaying are performed by the same always-on Identity Agents that use them — no platform tier required for the core trust roles.
 - **Duplicity caught without false positives.** The L1-authoritative, conservative blocking rule means a flaky shared watcher or peer never blocks a legitimate identity; L2/L3 only escalate.
-- **Reachability without lock-in.** The relay protocol is open and discovery-driven; `relay.grapeid.org` / `watcher.grapeid.org` are interchangeable providers, not dependencies.
+- **Reachability without lock-in.** The relay protocol is open and discovery-driven; relays and standing watchers are interchangeable providers, not dependencies.
 - **Resolvable identities, protected root.** `did:webs` publishing makes pairwise AIDs resolvable over plain HTTPS while the root AID stays off the public web.
 
 ### Negative / Trade-offs
@@ -84,7 +84,7 @@ Only pairwise AIDs are published — never the agent's root AID — keeping the 
 ## Implementation notes
 
 - Witness: `identity-agent-core/witness/` (`service.go`, `enrollment.go`, `pool.go`, `eligibility.go`, `types.go`).
-- Watcher: `identity-agent-core/watcher/` (`service.go` = L1, `l2_client.go`, `l3_client.go`, `types.go`); public URLs `watcher.grapeid.org`.
+- Watcher: `identity-agent-core/watcher/` (`service.go` = L1, `l2_client.go`, `l3_client.go`, `types.go`); the standing watcher the agent asks is `DefaultL2DigestURL` in `l2_client.go`.
 - Relay client: `identity-agent-core/relay/` (`client.go`, `manager.go`, `protocol.go`) on `relayproto` (ADR-048), which removed the frame protocol and its schema; public URL `relay.grapeid.org`.
 - did:webs publisher: `identity-agent-core/didwebs/publisher.go`, `urls.go`, served by `server/didwebs_handlers.go`. The resolver / verification side is ADR-023.
 
