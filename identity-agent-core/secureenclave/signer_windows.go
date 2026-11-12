@@ -67,6 +67,21 @@ func init() {
 // is not "there is no such key" counts as existing: a key that cannot be asked
 // about is not shown to be absent.
 func theProfilesTPMKeyExists(name string) bool {
+	// Asked on the path of every signature and lock check, so a yes is kept: a
+	// key that was there marks the profile gated whatever later happens to it.
+	if _, ok := thePresentTPMKeys.Load(name); ok {
+		return true
+	}
+	if theTPMKeyIsThere(name) {
+		thePresentTPMKeys.Store(name, true)
+		return true
+	}
+	return false
+}
+
+var thePresentTPMKeys sync.Map
+
+func theTPMKeyIsThere(name string) bool {
 	provider, err := openProvider()
 	if err != nil {
 		return false
@@ -255,10 +270,27 @@ func (s *tpmSigner) open() error {
 		return fmt.Errorf("%w: this machine's key could not be opened (0x%X)",
 			errAHardwareKeyExistsAndWillNotOpen, uint32(r))
 	}
-	defer procFreeObject.Call(uintptr(key))
+	// NCryptDeleteKey frees the handle when it succeeds, so a key that was
+	// deleted is not freed again.
+	deleted := false
+	defer func() {
+		if !deleted {
+			procFreeObject.Call(uintptr(key))
+		}
+	}()
+	// A key this call just made and cannot show it recorded is not left behind:
+	// it would be found next time with no record, and refused as not ours.
+	takeBack := func() {
+		if created {
+			if r, _, _ := procDeleteKey.Call(uintptr(key), 0); r == 0 {
+				deleted = true
+			}
+		}
+	}
 
 	pub, err := exportPublic(key)
 	if err != nil {
+		takeBack()
 		return err
 	}
 	if auth != nil {
@@ -271,9 +303,13 @@ func (s *tpmSigner) open() error {
 				// device's grant to the device-wide one no longer matches.
 				log.Printf("[secureenclave] this computer made a controller key of its own for this identity; the device-wide key it used before is kept and is no longer the one it signs with, so its root device must grant it again")
 			}
+			if _, err := readControllerKeyRecord(s.dataDir); err == nil {
+				// The record of an earlier key, and the key is gone (deleted, or the
+				// TPM was cleared). The new key replaces it; it is said, never silent.
+				log.Printf("[secureenclave] the controller key recorded for this identity is gone, and a new one was made: its public key changed, so its root device must grant it again")
+			}
 			if err := recordTheControllerKey(s.dataDir, "tpm2", s.keyName, pub); err != nil {
-				// Not recorded is not ours: take it back so a retry can make one.
-				procDeleteKey.Call(uintptr(key), 0)
+				takeBack()
 				return fmt.Errorf("the controller key could not be recorded: %w", err)
 			}
 		} else if err := theControllerKeyIsTheOneWeMade(s.dataDir, s.keyName, pub); err != nil {
