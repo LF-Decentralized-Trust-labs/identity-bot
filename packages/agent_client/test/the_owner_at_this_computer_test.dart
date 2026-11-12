@@ -253,9 +253,14 @@ void main() {
         r'http\.Client\(\)|\bhttp\s*\.\s*(get|post|put|patch|delete|head|read)\(|WebSocketChannel\.connect\(|IOWebSocketChannel\.connect\(');
     for (final f
         in Directory('lib').listSync(recursive: true).whereType<File>()) {
+      // accepted_measurements.dart fetches the publisher's signed list of
+      // accepted software from MEASUREMENT_LIST_URL: a public document on a
+      // public host, never the core, so it carries no owner proof. The list
+      // is trusted only after it verifies against the pinned publisher key.
       if (!f.path.endsWith('.dart') ||
           f.path.endsWith('the_owner_at_this_computer.dart') ||
-          f.path.contains('a_socket_to_the_agent')) {
+          f.path.contains('a_socket_to_the_agent') ||
+          f.path.endsWith('accepted_measurements.dart')) {
         continue;
       }
       if (bare.hasMatch(f.readAsStringSync())) offenders.add(f.path);
