@@ -93,3 +93,15 @@ func OpenKeyHeldUnderTheWrapper(what string, held []byte) (key []byte, wrapped b
 func TheWrapperWorksHere(dataDir string) bool {
 	return wrapperWorksAt(platformSeedWrapper(), dataDir)
 }
+
+// HeldKeyIsWrapped reads what a held key's envelope says about itself, without
+// opening it and without asking the platform anything: true when the platform
+// wrapper protected the key when it was written. It is the cheap way to report
+// protection, where TheWrapperWorksHere on a phone is an attestation check.
+func HeldKeyIsWrapped(held []byte) bool {
+	var env heldKeyEnvelope
+	if json.Unmarshal(held, &env) != nil || env.V < 1 {
+		return false
+	}
+	return env.Wrap != "" && env.Wrap != seedWrapNone
+}
