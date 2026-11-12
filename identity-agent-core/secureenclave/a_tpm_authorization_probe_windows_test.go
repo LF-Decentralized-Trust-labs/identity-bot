@@ -682,13 +682,14 @@ func probeCore(t *testing.T) {
 	procFreeObject.Call(uintptr(provider))
 	third := mk()
 	_, serr := third.Sign(msg)
+	avail := third.Available()
 	info("after the signer looked: available %v, sign error %v, its key is the planted one: %v, its key is new: %v",
-		third.Available(), serr, len(third.pub) > 0 && bytes.Equal(third.pub, plantedPub), len(third.pub) > 0 && !bytes.Equal(third.pub, plantedPub))
+		avail, serr, len(third.pub) > 0 && bytes.Equal(third.pub, plantedPub), len(third.pub) > 0 && !bytes.Equal(third.pub, plantedPub))
 	if there, err := theKeyIs(keyName); err == nil {
 		info("a key of the profile's name is listed afterwards: %v", there)
 	}
 	_, rerr := removeTheKey(keyName, nil)
-	verdict(t, "CORE-OWN", perr == nil && !third.Available() && (errors.Is(serr, ErrControllerKeyNotOurs) || errors.Is(serr, errAHardwareKeyExistsAndWillNotOpen)),
+	verdict(t, "CORE-OWN", perr == nil && !avail && (errors.Is(serr, ErrControllerKeyNotOurs) || errors.Is(serr, errAHardwareKeyExistsAndWillNotOpen)),
 		"a key of the profile's name made by someone else, with no authorization value, is refused (planting: "+fmt.Sprint(perr)+"; removing it afterwards: "+fmt.Sprint(rerr)+")")
 
 	// Locked: the TPM is not asked at all.
