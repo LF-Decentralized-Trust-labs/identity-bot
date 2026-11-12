@@ -56,6 +56,7 @@ package secureenclave
 //	cleanup  delete the probe key, and check nothing of the probe is left
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -664,12 +665,28 @@ func probeCore(t *testing.T) {
 	provider, _ := openProvider()
 	n, _ := windows.UTF16PtrFromString(keyName)
 	planted, perr := createMachineKey(provider, n, nil)
+	var plantedPub []byte
 	if perr == nil {
+		plantedPub, _ = exportPublic(planted)
 		procFreeObject.Call(uintptr(planted))
+	}
+	// What the provider says about the name now, before the signer looks: the signer
+	// treats some statuses as "no key yet", and this shows which one it would see.
+	if k, st := openTheKey(t, provider, keyName); st == 0 {
+		reopened, _ := exportPublic(k)
+		procFreeObject.Call(uintptr(k))
+		info("the planted key opens by name (status 0); it is the planted one: %v", bytes.Equal(reopened, plantedPub))
+	} else {
+		info("the planted key does NOT open by name: status 0x%X", st)
 	}
 	procFreeObject.Call(uintptr(provider))
 	third := mk()
 	_, serr := third.Sign(msg)
+	info("after the signer looked: available %v, sign error %v, its key is the planted one: %v, its key is new: %v",
+		third.Available(), serr, len(third.pub) > 0 && bytes.Equal(third.pub, plantedPub), len(third.pub) > 0 && !bytes.Equal(third.pub, plantedPub))
+	if there, err := theKeyIs(keyName); err == nil {
+		info("a key of the profile's name is listed afterwards: %v", there)
+	}
 	_, rerr := removeTheKey(keyName, nil)
 	verdict(t, "CORE-OWN", perr == nil && !third.Available() && (errors.Is(serr, ErrControllerKeyNotOurs) || errors.Is(serr, errAHardwareKeyExistsAndWillNotOpen)),
 		"a key of the profile's name made by someone else, with no authorization value, is refused (planting: "+fmt.Sprint(perr)+"; removing it afterwards: "+fmt.Sprint(rerr)+")")
