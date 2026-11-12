@@ -137,6 +137,8 @@ func (p *Profile) effective(base GK, secret string, now time.Time) (GK, error) {
 	if secret == "" {
 		return nil, ErrSecretNeeded
 	}
+	attemptMu.Lock()
+	defer attemptMu.Unlock()
 	a := p.readAttempts()
 	if d := delayAfter(a.Wrong); d > 0 {
 		if wait := a.Last.Add(d).Sub(now); wait > 0 {
@@ -149,6 +151,9 @@ func (p *Profile) effective(base GK, secret string, now time.Time) (GK, error) {
 	a.Last = now
 	if err := p.writeAttempts(a); err != nil {
 		return nil, fmt.Errorf("could not record the attempt, so none was made: %w", err)
+	}
+	if r.Secret.Time < 1 || r.Secret.Time > 16 || r.Secret.Par < 1 || r.Secret.MemKB < 8 || r.Secret.MemKB > 1<<20 {
+		return nil, errors.New("the secret's stretching parameters are out of range, so none was tried")
 	}
 	salt, err := base64.StdEncoding.DecodeString(r.Secret.Salt)
 	if err != nil {

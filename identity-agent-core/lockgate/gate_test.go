@@ -245,7 +245,8 @@ func TestADesktopNeedsARootDeviceVoucher(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	rootKey := base64.StdEncoding.EncodeToString(pub)
 	r := newRig(t, ModeController)
-	r.s.G.VerifyVoucher = VoucherFromRootDevice(func() (string, error) { return rootKey, nil })
+	r.s.G.VerifyVoucher = VoucherFromRootDevice(func() (string, error) { return rootKey, nil },
+		func() string { return "EAGENT" }, func() string { return "ECTRL" })
 	_ = r.s.Found()
 	_ = r.s.Lock()
 
@@ -279,6 +280,23 @@ func TestADesktopNeedsARootDeviceVoucher(t *testing.T) {
 	vouch(&p, priv, "EAGENT", "ECTRL")
 	if err := r.s.Unlock(p, ""); err != nil {
 		t.Fatalf("a vouched result: %v", err)
+	}
+	// A voucher made for another desktop of the same person does not open this one.
+	_ = r.s.Lock()
+	p = r.result(80)
+	vouch(&p, priv, "EAGENT", "EOTHERMACHINE")
+	if err := r.s.Unlock(p, ""); !errors.Is(err, ErrBadVoucher) {
+		t.Fatalf("a voucher for another machine: %v", err)
+	}
+	p = r.result(80)
+	vouch(&p, priv, "EOTHERAGENT", "ECTRL")
+	if err := r.s.Unlock(p, ""); !errors.Is(err, ErrBadVoucher) {
+		t.Fatalf("a voucher for another agent: %v", err)
+	}
+	p = r.result(80)
+	vouch(&p, priv, "EAGENT", "ECTRL")
+	if err := r.s.Unlock(p, ""); err != nil {
+		t.Fatal(err)
 	}
 	// A gate with nothing to verify against refuses every desktop result.
 	_ = r.s.Lock()

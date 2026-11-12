@@ -292,3 +292,28 @@ func TestAnIdentityWithASeedBeforeGatesIsServedAsItWasAndSaysSo(t *testing.T) {
 		t.Fatalf("logging out an identity with no lock must say it has none: %d", w.Code)
 	}
 }
+
+func TestAGateDeletedUnderARunningCoreDoesNotMakeItServe(t *testing.T) {
+	dir := t.TempDir()
+	seedwraptest.ThisMachineCanProtectASeed(t)
+	_, h := aGatedCore(t, dir)
+	askTheLock(t, h, http.MethodPost, "/api/lock/lock", "", true)
+	_ = os.RemoveAll(filepath.Join(dir, "gate"))
+	if w := askTheLock(t, h, http.MethodGet, "/api/identity", "", true); w.Code != http.StatusLocked {
+		t.Fatalf("deleting the gate under a running core opened it: %d", w.Code)
+	}
+}
+
+func TestASecondLogOutWhileOneIsRunningSaysSoAndIsNotAFailedLogOut(t *testing.T) {
+	seedwraptest.ThisMachineCanProtectASeed(t)
+	s, h := aGatedCore(t, t.TempDir())
+	s.lock.mu.Lock()
+	s.lock.locking = true
+	s.lock.mu.Unlock()
+	if w := askTheLock(t, h, http.MethodPost, "/api/lock/lock", "", true); w.Code != http.StatusConflict {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if w := askTheLock(t, h, http.MethodPost, "/api/lock/unlock", aLogIn(80), true); w.Code != http.StatusConflict {
+		t.Fatalf("an unlock during a lock: %d", w.Code)
+	}
+}

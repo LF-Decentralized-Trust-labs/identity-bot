@@ -14,9 +14,10 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-// Files, all in <data dir>/gate/. Only the two .key files are secret, and both
-// are held under the platform's hardware key; the rest says nothing a copied
-// directory should not be able to read.
+// Files, all in <data dir>/gate/. Only the two .key files hold GK, and both are
+// held under the platform's hardware key where there is one. gate.json holds the
+// optional secret's salt and check value: whoever has GK could use them to
+// test guesses offline.
 const (
 	gateDirName      = "gate"
 	recordFile       = "gate.json"
@@ -52,6 +53,10 @@ var ErrAlreadyGated = errors.New("this profile already has a gate")
 // the reason it stores no root seed unwrapped (ADR-028).
 var ErrHardwareLayerMissing = errors.New("this machine has no working hardware key to rest the gate key under, so the gate key would sit in a plain file")
 
+// attemptMu serialises counting wrong secrets, so parallel tries cannot be
+// counted as one.
+var attemptMu sync.Mutex
+
 // Profile is one identity's gate on this device.
 type Profile struct {
 	dir string
@@ -76,7 +81,10 @@ func (p *Profile) path(name string) string { return filepath.Join(p.dir, gateDir
 // Gated reports whether this profile has a gate.
 func (p *Profile) Gated() bool {
 	_, err := os.Stat(p.path(recordFile))
-	return err == nil
+	// Only "there is no record" means no gate. A stat that fails any other way
+	// (permissions, I/O) is not evidence the profile is ungated, and an
+	// identity must not fall open on it.
+	return err == nil || !os.IsNotExist(err)
 }
 
 // HardwareHeld reports whether the gate copy was written under the platform's
@@ -167,6 +175,9 @@ func (p *Profile) Create() (GK, error) {
 }
 
 func (p *Profile) writeHeld(file, use string, gk GK) error {
+	if err := p.mustHaveHardwareLayer(); err != nil {
+		return err
+	}
 	held, err := secureenclave.KeyToHoldUnderTheWrapper(p.dir, use+":"+p.id, gk)
 	if err != nil {
 		return err

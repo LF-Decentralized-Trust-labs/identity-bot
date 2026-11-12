@@ -165,11 +165,16 @@ func (g *Gate) spend(nonce string) bool {
 // the controller-request path already uses for the same purpose.
 // rootDeviceKey returns the verkey of the device entitled to vouch, or an error
 // when this agent knows of none (then every result is refused).
-func VoucherFromRootDevice(rootDeviceKey func() (string, error)) func(ProviderResult) error {
+func VoucherFromRootDevice(rootDeviceKey func() (string, error), thisAgent, thisMachine func() string) func(ProviderResult) error {
 	return func(r ProviderResult) error {
 		v := r.Voucher
 		if v == nil {
 			return errors.New("no voucher")
+		}
+		// Bound to this agent and this machine: a voucher made for another
+		// desktop of the same person does not open this one.
+		if thisAgent == nil || thisMachine == nil || v.AgentAID != thisAgent() || thisMachine() == "" || v.ControllerAID != thisMachine() {
+			return errors.New("the voucher is not for this agent and this machine")
 		}
 		key, err := rootDeviceKey()
 		if err != nil || key == "" {

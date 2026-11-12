@@ -37,13 +37,37 @@ var (
 	ring   = map[string]heldKey{}
 )
 
-type sealer struct {
-	profile string
-	gk      GK
+// sealer looks the key up at each use and works on a copy, so a lock zeroing
+// the held key cannot leave a seal running under an all-zero one.
+type sealer struct{ dataDir string }
+
+func (s sealer) key() (string, GK, error) {
+	ringMu.RLock()
+	defer ringMu.RUnlock()
+	h, ok := ring[s.dataDir]
+	if !ok {
+		return "", nil, secureenclave.ErrIdentityLocked
+	}
+	return h.profile, append(GK(nil), h.gk...), nil
 }
 
-func (s sealer) Seal(plain []byte) ([]byte, error)  { return Seal(s.gk, s.profile, plain) }
-func (s sealer) Open(sealed []byte) ([]byte, error) { return Open(s.gk, s.profile, sealed) }
+func (s sealer) Seal(plain []byte) ([]byte, error) {
+	p, k, err := s.key()
+	if err != nil {
+		return nil, err
+	}
+	defer k.Zero()
+	return Seal(k, p, plain)
+}
+
+func (s sealer) Open(sealed []byte) ([]byte, error) {
+	p, k, err := s.key()
+	if err != nil {
+		return nil, err
+	}
+	defer k.Zero()
+	return Open(k, p, sealed)
+}
 
 // lookup is what secureenclave asks, per data directory.
 func lookup(dataDir string) (secureenclave.GateSealer, bool) {
@@ -51,12 +75,12 @@ func lookup(dataDir string) (secureenclave.GateSealer, bool) {
 		return nil, false
 	}
 	ringMu.RLock()
-	h, ok := ring[dataDir]
+	_, ok := ring[dataDir]
 	ringMu.RUnlock()
 	if !ok {
 		return nil, true
 	}
-	return sealer{profile: h.profile, gk: h.gk}, true
+	return sealer{dataDir: dataDir}, true
 }
 
 // Install makes the seed layer ask this package whether a profile is gated and

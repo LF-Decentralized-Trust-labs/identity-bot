@@ -39,6 +39,10 @@ const (
 	lockSecretPath = "/api/lock/secret"
 )
 
+var errAlreadyLocking = errors.New("a lock is already in progress")
+
+func (l *theLock) isLocking() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.locking }
+
 // DrainWithin is how long a request already running is given when a lock fires.
 const DrainWithin = 30 * time.Second
 
@@ -72,6 +76,9 @@ type theLock struct {
 	flights map[*flight]struct{}
 	conns   map[net.Conn]struct{}
 	drained *sync.Cond
+	// startedGated: this core began with a gate. If the gate later seems to be
+	// gone (a file deleted under it), it refuses rather than falls open.
+	startedGated bool
 
 	drainWithin time.Duration
 	workStarted bool
@@ -173,7 +180,15 @@ func refuseLocked(w http.ResponseWriter) {
 // routes; an open one counts what is running so a lock can wait for it.
 func (l *theLock) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if l.sess.State() == lockgate.StateUngated || isALockRoute(r.URL.Path) {
+		if isALockRoute(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if l.sess.State() == lockgate.StateUngated {
+			if l.startedGated {
+				refuseLocked(w)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -214,7 +229,7 @@ func (l *theLock) lockNow() error {
 	}
 	if l.locking {
 		l.mu.Unlock()
-		return errors.New("a lock is already in progress")
+		return errAlreadyLocking
 	}
 	l.locking = true
 	l.mu.Unlock()
@@ -283,7 +298,14 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 		mode = lockgate.ModePhone
 	}
 	p := lockgate.OpenProfile(cfg.DataDir, id)
-	g := &lockgate.Gate{Mode: mode, VerifyVoucher: lockgate.VoucherFromRootDevice(s.theKeyEntitledToVouch)}
+	g := &lockgate.Gate{Mode: mode, VerifyVoucher: lockgate.VoucherFromRootDevice(s.theKeyEntitledToVouch,
+		s.thisIdentityAgentsIdentifier,
+		func() string {
+			if s.boxIdentity != nil {
+				return s.boxIdentity.AID
+			}
+			return ""
+		})}
 	sess := lockgate.NewSession(p, g)
 	switch {
 	case p.Gated():
@@ -298,6 +320,7 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 		log.Printf("[identity-agent-core] this identity was made before gates: it is not locked by anything until it is moved")
 	}
 	s.lock = newTheLock(sess)
+	s.lock.startedGated = sess.State() != lockgate.StateUngated
 }
 
 func aSeedIsStoredAt(dataDir string) bool {
@@ -373,12 +396,16 @@ type lockStateReply struct {
 	Statement string `json:"statement"`
 }
 
-func lockStatement(class lockgate.LockClass) string {
+func lockStatement(class lockgate.LockClass, hardware bool) string {
+	noHW := ""
+	if !hardware {
+		noHW = " This build has no hardware key to keep the lock key in, so a copy of this identity's files could also open it."
+	}
 	switch class {
 	case lockgate.ClassAppOnly:
-		return "This identity is locked by the app only. Nothing measures who is logging in yet, so this keeps out other users, other computers and copied files, not someone using this device as you."
+		return "This identity is locked by the app only. Nothing measures who is logging in yet, so the lock is not protection against someone using this device as you." + noHW
 	case lockgate.ClassSecretBound:
-		return "This identity is locked by the app and by a secret only you know. Wrong secrets are slowed down on this device; someone with a copy of the files and no device protection can still try offline."
+		return "This identity is locked by the app and by a secret only you know. Wrong secrets are slowed down in this app, but a program running as you on this device can still try secrets offline without the slowing." + noHW
 	case lockgate.ClassProviderBound:
 		return "This identity is locked until the authentication provider confirms it is you."
 	}
@@ -388,13 +415,13 @@ func lockStatement(class lockgate.LockClass) string {
 func (s *CoreServer) lockState() lockStateReply {
 	if s.lock == nil {
 		return lockStateReply{State: string(lockgate.StateUngated), LockClass: string(lockgate.ClassNone),
-			MinimumScore: permission.DefaultMinimumScore, Statement: lockStatement(lockgate.ClassNone)}
+			MinimumScore: permission.DefaultMinimumScore, Statement: lockStatement(lockgate.ClassNone, false)}
 	}
 	p := s.lock.sess.P
 	class := p.Class()
 	return lockStateReply{State: string(s.lock.sess.State()), LockClass: string(class),
 		HardwareLayer: p.HardwareHeld(), SecretSet: p.HasSecret(), Profile: p.ID(),
-		MinimumScore: permission.DefaultMinimumScore, Statement: lockStatement(class)}
+		MinimumScore: permission.DefaultMinimumScore, Statement: lockStatement(class, p.HardwareHeld())}
 }
 
 func (s *CoreServer) mountLockRoutes(r interface {
@@ -434,6 +461,10 @@ func (s *CoreServer) handleLockUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.lock == nil || s.lock.sess.State() == lockgate.StateUngated {
 		writeError(w, http.StatusConflict, "this identity has no lock", "")
+		return
+	}
+	if s.lock.isLocking() {
+		writeError(w, http.StatusConflict, "a log-out is in progress", "try again once it has finished")
 		return
 	}
 	var b unlockBody
@@ -486,7 +517,10 @@ func (s *CoreServer) handleLockLock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this identity has no lock", "")
 		return
 	}
-	if err := s.lock.lockNow(); err != nil {
+	if err := s.lock.lockNow(); errors.Is(err, errAlreadyLocking) {
+		writeError(w, http.StatusConflict, "a log-out is already in progress", "")
+		return
+	} else if err != nil {
 		// The identity is still open and serving: say so, plainly.
 		writeError(w, http.StatusInternalServerError, "not logged out: the identity is still open", err.Error())
 		return
@@ -506,6 +540,10 @@ func (s *CoreServer) handleLockSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.lock == nil || s.lock.sess.State() != lockgate.StateOpen {
 		writeError(w, http.StatusLocked, "identity is locked", "log in first")
+		return
+	}
+	if s.lock.isLocking() {
+		writeError(w, http.StatusConflict, "a log-out is in progress", "try again once it has finished")
 		return
 	}
 	var b secretBody
