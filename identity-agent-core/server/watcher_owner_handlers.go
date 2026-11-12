@@ -107,7 +107,7 @@ func (s *CoreServer) watcherOff(w http.ResponseWriter) bool {
 
 // handleWatcherStatus says honestly what the watcher is doing. "off" is its own
 // answer, and so is "own_record_only": with no trusted watcher, what another
-// watcher says is not believed, so only this agent's own memory can raise an alert.
+// watcher says is not believed, so only this Identity Agent's own memory can raise an alert.
 func (s *CoreServer) handleWatcherStatus(w http.ResponseWriter, r *http.Request) {
 	if s.WatcherService == nil {
 		jsonreply.Write(w, http.StatusOK, map[string]interface{}{
