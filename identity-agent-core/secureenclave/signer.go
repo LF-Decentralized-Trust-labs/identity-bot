@@ -24,18 +24,24 @@ type PlatformSigner interface {
 }
 
 // NewPlatformSigner selects the best available signer for this host.
+//
+// A hardware controller key that exists and will not open is a refusal, never a
+// reason to use the software signer: that is a different key in a plain file, and
+// a machine that quietly signs with it has become another machine (ADR-074
+// section 3). Whatever made the key unusable (a locked identity, a key made by
+// another chip, a damaged file, a key the core did not make) the answer is a
+// signer that says what holds the key and signs nothing.
 func NewPlatformSigner(dataDir string) PlatformSigner {
-	// A locked identity's controller key is unusable, and says so. It must not
-	// fall through to the software signer below: that is a different key, kept in
-	// a plain file, and a machine that quietly signs with it has become another
-	// machine (ADR-074 section 3).
-	if _, _, err := theGateForThisSeed(dataDir); errors.Is(err, ErrIdentityLocked) {
-		if platform, label := controllerKeyIsHardwareHere(); platform != "" {
-			return lockedControllerKey{platform: platform, label: label}
-		}
+	platform, label := controllerKeyIsHardwareHere()
+	if _, _, err := theGateForThisSeed(dataDir); errors.Is(err, ErrIdentityLocked) && platform != "" {
+		return lockedControllerKey{platform: platform, label: label}
 	}
-	if s := newDarwinSecureEnclaveSigner(dataDir); s != nil && s.Available() {
-		return s
+	var failed error
+	if s := newDarwinSecureEnclaveSigner(dataDir); s != nil {
+		if s.Available() {
+			return s
+		}
+		failed = whyUnavailable(s)
 	}
 	if s := newTPMSigner(); s != nil {
 		if p, ok := s.(interface {
@@ -46,11 +52,29 @@ func NewPlatformSigner(dataDir string) PlatformSigner {
 		if s.Available() {
 			return s
 		}
+		failed = errors.Join(failed, whyUnavailable(s))
+	}
+	if platform != "" && (aHardwareControllerKeyExistsAt(dataDir) ||
+		errors.Is(failed, errAHardwareKeyExistsAndWillNotOpen) || errors.Is(failed, ErrControllerKeyNotOurs)) {
+		return refusingControllerKey{platform: platform, label: label, why: failed}
 	}
 	if s := newStrongBoxSigner(); s != nil && s.Available() {
 		return s
 	}
 	return newSoftwareSigner(dataDir)
+}
+
+// errAHardwareKeyExistsAndWillNotOpen marks an error from a hardware signer that
+// found its key and could not use it, as against finding none to use.
+var errAHardwareKeyExistsAndWillNotOpen = errors.New("a hardware controller key exists and will not open")
+
+// whyUnavailable is the reason a signer that is not available gave, when it
+// kept one.
+func whyUnavailable(s PlatformSigner) error {
+	if w, ok := s.(interface{ whyUnavailable() error }); ok {
+		return w.whyUnavailable()
+	}
+	return nil
 }
 
 // HardwareRootStatus reports what this machine can protect a key with, and why.

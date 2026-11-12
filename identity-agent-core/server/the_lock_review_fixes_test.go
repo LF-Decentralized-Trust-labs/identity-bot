@@ -272,3 +272,44 @@ func TestAnUnlockAdmittedBeforeALogOutCannotReopenAfterIt(t *testing.T) {
 		t.Fatal("the identity is not locked")
 	}
 }
+
+// Phase 2 review, finding 1: a desktop holds no seed, so with gate/ deleted the
+// only thing left that says it was gated is its own controller key. The core must
+// stay locked, and must not found the profile again (a new gate key, an open core
+// and a controller key that no longer opens).
+func TestDeletingTheGateOfADesktopThatHoldsNoSeedDoesNotFoundItAgain(t *testing.T) {
+	seedwraptest.ThisMachineCanProtectASeed(t)
+	for _, goos := range []string{"darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			dir := t.TempDir()
+			s, h := aCoreOn(t, goos, dir)
+			askTheLock(t, h, http.MethodPost, "/api/lock/lock", "", true)
+			s.Stop()
+			// What the platform's signer leaves once the profile has a gate: a Mac's
+			// machine key sealed under it, or a Windows record of the key made.
+			key := filepath.Join(dir, "secureenclave")
+			if err := os.MkdirAll(key, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(key, "machine_key.sep"),
+				[]byte(`{"v":1,"kind":"sep-p256-signing","len":3,"blob":"AAAA","gate":"gk-aes256gcm-v1"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(filepath.Join(dir, "gate")); err != nil {
+				t.Fatal(err)
+			}
+
+			_, h2 := aCoreOn(t, goos, dir)
+			st := stateOf(t, h2)
+			if st.State != "locked" || st.LockClass != "gate_unreadable" {
+				t.Fatalf("a desktop with its gate deleted was founded again or called ungated: %+v", st)
+			}
+			if w := askTheLock(t, h2, http.MethodGet, "/api/identity", "", true); w.Code != http.StatusLocked {
+				t.Fatalf("GET /api/identity with the gate deleted: %d", w.Code)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "gate", "gate.json")); err == nil {
+				t.Fatal("a new gate record was written over the deleted one")
+			}
+		})
+	}
+}

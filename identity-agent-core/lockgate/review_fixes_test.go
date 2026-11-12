@@ -205,3 +205,31 @@ func TestAGateThatCouldNotBeFoundedAtStartIsFoundedWhenTheHostIsRegistered(t *te
 		t.Fatal("the seed was stored outside the gate")
 	}
 }
+
+// Phase 2 review, finding 1, at the profile: a desktop has no seed, so its
+// controller key is what shows it was gated.
+func TestAControllerKeyMadeUnderAGateKeepsAProfileGatedWhenItsRecordIsDeleted(t *testing.T) {
+	dir := t.TempDir()
+	keyDir := filepath.Join(dir, "secureenclave")
+	if err := os.MkdirAll(keyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "machine_key.sep"),
+		[]byte(`{"v":1,"kind":"sep-p256-signing","len":3,"blob":"AAAA","gate":"gk-aes256gcm-v1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := OpenProfile(dir, "profile-a")
+	if !p.Gated() || !p.RecordIsMissing() {
+		t.Fatal("a profile whose controller key is sealed under a gate was taken for ungated")
+	}
+	if _, err := p.Create(); !errors.Is(err, ErrAlreadyGated) {
+		t.Fatalf("a new gate was made over a controller key sealed under the old one: %v", err)
+	}
+	if c := p.Class(); c != ClassBroken {
+		t.Fatalf("class %s", c)
+	}
+	// The seed layer asks about a directory alone, and still gets the answer.
+	if !(&Profile{dir: dir}).Gated() {
+		t.Fatal("the directory-only profile the seed layer makes is not gated")
+	}
+}

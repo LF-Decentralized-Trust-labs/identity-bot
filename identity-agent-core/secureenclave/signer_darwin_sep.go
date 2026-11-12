@@ -76,6 +76,9 @@ type sepSigner struct {
 	dataDir string
 	blob    []byte
 	loaded  bool
+	// lastErr is why ensure last failed, for NewPlatformSigner to report when it
+	// refuses instead of falling through to the software signer.
+	lastErr error
 }
 
 // newDarwinSecureEnclaveSigner is the name NewPlatformSigner already calls, so
@@ -96,7 +99,17 @@ func (s *sepSigner) Available() bool {
 	if C.sep_available() != 1 {
 		return false
 	}
-	return s.ensure() == nil
+	err := s.ensure()
+	s.mu.Lock()
+	s.lastErr = err
+	s.mu.Unlock()
+	return err == nil
+}
+
+func (s *sepSigner) whyUnavailable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
 }
 
 // ensure loads the machine's key, or mints one the first time.

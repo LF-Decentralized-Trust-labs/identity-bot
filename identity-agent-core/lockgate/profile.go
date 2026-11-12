@@ -67,7 +67,27 @@ type Profile struct {
 // OpenProfile names the gate of the profile whose data directory is dataDir.
 // Nothing is read or written until it is used.
 func OpenProfile(dataDir, profileID string) *Profile {
+	if profileID != "" {
+		namedProfiles.Store(dataDir, profileID)
+	}
 	return &Profile{dir: dataDir, id: profileID}
+}
+
+// namedProfiles remembers which profile each data directory belongs to, so the
+// seed layer (which knows only a directory) can still ask the hardware about the
+// profile's own key while the profile is locked, when nothing else names it.
+var namedProfiles sync.Map
+
+// profileID is this profile's id, from what it was opened with or, for the
+// directory-only Profile the seed layer makes, from when it was last opened.
+func (p *Profile) profileID() string {
+	if p.id != "" {
+		return p.id
+	}
+	if v, ok := namedProfiles.Load(p.dir); ok {
+		return v.(string)
+	}
+	return ""
 }
 
 // ID is the profile's identifier.
@@ -87,16 +107,25 @@ func (p *Profile) Gated() bool {
 	if err == nil || !os.IsNotExist(err) {
 		return true
 	}
-	// No record, but a seed sealed under a gate layer: the gate was deleted or
-	// lost. That is locked or broken, never ungated.
-	return secureenclave.TheStoredSeedIsUnderAGate(p.dir)
+	// No record, but a seed sealed under a gate layer, or a controller key made
+	// under one (a desktop holds no seed, and its key is what says it was gated):
+	// the gate was deleted or lost. That is locked or broken, never ungated, and
+	// never founded again over the key.
+	return p.theGateIsEvidencedElsewhere()
 }
 
-// RecordIsMissing says the profile is gated by its seed but its gate record is
-// not there (deleted, or never finished).
+// theGateIsEvidencedElsewhere is true when something other than the record shows
+// the profile was gated.
+func (p *Profile) theGateIsEvidencedElsewhere() bool {
+	return secureenclave.TheStoredSeedIsUnderAGate(p.dir) ||
+		secureenclave.TheControllerKeyIsUnderAGate(p.dir, p.profileID())
+}
+
+// RecordIsMissing says the profile is gated by its seed or its controller key but
+// its gate record is not there (deleted, or never finished).
 func (p *Profile) RecordIsMissing() bool {
 	_, err := os.Stat(p.path(recordFile))
-	return os.IsNotExist(err) && secureenclave.TheStoredSeedIsUnderAGate(p.dir)
+	return os.IsNotExist(err) && p.theGateIsEvidencedElsewhere()
 }
 
 // HardwareHeld reports whether the gate copy was written under the platform's
