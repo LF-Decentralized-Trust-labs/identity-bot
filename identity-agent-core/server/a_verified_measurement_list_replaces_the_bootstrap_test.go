@@ -250,3 +250,29 @@ func mustHex(t *testing.T, h string) []byte {
 	}
 	return m[0]
 }
+
+// The owner's per-adoption statement survives an accepted list, but only adds
+// what the owner named: a refused list still refuses everything else, for this
+// request and every other.
+func TestTheOwnersNamedMeasurementOnlyAddsAndNeverLiftsAListRefusal(t *testing.T) {
+	f := newListFixture(t, "a")
+	t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", aMeasurement(0x77))
+	f.publish(t, 9, map[string][]string{"individual": {aMeasurement(0x12)}}, f.priv)
+	mustAccepted(t, f.dir)                                                           // records sequence 9
+	f.publish(t, 4, map[string][]string{"individual": {aMeasurement(0x11)}}, f.priv) // rollback
+
+	s := serverAccepting(mustAccepted(t, f.dir))
+	named := [][]byte{mustHex(t, aMeasurement(0x55))}
+	accept := s.acceptableOrOwnerNamed(named)
+	if !accept(mustHex(t, aMeasurement(0x55))) {
+		t.Error("what the owner named was refused")
+	}
+	for _, b := range []byte{0x11, 0x12, 0x77, 0x99} {
+		if accept(mustHex(t, aMeasurement(b))) {
+			t.Errorf("%#x accepted because the owner named something else", b)
+		}
+	}
+	if s.acceptableMeasurement(mustHex(t, aMeasurement(0x55))) {
+		t.Error("the owner's one-adoption statement leaked into the standing policy")
+	}
+}

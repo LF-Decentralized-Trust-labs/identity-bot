@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -24,13 +25,18 @@ import (
 //   - The signed, published measurement list (package measurementlist), read
 //     from AGENT_MEASUREMENT_LIST_FILE and checked against the publisher key
 //     pinned in this build. When one verifies it is the policy, and nothing
-//     else is added to it.
+//     else is added to it — except by the owner's own statement on one
+//     adoption request, below, which survives an accepted list on purpose.
 //   - AGENT_ACCEPTED_MEASUREMENTS on this agent, for a standing policy that
 //     survives restarts. It is the bootstrap: used only while no signed list
 //     has ever been accepted here; after one has, it is never used again.
 //   - accepted_measurements on the adoption request itself, for one adoption.
 //     /api/pairing/adopt is owner-only, so this is the owner speaking, not the
-//     box — but see the warning on the request field.
+//     box — but see the warning on the request field. It is kept after a list
+//     has been accepted because it is the owner's own signed-in statement, not
+//     a policy anyone else can supply; it can only ADD the values the owner
+//     named in that one request, and never reopens the bootstrap or anything
+//     else a refused list rules out (acceptableOrOwnerNamed).
 //
 // An empty policy stays a refusal. It would be easy to read "no list" as
 // "accept anything", and that single default would make every other check in
@@ -188,4 +194,26 @@ func (s *CoreServer) currentMeasurements() ([][]byte, string) {
 	s.measurementPolicyMu.Lock()
 	defer s.measurementPolicyMu.Unlock()
 	return s.measurementPolicy(time.Now())
+}
+
+// acceptableOrOwnerNamed is the adoption-time test when the owner named
+// measurements on the request: the current policy, or exactly those values.
+//
+// It is an OR with the policy and never a replacement or a mutation. When the
+// list is refused (rollback, expiry, tampering) the policy is empty, so the
+// only thing accepted is what the owner named; everything else the list ruled
+// out, including the bootstrap, stays refused. Nothing is stored, so the next
+// request, and every other owner or caller, sees the unchanged policy.
+func (s *CoreServer) acceptableOrOwnerNamed(named [][]byte) func([]byte) bool {
+	return func(m []byte) bool {
+		if s.acceptableMeasurement(m) {
+			return true
+		}
+		for _, a := range named {
+			if bytes.Equal(a, m) {
+				return true
+			}
+		}
+		return false
+	}
 }
