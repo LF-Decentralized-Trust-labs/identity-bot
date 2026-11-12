@@ -366,7 +366,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// sign of a mistyped measurement is a box being refused, which reads as
 	// "that machine is running something else" and sends somebody to look at
 	// the wrong end of the problem.
-	accepted, err := acceptedMeasurementsFromEnv()
+	accepted, err := acceptedMeasurements(cfg.DataDir, cfg.EntityType, time.Now())
 	if err != nil {
 		cancel()
 		dataStore.Close()
