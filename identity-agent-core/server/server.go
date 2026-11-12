@@ -332,6 +332,20 @@ type Config struct {
 	GateMode lockgate.Mode
 }
 
+// gateModeFromTheEnvironment lets a development build be made to act as a phone
+// or a desktop for a probe on a machine that is neither. It can only add a gate,
+// never remove one, and a production build ignores it.
+func gateModeFromTheEnvironment() lockgate.Mode {
+	if !buildmode.IsDev() {
+		return ""
+	}
+	switch m := lockgate.Mode(os.Getenv("IDENTITY_AGENT_GATE_MODE")); m {
+	case lockgate.ModePhone, lockgate.ModeController:
+		return m
+	}
+	return ""
+}
+
 func DefaultConfig() Config {
 	dataDir := os.Getenv("AGENT_DATA_DIR")
 	if dataDir == "" {
@@ -356,6 +370,7 @@ func DefaultConfig() Config {
 		Port:                    port,
 		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
 		RequireOwnerAtInception: requireOwner,
+		GateMode:                gateModeFromTheEnvironment(),
 		LocalOwnerSecret:        takeLocalOwnerSecretFromEnv(),
 	}
 }

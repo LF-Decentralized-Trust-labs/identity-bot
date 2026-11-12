@@ -85,7 +85,29 @@ func lookup(dataDir string) (secureenclave.GateSealer, bool) {
 
 // Install makes the seed layer ask this package whether a profile is gated and
 // open. Call once at start; returns the function that undoes it.
-func Install() (restore func()) { return secureenclave.UseGate(lookup) }
+func Install() (restore func()) {
+	r1 := secureenclave.UseGate(lookup)
+	r2 := secureenclave.UseGateRequirement(func(dataDir string) bool {
+		requiredMu.RLock()
+		defer requiredMu.RUnlock()
+		return required[dataDir]
+	})
+	return func() { r2(); r1() }
+}
+
+var (
+	requiredMu sync.RWMutex
+	required   = map[string]bool{}
+)
+
+// Require says that the profile at dataDir must have a gate before any seed is
+// stored in it (a build with gates, a profile made now). If making the gate
+// failed, the store is refused and the next start tries again.
+func Require(dataDir string) {
+	requiredMu.Lock()
+	required[dataDir] = true
+	requiredMu.Unlock()
+}
 
 func hold(dataDir, profile string, gk GK) {
 	ringMu.Lock()

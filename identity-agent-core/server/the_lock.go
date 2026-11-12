@@ -8,7 +8,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -62,6 +64,14 @@ func isALockRoute(path string) bool {
 	return false
 }
 
+// isTheHealthProbe is the public liveness answer, which reveals nothing. A
+// locked core answers it, or every caller that wants 200 from a live core reads
+// a locked one as dead or absent (the app's process supervisor, the agent
+// detector, the witness heartbeat). The lock is reported on /api/lock/state.
+func isTheHealthProbe(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/api/health"
+}
+
 type flight struct {
 	cancel context.CancelFunc
 	w      *flightWriter
@@ -82,6 +92,27 @@ type theLock struct {
 
 	drainWithin time.Duration
 	workStarted bool
+
+	// transition is held for the whole of a log-out and for the whole of an
+	// unlock or secret change, so the two never interleave. gen counts log-outs
+	// begun: an unlock that was admitted before one began is refused after it.
+	transition sync.Mutex
+	gen        uint64
+}
+
+func (l *theLock) generation() uint64 { l.mu.Lock(); defer l.mu.Unlock(); return l.gen }
+
+// beginChange is for an unlock or secret change that was admitted at generation
+// gen0. It returns false when a log-out began or ran since, in which case the
+// caller answers 409 and changes nothing; otherwise the caller holds the
+// transition until it calls the returned release.
+func (l *theLock) beginChange(gen0 uint64) (release func(), ok bool) {
+	l.transition.Lock()
+	if l.isLocking() || l.generation() != gen0 {
+		l.transition.Unlock()
+		return nil, false
+	}
+	return l.transition.Unlock, true
 }
 
 func newTheLock(sess *lockgate.Session) *theLock {
@@ -180,7 +211,7 @@ func refuseLocked(w http.ResponseWriter) {
 // routes; an open one counts what is running so a lock can wait for it.
 func (l *theLock) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isALockRoute(r.URL.Path) {
+		if isALockRoute(r.URL.Path) || isTheHealthProbe(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -232,7 +263,13 @@ func (l *theLock) lockNow() error {
 		return errAlreadyLocking
 	}
 	l.locking = true
+	l.gen++
 	l.mu.Unlock()
+	// Taken after locking is set, so no new change is admitted, and held to the
+	// end, so one already running finishes before the key is dropped and one
+	// waiting finds the log-out done and is refused (beginChange).
+	l.transition.Lock()
+	defer l.transition.Unlock()
 	defer func() { l.mu.Lock(); l.locking = false; l.mu.Unlock() }()
 
 	if !l.waitForFlights(l.drainWithin) {
@@ -295,17 +332,18 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 	}
 	mode := cfg.GateMode
 	if mode == "" {
-		mode = lockgate.ModePhone
+		mode = s.theGateModeOfThisPlatform(cfg.DataDir)
 	}
 	p := lockgate.OpenProfile(cfg.DataDir, id)
+	if mode == lockgate.ModeNone && !p.Gated() {
+		// A black-box server, or a development box: not gated, and said so.
+		return
+	}
+	if mode == lockgate.ModeNone {
+		mode = lockgate.ModePhone
+	}
 	g := &lockgate.Gate{Mode: mode, VerifyVoucher: lockgate.VoucherFromRootDevice(s.theKeyEntitledToVouch,
-		s.thisIdentityAgentsIdentifier,
-		func() string {
-			if s.boxIdentity != nil {
-				return s.boxIdentity.AID
-			}
-			return ""
-		})}
+		s.thisIdentityAgentsIdentifier, s.thisMachinesControllerIdentifier)}
 	sess := lockgate.NewSession(p, g)
 	switch {
 	case p.Gated():
@@ -313,6 +351,9 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 			log.Printf("[identity-agent-core] this identity stays locked: %v", err)
 		}
 	case !aSeedIsStoredAt(cfg.DataDir):
+		// Made now: it must be gated before it stores anything. If Found fails
+		// the store refuses (not ungated forever), and the next start retries.
+		lockgate.Require(cfg.DataDir)
 		if err := sess.Found(); err != nil {
 			log.Printf("[identity-agent-core] this identity has no gate and is NOT locked by anything: %v", err)
 		}
@@ -321,6 +362,46 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 	}
 	s.lock = newTheLock(sess)
 	s.lock.startedGated = sess.State() != lockgate.StateUngated
+}
+
+// thisPlatformGOOS is the platform the core decides its role by. A variable so
+// a test can be a desktop on any machine.
+var thisPlatformGOOS = runtime.GOOS
+
+// theGateModeOfThisPlatform is the role this core has when the app did not say:
+// a Mac or Windows computer is a controller whose log-in must be vouched for by
+// its person's root device (a machine may not score itself, ADR-074 section 2);
+// a phone holds the root; a sealed black-box server, or any Linux core or core
+// with a box identity, is not gated when founded.
+func (s *CoreServer) theGateModeOfThisPlatform(dataDir string) lockgate.Mode {
+	if _, err := os.Stat(filepath.Join(dataDir, boxIdentityFile)); err == nil || s.boxIdentity != nil {
+		return lockgate.ModeNone
+	}
+	switch thisPlatformGOOS {
+	case "darwin", "windows":
+		return lockgate.ModeController
+	case "ios", "android":
+		return lockgate.ModePhone
+	}
+	return lockgate.ModeNone
+}
+
+// thisMachinesControllerIdentifier is the identifier this computer signs as a
+// controller, the one a voucher names. Not the black box's identity, which is
+// nil on a desktop. Read when a voucher is checked, not at start, since reading
+// the key can reach the keychain.
+func (s *CoreServer) thisMachinesControllerIdentifier() string {
+	return theControllerIdentifierOf(s)
+}
+
+// theControllerIdentifierOf reads the platform's controller key. A variable so a
+// test can stand in for the hardware this machine lacks.
+var theControllerIdentifierOf = func(s *CoreServer) string {
+	id, err := s.thisMachineAsAController()
+	if err != nil {
+		return ""
+	}
+	return id.AID
 }
 
 func aSeedIsStoredAt(dataDir string) bool {
@@ -408,6 +489,8 @@ func lockStatement(class lockgate.LockClass, hardware bool) string {
 		return "This identity is locked by the app and by a secret only you know. Wrong secrets are slowed down in this app, but a program running as you on this device can still try secrets offline without the slowing." + noHW
 	case lockgate.ClassProviderBound:
 		return "This identity is locked until the authentication provider confirms it is you."
+	case lockgate.ClassBroken:
+		return "This identity is locked, but its lock record is missing or unreadable, so it cannot be opened here. Restore it from the recovery phrase."
 	}
 	return "Nothing locks this identity. It was made before locking existed."
 }
@@ -463,6 +546,7 @@ func (s *CoreServer) handleLockUnlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this identity has no lock", "")
 		return
 	}
+	gen0 := s.lock.generation()
 	if s.lock.isLocking() {
 		writeError(w, http.StatusConflict, "a log-out is in progress", "try again once it has finished")
 		return
@@ -477,7 +561,14 @@ func (s *CoreServer) handleLockUnlock(w http.ResponseWriter, r *http.Request) {
 	if b.Provider == "" {
 		b.Provider = authprovider.PlaceholderProvider
 	}
-	if err := s.lock.sess.Unlock(b.ProviderResult, b.Secret); err != nil {
+	release, ok := s.lock.beginChange(gen0)
+	if !ok {
+		writeError(w, http.StatusConflict, "a log-out happened while this log-in was arriving", "log in again")
+		return
+	}
+	err := s.lock.sess.Unlock(b.ProviderResult, b.Secret)
+	release()
+	if err != nil {
 		status, msg := lockRefusal(err)
 		var d *lockgate.DelayedError
 		if errors.As(err, &d) {
@@ -542,6 +633,7 @@ func (s *CoreServer) handleLockSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusLocked, "identity is locked", "log in first")
 		return
 	}
+	gen0 := s.lock.generation()
 	if s.lock.isLocking() {
 		writeError(w, http.StatusConflict, "a log-out is in progress", "try again once it has finished")
 		return
@@ -558,7 +650,14 @@ func (s *CoreServer) handleLockSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a new secret is needed", "")
 		return
 	}
-	if err := s.lock.sess.ChangeSecret(b.Current, next); err != nil {
+	release, ok := s.lock.beginChange(gen0)
+	if !ok {
+		writeError(w, http.StatusConflict, "a log-out happened while this change was arriving", "log in and try again")
+		return
+	}
+	err := s.lock.sess.ChangeSecret(b.Current, next)
+	release()
+	if err != nil {
 		status, msg := lockRefusal(err)
 		writeError(w, status, msg, err.Error())
 		return

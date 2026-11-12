@@ -203,12 +203,20 @@ Every SQLite database in the profile is opened through `sqlitedb.Open`, so that 
 - the two copies of `GK` (the gate copy and the device-held copy, deleted and proved deleted at log-out), each under the platform's wrapper, refused in a production build where there is none
 - the gate layer of a stored seed and envelope version 2 (`secureenclave`, `GateSealer`), so a locked profile reads no seed, not even one stored before it had a gate
 - the lock routes (`GET /api/lock/state`, `POST /api/lock/unlock`, `POST /api/lock/lock`, `PUT` and `DELETE /api/lock/secret`), closed to a controller, with the local owner proof required on each; a locked core answers only these and the owner-proof route
-- locking drains a running request for up to 30 seconds, then cancels it and never completes it
-- `lock_class` (`none`, `app_only`, `secret_bound`) and the statement a screen shows; `provider_bound` is named and cannot be reached yet
+- locking drains a running request for up to 30 seconds, then cancels it and withholds its reply, so a signature the lock interrupted is never completed; a cancelled request's other side effects may still complete
+- `lock_class` (`none`, `app_only`, `secret_bound`, and `gate_unreadable` for a gated profile whose record is missing or unreadable) and the statement a screen shows; `provider_bound` is named and cannot be reached yet. `secret_bound` is reported only while the recovery phrase and the backup key are held under `GK`; otherwise `app_only`
+- a profile is gated when its stored seed is a version 2 envelope with a gate layer, even if its gate record is gone: it stays locked and is never taken for one made before locking existed
+- the recovery phrases and the backup credential key sealed under `GK`, re-sealed with the seed when the identity secret changes
+- a desktop core (macOS, Windows) is a controller by default and refuses an unlock with no voucher from its root device, which names this machine's controller identifier; a Linux core and any core with a box identity is not gated when founded; the public `GET /api/health` is answered while locked
 - the optional identity secret, with the delay counted before any key-stretching
 - a log-out whose deletion fails reports the identity as still open
 
 **Not built:**
+- the optional inactivity timeout (section 5)
+- stopping the core on a lock: secrets are zeroed and the core refuses requests, but the process keeps running, and the relay, witnessing and add-ons keep running with whatever key material they cached, until the app ends the process (section 5 is not met until it does or the work is stopped)
+- hiding all but the name of a locked identity in the list of identities (section 5): the recovery-phrase and backup-key files are sealed, but other files in a locked profile directory are readable until data at rest (section 7) is built
+- the sealing of every other secret a profile holds under `GK`; only the seed, the recovery phrases and the backup key are
+- the hijacked connections of a locked core are closed only if they were hijacked before the lock fired
 - the per-profile key name inside each platform's wrapper (the wrappers are still device-wide)
 - sealing a desktop's controller key under `GK`, and the Windows TPM authorization value
 - locking on a switch (the app's step)

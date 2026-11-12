@@ -263,7 +263,7 @@ func storeSeedSealedBy(dataDir string, seed []byte, w SeedWrapper, requireWrap b
 	}
 	gateName := ""
 	if seal == nil {
-		sealer, gated, err := theGateForThisSeed(dataDir)
+		sealer, gated, err := theGateForThisSeedToStore(dataDir)
 		if err != nil {
 			return err
 		}

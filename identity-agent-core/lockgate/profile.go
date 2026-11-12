@@ -84,7 +84,19 @@ func (p *Profile) Gated() bool {
 	// Only "there is no record" means no gate. A stat that fails any other way
 	// (permissions, I/O) is not evidence the profile is ungated, and an
 	// identity must not fall open on it.
-	return err == nil || !os.IsNotExist(err)
+	if err == nil || !os.IsNotExist(err) {
+		return true
+	}
+	// No record, but a seed sealed under a gate layer: the gate was deleted or
+	// lost. That is locked or broken, never ungated.
+	return secureenclave.TheStoredSeedIsUnderAGate(p.dir)
+}
+
+// RecordIsMissing says the profile is gated by its seed but its gate record is
+// not there (deleted, or never finished).
+func (p *Profile) RecordIsMissing() bool {
+	_, err := os.Stat(p.path(recordFile))
+	return os.IsNotExist(err) && secureenclave.TheStoredSeedIsUnderAGate(p.dir)
 }
 
 // HardwareHeld reports whether the gate copy was written under the platform's
@@ -237,6 +249,29 @@ func (p *Profile) DeleteDeviceHeld() error {
 		return errors.New("the device-held gate key is still there after it was deleted")
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("could not confirm the device-held gate key is gone: %w", err)
+	}
+	return p.sweepStrayCopies()
+}
+
+// sweepStrayCopies removes the temporary files a write cut short by a crash
+// leaves in gate/. Those hold a copy of GK under the wrapper, and a log-out that
+// leaves one behind has not removed the key. Only temp files of the two key
+// files are touched, and one that cannot be removed is an error: that log-out
+// is not complete.
+func (p *Profile) sweepStrayCopies() error {
+	dir := filepath.Join(p.dir, gateDirName)
+	for _, base := range []string{deviceHeldFile, gateCopyFile} {
+		stray, err := filepath.Glob(filepath.Join(dir, base+".tmp-*"))
+		if err != nil {
+			return err
+		}
+		for _, f := range stray {
+			// The gate copy is the one the owner's next log-in needs, and a temp
+			// copy of it is only ever a half-written replacement.
+			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove a stray copy of the gate key: %w", err)
+			}
+		}
 	}
 	return nil
 }

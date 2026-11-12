@@ -144,7 +144,7 @@ func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedW
 		return fmt.Errorf("a recovery phrase is between 1 and %d bytes", maxRecoveryPhraseBytes)
 	}
 	// A locked identity writes no phrase, and says why before anything else.
-	sealer, gated, gerr := theGateForThisSeed(dataDir)
+	sealer, gated, gerr := theGateForThisSeedToStore(dataDir)
 	if gerr != nil {
 		return gerr
 	}

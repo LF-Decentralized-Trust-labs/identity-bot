@@ -13,6 +13,11 @@
 #
 #   scripts/probe-a-killed-core-reopens.sh
 #
+# This script is bash and so does not run on Windows. The same kill and reopen,
+# against a real child process killed by the operating system, is
+# TestAKilledCoreReopensWhenLoggedInAndStaysLockedWhenNot in
+# identity-agent-core/server, which runs on macOS, Linux and Windows.
+#
 # Exit 0 every step held; exit 1 one did not, and which is printed.
 set -uo pipefail
 
@@ -26,7 +31,7 @@ port=$((20000 + RANDOM % 20000))
 
 fail=0
 start() {
-  IDENTITY_AGENT_LOCAL_OWNER_SECRET="$secret" AGENT_DATA_DIR="$work/profile-a" PORT="$port" "$work/core" >"$work/core.log" 2>&1 &
+  IDENTITY_AGENT_GATE_MODE=root-device IDENTITY_AGENT_LOCAL_OWNER_SECRET="$secret" AGENT_DATA_DIR="$work/profile-a" PORT="$port" "$work/core" >"$work/core.log" 2>&1 &
   pid=$!
   for _ in $(seq 1 50); do
     curl -fs -H "X-Local-Owner-Secret: $secret" "http://127.0.0.1:$port/api/lock/state" >/dev/null 2>&1 && return 0
@@ -55,6 +60,7 @@ start
 expect "killed while logged out, it stays locked" "$(state)" locked
 expect "a locked core refuses an ordinary route" "$(curl -s -o /dev/null -w '%{http_code}' -H "X-Local-Owner-Secret: $secret" "http://127.0.0.1:$port/api/identity")" 423
 expect "an unlock with no owner proof is refused" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$port/api/lock/unlock")" 403
+expect "a locked core still answers the public health probe" "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/health")" 200
 login
 expect "a passing log-in opens it" "$(state)" open
 echo "  note  hardware_layer: $(api GET /api/lock/state | python3 -c 'import sys,json; print(json.load(sys.stdin)["hardware_layer"])') (false means this probe says nothing about a hardware key)"

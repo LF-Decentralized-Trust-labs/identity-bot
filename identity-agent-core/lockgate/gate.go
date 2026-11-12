@@ -9,6 +9,7 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
+	"identity-agent-core/secureenclave"
 )
 
 // ProviderResult is what a log-in through the authentication provider hands the
@@ -44,6 +45,10 @@ const (
 	ModePhone Mode = "root-device"
 	// ModeController: a desktop, whose score must be vouched for.
 	ModeController Mode = "controller"
+	// ModeNone: this core is not gated when founded. A sealed black-box server is
+	// protected by its sealed volume and its attested image, and ADR-074 leaves
+	// it unchanged. A profile that already has a gate is still gated.
+	ModeNone Mode = "none"
 )
 
 // Refusal reasons. A caller can tell a person which, so none is a bare "no".
@@ -208,13 +213,25 @@ const (
 	// package can reach it yet: it needs a provider whose answer the gate copy is
 	// sealed under, and the gate copy is not. It is named so no screen invents it.
 	ClassProviderBound LockClass = "provider_bound"
+	// ClassBroken: the profile is gated but its gate record is missing or
+	// unreadable. It stays locked and is never called ungated.
+	ClassBroken LockClass = "gate_unreadable"
 )
 
 // Class is the profile's lock class.
 func (p *Profile) Class() LockClass {
 	r, err := p.readRecord()
 	if err != nil {
-		return ClassNone
+		if errors.Is(err, ErrNoGate) && !p.Gated() {
+			return ClassNone
+		}
+		return ClassBroken
+	}
+	// A secret_bound claim is only as strong as the weakest thing it guards:
+	// while a recovery phrase or the backup key is held without the gate layer,
+	// same-user code reaches the seed without the secret, so report app_only.
+	if secureenclave.AHeldSecretLacksTheGateLayer(p.dir) {
+		return ClassAppOnly
 	}
 	if r.Secret != nil {
 		return ClassSecretBound

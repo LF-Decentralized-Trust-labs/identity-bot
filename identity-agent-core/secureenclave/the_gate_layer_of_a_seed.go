@@ -40,6 +40,33 @@ func UseGate(f func(dataDir string) (GateSealer, bool)) (restore func()) {
 	return func() { gateOf = prev }
 }
 
+// ErrGateRequired is the refusal to store a seed, or a secret that reproduces
+// one, in a profile this build requires a gate for and which has none: making
+// the gate failed, and storing under no gate now would leave the identity
+// unlockable-by-nothing forever.
+var ErrGateRequired = errors.New("this identity must have a gate before it stores a secret, and its gate could not be made")
+
+// gateRequiredFor says a profile must be gated before anything is stored in it.
+var gateRequiredFor = func(dataDir string) bool { return false }
+
+// UseGateRequirement installs the lookup that says which profiles must have a
+// gate before a seed is stored, and returns the function that undoes it.
+func UseGateRequirement(f func(dataDir string) bool) (restore func()) {
+	prev := gateRequiredFor
+	gateRequiredFor = f
+	return func() { gateRequiredFor = prev }
+}
+
+// theGateForThisSeedToStore is theGateForThisSeed for a write: a profile that
+// must be gated and is not refuses.
+func theGateForThisSeedToStore(dataDir string) (GateSealer, bool, error) {
+	s, gated, err := theGateForThisSeed(dataDir)
+	if err == nil && !gated && gateRequiredFor(dataDir) {
+		return nil, false, ErrGateRequired
+	}
+	return s, gated, err
+}
+
 // theGateForThisSeed is the sealer to use, or ErrIdentityLocked when the profile
 // is gated and not open.
 func theGateForThisSeed(dataDir string) (s GateSealer, gated bool, err error) {
@@ -97,4 +124,13 @@ func gateSchemeOf(env seedEnvelope) bool { return env.Gate == gateScheme }
 
 func errGateUnknown(env seedEnvelope) error {
 	return fmt.Errorf("root seed is sealed under gate scheme %q, which this build cannot open", env.Gate)
+}
+
+// TheStoredSeedIsUnderAGate says the seed stored at dataDir is a version 2
+// envelope sealed under a gate layer. Such a profile is gated whatever else is
+// on disk: a gate record that has gone missing means locked or broken, never
+// "made before locking existed" (ADR-074).
+func TheStoredSeedIsUnderAGate(dataDir string) bool {
+	env, err := readEnvelope(dataDir)
+	return err == nil && env.V >= 2 && env.Gate != ""
 }

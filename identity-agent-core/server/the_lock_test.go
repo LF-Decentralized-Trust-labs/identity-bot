@@ -26,6 +26,7 @@ func aGatedCore(t *testing.T, dir string) (*CoreServer, http.Handler) {
 	cfg.DataDir = dir
 	cfg.LocalOwnerSecret = testOwnerSecret
 	cfg.ProfileID = "profile-a"
+	cfg.GateMode = lockgate.ModePhone
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +91,9 @@ func TestALockedCoreAnswersOnlyTheLockRoutesAndReadsNoSeed(t *testing.T) {
 		if strings.Contains(route, "*") || !strings.HasPrefix(route, "/api/") || isALockRoute(route) {
 			return nil
 		}
+		if method == http.MethodGet && route == "/api/health" {
+			return nil // public, reveals nothing, answered while locked on purpose
+		}
 		path := strings.NewReplacer("{", "", "}", "").Replace(route)
 		w := askTheLock(t, h, method, path, `{}`, true)
 		checked++
@@ -98,6 +102,18 @@ func TestALockedCoreAnswersOnlyTheLockRoutesAndReadsNoSeed(t *testing.T) {
 		}
 		return nil
 	})
+	// The public liveness probe answers while locked, so callers that want 200
+	// from a live core do not read a locked one as dead; the lock itself is
+	// reported on /api/lock/state.
+	if w := askTheLock(t, h, http.MethodGet, "/api/health", "", false); w.Code != http.StatusOK {
+		t.Fatalf("health while locked: %d %s", w.Code, w.Body.String())
+	}
+	if st := stateOf(t, h); st.State != "locked" {
+		t.Fatalf("health must not change the lock: %+v", st)
+	}
+	if w := askTheLock(t, h, http.MethodPost, "/api/health", `{}`, true); w.Code != http.StatusLocked {
+		t.Fatalf("only GET health is let through: %d", w.Code)
+	}
 	if checked < 50 {
 		t.Fatalf("only %d routes were walked, so this proves little", checked)
 	}

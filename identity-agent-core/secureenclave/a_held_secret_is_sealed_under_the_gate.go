@@ -33,7 +33,7 @@ const keyUnderGateSuffix = "+gate"
 // gated profile the key is sealed under GK first, and a locked profile gets
 // ErrIdentityLocked and nothing is written.
 func HoldKeyUnderTheGate(dataDir, what string, key []byte) ([]byte, error) {
-	sealer, gated, err := theGateForThisSeed(dataDir)
+	sealer, gated, err := theGateForThisSeedToStore(dataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -185,4 +185,40 @@ func reSealPhrase(slot phraseSlot, dataDir string, open, seal func([]byte) ([]by
 		return nil
 	}
 	return atomicfile.Write(slot.path(dataDir), out, 0o600)
+}
+
+// AHeldSecretLacksTheGateLayer reports whether any secret this package knows
+// holds (a recovery phrase, a registered key file) exists at dataDir without the
+// gate layer, so that code running as the same user could read it while the
+// identity is locked. It reads only what the files say about themselves and
+// asks the platform nothing, so a screen can poll it. A file that cannot be
+// read as an envelope counts as lacking the layer.
+func AHeldSecretLacksTheGateLayer(dataDir string) bool {
+	for _, slot := range []phraseSlot{slotInForce, slotMovingTo} {
+		raw, err := os.ReadFile(slot.path(dataDir))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		var env phraseEnvelope
+		if err != nil || json.Unmarshal(raw, &env) != nil || env.Gate == "" {
+			return true
+		}
+	}
+	gateKeyFilesMu.Lock()
+	files := map[string]string{}
+	for k, v := range gateKeyFiles {
+		files[k] = v
+	}
+	gateKeyFilesMu.Unlock()
+	for rel, what := range files {
+		raw, err := os.ReadFile(filepath.Join(dataDir, rel))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		var env heldKeyEnvelope
+		if err != nil || json.Unmarshal(raw, &env) != nil || env.Holder != holderHeldKey+":"+what+keyUnderGateSuffix {
+			return true
+		}
+	}
+	return false
 }
