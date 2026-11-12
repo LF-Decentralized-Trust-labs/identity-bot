@@ -471,6 +471,9 @@ func New(cfg Config) (*CoreServer, error) {
 	ws := watcher.NewService(watcher.NewSQLiteStore(dataStore.DB()))
 	ws.SignDigest = s.signWitnessReceipt
 	ws.OnEvent = func(eventType string, payload map[string]interface{}) {
+		// Written as well as broadcast: a person who was not connected when
+		// it happened still finds it in the Activity list.
+		s.recordWatcherFinding(eventType, payload)
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	s.WatcherService = ws
