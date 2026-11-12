@@ -540,3 +540,43 @@ func TestALockedProfilesControllerKeyIsNotTheSoftwareSigner(t *testing.T) {
 		t.Fatal("a software key was minted for a locked profile")
 	}
 }
+
+// Each key keeps the level its own check found. Before, one record served every
+// key: a profile whose key is in a TEE, checked after the device-wide key that is
+// in StrongBox, put "tee" on the device-wide key's seeds, and the reverse.
+func TestEachAndroidKeyKeepsItsOwnVerifiedHardwareLevel(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+	theApp(t, aKeyIn(attestStrongBox), true) // the device-wide key: StrongBox
+	alias := ProfileKeyName(androidSeedAliasBase, "profile-a")
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := aKeyIn(attestTrustedEnvironment) // this profile's key: a TEE
+	spec.leafKey = &k.PublicKey
+	chain, root := builtChain(t, spec)
+	attestationRoots = append(attestationRoots, root)
+	ph := &theAppsPerProfileKeystore{keys: map[string]*rsa.PrivateKey{alias: k}, chains: map[string][]byte{alias: chain}}
+	DeclareProfileSeedWrapHost(ph)
+	t.Cleanup(func() { DeclareProfileSeedWrapHost(nil) })
+
+	device := declaredHostSeedWrapper()
+	profile := device.(PerProfileKeys).ForKey(alias)
+	if !device.Available() || !profile.Available() {
+		t.Fatal("both keys must check out for this test")
+	}
+	if got := device.Scheme(); got != "android-keystore-strongbox-rsa2048oaep-aes256gcm" {
+		t.Fatalf("the device-wide key's scheme became %q after the profile's key was checked", got)
+	}
+	if got := profile.Scheme(); got != "android-keystore-tee-rsa2048oaep-aes256gcm" {
+		t.Fatalf("the profile's key's scheme is %q, not its own level", got)
+	}
+	// A check that fails forgets that key's level and no other's.
+	ph.chains[alias] = nil
+	if profile.Available() {
+		t.Fatal("a key with no chain read as available")
+	}
+	if theVerifiedKey(alias).level != "" || theVerifiedKey("").level != "strongbox" {
+		t.Fatalf("a failed check on one key changed another's: %+v / %+v", theVerifiedKey(alias), theVerifiedKey(""))
+	}
+}

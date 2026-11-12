@@ -400,9 +400,7 @@ func TestAFailedCheckForgetsTheLevelTheLastOneFound(t *testing.T) {
 	h := theApp(t, aKeyIn(attestTrustedEnvironment), true)
 	w := declaredHostSeedWrapper()
 	level := func() string {
-		seedWrapHostMu.RLock()
-		defer seedWrapHostMu.RUnlock()
-		return verifiedLevel
+		return theVerifiedKey("").level
 	}
 	if !w.Available() || level() != "tee" {
 		t.Fatalf("the first check did not pass: available=%v level=%q", w.Available(), level())

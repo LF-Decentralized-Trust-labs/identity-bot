@@ -33,6 +33,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"sync"
 	"unsafe"
 
@@ -265,6 +266,11 @@ func (s *tpmSigner) open() error {
 		// key of the one it creates, under the gate key, and refuses any other:
 		// same-user code can make a key of this name with no authorization value.
 		if created {
+			if s.keyName != machineKeyName && theProfilesTPMKeyExists(machineKeyName) {
+				// ADR-074 section 3: a profile's key is a new key, so the root
+				// device's grant to the device-wide one no longer matches.
+				log.Printf("[secureenclave] this computer made a controller key of its own for this identity; the device-wide key it used before is kept and is no longer the one it signs with, so its root device must grant it again")
+			}
 			if err := recordTheControllerKey(s.dataDir, "tpm2", s.keyName, pub); err != nil {
 				// Not recorded is not ours: take it back so a retry can make one.
 				procDeleteKey.Call(uintptr(key), 0)

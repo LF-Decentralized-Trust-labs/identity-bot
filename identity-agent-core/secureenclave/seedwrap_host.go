@@ -95,21 +95,38 @@ var (
 	attestationRoots = googleAttestationRoots
 	attestationClock = time.Now
 
-	// verifiedLevel is the level the last SUCCESSFUL check found. The scheme
-	// recorded with a seed comes from it, never from a second read of the app's
-	// chain, which the app could change between the check and the label.
-	verifiedLevel string
-	// verifiedCaveat is what the last successful check let through unchecked
-	// (a development build with no revocation list), "" when nothing.
-	verifiedCaveat string
+	// verified is what the last SUCCESSFUL check of each key found, by the key's
+	// alias ("" for the device-wide key). The scheme recorded with a seed comes
+	// from it, never from a second read of the app's chain, which the app could
+	// change between the check and the label. One entry per key: two profiles'
+	// keys can be at different hardware levels, and one's check must not name the
+	// other's.
+	verified = map[string]verifiedKey{}
 )
+
+// verifiedKey is what a successful check found about one key.
+type verifiedKey struct {
+	// level is the hardware level the attestation proved.
+	level string
+	// caveat is what the check let through unchecked (a development build with no
+	// revocation list), "" when nothing.
+	caveat string
+}
+
+func forgetEveryVerifiedKey() { verified = map[string]verifiedKey{} }
+
+func theVerifiedKey(alias string) verifiedKey {
+	seedWrapHostMu.RLock()
+	defer seedWrapHostMu.RUnlock()
+	return verified[alias]
+}
 
 // DeclareSeedWrapHost registers the app's wrapper. Called through mobilecore
 // before the server starts. Passing nil removes it.
 func DeclareSeedWrapHost(h SeedWrapHost) {
 	seedWrapHostMu.Lock()
 	seedWrapHost = h
-	verifiedLevel, verifiedCaveat = "", ""
+	forgetEveryVerifiedKey()
 	seedWrapHostMu.Unlock()
 }
 
@@ -142,7 +159,7 @@ var seedWrapProfileHost ProfileSeedWrapHost
 func DeclareProfileSeedWrapHost(h ProfileSeedWrapHost) {
 	seedWrapHostMu.Lock()
 	seedWrapProfileHost = h
-	verifiedLevel, verifiedCaveat = "", ""
+	forgetEveryVerifiedKey()
 	seedWrapHostMu.Unlock()
 }
 
@@ -226,13 +243,12 @@ func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 	f, err := w.checkAttestation()
 	if err != nil {
 		seedWrapHostMu.Lock()
-		verifiedLevel, verifiedCaveat = "", ""
+		delete(verified, w.alias)
 		seedWrapHostMu.Unlock()
 		return nil, err
 	}
 	seedWrapHostMu.Lock()
-	verifiedLevel = f.LevelName()
-	verifiedCaveat = f.caveat()
+	verified[w.alias] = verifiedKey{level: f.LevelName(), caveat: f.caveat()}
 	seedWrapHostMu.Unlock()
 	return f, nil
 }
@@ -261,9 +277,7 @@ func (w hostedSeedWrapper) checkAttestation() (*AndroidKeyFacts, error) {
 // caveat is what the check that licensed this wrapper let through unchecked:
 // storeSeedAs records it in the envelope, so the file says it.
 func (w hostedSeedWrapper) caveat() string {
-	seedWrapHostMu.RLock()
-	defer seedWrapHostMu.RUnlock()
-	return verifiedCaveat
+	return theVerifiedKey(w.alias).caveat
 }
 
 // Scheme says which hardware holds the key: the level the last successful check
@@ -277,9 +291,7 @@ func (w hostedSeedWrapper) caveat() string {
 // opensScheme below accepts any level there, so a chain that can no longer be
 // verified or read cannot make a stored seed unreadable.
 func (w hostedSeedWrapper) Scheme() string {
-	seedWrapHostMu.RLock()
-	level := verifiedLevel
-	seedWrapHostMu.RUnlock()
+	level := theVerifiedKey(w.alias).level
 	if level == "" {
 		level = "unattested"
 		if chain, err := splitChain(w.hostChain()); err == nil {
