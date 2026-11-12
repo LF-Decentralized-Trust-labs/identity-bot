@@ -39,7 +39,7 @@ def fingerprint(salt, words):
     return base.digest(b"IA-FINGERPRINT-V1" + len(salt).to_bytes(2, "big") + salt + words)
 
 
-KINDS = ("message", "ask", "split", "hand-off", "close", "reopen")
+KINDS = ("message", "ask", "split", "hand-off", "close", "reopen", "limit")
 
 FIELDS = ("agent", "conversation", "message_id", "kind", "from", "signer", "to", "in_reply_to",
           "range_first", "range_last", "nonce", "time", "fingerprint_version", "fingerprint")
@@ -106,7 +106,7 @@ def refused(s):
         return "kind"
     if k in ("message", "ask", "hand-off", "split") and not to:
         return "no recipient"
-    if k in ("close", "reopen") and to:
+    if k in ("close", "reopen", "limit") and to:
         return "recipient on a close"
     if k == "split" and not (first and last):
         return "split range"

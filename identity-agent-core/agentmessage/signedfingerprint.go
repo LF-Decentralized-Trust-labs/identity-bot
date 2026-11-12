@@ -120,6 +120,9 @@ const (
 	PersonKindHandOff = "hand-off"
 	PersonKindClose   = "close"
 	PersonKindReopen  = "reopen"
+	// PersonKindLimit raises a conversation's turn limit. Its words are the new
+	// limit in decimal digits, fingerprinted like any other words.
+	PersonKindLimit = "limit"
 )
 
 // PersonStatement is what a person's device or session signs: a statement
@@ -194,7 +197,7 @@ func (s PersonStatement) Check() error {
 		if s.RangeFirst == "" || s.RangeLast == "" {
 			return errors.New("a split must name the range it carries")
 		}
-	case PersonKindClose, PersonKindReopen:
+	case PersonKindClose, PersonKindReopen, PersonKindLimit:
 		if s.To != "" {
 			return fmt.Errorf("a %s names no recipient", s.Kind)
 		}

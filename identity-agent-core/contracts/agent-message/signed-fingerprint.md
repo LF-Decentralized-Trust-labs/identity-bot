@@ -37,8 +37,8 @@ a JSON integer (`true`, `1.0`, `"1"`) is refused; a field left out is empty (0
 for the version). It is then refused if: `agent`, `conversation`, `message_id`, `kind`, `from`,
 `signer`, `nonce`, `time` or `fingerprint` is empty; any field holds a CR or
 LF; `kind` is not one of `message`, `ask`, `split`, `hand-off`, `close`,
-`reopen`; `to` is empty for a message, ask, split or hand-off, or not empty for
-a close or reopen; a split has an empty `range_first` or `range_last`, or any
+`reopen`, `limit`; `to` is empty for a message, ask, split or hand-off, or not empty for
+a close, reopen or limit (a limit's words are the new turn limit, in decimal digits); a split has an empty `range_first` or `range_last`, or any
 other kind has either; `fingerprint_version` is not 1 (0 and every other
 value are refused); `nonce` is under 16 **bytes** (UTF-8; a nonce of 8 two-byte characters is
 enough); `time` is not RFC 3339 as Go's `time.Parse` reads it: `YYYY-MM-DDTHH:MM:SS`,

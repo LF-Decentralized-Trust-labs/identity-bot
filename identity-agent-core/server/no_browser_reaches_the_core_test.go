@@ -194,6 +194,9 @@ func newAnAppWorld(t *testing.T) *anAppWorld {
 		r.Post("/mcp/agents/{id}/conversations", say)
 		r.Get("/mcp/agents/{id}/conversations", say)
 		r.Get("/mcp/conversations/{cid}", say)
+		r.Post("/mcp/conversations/{cid}/close", say)
+		r.Post("/mcp/conversations/{cid}/reopen", say)
+		r.Post("/mcp/conversations/{cid}/limit", say)
 	})
 	target, err := s.whoThisIdentityAgentIs()
 	if err != nil {

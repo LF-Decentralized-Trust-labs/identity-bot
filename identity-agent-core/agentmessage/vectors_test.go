@@ -333,6 +333,15 @@ func writeMessageVectors(t *testing.T) {
 		HostNonce: "nonce-receipt-00000001", HostTime: "2026-10-20T12:00:02Z", BodyCredential: "EBODYCRED"}
 	progress := Statement{Conversation: "c_vector", Kind: KindProgress, From: "EAGENT_B", To: "EAGENT_A", InReplyTo: "m_ask",
 		Brain: brain, HostNonce: "nonce-progress-000001", HostTime: "2026-10-20T11:59:50Z", BodyCredential: "EBODYCRED"}
+	// The one who opened a conversation closes it, reopens it, or raises its
+	// limit. These address nobody and act on no message; the limit's words are
+	// the new limit.
+	control := func(kind, nonce, at string) Statement {
+		return Statement{Conversation: "c_vector", Kind: kind, From: "EAGENT_A", HostNonce: nonce, HostTime: at, BodyCredential: "EBODYCRED"}
+	}
+	closeNote := control(KindClose, "nonce-close-00000001", "2026-10-20T12:10:00Z")
+	reopenNote := control(KindReopen, "nonce-reopen-0000001", "2026-10-20T12:11:00Z")
+	limitNote := control(KindLimit, "nonce-limit-00000001", "2026-10-20T12:12:00Z")
 	deepAsk := ask
 	deepAsk.Tier, deepAsk.HostNonce, deepAsk.HostTime = TierDeep, "nonce-deep-0000001", "2026-10-20T11:59:40Z"
 	opening := Statement{Kind: KindAsk, From: "EAGENT_A", To: "EAGENT_B", Brain: brain,
@@ -344,6 +353,9 @@ func writeMessageVectors(t *testing.T) {
 		{Name: "an ask", Statement: ask, Body: "Which operating system are you on?"},
 		{Name: "a receipt, with no brain", Statement: receipt, Body: ""},
 		{Name: "a progress note, which is not the answer", Statement: progress, Body: "Half the files read; no problems so far."},
+		{Name: "a close, by the one who opened the conversation, addressed to nobody", Statement: closeNote, Body: ""},
+		{Name: "a reopen", Statement: reopenNote, Body: ""},
+		{Name: "a raise of the turn limit, whose words are the new limit", Statement: limitNote, Body: "80"},
 	}
 	type refused = struct {
 		Name      string    `json:"name"`
@@ -368,7 +380,13 @@ func writeMessageVectors(t *testing.T) {
 	unknownTier.Tier = "turbo"
 	tierOnReply := withHost(reply)
 	tierOnReply.Tier = TierQuick
+	closeToSomeone := withHost(closeNote)
+	closeToSomeone.To = "EAGENT_B"
+	closeOnAMessage := withHost(closeNote)
+	closeOnAMessage.InReplyTo = "m_ask"
 	set.RefusedStatements = []refused{
+		{"a close addressed to someone", closeToSomeone},
+		{"a close that acts on a message", closeOnAMessage},
 		{"a tier that is not quick, standard or deep", unknownTier},
 		{"a tier on a reply", tierOnReply},
 		{"a line break in a field", lineBreak},

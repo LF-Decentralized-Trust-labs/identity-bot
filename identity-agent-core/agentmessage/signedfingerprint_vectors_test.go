@@ -302,6 +302,7 @@ func writeFingerprintVectors(t *testing.T) {
 		{Name: "a close, with no words and no recipient", Statement: with(func(s *PersonStatement) { s.Kind, s.MessageID, s.To = PersonKindClose, "m_5", "" }), SaltHex: salt(0x35, 16), WordsHex: ""},
 		{Name: "a nonce of 8 two-byte characters, which is 16 bytes", Statement: with(func(s *PersonStatement) { s.MessageID, s.Nonce = "m_7", strings.Repeat("é", 8) }), SaltHex: salt(0x37, 16), WordsHex: text("bytes, not characters")},
 		{Name: "a time with an offset and a fraction", Statement: with(func(s *PersonStatement) { s.MessageID, s.Time = "m_8", "2026-11-06T11:00:00.25+01:00" }), SaltHex: salt(0x38, 16), WordsHex: text("hello")},
+		{Name: "a raise of the turn limit, whose words are the new limit", Statement: with(func(s *PersonStatement) { s.Kind, s.MessageID, s.To = PersonKindLimit, "m_9", "" }), SaltHex: salt(0x39, 16), WordsHex: text("80")},
 		{Name: "a reopen", Statement: with(func(s *PersonStatement) { s.Kind, s.MessageID, s.To = PersonKindReopen, "m_6", "" }), SaltHex: salt(0x36, 16), WordsHex: ""},
 	}
 	type rs = refusedStatement
@@ -318,6 +319,7 @@ func writeFingerprintVectors(t *testing.T) {
 		bad("a line break in a field", func(s *PersonStatement) { s.To = "EA\nEB" }),
 		bad("a message to nobody", func(s *PersonStatement) { s.To = "" }),
 		bad("a close naming a recipient", func(s *PersonStatement) { s.Kind = PersonKindClose }),
+		bad("a limit naming a recipient", func(s *PersonStatement) { s.Kind = PersonKindLimit }),
 		bad("a split with no range", func(s *PersonStatement) { s.Kind = PersonKindSplit }),
 		bad("a message naming a range", func(s *PersonStatement) { s.RangeFirst, s.RangeLast = "m_1", "m_2" }),
 		bad("a kind that does not exist", func(s *PersonStatement) { s.Kind = "shout" }),

@@ -54,7 +54,49 @@ const (
 	// the answer — the ask stays open, so the reply or failure that closes it
 	// can still follow, and any number of notes may come before it.
 	KindProgress = "progress"
+	// KindClose is the one who opened a conversation saying the work is done,
+	// or the organisation's owner stopping it. It takes no turn and carries no
+	// words. Nothing closes a conversation for being quiet.
+	KindClose = "close"
+	// KindReopen is the opener undoing a close.
+	KindReopen = "reopen"
+	// KindLimit is the opener raising the number of turns the conversation may
+	// hold. Its words are the new limit, in decimal digits.
+	KindLimit = "limit"
 )
+
+// The turns a conversation may hold, and the most its opener may raise that to.
+// An answer to an ask already made never counts against the limit.
+const (
+	DefaultTurnLimit = 40
+	TurnLimitCeiling = 400
+)
+
+// IsControl says whether a kind changes how a conversation may go on rather
+// than saying something in it: a close, a reopen or a raise of the limit. Such
+// an entry takes no turn and acts on no message.
+func IsControl(kind string) bool {
+	return kind == KindClose || kind == KindReopen || kind == KindLimit
+}
+
+// ParseTurnLimit reads the words of a limit entry: decimal digits only, a
+// whole number above the default and no higher than the ceiling.
+func ParseTurnLimit(words []byte) (int, error) {
+	n := 0
+	if len(words) == 0 || len(words) > 4 {
+		return 0, errors.New("a limit is a whole number, in digits")
+	}
+	for _, c := range words {
+		if c < '0' || c > '9' {
+			return 0, errors.New("a limit is a whole number, in digits")
+		}
+		n = n*10 + int(c-'0')
+	}
+	if n <= DefaultTurnLimit || n > TurnLimitCeiling {
+		return 0, fmt.Errorf("a limit is above %d and no higher than %d", DefaultTurnLimit, TurnLimitCeiling)
+	}
+	return n, nil
+}
 
 // CapabilityMessageAgent is the grant entry that lets an AI agent ask
 // another.
@@ -173,6 +215,7 @@ type Statement struct {
 	Conversation string `json:"conversation,omitempty"`
 	Kind         string `json:"kind"`
 	// From is the AI agent speaking; To is the AI agent or person addressed.
+	// A close, a reopen and a limit address nobody: To is empty.
 	From string `json:"from"`
 	To   string `json:"to"`
 	// InReplyTo is the message this one answers, acknowledges or reports a
@@ -246,7 +289,7 @@ func HashBody(body []byte) string { return iacrypto.Blake3QB64Must(body) }
 // verified: a newline in a field would let one statement be read as another.
 func (s Statement) Check() error {
 	fields := map[string]string{
-		"kind": s.Kind, "from": s.From, "to": s.To,
+		"kind": s.Kind, "from": s.From,
 		"body_hash": s.BodyHash, "host": s.Host, "host_nonce": s.HostNonce,
 		"host_time": s.HostTime, "body_credential": s.BodyCredential,
 	}
@@ -255,6 +298,9 @@ func (s Statement) Check() error {
 	// Any other statement names the conversation it is in.
 	if !s.Opens() {
 		fields["conversation"] = s.Conversation
+	}
+	if !IsControl(s.Kind) {
+		fields["to"] = s.To
 	}
 	for name, v := range fields {
 		if v == "" {
@@ -269,9 +315,12 @@ func (s Statement) Check() error {
 		}
 	}
 	switch s.Kind {
-	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress:
+	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress, KindClose, KindReopen, KindLimit:
 	default:
 		return fmt.Errorf("%q is not a kind of message", s.Kind)
+	}
+	if IsControl(s.Kind) && (s.To != "" || s.InReplyTo != "") {
+		return fmt.Errorf("a %s addresses nobody and acts on no message", s.Kind)
 	}
 	if s.Tier != "" {
 		if !ValidTier(s.Tier) {
@@ -284,10 +333,10 @@ func (s Statement) Check() error {
 	// A body speaks about a message it was given. The one exception is an ask
 	// that opens a conversation, which names no message and no conversation:
 	// the Identity Agent decides whether its grant lets it, and what it opens.
-	if s.InReplyTo == "" && s.Kind != KindAsk {
+	if s.InReplyTo == "" && s.Kind != KindAsk && !IsControl(s.Kind) {
 		return fmt.Errorf("a %s from a body must name the message it acts on", s.Kind)
 	}
-	if s.InReplyTo == "" && s.Conversation != "" {
+	if s.InReplyTo == "" && s.Conversation != "" && !IsControl(s.Kind) {
 		return errors.New("an ask that acts on no message opens a conversation, so it cannot name one")
 	}
 	if agentbody.CheckNonce(s.HostNonce) != nil {

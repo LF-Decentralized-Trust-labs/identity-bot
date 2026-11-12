@@ -76,6 +76,25 @@ func theWordsAPersonSays(r *http.Request, body []byte) (words []byte, m agentmes
 	return []byte(m.Body), m, nil
 }
 
+// theControlAPersonSigns is the route a person says a conversation is done on,
+// or takes it back, or raises its turn limit: POST /api/mcp/conversations/{cid}
+// followed by close, reopen or limit. It names the conversation and the kind of
+// statement the person must have signed for it. Such a statement is to nobody and
+// answers nothing (ADR-077); a close and a reopen carry no words, and a limit's
+// words are the new limit.
+func theControlAPersonSigns(r *http.Request) (conversation, kind string, ok bool) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if r.Method != http.MethodPost || len(parts) != 5 || parts[0] != "api" || parts[1] != "mcp" ||
+		parts[2] != "conversations" || parts[3] == "" {
+		return "", "", false
+	}
+	switch parts[4] {
+	case agentmessage.PersonKindClose, agentmessage.PersonKindReopen, agentmessage.PersonKindLimit:
+		return parts[3], parts[4], true
+	}
+	return "", "", false
+}
+
 // thePersonAnAppSpeaksFor settles who an app speaks for: a person only, and only
 // when every check below holds. A request that carries these headers and is not
 // an app's is refused where it is read (thePersonAsking).
@@ -111,35 +130,66 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 	// and the conversation, kind, recipient, reply and message id of this route
 	// and body. A statement signed for other words, or for another thing, is
 	// not this request's.
-	words, msg, werr := theWordsAPersonSays(r, body)
-	if werr != nil {
-		return refuse(werr)
-	}
-	if st.Kind != agentmessage.PersonKindMessage && st.Kind != agentmessage.PersonKindAsk {
-		return refuse(fmt.Errorf("a statement of kind %q is not what this route takes: it takes a message or an ask", st.Kind))
+	var (
+		words []byte
+		msg   agentmessage.PersonMessage
+	)
+	cid, controlKind, isControl := theControlAPersonSigns(r)
+	if isControl {
+		if json.Unmarshal(body, &msg) != nil {
+			return refuse(errors.New("the request must be JSON"))
+		}
+		words = []byte(msg.Body)
+		switch {
+		case st.Kind != controlKind:
+			return refuse(fmt.Errorf("a statement of kind %q is not what this route takes: it takes a %s", st.Kind, controlKind))
+		case msg.Conversation != "" && msg.Conversation != cid:
+			return refuse(errors.New("the request names another conversation than the route"))
+		case st.Conversation != cid:
+			return refuse(errors.New("the statement is for another conversation than the route's"))
+		case st.To != "" || st.InReplyTo != "" || msg.To != "" || msg.InReplyTo != "":
+			return refuse(fmt.Errorf("a %s is to nobody and answers nothing", controlKind))
+		case controlKind != agentmessage.PersonKindLimit && len(words) != 0:
+			return refuse(fmt.Errorf("a %s carries no words", controlKind))
+		case controlKind == agentmessage.PersonKindLimit && len(words) == 0:
+			return refuse(errors.New("a limit's words are the new limit"))
+		case st.MessageID != msg.Nonce:
+			return refuse(errors.New("the statement is for another message than the request's"))
+		}
+	} else {
+		var werr error
+		words, msg, werr = theWordsAPersonSays(r, body)
+		if werr != nil {
+			return refuse(werr)
+		}
+		if st.Kind != agentmessage.PersonKindMessage && st.Kind != agentmessage.PersonKindAsk {
+			return refuse(fmt.Errorf("a statement of kind %q is not what this route takes: it takes a message or an ask", st.Kind))
+		}
 	}
 	// The conversation is compared when the request names none too: a statement
 	// is always for one conversation (its id is the person's to choose), so a
 	// request that names none, which opens a new one, is not what any statement
 	// said. The statement a person signed for c1 cannot open another.
-	if st.Conversation != msg.Conversation {
-		return refuse(errors.New("the statement is for another conversation than the request's, " +
-			"and a request that opens one names the conversation the person signed for"))
-	}
-	// The AI agent is the one on the route the app called: a statement to agent
-	// A is not delivered on agent B's route, whatever the body says.
-	agent, isAgent := s.theAIAgentARouteNames(app.Params["id"])
-	if !isAgent {
-		return refuse(errors.New("the route does not name an AI agent of this Identity Agent that has an identifier its entries are addressed to"))
-	}
-	if st.To != agent {
-		return refuse(errors.New("the statement is to another AI agent than the one the request is sent to"))
-	}
-	if st.To != msg.To || st.InReplyTo != msg.InReplyTo {
-		return refuse(errors.New("the statement is to someone else than the request's, or answers something else"))
-	}
-	if st.MessageID != msg.Nonce {
-		return refuse(errors.New("the statement is for another message than the request's"))
+	if !isControl {
+		if st.Conversation != msg.Conversation {
+			return refuse(errors.New("the statement is for another conversation than the request's, " +
+				"and a request that opens one names the conversation the person signed for"))
+		}
+		// The AI agent is the one on the route the app called: a statement to agent
+		// A is not delivered on agent B's route, whatever the body says.
+		agent, isAgent := s.theAIAgentARouteNames(app.Params["id"])
+		if !isAgent {
+			return refuse(errors.New("the route does not name an AI agent of this Identity Agent that has an identifier its entries are addressed to"))
+		}
+		if st.To != agent {
+			return refuse(errors.New("the statement is to another AI agent than the one the request is sent to"))
+		}
+		if st.To != msg.To || st.InReplyTo != msg.InReplyTo {
+			return refuse(errors.New("the statement is to someone else than the request's, or answers something else"))
+		}
+		if st.MessageID != msg.Nonce {
+			return refuse(errors.New("the statement is for another message than the request's"))
+		}
 	}
 
 	// Then the statement is the person's: well formed, the key's signature, this

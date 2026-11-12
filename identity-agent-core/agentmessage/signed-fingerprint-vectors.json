@@ -209,6 +209,25 @@
       "signature": "0BC4W8akuu2XvW79d6zlxatf6eFapfVVGEdc5Y8MXYeXdJwIrh6nYV8zcPx4nVD-TsnEyGehN1-S4iXlG80YEBwE"
     },
     {
+      "name": "a raise of the turn limit, whose words are the new limit",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_9",
+        "kind": "limit",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EPGCvse8TsMzhkQbsChT-rW9vq5GhF2JFJkJbFw4Iwow"
+      },
+      "salt_hex": "39393939393939393939393939393939",
+      "words_hex": "3830",
+      "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_9\nlimit\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\n\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEPGCvse8TsMzhkQbsChT-rW9vq5GhF2JFJkJbFw4Iwow",
+      "signature": "0BAIHhkAWbQu8H5HJ9cmPw5JfLLj7gu7ssnHpictVT79V-kBLJfDcuA7ebMJcGKCFCVYp3IRmuuvYdSwGn2eKsUJ"
+    },
+    {
       "name": "a reopen",
       "statement": {
         "agent": "EIDENTITYAGENT",
@@ -315,6 +334,22 @@
         "conversation": "c_vector",
         "message_id": "m_1",
         "kind": "close",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a limit naming a recipient",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "limit",
         "from": "EPERSON",
         "signer": "DSIGNER",
         "to": "EAGENT",

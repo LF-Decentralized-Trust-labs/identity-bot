@@ -133,6 +133,10 @@ func (v *verifier) checkOutcome(where string, rec agentmessage.Record, m *Messag
 	if rec.From != v.b.Root {
 		v.fault(where, "an outcome is the Identity Agent's, and this one is from %s", rec.From)
 	}
+	if rec.Outcome.State == agentmessage.OutcomeClosedUnanswered || rec.Outcome.State == agentmessage.OutcomeBodyLost {
+		v.checkAskEnded(where, rec)
+		return
+	}
 	pe, ok := v.people[rec.Outcome.Entry]
 	switch {
 	case !ok || pe.rec.Seq >= rec.Seq:
