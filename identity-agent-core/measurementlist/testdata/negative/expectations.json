@@ -1,0 +1,41 @@
+[
+  {
+    "file": "tampered.json",
+    "refusal": "ErrBadSignature",
+    "note": "a measurement changed after signing"
+  },
+  {
+    "file": "another_key.json",
+    "refusal": "ErrBadSignature",
+    "note": "validly signed by a key that is not the pinned one"
+  },
+  {
+    "file": "missing_domain_prefix.json",
+    "refusal": "ErrBadSignature",
+    "note": "signed over the canonical bytes without the measurement-list-v1 line"
+  },
+  {
+    "file": "old_sequence.json",
+    "refusal": "ErrOldList",
+    "min_sequence": 7,
+    "note": "sequence 6 after sequence 7 was accepted"
+  },
+  {
+    "file": "same_sequence_different_content.json",
+    "refusal": "ErrConflictingList",
+    "min_sequence": 7,
+    "seen_digest": "bf56e040a0395d79b97c42d407dd96fc35793a2b22d2b71587555fa21d201aee",
+    "note": "sequence 7 again, but not the list accepted at sequence 7"
+  },
+  {
+    "file": "expired.json",
+    "refusal": "ErrExpired",
+    "note": "expires_at is before the evaluation time"
+  },
+  {
+    "file": "entry_outside_window.json",
+    "refusal": "",
+    "accepted_for_individual": 0,
+    "note": "the list verifies, but its only entry ended before the evaluation time, so nothing is accepted"
+  }
+]

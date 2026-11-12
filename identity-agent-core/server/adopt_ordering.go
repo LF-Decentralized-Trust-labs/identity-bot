@@ -127,10 +127,11 @@ func checkOfferBeforeDelegating(offer *pairingBeginResponse,
 // while the question of who signs the measurement list is open, and it is the
 // hook that question plugs into when it is answered.
 func (s *CoreServer) acceptableMeasurement(measurement []byte) bool {
-	if len(s.AcceptedMeasurements) == 0 {
+	accepted, _ := s.currentMeasurements()
+	if len(accepted) == 0 {
 		return false
 	}
-	for _, allowed := range s.AcceptedMeasurements {
+	for _, allowed := range accepted {
 		if bytes.Equal(allowed, measurement) {
 			return true
 		}

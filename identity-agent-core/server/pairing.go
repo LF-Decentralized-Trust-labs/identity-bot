@@ -779,8 +779,11 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// questions to ask of the same record.
 		Kind string `json:"kind,omitempty"`
 		// AcceptedMeasurements is the software this owner will adopt, as hex,
-		// for this adoption only. It adds to any standing policy in
-		// AGENT_ACCEPTED_MEASUREMENTS rather than replacing it.
+		// for this adoption only. It adds to the standing policy (the signed
+		// list, or the bootstrap) rather than replacing it, and it can only
+		// ever add: it is not stored, it does not change the policy for any
+		// other request, and it does not lift a refusal for any value the owner
+		// did not name — see acceptableOrOwnerNamed.
 		//
 		// This route is owner-only, so this is the owner stating their own
 		// policy — not the box vouching for itself. That distinction is the
@@ -838,23 +841,20 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// everyone who checks it afterwards will agree it is correct. Checking
 	// afterwards establishes nothing, because by then the statement exists.
 	accept := s.acceptableMeasurement
+	if len(req.AcceptedMeasurements) == 0 {
+		// Say why, when the list is the reason, instead of "not accepted".
+		if _, why := s.currentMeasurements(); why != "" {
+			writeError(w, http.StatusForbidden, "This box was not adopted", why)
+			return
+		}
+	}
 	if len(req.AcceptedMeasurements) > 0 {
 		extra, err := parseMeasurements(req.AcceptedMeasurements)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "Unreadable measurement", err.Error())
 			return
 		}
-		accept = func(m []byte) bool {
-			if s.acceptableMeasurement(m) {
-				return true
-			}
-			for _, a := range extra {
-				if bytes.Equal(a, m) {
-					return true
-				}
-			}
-			return false
-		}
+		accept = s.acceptableOrOwnerNamed(extra)
 	}
 	if err := checkOfferBeforeDelegating(offer, accept, s.verifySNPChain); err != nil {
 		writeError(w, http.StatusForbidden, "This box was not adopted", err.Error())

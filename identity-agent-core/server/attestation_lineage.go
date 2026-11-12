@@ -135,7 +135,7 @@ func (s *CoreServer) handleAttestationLineage(w http.ResponseWriter, r *http.Req
 		// empty policy stays unknown rather than becoming a pass — the same
 		// refusal the adoption gate makes.
 		if raw, err := iacrypto.DecodeHex(att.Measurement); err == nil && len(raw) > 0 {
-			if len(s.AcceptedMeasurements) == 0 {
+			if accepted, _ := s.currentMeasurements(); len(accepted) == 0 {
 				out.MeasurementMatchesExpected = ProofUnknown
 			} else if s.acceptableMeasurement(raw) {
 				out.MeasurementMatchesExpected = ProofVerified
