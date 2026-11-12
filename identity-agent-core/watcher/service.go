@@ -199,73 +199,82 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		sourcesQueried: []SourceOutcome{},
 	}
 
-	s.l1.Lock()
-	existing, _ := s.Store.getFirstSeen(in.AID, seq)
-	firstContact := existing == nil
-	result.firstContact = firstContact
+	var (
+		existing     *FirstSeenRecord
+		firstContact bool
+		l1Outcome    string
+		l1Fork       *proof // the proof, when this agent's own kept log shows a fork
+	)
+	// What is remembered of a contact is read, judged and written one check at a
+	// time, and released on any exit, a panic included.
+	if err := func() error {
+		s.l1.Lock()
+		defer s.l1.Unlock()
+		existing, _ = s.Store.getFirstSeen(in.AID, seq)
+		firstContact = existing == nil
 
-	// A digest is remembered from any log, but only a log that verifies (signed by
-	// its own controller) can found a sighting that later refuses a log. Otherwise
-	// anybody could plant a digest for an identity they do not control with a
-	// made-up log, and the identity's real log would be refused for differing from
-	// it. A proven log replaces a planted sighting; an unproven one never
-	// contradicts a proven one.
-	var l1Outcome string
-	var l1Fork *proof // the proof, when this agent's own kept log shows a fork
-	var keep [][]byte // the log to keep as the one last accepted
-	switch {
-	case proven:
-		seen, err := s.Store.getSeenLog(in.AID)
-		if err != nil {
-			log.Printf("[watcher] the kept log of %s could not be read: %v", in.AID, err)
-		}
+		// A digest is remembered from any log, but only a log that verifies (signed
+		// by its own controller) can found a sighting that later refuses a log.
+		// Otherwise anybody could plant a digest for an identity they do not
+		// control with a made-up log, and the identity's real log would be refused
+		// for differing from it. A proven log replaces a planted sighting; an
+		// unproven one never contradicts a proven one.
+		var keep [][]byte // the log to keep as the one last accepted
 		switch {
-		case err != nil || (seen == nil && existing != nil && existing.Proven && existing.KelDigest != digest):
-			// A sighting from a proven log whose events are not kept (or cannot be
-			// read): a difference cannot be shown, so it is shown, not refused on.
-			l1Outcome = "unproven_mismatch"
-		case seen == nil:
-			l1Outcome, keep = "first_seen", in.Signed
-		default:
-			v, p, merged := judgeAgainstSeen(in.AID, seen, in.Signed)
-			switch v {
-			case seenFork:
-				l1Outcome, l1Fork = "mismatch", &p
-			case seenUnprovable:
+		case proven:
+			seen, err := s.Store.getSeenLog(in.AID)
+			if err != nil {
+				log.Printf("[watcher] the kept log of %s could not be read: %v", in.AID, err)
+			}
+			switch {
+			case err != nil || (seen == nil && existing != nil && existing.Proven && existing.KelDigest != digest):
+				// A sighting from a proven log whose events are not kept (or cannot
+				// be read): a difference cannot be shown, so it is shown, not
+				// refused on.
 				l1Outcome = "unproven_mismatch"
-			case seenMoved:
-				l1Outcome, keep = "first_seen", merged
+			case seen == nil:
+				l1Outcome, keep = "first_seen", in.Signed
 			default:
-				l1Outcome = "match"
-			}
-		}
-		if l1Outcome == "first_seen" || l1Outcome == "match" {
-			// Remembered, and a retired branch's digest at this place is replaced.
-			if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
-				s.l1.Unlock()
-				return nil, err
-			}
-			if keep != nil {
-				if err := s.Store.saveSeenLog(in.AID, keep, seq, s.now()); err != nil {
-					s.l1.Unlock()
-					return nil, err
+				v, p, merged := judgeAgainstSeen(in.AID, seen, in.Signed)
+				switch v {
+				case seenFork:
+					l1Outcome, l1Fork = "mismatch", &p
+				case seenUnprovable:
+					l1Outcome = "unproven_mismatch"
+				case seenMoved:
+					l1Outcome, keep = "first_seen", merged
+				default:
+					l1Outcome = "match"
 				}
 			}
+			if l1Outcome == "first_seen" || l1Outcome == "match" {
+				// Remembered, and a retired branch's digest at this place is replaced.
+				if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
+					return err
+				}
+				if keep != nil {
+					if err := s.Store.saveSeenLog(in.AID, keep, seq, s.now()); err != nil {
+						return err
+					}
+				}
+			}
+		case existing == nil:
+			l1Outcome = "first_seen"
+			if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false); err != nil {
+				return err
+			}
+		case existing.KelDigest == digest:
+			l1Outcome = "match"
+			_ = s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false)
+		default:
+			// Shown, never refused on: this log proves nothing.
+			l1Outcome = "unproven_mismatch"
 		}
-	case existing == nil:
-		l1Outcome = "first_seen"
-		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false); err != nil {
-			s.l1.Unlock()
-			return nil, err
-		}
-	case existing.KelDigest == digest:
-		l1Outcome = "match"
-		_ = s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false)
-	default:
-		// Shown, never refused on: this log proves nothing.
-		l1Outcome = "unproven_mismatch"
+		return nil
+	}(); err != nil {
+		return nil, err
 	}
-	s.l1.Unlock()
+	result.firstContact = firstContact
 	result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
 
 	// Every standing watcher is asked. The first is the default one, whose
