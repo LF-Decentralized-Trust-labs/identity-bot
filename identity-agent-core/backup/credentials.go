@@ -38,9 +38,14 @@ type RemoteCredentialSecrets struct {
 
 // CredentialStore persists destination credentials encrypted in the data directory.
 type CredentialStore struct {
-	dir       string
-	masterKey []byte
-	mu        sync.RWMutex
+	dir string
+	mu  sync.RWMutex
+}
+
+func init() {
+	// The key file carries the gate layer, so changing the identity secret
+	// re-seals it with the seed (secureenclave.ReSealGateHeldSecrets).
+	secureenclave.RegisterGateSealedKeyFile(filepath.Join("backup", "credentials_master.key"), masterKeyUse)
 }
 
 func NewCredentialStore(dataDir string) (*CredentialStore, error) {
@@ -48,12 +53,21 @@ func NewCredentialStore(dataDir string) (*CredentialStore, error) {
 	if err := os.MkdirAll(cs.dir, 0700); err != nil {
 		return nil, err
 	}
+	// Make the key now if there is none and the identity is open. A locked
+	// identity has no key to make or read; it is read at each use instead, and
+	// none is kept in memory between uses.
 	key, err := cs.loadOrCreateMasterKey()
-	if err != nil {
+	if err != nil && !errors.Is(err, secureenclave.ErrIdentityLocked) {
 		return nil, err
 	}
-	cs.masterKey = key
+	zeroBytes(key)
 	return cs, nil
+}
+
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 func (cs *CredentialStore) masterKeyPath() string {
@@ -80,10 +94,12 @@ func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 	dataDir := filepath.Dir(cs.dir)
 	data, err := os.ReadFile(path)
 	if err == nil {
-		key, wrapped, oerr := secureenclave.OpenKeyHeldUnderTheWrapper(masterKeyUse, data)
+		key, wrapped, needsGate, oerr := secureenclave.OpenKeyHeldUnderTheGate(dataDir, masterKeyUse, data)
 		switch {
+		case errors.Is(oerr, secureenclave.ErrIdentityLocked):
+			return nil, oerr
 		case oerr == nil:
-			if !wrapped && secureenclave.TheWrapperWorksHere(dataDir) {
+			if (!wrapped && secureenclave.TheWrapperWorksHere(dataDir)) || needsGate {
 				cs.rewrap(path, dataDir, key)
 			}
 			return key, nil
@@ -92,7 +108,7 @@ func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 			if secureenclave.TheWrapperWorksHere(dataDir) {
 				cs.rewrap(path, dataDir, data)
 			}
-			return data, nil
+			return append([]byte(nil), data...), nil
 		default:
 			// Do not make a new key: it would orphan every credential sealed
 			// by this one.
@@ -106,7 +122,7 @@ func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	held, err := secureenclave.KeyToHoldUnderTheWrapper(dataDir, masterKeyUse, key)
+	held, err := secureenclave.HoldKeyUnderTheGate(dataDir, masterKeyUse, key)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +131,7 @@ func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 	if err := atomicfile.Create(path, held, 0600); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			if data, rerr := os.ReadFile(path); rerr == nil {
-				if k, _, oerr := secureenclave.OpenKeyHeldUnderTheWrapper(masterKeyUse, data); oerr == nil {
+				if k, _, _, oerr := secureenclave.OpenKeyHeldUnderTheGate(dataDir, masterKeyUse, data); oerr == nil {
 					return k, nil
 				}
 			}
@@ -128,7 +144,7 @@ func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 // rewrap puts an existing key through the wrapper. A failure leaves the file
 // as it was and is logged: the key still opens, and it is tried again next time.
 func (cs *CredentialStore) rewrap(path, dataDir string, key []byte) {
-	held, err := secureenclave.KeyToHoldUnderTheWrapper(dataDir, masterKeyUse, key)
+	held, err := secureenclave.HoldKeyUnderTheGate(dataDir, masterKeyUse, key)
 	if err == nil {
 		err = atomicfile.Write(path, held, 0600)
 	}
@@ -145,12 +161,17 @@ func (cs *CredentialStore) Save(id string, cred RemoteCredentialSecrets) error {
 	if err != nil {
 		return err
 	}
-	enc, err := encryptLocal(cs.masterKey, plain)
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	key, err := cs.loadOrCreateMasterKey()
 	if err != nil {
 		return err
 	}
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	defer zeroBytes(key)
+	enc, err := encryptLocal(key, plain)
+	if err != nil {
+		return err
+	}
 	return atomicfile.Write(cs.credPath(id), enc, 0600)
 }
 
@@ -159,13 +180,19 @@ func (cs *CredentialStore) Load(id string) (RemoteCredentialSecrets, error) {
 	if id == "" {
 		return out, fmt.Errorf("credential id required")
 	}
-	cs.mu.RLock()
+	cs.mu.Lock()
 	data, err := os.ReadFile(cs.credPath(id))
-	cs.mu.RUnlock()
+	if err != nil {
+		cs.mu.Unlock()
+		return out, err
+	}
+	key, err := cs.loadOrCreateMasterKey()
+	cs.mu.Unlock()
 	if err != nil {
 		return out, err
 	}
-	plain, err := decryptLocal(cs.masterKey, data)
+	defer zeroBytes(key)
+	plain, err := decryptLocal(key, data)
 	if err != nil {
 		return out, err
 	}

@@ -172,19 +172,22 @@ func (p *Profile) effective(base GK, secret string, now time.Time) (GK, error) {
 }
 
 // SetSecret turns the optional secret on, or changes it. current is the key now
-// sealing the profile (what Release returned) and reseal is called with it and
-// the new key, to re-seal everything under the new one BEFORE anything here
-// changes; if reseal fails nothing changed. Changing or removing an existing
-// secret needs the current key, and the caller gets that only by passing the
-// gate with the current secret.
-func (p *Profile) SetSecret(current GK, secret string, reseal func(old, new GK) error) error {
+// sealing the profile (what Release returned). The change is journalled and
+// completed in order (see change.go), so a crash at any point is finished the
+// next time the profile is opened and never leaves the seed under a key the
+// record does not describe. Changing or removing an existing secret needs the
+// current key, and the caller gets that only by passing the gate with the
+// current secret.
+func (p *Profile) SetSecret(current GK, secret string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if secret == "" {
 		return errors.New("an identity secret cannot be empty; remove it instead")
 	}
-	r, err := p.readRecord()
-	if err != nil {
+	if err := p.finishPendingChangeLocked(); err != nil {
+		return err
+	}
+	if _, err := p.readRecord(); err != nil {
 		return err
 	}
 	base, err := p.readHeld(gateCopyFile, useGateCopy)
@@ -201,27 +204,19 @@ func (p *Profile) SetSecret(current GK, secret string, reseal func(old, new GK) 
 		return err
 	}
 	defer eff.Zero()
-	if err := reseal(current, eff); err != nil {
-		return fmt.Errorf("re-seal under the new secret: %w", err)
-	}
-	r.Secret = &secretRecord{Salt: base64.StdEncoding.EncodeToString(salt), Check: checkOf(eff),
-		Time: argonTime, MemKB: argonMem, Par: argonPar}
-	if err := p.writeRecord(r); err != nil {
-		return err
-	}
-	_ = p.writeAttempts(attempts{})
-	if p.LoggedIn() {
-		return p.writeHeld(deviceHeldFile, useDeviceHeld, eff)
-	}
-	return nil
+	return p.changeLocked(current, eff, &secretRecord{Salt: base64.StdEncoding.EncodeToString(salt), Check: checkOf(eff),
+		Time: argonTime, MemKB: argonMem, Par: argonPar})
 }
 
 // RemoveSecret turns the secret off; current is the key sealing the profile now
-// (which proves the current secret, since Release produced it) and reseal moves
-// everything back under the base key.
-func (p *Profile) RemoveSecret(current GK, reseal func(old, new GK) error) error {
+// (which proves the current secret, since Release produced it) and the seed is
+// moved back under the base key, journalled as SetSecret is.
+func (p *Profile) RemoveSecret(current GK) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if err := p.finishPendingChangeLocked(); err != nil {
+		return err
+	}
 	r, err := p.readRecord()
 	if err != nil {
 		return err
@@ -234,16 +229,5 @@ func (p *Profile) RemoveSecret(current GK, reseal func(old, new GK) error) error
 		return err
 	}
 	defer base.Zero()
-	if err := reseal(current, base); err != nil {
-		return fmt.Errorf("re-seal without the secret: %w", err)
-	}
-	r.Secret = nil
-	if err := p.writeRecord(r); err != nil {
-		return err
-	}
-	_ = os.Remove(p.path(attemptsFile))
-	if p.LoggedIn() {
-		return p.writeHeld(deviceHeldFile, useDeviceHeld, base)
-	}
-	return nil
+	return p.changeLocked(current, base, nil)
 }

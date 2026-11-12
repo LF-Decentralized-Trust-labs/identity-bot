@@ -251,7 +251,7 @@ func TestADesktopNeedsARootDeviceVoucher(t *testing.T) {
 	_ = r.s.Lock()
 
 	vouch := func(p *ProviderResult, signer ed25519.PrivateKey, agent, ctrl string) {
-		sig, err := login.SignString(authprovider.CanonicalAuthLevelStatement(agent, ctrl, p.Level, p.At, p.Score), signer.Seed())
+		sig, err := login.SignString(authprovider.CanonicalUnlockVoucherStatement(agent, ctrl, p.Level, p.At, p.Score, p.Nonce), signer.Seed())
 		if err != nil {
 			t.Fatal(err)
 		}

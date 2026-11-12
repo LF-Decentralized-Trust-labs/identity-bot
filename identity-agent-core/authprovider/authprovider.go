@@ -213,12 +213,27 @@ func Of(p Provider) Result {
 // CanonicalAuthLevelStatement is the string a person's root device signs to
 // vouch for how well that person was authenticated, for one Identity Agent and
 // one machine acting for it. It lives here so the check on a controller's
-// request and the check on a desktop's unlock read one definition: a second
-// copy of this string is a signature that verifies in one place and not the
-// other.
+// request reads one definition. A desktop's log-in voucher is the same
+// statement under its own first line and with the nonce (below); both are built
+// by one function, so they cannot drift apart.
 func CanonicalAuthLevelStatement(agentAID, controllerAID string, level Level, at time.Time, score int) string {
+	return authLevelLines("IA-AUTH-LEVEL-V2", agentAID, controllerAID, level, at, score)
+}
+
+// CanonicalUnlockVoucherStatement is what the root device signs to let ONE
+// desktop log-in happen: the statement above, under its own first line, with the
+// log-in's nonce on the last line. The nonce is what makes it good for one
+// log-in and not for every one inside the freshness window, and the first line
+// means a statement made to vouch for a request can never be spent as a log-in
+// voucher, or the other way round. A signer that signs the log-in's nonce here
+// is the only change a root device needs.
+func CanonicalUnlockVoucherStatement(agentAID, controllerAID string, level Level, at time.Time, score int, nonce string) string {
+	return authLevelLines("IA-UNLOCK-VOUCHER-V1", agentAID, controllerAID, level, at, score) + "\n" + nonce
+}
+
+func authLevelLines(first, agentAID, controllerAID string, level Level, at time.Time, score int) string {
 	return strings.Join([]string{
-		"IA-AUTH-LEVEL-V2",
+		first,
 		agentAID,
 		controllerAID,
 		string(level),

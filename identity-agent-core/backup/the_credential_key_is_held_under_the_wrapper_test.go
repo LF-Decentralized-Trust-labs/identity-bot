@@ -22,7 +22,11 @@ func TestTheCredentialKeyIsNotAPlainFileWhereTheMachineCanWrapIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	onDisk, _ := os.ReadFile(cs.masterKeyPath())
-	if bytes.Contains(onDisk, cs.masterKey) || len(onDisk) == 32 {
+	key, kerr := cs.loadOrCreateMasterKey()
+	if kerr != nil {
+		t.Fatal(kerr)
+	}
+	if bytes.Contains(onDisk, key) || len(onDisk) == 32 {
 		t.Fatal("the key that seals the credentials is on disk in the clear on a machine that can wrap it")
 	}
 	if !bytes.Contains(onDisk, []byte("test-wrap")) {
@@ -49,7 +53,7 @@ func TestAKeyWrittenBeforeWrappingIsStillOpenedAndThenWrapped(t *testing.T) {
 	if err := os.WriteFile(dir+"/backup/credentials_master.key", old, 0600); err != nil {
 		t.Fatal(err)
 	}
-	prev := &CredentialStore{dir: dir + "/backup", masterKey: old}
+	prev := &CredentialStore{dir: dir + "/backup"}
 	if err := prev.Save("c1", RemoteCredentialSecrets{AccessKey: "ak", SecretKey: "sk"}); err != nil {
 		t.Fatal(err)
 	}

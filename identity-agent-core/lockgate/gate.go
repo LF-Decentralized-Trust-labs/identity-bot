@@ -28,7 +28,8 @@ type ProviderResult struct {
 }
 
 // Voucher is a desktop's proof that its person's root device vouches for the
-// result. Signature is over authprovider.CanonicalAuthLevelStatement.
+// result. Signature is over authprovider.CanonicalUnlockVoucherStatement, which includes
+// the result's nonce, so a voucher is good for one log-in.
 type Voucher struct {
 	AgentAID      string `json:"agent_aid"`
 	ControllerAID string `json:"controller_aid"`
@@ -62,7 +63,10 @@ const (
 	MaxResultAge   = 2 * time.Minute
 	maxClockSkew   = 30 * time.Second
 	minNonceLength = 16
-	nonceMemory    = 4096
+	// A spent nonce is remembered well past the longest a result can still pass
+	// the freshness check, then forgotten.
+	nonceMemory = 10 * time.Minute
+	nonceCap    = 4096
 )
 
 // Gate decides whether a profile's GK is released.
@@ -76,9 +80,7 @@ type Gate struct {
 	// every desktop result rather than accepting an unchecked one.
 	VerifyVoucher func(ProviderResult) error
 
-	mu   sync.Mutex
-	seen map[string]struct{}
-	ring []string
+	mu sync.Mutex
 }
 
 func (g *Gate) now() time.Time {
@@ -127,6 +129,9 @@ func (g *Gate) Release(r ProviderResult, secret string) (GK, error) {
 	if !g.spend(r.Nonce) {
 		return nil, ErrReplayed
 	}
+	if err := g.Profile.FinishPendingChange(); err != nil {
+		return nil, err
+	}
 	base, err := g.Profile.readGateCopy()
 	if err != nil {
 		return nil, err
@@ -142,22 +147,15 @@ func (g *Gate) Release(r ProviderResult, secret string) (GK, error) {
 	return eff, nil
 }
 
+// spend records the nonce as used, on disk, before any key is touched. It is
+// kept in the profile's directory and not in memory, so a core restart does not
+// give the same result a second life. False means already used, or that the
+// record could not be written (a result that cannot be recorded as spent is not
+// accepted).
 func (g *Gate) spend(nonce string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.seen == nil {
-		g.seen = map[string]struct{}{}
-	}
-	if _, dup := g.seen[nonce]; dup {
-		return false
-	}
-	g.seen[nonce] = struct{}{}
-	g.ring = append(g.ring, nonce)
-	if len(g.ring) > nonceMemory {
-		delete(g.seen, g.ring[0])
-		g.ring = g.ring[1:]
-	}
-	return true
+	return g.Profile.spendNonce(nonce, g.now())
 }
 
 // VoucherFromRootDevice builds the check a desktop's gate uses: the voucher's
@@ -185,7 +183,7 @@ func VoucherFromRootDevice(rootDeviceKey func() (string, error), thisAgent, this
 			return errors.New("the vouching device's key is unusable")
 		}
 		ok, err := login.VerifyString(
-			authprovider.CanonicalAuthLevelStatement(v.AgentAID, v.ControllerAID, r.Level, r.At, r.Score),
+			authprovider.CanonicalUnlockVoucherStatement(v.AgentAID, v.ControllerAID, r.Level, r.At, r.Score, r.Nonce),
 			v.Signature, pub)
 		if err != nil || !ok {
 			return errors.New("the signature does not verify")

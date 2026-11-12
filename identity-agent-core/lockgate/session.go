@@ -140,6 +140,11 @@ func (s *Session) Reopen() error {
 	if !s.P.Gated() {
 		return nil
 	}
+	// A secret change a crash cut short is finished before anything is read, so
+	// the device-held key and the seed agree.
+	if err := s.P.FinishPendingChange(); err != nil {
+		return fmt.Errorf("a change of the identity secret was cut short and could not be finished: %w", err)
+	}
 	gk, err := s.P.ReadDeviceHeld()
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -222,6 +227,9 @@ func (s *Session) ChangeSecret(current, secret string) error {
 	if s.State() != StateOpen {
 		return secureenclave.ErrIdentityLocked
 	}
+	if err := s.P.FinishPendingChange(); err != nil {
+		return err
+	}
 	base, err := s.P.readGateCopy()
 	if err != nil {
 		return err
@@ -234,23 +242,11 @@ func (s *Session) ChangeSecret(current, secret string) error {
 	if &have[0] != &base[0] {
 		defer have.Zero()
 	}
-	reseal := func(old, new GK) error {
-		return secureenclave.ReSealRootSeed(s.P.dir,
-			func(b []byte) ([]byte, error) { return Open(old, s.P.id, b) },
-			func(b []byte) ([]byte, error) { return Seal(new, s.P.id, b) })
-	}
-	// reseal tolerates a profile with no seed yet (nothing is sealed under the key).
-	safeReseal := func(old, new GK) error {
-		if err := reseal(old, new); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
 	var cerr error
 	if secret == "" {
-		cerr = s.P.RemoveSecret(have, safeReseal)
+		cerr = s.P.RemoveSecret(have)
 	} else {
-		cerr = s.P.SetSecret(have, secret, safeReseal)
+		cerr = s.P.SetSecret(have, secret)
 	}
 	if cerr != nil {
 		return cerr

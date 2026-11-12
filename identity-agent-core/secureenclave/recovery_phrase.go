@@ -80,6 +80,10 @@ type phraseEnvelope struct {
 	Protection string `json:"protection,omitempty"`
 	Why        string `json:"why,omitempty"`
 	Holder     string `json:"holder"`
+	// Gate is set when the phrase was sealed under the profile's gate key before
+	// it was encrypted here (a gated profile): it opens only while the identity
+	// is open.
+	Gate string `json:"gate,omitempty"`
 }
 
 func recoveryPhrasePath(dataDir string) string {
@@ -139,6 +143,11 @@ func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedW
 	if len(phrase) == 0 || len(phrase) > maxRecoveryPhraseBytes {
 		return fmt.Errorf("a recovery phrase is between 1 and %d bytes", maxRecoveryPhraseBytes)
 	}
+	// A locked identity writes no phrase, and says why before anything else.
+	sealer, gated, gerr := theGateForThisSeed(dataDir)
+	if gerr != nil {
+		return gerr
+	}
 	if !replacing {
 		held, err := loadPhraseLocked(slot, dataDir)
 		switch {
@@ -166,15 +175,23 @@ func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedW
 		return cannotLiveHere(detectCapability(), reason+", so the recovery phrase could only be written as a plain file")
 	}
 
+	toHold, gateName := phrase, ""
+	if gated {
+		var serr error
+		if toHold, serr = sealer.Seal(phrase); serr != nil {
+			return fmt.Errorf("seal the recovery phrase under the gate key: %w", serr)
+		}
+		gateName = gateScheme
+	}
 	dk := make([]byte, 32)
 	if _, err := rand.Read(dk); err != nil {
 		return err
 	}
-	sealed, err := sealPhrase(slot.holder, dk, phrase)
+	sealed, err := sealPhrase(slot.holder, dk, toHold)
 	if err != nil {
 		return err
 	}
-	env := phraseEnvelope{V: 1, Wrap: seedWrapNone, Key: base64.StdEncoding.EncodeToString(dk),
+	env := phraseEnvelope{V: 1, Wrap: seedWrapNone, Gate: gateName, Key: base64.StdEncoding.EncodeToString(dk),
 		Sealed: base64.StdEncoding.EncodeToString(sealed), Protection: ProtectionUnwrapped,
 		Why: whyNotWrappedAt(dataDir), Holder: slot.holder}
 	if works {
@@ -236,6 +253,12 @@ func loadPhrase(slot phraseSlot, dataDir string) ([]byte, error) {
 }
 
 func loadPhraseLocked(slot phraseSlot, dataDir string) ([]byte, error) {
+	// A locked identity gives no phrase and says nothing about whether one is
+	// held, whatever is on disk.
+	sealer, _, lerr := theGateForThisSeed(dataDir)
+	if lerr != nil {
+		return nil, lerr
+	}
 	raw, err := os.ReadFile(slot.path(dataDir))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %w", ErrNoRecoveryPhrase, err)
@@ -247,11 +270,35 @@ func loadPhraseLocked(slot phraseSlot, dataDir string) ([]byte, error) {
 	if jerr := json.Unmarshal(raw, &env); jerr != nil || env.V < 1 || env.Wrap == "" {
 		return nil, fmt.Errorf("recovery phrase envelope corrupt")
 	}
-	key, err := base64.StdEncoding.DecodeString(env.Key)
+	if env.Gate != "" && env.Gate != gateScheme {
+		return nil, fmt.Errorf("the recovery phrase is sealed under gate scheme %q, which this build cannot open", env.Gate)
+	}
+	if env.Gate != "" && sealer == nil {
+		return nil, ErrIdentityLocked
+	}
+	key, err := phraseDataKey(env)
+	if err != nil {
+		return nil, err
+	}
+	sealed, err := base64.StdEncoding.DecodeString(env.Sealed)
 	if err != nil {
 		return nil, fmt.Errorf("recovery phrase envelope corrupt: %w", err)
 	}
-	sealed, err := base64.StdEncoding.DecodeString(env.Sealed)
+	out, err := openPhrase(slot.holder, key, sealed)
+	if err != nil || env.Gate == "" {
+		return out, err
+	}
+	phrase, oerr := sealer.Open(out)
+	if oerr != nil {
+		return nil, fmt.Errorf("the recovery phrase does not open under the gate key: %w", oerr)
+	}
+	return phrase, nil
+}
+
+// phraseDataKey is the key that encrypts the phrase in env, unwrapped from the
+// platform where it is wrapped.
+func phraseDataKey(env phraseEnvelope) ([]byte, error) {
+	key, err := base64.StdEncoding.DecodeString(env.Key)
 	if err != nil {
 		return nil, fmt.Errorf("recovery phrase envelope corrupt: %w", err)
 	}
@@ -259,16 +306,16 @@ func loadPhraseLocked(slot phraseSlot, dataDir string) ([]byte, error) {
 		if aProductionBuild() {
 			return nil, existingSeedRefusal("the recovery phrase is held unwrapped: " + env.Why)
 		}
-	} else {
-		w := platformSeedWrapper()
-		if w == nil || w.Scheme() != env.Wrap {
-			return nil, fmt.Errorf("the recovery phrase is wrapped with %q, which this build/platform cannot open", env.Wrap)
-		}
-		if key, err = w.Unwrap(key); err != nil {
-			return nil, fmt.Errorf("recovery phrase unwrap failed (%s): %w", env.Wrap, err)
-		}
+		return key, nil
 	}
-	return openPhrase(slot.holder, key, sealed)
+	w := platformSeedWrapper()
+	if w == nil || w.Scheme() != env.Wrap {
+		return nil, fmt.Errorf("the recovery phrase is wrapped with %q, which this build/platform cannot open", env.Wrap)
+	}
+	if key, err = w.Unwrap(key); err != nil {
+		return nil, fmt.Errorf("recovery phrase unwrap failed (%s): %w", env.Wrap, err)
+	}
+	return key, nil
 }
 
 // RecoveryPhraseProtection says what protects the held phrase, from its
