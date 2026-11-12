@@ -238,8 +238,13 @@ func (s *CoreServer) privateAddressMayReach(r *http.Request) bool {
 //
 // It runs in its own goroutine off Start: the local server must not wait on the
 // network.
-func (s *CoreServer) startRelay() {
-	ctx, gen := s.nextRelayGeneration()
+func (s *CoreServer) startRelay() { s.startRelayUnder(s.backgroundContext()) }
+
+// startRelayUnder is startRelay with a parent context of the caller's: the
+// work that needs the identity's key passes its own, so a relay begun after a
+// lock has ended that work is born cancelled and installs nothing.
+func (s *CoreServer) startRelayUnder(parent context.Context) {
+	ctx, gen := s.nextRelayGenerationUnder(parent)
 	s.runRelay(ctx, gen)
 }
 
@@ -267,7 +272,11 @@ type relayFailure struct {
 // begins a new generation with its own context. Anything the old generation
 // is still doing is cancelled, and it can install nothing.
 func (s *CoreServer) nextRelayGeneration() (context.Context, int) {
-	ctx, cancel := context.WithCancel(s.backgroundContext())
+	return s.nextRelayGenerationUnder(s.backgroundContext())
+}
+
+func (s *CoreServer) nextRelayGenerationUnder(parent context.Context) (context.Context, int) {
+	ctx, cancel := context.WithCancel(parent)
 	s.mu.Lock()
 	if s.relayCancel != nil {
 		s.relayCancel()

@@ -269,6 +269,9 @@ type CoreServer struct {
 	// this one whose key log this Identity Agent writes (its record
 	// identity's); see signEventFor.
 	eventSigners sync.Map
+	// seedWork is the work that needs the identity's key while it is open, and
+	// ends when it is locked (the_lock_work.go).
+	seedWork seedWorkState
 	// fetchSignedEvent, when set, stands in for asking the identity's
 	// witnesses for an event the device that holds the key signed.
 	fetchSignedEvent func(aid string, sn int) []heldEvent
@@ -930,6 +933,7 @@ func (s *CoreServer) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	s.endSeedWork()
 	s.anchorStopMu.Lock()
 	if s.anchorStop != nil {
 		close(s.anchorStop)

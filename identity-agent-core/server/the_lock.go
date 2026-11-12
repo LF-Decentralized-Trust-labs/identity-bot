@@ -84,7 +84,7 @@ type theLock struct {
 	mu      sync.Mutex
 	locking bool
 	flights map[*flight]struct{}
-	conns   map[net.Conn]struct{}
+	conns   map[*trackedConn]struct{}
 	drained *sync.Cond
 	// startedGated: this core began with a gate. If the gate later seems to be
 	// gone (a file deleted under it), it refuses rather than falls open.
@@ -92,6 +92,10 @@ type theLock struct {
 
 	drainWithin time.Duration
 	workStarted bool
+	// endWork ends the work that needs the identity's key (relay, witnessing,
+	// anchoring, add-ons, the scheduled backup) and drops what it cached;
+	// resumeWork starts it again. Set by the core that owns this lock.
+	endWork, resumeWork func()
 
 	// transition is held for the whole of a log-out and for the whole of an
 	// unlock or secret change, so the two never interleave. gen counts log-outs
@@ -116,7 +120,7 @@ func (l *theLock) beginChange(gen0 uint64) (release func(), ok bool) {
 }
 
 func newTheLock(sess *lockgate.Session) *theLock {
-	l := &theLock{sess: sess, flights: map[*flight]struct{}{}, conns: map[net.Conn]struct{}{}, drainWithin: DrainWithin}
+	l := &theLock{sess: sess, flights: map[*flight]struct{}{}, conns: map[*trackedConn]struct{}{}, drainWithin: DrainWithin}
 	l.drained = sync.NewCond(&l.mu)
 	return l
 }
@@ -172,23 +176,62 @@ func (w *flightWriter) Flush() {
 
 func (w *flightWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+// trackedConn is a taken-over connection the lock can close. Closing it by any
+// route takes it out of the lock's set, so the set holds only open connections.
+type trackedConn struct {
+	net.Conn
+	lock *theLock
+	once sync.Once
+}
+
+func (c *trackedConn) Close() error {
+	c.once.Do(func() {
+		c.lock.mu.Lock()
+		delete(c.lock.conns, c)
+		c.lock.mu.Unlock()
+	})
+	return c.Conn.Close()
+}
+
 // Hijack hands the connection to a streaming handler (a websocket). The request
 // is then no longer one the lock can wait for, so it leaves the count and its
-// connection is closed when the lock fires.
+// connection is closed when the lock fires. A request the lock has already
+// cancelled may not take one over: the lock has closed the connections it knew
+// of, so one taken after would never be closed.
 func (w *flightWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	h, ok := w.ResponseWriter.(http.Hijacker)
 	if !ok {
 		return nil, nil, errors.New("this connection cannot be taken over")
 	}
+	// The lock cancels a request (kill) under lock.mu, and a connection is
+	// added to the set under it, so one of the two always sees the other.
+	w.lock.mu.Lock()
+	w.mu.Lock()
+	dead := w.dead
+	w.mu.Unlock()
+	w.lock.mu.Unlock()
+	if dead {
+		return nil, nil, errors.New("identity is locked")
+	}
 	c, rw, err := h.Hijack()
 	if err != nil {
 		return nil, nil, err
 	}
+	tc := &trackedConn{Conn: c, lock: w.lock}
 	w.lock.mu.Lock()
-	w.lock.conns[c] = struct{}{}
+	w.mu.Lock()
+	dead = w.dead
+	w.mu.Unlock()
+	if !dead {
+		w.lock.conns[tc] = struct{}{}
+	}
 	w.lock.mu.Unlock()
+	if dead {
+		_ = c.Close()
+		return nil, nil, errors.New("identity is locked")
+	}
 	w.lock.leave(w.f)
-	return c, rw, nil
+	return tc, rw, nil
 }
 
 func (l *theLock) leave(f *flight) {
@@ -270,6 +313,14 @@ func (l *theLock) lockNow() error {
 	// waiting finds the log-out done and is refused (beginChange).
 	l.transition.Lock()
 	defer l.transition.Unlock()
+	// Runs last, once locking is cleared: work refuses to start while a lock is
+	// in progress.
+	startAgain := false
+	defer func() {
+		if startAgain && l.resumeWork != nil {
+			l.resumeWork()
+		}
+	}()
 	defer func() { l.mu.Lock(); l.locking = false; l.mu.Unlock() }()
 
 	if !l.waitForFlights(l.drainWithin) {
@@ -281,15 +332,25 @@ func (l *theLock) lockNow() error {
 		l.mu.Unlock()
 		l.waitForFlights(cancelGrace)
 	}
+	// The work that needs the key ends before the key goes, so nothing is
+	// signing as the key is dropped. If the key cannot be dropped the identity
+	// is still open and the work starts again.
+	if l.endWork != nil {
+		l.endWork()
+	}
 	if err := l.sess.Lock(); err != nil {
+		startAgain = true
 		return err
 	}
 	l.mu.Lock()
+	open := make([]*trackedConn, 0, len(l.conns))
 	for c := range l.conns {
-		_ = c.Close()
-		delete(l.conns, c)
+		open = append(open, c)
 	}
 	l.mu.Unlock()
+	for _, c := range open {
+		_ = c.Close() // takes it out of the set
+	}
 	return nil
 }
 
@@ -360,6 +421,8 @@ func (s *CoreServer) settleTheLock(cfg Config) {
 		log.Printf("[identity-agent-core] this identity was made before gates: it is not locked by anything until it is moved")
 	}
 	s.lock = newTheLock(sess)
+	s.lock.endWork = s.endSeedWork
+	s.lock.resumeWork = s.startWhatNeedsTheIdentity
 	s.lock.startedGated = sess.State() != lockgate.StateUngated
 }
 
@@ -451,9 +514,12 @@ func (s *CoreServer) startWhatNeedsTheIdentity() {
 		s.lock.workStarted = true
 		s.lock.mu.Unlock()
 	}
+	// Everything below runs in the open period's scope, so a lock ends it and
+	// an unlock starts it again (the_lock_work.go).
+
 	// Machines granted as an app's back end before an app signed as itself are
 	// withdrawn, so no credential of this identity still says they act for it.
-	go s.withdrawTheGrantsOfRetiredAppBackEnds()
+	s.runSeedWork(func(context.Context, <-chan struct{}) { s.withdrawTheGrantsOfRetiredAppBackEnds() })
 
 	if cfg, err := s.backupService().LoadConfig(); err == nil && cfg.Enabled && cfg.ScheduleDaily {
 		// Give the scheduler a way to reach this agent's own seed, or every
@@ -470,14 +536,18 @@ func (s *CoreServer) startWhatNeedsTheIdentity() {
 	// manager: a live relay allocation is a durable, provably-ours address, so
 	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
 	// relay this returns immediately, leaving the tunnel/direct path in place.
-	s.inBackground(func(context.Context) { s.startRelay() })
-	s.anchorStopMu.Lock()
-	stop := s.anchorStop
-	s.anchorStopMu.Unlock()
+	s.runSeedWork(func(ctx context.Context, _ <-chan struct{}) { s.startRelayUnder(ctx) })
 	s.beginWitnessing()
-	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
-	s.inBackground(func(context.Context) { s.backfillRegistryEvents() })
-	s.runAddons(stop)
+	s.runSeedWork(func(_ context.Context, stop <-chan struct{}) { s.keepAnchoring(stop) })
+	s.runSeedWork(func(context.Context, <-chan struct{}) { s.backfillRegistryEvents() })
+	s.runAddons()
+	// Witnessing asked for while locked waits in its jobs; start its worker.
+	s.witnessing.witnessMu.Lock()
+	waiting := len(s.witnessing.witnessJobs) > 0
+	s.witnessing.witnessMu.Unlock()
+	if waiting {
+		s.kickWitnessing()
+	}
 }
 
 // ---- routes ----

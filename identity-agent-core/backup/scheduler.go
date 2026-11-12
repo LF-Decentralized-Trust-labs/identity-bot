@@ -16,6 +16,7 @@ type Scheduler struct {
 	debounceInterval time.Duration
 	lastExport       time.Time
 	dailyTicker      *time.Ticker
+	dailyStop        chan struct{} // ends the daily loop; Suspend closes it
 	stopCh           chan struct{}
 	mnemonicFunc     func() (string, error)
 	seedFunc         func() ([]byte, error) // injected — never persisted
@@ -97,26 +98,55 @@ func (sch *Scheduler) TriggerEvent(reason string) {
 	})
 }
 
-// StartDaily begins the daily minimum timer.
+// StartDaily begins the daily minimum timer. After Suspend it begins it again.
 func (sch *Scheduler) StartDaily() {
 	sch.mu.Lock()
 	defer sch.mu.Unlock()
 	if sch.dailyTicker != nil || sch.stopped {
 		return
 	}
-	sch.dailyTicker = time.NewTicker(24 * time.Hour)
+	ticker := time.NewTicker(24 * time.Hour)
+	daily := make(chan struct{})
+	sch.dailyTicker = ticker
+	sch.dailyStop = daily
 	sch.working.Add(1)
 	go func() {
 		defer sch.working.Done()
 		for {
 			select {
-			case <-sch.dailyTicker.C:
-				sch.runBackup("daily_timer")
+			case <-ticker.C:
+				if sch.begin() {
+					sch.runBackup("daily_timer")
+					sch.working.Done()
+				}
+			case <-daily:
+				return
 			case <-sch.stopCh:
 				return
 			}
 		}
 	}()
+}
+
+// Suspend ends the daily timer and any debounced backup waiting, without
+// refusing later ones: StartDaily and TriggerEvent work again. A backup already
+// running is not interrupted and is counted by Wait; the caller stops what
+// feeds it its seed.
+func (sch *Scheduler) Suspend() {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	if sch.dailyTicker != nil {
+		sch.dailyTicker.Stop()
+		sch.dailyTicker = nil
+	}
+	if sch.dailyStop != nil {
+		close(sch.dailyStop)
+		sch.dailyStop = nil
+	}
+	if sch.debounce != nil {
+		sch.debounce.Stop()
+		sch.debounce = nil
+	}
 }
 
 func (sch *Scheduler) Stop() {
