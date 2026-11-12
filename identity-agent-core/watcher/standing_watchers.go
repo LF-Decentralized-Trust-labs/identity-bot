@@ -3,6 +3,8 @@ package watcher
 import (
 	"context"
 	"encoding/json"
+
+	"identity-agent-core/drivers"
 )
 
 // Several standing watchers, for coverage.
@@ -187,5 +189,12 @@ func recordsFor(presented [][]byte, presentedRecs []map[string]interface{}, thei
 		}
 		out = append(out, rec)
 	}
-	return out
+	// Whatever the watcher served beside the bytes (parsed fields, event text) is
+	// not covered by the signatures, so each record is rebuilt from the verified
+	// bytes alone.
+	rebuilt, ok := drivers.RecordsFromVerifiedBytes(out)
+	if !ok {
+		return nil
+	}
+	return rebuilt
 }

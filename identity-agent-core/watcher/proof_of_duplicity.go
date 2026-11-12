@@ -44,8 +44,9 @@ const (
 	proofUnprovable proofKind = iota
 	// proofFork is two events at one place, each validly signed: duplicity.
 	proofFork
-	// proofWatcherFaulty is a watcher whose answer does not hold up: its log does
-	// not verify, or it holds exactly the presented log yet gave another digest.
+	// proofWatcherFaulty is a watcher whose answer does not hold up, shown by its
+	// own log: it does not verify, or an event of it does not verify against the
+	// state before it.
 	proofWatcherFaulty
 	// proofAhead is a watcher holding validly signed later events the presented
 	// log lacks. The presenter showed a stale key state.
@@ -119,7 +120,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		return proof{Kind: proofUnprovable, Reason: "the presented log is for another identity"}
 	}
 	if len(theirs.Messages) == 0 {
-		return proof{Kind: proofWatcherFaulty, Reason: "it gave a digest but holds no log to show for it"}
+		return proof{Kind: proofUnprovable, Reason: "it gave a digest but showed no log for it, so nothing can be proven either way"}
 	}
 	theirLog, err := keri.ValidateSignedKEL(theirs.Messages)
 	if err != nil {
@@ -226,6 +227,8 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		return proof{Kind: proofAhead, Reason: "the watcher holds later signed events the presented log lacks",
 			Latest: cur, LatestMessages: msgs}
 	}
-	return proof{Kind: proofWatcherFaulty, Reason: "it gave a digest that differs from the presented log, " +
+	// The same events, another digest: the two sides digest different renderings
+	// of them. Nothing is proven against either, so it is shown, not flagged.
+	return proof{Kind: proofUnprovable, Reason: "its digest differs from the presented log's, " +
 		"yet its own log holds exactly the presented events"}
 }

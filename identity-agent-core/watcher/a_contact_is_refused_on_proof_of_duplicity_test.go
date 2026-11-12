@@ -80,14 +80,15 @@ func TestAForgedBranchFromALyingWatcherIsIgnoredAndTheWatcherFlagged(t *testing.
 }
 
 // A watcher that holds exactly the presented events yet gives another digest has
-// shown nothing against the contact either.
-func TestAWatcherWhoseDigestDisagreesWithItsOwnLogIsFlagged(t *testing.T) {
+// shown nothing against the contact. Nor is it flagged: the two sides may digest
+// different renderings of the same events, so nothing proves the watcher at fault.
+func TestAWatcherWhoseDigestDisagreesWithItsOwnLogIsShownNotFlagged(t *testing.T) {
 	trusted := newTestWatcherKey(1)
 	honest, rival := twoHistories(t)
 	w := aWatcherHolding(t, &trusted, rival)
 	w.Alter = func([]map[string]interface{}) []map[string]interface{} { return recordsOf(honest) }
 	ws := serviceAsking(t, trusted, w.URL)
-	if res := verifying(t, ws, honest); res.Blocked || len(res.FlaggedWatchers) != 1 {
+	if res := verifying(t, ws, honest); res.Blocked || len(res.FlaggedWatchers) != 0 || res.OverallOutcome != "escalated" {
 		t.Fatalf("%+v", res)
 	}
 }

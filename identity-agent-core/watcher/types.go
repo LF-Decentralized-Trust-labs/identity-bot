@@ -29,6 +29,10 @@ type FirstSeenRecord struct {
 	SeenCount       int
 	SourceType      SourceType
 	SourceURL       string
+	// Proven is whether the log first seen verified under its own controller's
+	// signatures. A digest from a log that did not is remembered but never
+	// contradicted into a refusal.
+	Proven bool
 }
 
 // DuplicityAlert is an immutable fork-detection audit record.

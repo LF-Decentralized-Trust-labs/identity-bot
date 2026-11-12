@@ -21,16 +21,17 @@ func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
 	_, err := s.db.Exec(`
 		INSERT INTO kel_first_seen (
 			aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
-			seen_count, source_type, source_url
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			seen_count, source_type, source_url, proven
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, sequence_num) DO UPDATE SET
 			kel_digest = excluded.kel_digest,
+			proven = MAX(kel_first_seen.proven, excluded.proven),
 			last_confirmed_at = excluded.last_confirmed_at,
 			seen_count = kel_first_seen.seen_count + 1`,
 		rec.AID, rec.SequenceNum, rec.KelDigest,
 		rec.FirstSeenAt.UTC().Format(time.RFC3339),
 		rec.LastConfirmedAt.UTC().Format(time.RFC3339),
-		rec.SeenCount, string(rec.SourceType), rec.SourceURL,
+		rec.SeenCount, string(rec.SourceType), rec.SourceURL, boolToInt(rec.Proven),
 	)
 	return err
 }
@@ -38,7 +39,7 @@ func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
 func (s *SQLiteStore) getFirstSeen(aid string, seq int) (*FirstSeenRecord, error) {
 	row := s.db.QueryRow(`
 		SELECT aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
-		       seen_count, source_type, source_url
+		       seen_count, source_type, source_url, proven
 		FROM kel_first_seen WHERE aid = ? AND sequence_num = ?`, aid, seq)
 	return scanFirstSeen(row)
 }
@@ -46,7 +47,7 @@ func (s *SQLiteStore) getFirstSeen(aid string, seq int) (*FirstSeenRecord, error
 func (s *SQLiteStore) listFirstSeen(aid string) ([]FirstSeenRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT aid, sequence_num, kel_digest, first_seen_at, last_confirmed_at,
-		       seen_count, source_type, source_url
+		       seen_count, source_type, source_url, proven
 		FROM kel_first_seen WHERE aid = ? ORDER BY sequence_num`, aid)
 	if err != nil {
 		return nil, err
@@ -298,8 +299,9 @@ func (s *SQLiteStore) PruneStale(before time.Time) (int, error) {
 func scanFirstSeen(row *sql.Row) (*FirstSeenRecord, error) {
 	var rec FirstSeenRecord
 	var firstSeen, lastConfirmed, sourceType string
+	var proven int
 	if err := row.Scan(&rec.AID, &rec.SequenceNum, &rec.KelDigest,
-		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL); err != nil {
+		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL, &proven); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -308,19 +310,22 @@ func scanFirstSeen(row *sql.Row) (*FirstSeenRecord, error) {
 	rec.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeen)
 	rec.LastConfirmedAt, _ = time.Parse(time.RFC3339, lastConfirmed)
 	rec.SourceType = SourceType(sourceType)
+	rec.Proven = proven != 0
 	return &rec, nil
 }
 
 func scanFirstSeenRow(rows *sql.Rows) (*FirstSeenRecord, error) {
 	var rec FirstSeenRecord
 	var firstSeen, lastConfirmed, sourceType string
+	var proven int
 	if err := rows.Scan(&rec.AID, &rec.SequenceNum, &rec.KelDigest,
-		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL); err != nil {
+		&firstSeen, &lastConfirmed, &rec.SeenCount, &sourceType, &rec.SourceURL, &proven); err != nil {
 		return nil, err
 	}
 	rec.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeen)
 	rec.LastConfirmedAt, _ = time.Parse(time.RFC3339, lastConfirmed)
 	rec.SourceType = SourceType(sourceType)
+	rec.Proven = proven != 0
 	return &rec, nil
 }
 

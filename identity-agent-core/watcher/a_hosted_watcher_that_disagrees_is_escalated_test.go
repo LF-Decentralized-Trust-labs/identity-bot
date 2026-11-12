@@ -168,12 +168,8 @@ func TestContactsAreNotAskedWhenTheirAnswerChangesNothing(t *testing.T) {
 		t.Fatalf("hosted watcher that has not met him: %+v asked=%d", res, *rc.asked)
 	}
 
-	// A repeat L1 mismatch blocks, with no question asked.
-	rc = newRepeatContact(t, true)
-	rc.kel = []map[string]interface{}{{"v": "KERI10JSON000256_", "t": "icp", "i": "EBob", "s": "0", "k": []string{"Dfork"}}}
-	if res := rc.again(t); !res.Blocked || *rc.asked != 0 {
-		t.Fatalf("fork: %+v asked=%d", res, *rc.asked)
-	}
+	// (A repeat L1 mismatch that blocks asks nobody either; it needs signed logs
+	// on both sides, see the_first_sighting_must_be_proven_to_refuse_test.go.)
 }
 
 // First contact where the hosted watcher disagrees and cannot show why blocks

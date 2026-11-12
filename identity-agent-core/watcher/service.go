@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	keri "github.com/grapeid/keri-go"
+
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"identity-agent-core/iacrypto"
 )
@@ -110,6 +112,12 @@ func (s *Service) SetWatcherHints(urls []string) error {
 
 // RecordFirstSeen stores L1 digest at seq (creates or reinforces).
 func (s *Service) RecordFirstSeen(aid string, seq int, digest string, source SourceType, sourceURL string) error {
+	return s.recordFirstSeen(aid, seq, digest, source, sourceURL, false)
+}
+
+// recordFirstSeen is RecordFirstSeen that also says whether the log it comes
+// from verified. A sighting once proven stays proven.
+func (s *Service) recordFirstSeen(aid string, seq int, digest string, source SourceType, sourceURL string, proven bool) error {
 	now := time.Now().UTC()
 	existing, err := s.Store.getFirstSeen(aid, seq)
 	if err != nil {
@@ -122,7 +130,7 @@ func (s *Service) RecordFirstSeen(aid string, seq int, digest string, source Sou
 	return s.Store.RecordFirstSeen(FirstSeenRecord{
 		AID: aid, SequenceNum: seq, KelDigest: digest,
 		FirstSeenAt: firstSeenTime(existing, now), LastConfirmedAt: now,
-		SeenCount: count, SourceType: source, SourceURL: sourceURL,
+		SeenCount: count, SourceType: source, SourceURL: sourceURL, Proven: proven,
 	})
 }
 
@@ -178,17 +186,41 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	firstContact := existing == nil
 	result.firstContact = firstContact
 
+	// A digest is remembered from any log, but only a log that verifies (signed by
+	// its own controller) can found a sighting that later refuses a log. Otherwise
+	// anybody could plant a digest for an identity they do not control with a
+	// made-up log, and the identity's real log would be refused for differing from
+	// it. A proven log replaces a planted sighting; an unproven one never
+	// contradicts a proven one.
+	proven := false
+	if len(in.Signed) > 0 {
+		if v, err := keri.ValidateSignedKEL(in.Signed); err == nil && v.Identifier == in.AID {
+			proven = true
+		}
+	}
+
 	var l1Outcome string
-	if existing == nil {
+	switch {
+	case existing == nil:
 		l1Outcome = "first_seen"
-		if err := s.RecordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL); err != nil {
+		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, proven); err != nil {
 			return nil, err
 		}
-	} else if existing.KelDigest == digest {
+	case existing.KelDigest == digest:
 		l1Outcome = "match"
-		_ = s.RecordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL)
-	} else {
+		_ = s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, proven)
+	case proven && !existing.Proven:
+		// What was remembered came from a log that proved nothing. The proven one
+		// takes its place, and nothing is refused.
+		l1Outcome = "first_seen"
+		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
+			return nil, err
+		}
+	case proven && existing.Proven:
 		l1Outcome = "mismatch"
+	default:
+		// Shown, never refused on: this log proves nothing.
+		l1Outcome = "unproven_mismatch"
 	}
 	result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
 
@@ -262,7 +294,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		// The owner resolving the alert ends it.
 		shouldBlock = true
 		heldAlert = held
-		blockReason = "first-contact L1 vs L2-standing digest conflict"
+		blockReason = "a standing watcher disagrees with what this log is known to be, and an alert about it is still open"
 	}
 
 	// A watcher that disagrees and cannot show why. That is one watcher against
@@ -273,7 +305,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	for _, an := range answers {
 		unproven = unproven || an.outcome == "mismatch"
 	}
-	escalate := !shouldBlock && unproven
+	escalate := !shouldBlock && (unproven || l1Outcome == "unproven_mismatch")
 
 	// L3 — the contacts the owner chose, when the owner turned peer checks on.
 	//
@@ -294,7 +326,10 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		if alert == nil {
 			var err error
 			if _, alert, err = s.recordDuplicity(in.AID, seq, digest, l2URL, existing, l2Resp, evidence); err != nil {
-				return nil, err
+				// The refusal stands: a store fault must not let a proven fork
+				// through. Only the record of it is lost, and that is said.
+				log.Printf("[watcher] could not keep the duplicity alert for %s at %d: %v", in.AID, seq, err)
+				alert = nil
 			}
 		}
 		result.Blocked = true

@@ -1223,6 +1223,16 @@ ALTER TABLE duplicity_alerts ADD COLUMN kind TEXT NOT NULL DEFAULT 'duplicity';
 -- holds why that watcher's answer was set aside.
 ALTER TABLE duplicity_alerts ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '';
 `},
+	{
+		Version:     57,
+		Description: "Remember whether a first sighting of a key log was of a log its own controller signed",
+		SQL: `
+-- 1 when the log first seen verified (self-certifying, every event signed by the
+-- key in force), 0 when it came as bare records. Only a proven sighting may be
+-- contradicted by a later log: a digest planted from a made-up log must never get
+-- the identity's real log refused.
+ALTER TABLE kel_first_seen ADD COLUMN proven INTEGER NOT NULL DEFAULT 0;
+`},
 }
 
 // execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD

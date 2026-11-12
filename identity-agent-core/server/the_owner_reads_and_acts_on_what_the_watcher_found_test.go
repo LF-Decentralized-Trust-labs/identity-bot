@@ -171,12 +171,10 @@ func TestAnAgentWithNoWatcherSaysItIsOffAndNotThatNothingWasFound(t *testing.T) 
 	}
 }
 
-// Adding a contact runs the watcher, and a log this agent has seen differently
-// is refused with the typed answer a client reads.
-//
-// Fails when the runWatcherOnKel call in handleAddContact (server.go) is removed:
-// the contact is added and the answer is 201.
-func TestAddContactWithAForkedLogIsRefusedAsDuplicityAndAnAlertIsKept(t *testing.T) {
+// A digest this agent holds from a log that proved nothing refuses nobody: it
+// could have been planted by whoever showed it. (A proven fork refusing on this
+// route is TestAProvenForkStopsOobiResolveAndAddContact.)
+func TestAddContactIsNotRefusedOnADigestFromALogThatProvedNothing(t *testing.T) {
 	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
 	// A numbered log, as the watcher reads one; the test logs of the other
 	// intake tests carry no sequence numbers and are refused as unreadable.
@@ -204,18 +202,11 @@ func TestAddContactWithAForkedLogIsRefusedAsDuplicityAndAnAlertIsKept(t *testing
 	body, _ := json.Marshal(map[string]interface{}{"oobi_url": srv.URL + "/oobi/" + aid, "alias": "x"})
 	rec := httptest.NewRecorder()
 	s.handleAddContact(rec, httptest.NewRequest("POST", "/api/contacts", strings.NewReader(string(body))))
-	if rec.Code != 409 {
-		t.Fatalf("adding a contact from a forked log: %d %s", rec.Code, rec.Body.String())
+	if rec.Code == 409 {
+		t.Fatalf("refused on a digest that proves nothing: %s", rec.Body.String())
 	}
-	var got struct{ Code, AID string }
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Code != "duplicity" || got.AID != aid {
-		t.Fatalf("not the typed duplicity answer: %s", rec.Body.String())
-	}
-	if c, _ := s.DataStore.GetContact(aid); c != nil {
-		t.Fatalf("a contact was added from a forked log: %+v", c)
-	}
-	if open, _ := ws.DisclosableAlerts(aid); len(open) != 1 {
-		t.Fatalf("the alert was not kept: %+v", open)
+	if open, _ := ws.DisclosableAlerts(aid); len(open) != 0 {
+		t.Fatalf("a duplicity alert was raised without proof: %+v", open)
 	}
 }
 
