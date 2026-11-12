@@ -1,4 +1,5 @@
 # Login SDK packages + verify microservice
+/node_modules/
 packages/*/node_modules/
 packages/*/dist/
 services/*/node_modules/

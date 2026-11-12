@@ -5,6 +5,12 @@ React widget for "Sign In with Identity Agent" (login js-widget surface).
 ```tsx
 import { SignInButton } from "@identity-agent/login-web";
 ```
+## Installing: what is published
+
+Install and build this package **from a checkout of this repository**: `npm install` at the repository root links `@identity-agent/login-web` and `@identity-agent/login-verify` together as workspaces, and `npm run build` here builds login-verify first (`npm run build --workspace @identity-agent/login-verify`), which only works inside this repository.
+
+Outside this repository the published package cannot be installed yet: it depends on `@identity-agent/login-verify` `^0.1.1` from the npm registry, and that version is not published there, so the install returns a 404. Publishing login-verify (then login-web) is the fix and is proposed as follow-up work; it has not been done.
+
 ## From a website's server
 
 The site holds no key. Its organisation created a website asset; the server asks
