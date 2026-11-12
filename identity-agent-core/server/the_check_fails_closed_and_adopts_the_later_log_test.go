@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -71,4 +72,67 @@ func TestACheckThatCannotBeCompletedRefusesTheLog(t *testing.T) {
 	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be completed") {
 		t.Fatalf("resolve went ahead on a check that failed: %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+// A check that could not be completed stops all four routes, and is answered as
+// a check that did not complete ("unchecked") and not as a fork: nothing was
+// proven about the identity. The check is kept, so the owner's screen shows
+// "unchecked".
+//
+// Fails when a failed check is worded as duplicity on any route, or when the
+// error path returns before the check is recorded.
+func TestAFailedCheckIsAnsweredAsUncheckedOnEveryRoute(t *testing.T) {
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
+	words := func(where, body string) {
+		t.Helper()
+		if strings.Contains(strings.ToLower(body), "duplicity") {
+			t.Errorf("%s: a failed check is worded as duplicity: %s", where, body)
+		}
+	}
+	dropFirstSeen := func(s *CoreServer) {
+		t.Helper()
+		if _, err := s.DataStore.(*store.SQLiteStore).DB().Exec(`DROP TABLE kel_first_seen`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// resolve and add contact
+	honest, _ := twoSignedHistories(t)
+	s := witnessWithSeed(t, 7)
+	s.KeriDriver = anEngineThatVerifies(honest.Key(), honest.Len())
+	aStandingWatcherHolding(t, s, honest.AID, withParsedFields(honest.Records()))
+	dropFirstSeen(s)
+	peer := aPeerServing(t, honest.AID, honest.Key(), withParsedFields(honest.Records()))
+	body := map[string]interface{}{"oobi_url": peer.URL + "/oobi/" + honest.AID, "alias": "x"}
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"resolve": aRecordedPost(s.handleResolveOobiContact, "/api/oobi/resolve", body),
+		"add":     aRecordedPost(s.handleAddContact, "/api/contacts", body),
+	} {
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"unchecked"`) {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		words(name, rec.Body.String())
+	}
+	var verdict string
+	if err := s.DataStore.(*store.SQLiteStore).DB().QueryRow(`SELECT verdict FROM watcher_contact_check WHERE aid = ?`, honest.AID).Scan(&verdict); err != nil || verdict != watcher.VerdictUnchecked {
+		t.Errorf("the failed check was not kept as unchecked: %q %v", verdict, err)
+	}
+
+	// credential verify and credential sign-in
+	w := aGateWorldHolding(t, true, logHeldAsContact)
+	held, err := w.s.DataStore.GetContactKEL(w.issuer)
+	if err != nil || held == nil {
+		t.Fatalf("the issuer's log: %v", err)
+	}
+	aStandingWatcherHolding(t, w.s, w.issuer, withParsedFields(held.KEL))
+	dropFirstSeen(w.s)
+	rec := aRecordedPost(w.s.handleVerifyCredential, "/api/credentials/verify", map[string]interface{}{"acdc_json": w.acdc})
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "could not be checked") {
+		t.Errorf("credential verify: %d %s", rec.Code, rec.Body.String())
+	}
+	words("credential verify", rec.Body.String())
+	ok, _, reason := w.s.verifyPresentedCredentialACDC(context.Background(), w.acdc, w.holder, "", "", "", nil)
+	if ok || !strings.Contains(reason, "not checked") {
+		t.Errorf("sign-in: ok=%v reason=%q", ok, reason)
+	}
+	words("sign-in", reason)
 }

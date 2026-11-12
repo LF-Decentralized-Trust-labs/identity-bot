@@ -79,7 +79,10 @@ type WatcherLog struct {
 
 // Evidence is what an alert rests on.
 type Evidence struct {
-	Kind        string `json:"kind"` // "duplicity" or "watcher"
+	Kind string `json:"kind"` // "duplicity" or "watcher"
+	// Identifier is the identity the two events belong to; Reverify refuses
+	// events of any other.
+	Identifier  string `json:"identifier,omitempty"`
 	SequenceNum int    `json:"sequence_number"`
 	// HeldMessage and RivalMessage are the two signed events at the contested
 	// place, each as an event with its attached signatures (base64). Anyone can
@@ -108,8 +111,8 @@ func (e Evidence) Reverify() error {
 		return errors.New("the evidence does not hold both events")
 	}
 	var before *keri.KeyState
+	var prior [][]byte
 	if e.SequenceNum > 0 {
-		var prior [][]byte
 		for _, p := range e.PriorMessages {
 			m, err := base64.StdEncoding.DecodeString(p)
 			if err != nil {
@@ -127,11 +130,13 @@ func (e Evidence) Reverify() error {
 		before = log.State()
 	}
 	var said [2]string
+	var msgs [2][]byte
 	for i, b64 := range []string{e.HeldMessage, e.RivalMessage} {
 		m, err := base64.StdEncoding.DecodeString(b64)
 		if err != nil {
 			return fmt.Errorf("an event does not decode: %w", err)
 		}
+		msgs[i] = m
 		v, err := keri.VerifyEvent(before, m)
 		if err != nil {
 			return fmt.Errorf("an event at place %d does not verify: %w", e.SequenceNum, err)
@@ -141,10 +146,20 @@ func (e Evidence) Reverify() error {
 			return errors.New("an event is not at the contested place")
 		}
 		_ = v
+		if e.Identifier == "" || ev.Identifier != e.Identifier {
+			return errors.New("an event is not of the identity the evidence is about")
+		}
 		said[i] = ev.SAID
 	}
 	if said[0] == said[1] {
 		return errors.New("the two events are the same event")
+	}
+	// A recovery rotation replaces an interaction at its place, in either
+	// direction: the pair is then one history and its repair, not a fork.
+	if e.SequenceNum > 0 {
+		if recoveryRetires(prior, msgs[0], msgs[1]) || recoveryRetires(prior, msgs[1], msgs[0]) {
+			return errors.New("one event is a recovery rotation replacing the other, which is not duplicity")
+		}
 	}
 	return nil
 }
@@ -225,7 +240,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		}
 		return &proof{Kind: proofFork, Reason: fmt.Sprintf("two validly signed events at place %d", ev.SN),
 			Evidence: &Evidence{
-				Kind: "duplicity", SequenceNum: int(ev.SN),
+				Kind: "duplicity", Identifier: aid, SequenceNum: int(ev.SN),
 				HeldMessage:   base64.StdEncoding.EncodeToString(msgs[ev.SN]),
 				RivalMessage:  base64.StdEncoding.EncodeToString(message),
 				PriorMessages: prior,

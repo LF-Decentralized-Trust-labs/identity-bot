@@ -52,3 +52,47 @@ func TestARecordWithSeveralSignaturesKeepsEveryOneThroughSignedMessages(t *testi
 		t.Fatal("a message with no signatures was handed on as a record")
 	}
 }
+
+// A log whose signatures are written under the wider codes, "2A" (a key at a
+// different place in its two lists) and "2B" (an index of 64 or more), which are
+// 92 characters and not 88, goes to records and back whole.
+//
+// Fails when each signature is assumed to be 88 characters: the message is then
+// refused and an adopted later log holding one cannot be handed on.
+func TestSignaturesUnderThe2AAnd2BCodesAreReadByTheirOwnWidth(t *testing.T) {
+	raw := []byte(`{"v":"KERI10JSON000000_","t":"icp","d":"E","i":"E","s":"0"}`)
+	sig := make([]byte, 64)
+	enc := func(at keri.SignaturePlace) string {
+		s, err := keri.EncodeIndexedSignature(sig, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	a := enc(keri.SignaturePlace{Index: 0, Ondex: 0})
+	twoA := enc(keri.SignaturePlace{Index: 0, Ondex: 1})
+	twoB := enc(keri.SignaturePlace{Index: 70, CurrentOnly: true})
+	if len(a) != 88 || len(twoA) != 92 || len(twoB) != 92 || twoA[:2] != "2A" || twoB[:2] != "2B" {
+		t.Fatalf("control: widths %d %d %d, codes %q %q", len(a), len(twoA), len(twoB), twoA[:2], twoB[:2])
+	}
+	for name, sigs := range map[string][]string{
+		"2A alone": {twoA}, "2B alone": {twoB}, "mixed": {a, twoA, twoB, a},
+	} {
+		m, err := SignedMessage(raw, sigs)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		recs, ok := RecordsFromSignedMessages([][]byte{m})
+		if !ok || len(recs) != 1 {
+			t.Fatalf("%s: not handed on as a record", name)
+		}
+		if got := RecordSignatures(recs[0]); strings.Join(got, ",") != strings.Join(sigs, ",") {
+			t.Fatalf("%s: signatures %v, want %v", name, got, sigs)
+		}
+	}
+	// A code that is not known is not guessed at, and trailing material is refused.
+	m, _ := SignedMessage(raw, []string{twoA})
+	if _, ok := RecordsFromSignedMessages([][]byte{append(m, 'A')}); ok {
+		t.Fatal("trailing characters after the signatures were accepted")
+	}
+}

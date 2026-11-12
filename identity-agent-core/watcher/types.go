@@ -212,6 +212,22 @@ type ContactCheck struct {
 // (Blocked).
 func (r *VerifyKelResult) Stopped() bool { return r.Blocked }
 
+// Duplicity says the stop is a proven fork. A stop for any other reason (the
+// check could not be completed, the log could not be read, a later log could not
+// be handed on) is not a finding about the identity and is not worded as one.
+func (r *VerifyKelResult) Duplicity() bool {
+	return r.Blocked && r.Check().Verdict == VerdictDuplicity
+}
+
+// RefusalCode is the code a route answers with when it stops: "duplicity" for a
+// proven fork, otherwise the check's own verdict ("unchecked", "unreadable").
+func (r *VerifyKelResult) RefusalCode() string {
+	if r.Duplicity() {
+		return "duplicity"
+	}
+	return r.Check().Verdict
+}
+
 // Check summarises a result for the owner. The per-source detail is folded here,
 // at the one place it is read, so what leaves the package is the summary and
 // not the observation.

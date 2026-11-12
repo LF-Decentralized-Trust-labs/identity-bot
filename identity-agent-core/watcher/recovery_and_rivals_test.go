@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/signedlog"
 )
 
@@ -270,5 +271,89 @@ func TestARepeatContactMismatchRefusesOnTheKeptSignedLogAndNeverOnABareDigest(t 
 	}
 	if rr.OverallOutcome != "escalated" {
 		t.Errorf("the difference is shown to the owner: outcome %s", rr.OverallOutcome)
+	}
+}
+
+// The retired branch is not remembered. Once this agent has kept the recovered
+// log, the thief presenting the retired branch does not change what is
+// remembered as first seen at that place, so nothing built from it (the digest
+// this agent answers with) names the branch recovery replaced.
+//
+// Fails when the stale path records the presented digest as first seen.
+func TestAPresentedRetiredBranchDoesNotReplaceTheFirstSeenDigest(t *testing.T) {
+	trusted := newTestWatcherKey(1)
+	_, stale, recovered := aRecoveryAfterATheft(t)
+	ws := serviceAsking(t, trusted, aWatcherHolding(t, &trusted, nil).URL)
+	if r := verifying(t, ws, recovered); !r.OK {
+		t.Fatalf("control: %+v", r)
+	}
+	seq := recovered.Len() - 1
+	before, err := ws.Store.getFirstSeen(recovered.AID, seq)
+	if err != nil || before == nil {
+		t.Fatalf("the recovered log was not remembered: %v", err)
+	}
+	r := verifying(t, ws, stale)
+	if r.Blocked || r.Latest == nil {
+		t.Fatalf("control: the retired branch is met with the kept log: %+v", r)
+	}
+	if r.Digest == before.KelDigest {
+		t.Fatal("control: the two branches digest alike, so this proves nothing")
+	}
+	after, err := ws.Store.getFirstSeen(recovered.AID, seq)
+	if err != nil || after == nil {
+		t.Fatalf("first seen: %v", err)
+	}
+	if after.KelDigest != before.KelDigest {
+		t.Fatalf("the digest remembered at place %d is now the retired branch's (%s), was the recovered log's (%s)", seq, after.KelDigest, before.KelDigest)
+	}
+}
+
+// A recovery is not a fork, however the pair is put to Reverify: the recovery
+// rotation as the held event and the retired interaction as the rival, or the
+// other way round. The same pair of events with no recovery between them is
+// still a fork.
+//
+// Fails when Reverify does not apply recoveryRetires in both directions, or
+// does not check the identifier.
+func TestReverifyDoesNotAcceptARecoveryAsAFork(t *testing.T) {
+	_, stale, recovered := aRecoveryAfterATheft(t)
+	rec, err := drivers.SignedMessagesFromRecords(recovered.Records())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ret, err := drivers.SignedMessagesFromRecords(stale.Records())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := func(m []byte) string { return base64.StdEncoding.EncodeToString(m) }
+	prior := []string{b64(rec[0]), b64(rec[1])}
+	mk := func(held, rival []byte) Evidence {
+		return Evidence{Kind: "duplicity", Identifier: recovered.AID, SequenceNum: 2,
+			HeldMessage: b64(held), RivalMessage: b64(rival), PriorMessages: prior}
+	}
+	if err := mk(rec[2], ret[2]).Reverify(); err == nil {
+		t.Error("a recovery rotation held, the retired interaction as the rival, was taken as a fork")
+	}
+	if err := mk(ret[2], rec[2]).Reverify(); err == nil {
+		t.Error("the retired interaction held, the recovery rotation as the rival, was taken as a fork")
+	}
+	// Control: two interactions at one place are a fork, and the identifier is checked.
+	honest, rival := twoHistories(t)
+	hm, _ := drivers.SignedMessagesFromRecords(honest.Records())
+	rm, _ := drivers.SignedMessagesFromRecords(rival.Records())
+	fork := Evidence{Kind: "duplicity", Identifier: honest.AID, SequenceNum: 2,
+		HeldMessage: b64(hm[2]), RivalMessage: b64(rm[2]), PriorMessages: []string{b64(hm[0]), b64(hm[1])}}
+	if err := fork.Reverify(); err != nil {
+		t.Fatalf("control: a real fork stopped re-verifying: %v", err)
+	}
+	other := fork
+	other.Identifier = recovered.AID
+	if other.Reverify() == nil {
+		t.Error("evidence naming another identity re-verified")
+	}
+	none := fork
+	none.Identifier = ""
+	if none.Reverify() == nil {
+		t.Error("evidence naming no identity re-verified")
 	}
 }

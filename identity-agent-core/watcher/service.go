@@ -221,6 +221,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		// for differing from it. A proven log replaces a planted sighting; an
 		// unproven one never contradicts a proven one.
 		var keep [][]byte // the log to keep as the one last accepted
+		stale := false    // the presented log is a branch the kept log retired
 		switch {
 		case proven:
 			seen, err := s.Store.getSeenLog(in.AID)
@@ -245,15 +246,20 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 				case seenMoved:
 					l1Outcome, keep = "first_seen", merged
 				case seenStale:
-					l1Outcome, l1Latest = "match", merged
+					l1Outcome, l1Latest, stale = "match", merged, true
 				default:
 					l1Outcome = "match"
 				}
 			}
 			if l1Outcome == "first_seen" || l1Outcome == "match" {
 				// Remembered, and a retired branch's digest at this place is replaced.
-				if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
-					return err
+				// Not when the presented log is the retired branch itself: what is
+				// remembered at this place stays the recovered log's, so nothing
+				// built from it names the branch recovery replaced.
+				if !stale {
+					if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
+						return err
+					}
 				}
 				if keep != nil {
 					if err := s.Store.saveSeenLog(in.AID, keep, seq, s.now()); err != nil {

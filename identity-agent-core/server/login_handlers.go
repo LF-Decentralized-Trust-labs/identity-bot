@@ -692,7 +692,10 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 		var wRes *watcher.VerifyKelResult
 		issuerKelEvents, wRes = s.watchedLog(ctx, issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil)
 		if wRes != nil && wRes.Stopped() {
-			return false, issuerAid, "issuer KEL duplicity: " + wRes.Reason
+			if wRes.Duplicity() {
+				return false, issuerAid, "issuer KEL duplicity: " + wRes.Reason
+			}
+			return false, issuerAid, "issuer KEL not checked: " + wRes.Reason
 		}
 	}
 	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)

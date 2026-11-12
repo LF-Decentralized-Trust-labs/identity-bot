@@ -84,7 +84,6 @@ func RecordSignatures(rec map[string]interface{}) []string {
 // the rest. ok is false when a message is not of that shape, in which case the
 // log is not handed on as records.
 func RecordsFromSignedMessages(messages [][]byte) ([]map[string]interface{}, bool) {
-	const sigWidth = 88 // an Ed25519 indexed signature, in any of its four codes
 	recs := make([]map[string]interface{}, 0, len(messages))
 	for _, m := range messages {
 		raw := eventOf(m)
@@ -104,12 +103,22 @@ func RecordsFromSignedMessages(messages [][]byte) ([]map[string]interface{}, boo
 			n = n*64 + i
 		}
 		att = att[4:]
-		if n == 0 || len(att) != n*sigWidth {
+		if n == 0 {
 			return nil, false
 		}
-		sigs := make([]string, n)
-		for i := range sigs {
-			sigs[i] = att[i*sigWidth : (i+1)*sigWidth]
+		// Each signature is as wide as its own code says, so a log that mixes
+		// "A" and "2A" signatures is read whole.
+		sigs := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			w := indexedSigWidth(att)
+			if w == 0 || len(att) < w {
+				return nil, false
+			}
+			sigs = append(sigs, att[:w])
+			att = att[w:]
+		}
+		if len(att) != 0 {
+			return nil, false
 		}
 		recs = append(recs, map[string]interface{}{
 			"raw_bytes_b64":   base64.StdEncoding.EncodeToString(raw),
@@ -118,6 +127,20 @@ func RecordsFromSignedMessages(messages [][]byte) ([]map[string]interface{}, boo
 		})
 	}
 	return RecordsFromVerifiedBytes(recs)
+}
+
+// indexedSigWidth is the width of the Ed25519 indexed signature at the front of
+// s, from its code: 88 for "A" and "B", 92 for "2A" and "2B" (a key at another
+// place in its two lists, or an index of 64 or more). 0 for any other code, which
+// is not guessed at.
+func indexedSigWidth(s string) int {
+	switch {
+	case strings.HasPrefix(s, "2A"), strings.HasPrefix(s, "2B"):
+		return 92
+	case strings.HasPrefix(s, "A"), strings.HasPrefix(s, "B"):
+		return 88
+	}
+	return 0
 }
 
 const b64Digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"

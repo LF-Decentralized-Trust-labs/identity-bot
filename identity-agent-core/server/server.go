@@ -2888,7 +2888,11 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		var wRes *watcher.VerifyKelResult
 		issuerKelEvents, wRes = s.watchedLog(r.Context(), cred.Issuer, issuerKelEvents, watcher.SourceCredential, "", nil)
 		if wRes != nil && wRes.Stopped() {
-			writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
+			if wRes.Duplicity() {
+				writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
+			} else {
+				writeError(w, http.StatusConflict, "Issuer KEL could not be checked", wRes.Reason)
+			}
 			return
 		}
 	}
@@ -4073,7 +4077,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		var wRes *watcher.VerifyKelResult
 		oobiData.KEL, wRes = s.watchedLog(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers)
 		if wRes != nil && wRes.Stopped() {
-			writeDuplicity(w, oobiData.AID, wRes.Reason)
+			writeStopped(w, oobiData.AID, wRes)
 			return
 		}
 		kelCount = len(oobiData.KEL)
@@ -4245,7 +4249,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		var wRes *watcher.VerifyKelResult
 		oobiData.KEL, wRes = s.watchedLog(r.Context(), oobiData.AID, oobiData.KEL, watcher.SourceOOBI, req.OobiURL, oobiData.Watchers)
 		if wRes != nil && wRes.Stopped() {
-			writeDuplicity(w, oobiData.AID, wRes.Reason)
+			writeStopped(w, oobiData.AID, wRes)
 			return
 		}
 	}
