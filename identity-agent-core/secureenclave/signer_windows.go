@@ -279,19 +279,23 @@ func (s *tpmSigner) open() error {
 		}
 	}()
 	// A key this call just made and cannot show it recorded is not left behind:
-	// it would be found next time with no record, and refused as not ours.
-	takeBack := func() {
-		if created {
-			if r, _, _ := procDeleteKey.Call(uintptr(key), 0); r == 0 {
-				deleted = true
-			}
+	// it would be found next time with no record, and refused as not ours. When it
+	// cannot be taken back, that is said with the reason it could not be made, never
+	// dropped: a key left behind is one the next call refuses to use.
+	takeBack := func(cause error) error {
+		if !created {
+			return cause
 		}
+		if err := deleteMachineKey(key, auth); err != nil {
+			return fmt.Errorf("%w; and the key it had just made could not be taken back, and is left in the TPM under the name %s: %v", cause, s.keyName, err)
+		}
+		deleted = true
+		return cause
 	}
 
 	pub, err := exportPublic(key)
 	if err != nil {
-		takeBack()
-		return err
+		return takeBack(err)
 	}
 	if auth != nil {
 		// A gated profile uses only a key it made. The core records the public
@@ -307,14 +311,33 @@ func (s *tpmSigner) open() error {
 			// cleared): the new key replaces it, said and never silent. Shared with
 			// the Mac signer, so the two do not drift.
 			if err := recordANewControllerKey(s.dataDir, "tpm2", s.keyName, pub); err != nil {
-				takeBack()
-				return fmt.Errorf("the controller key could not be recorded: %w", err)
+				return takeBack(fmt.Errorf("the controller key could not be recorded: %w", err))
 			}
 		} else if err := theControllerKeyIsTheOneWeMade(s.dataDir, s.keyName, pub); err != nil {
 			return fmt.Errorf("%w: %w", errAHardwareKeyExistsAndWillNotOpen, err)
 		}
 	}
 	s.pub, s.opened = pub, true
+	return nil
+}
+
+// deleteMachineKey deletes an open key. A key made with an authorization value is
+// deleted only by a caller that has it: the Platform Crypto Provider asks for the
+// value first, and, told it may not ask (NCRYPT_SILENT_FLAG, which no call on this
+// path may omit: deleting a profile must never put a prompt on a screen nobody is at),
+// refuses, and the key stays. So the value is given to the handle first, and a refusal
+// is an error the caller reads, never a delete that did not happen. On success the
+// handle is freed by the provider; on failure it is still the caller's. auth is nil for
+// a key made without one.
+func deleteMachineKey(key windows.Handle, auth []byte) error {
+	if auth != nil {
+		if err := supplyUsageAuth(key, auth); err != nil {
+			return err
+		}
+	}
+	if r, _, _ := procDeleteKey.Call(uintptr(key), ncryptSilentFlag); r != 0 {
+		return fmt.Errorf("the TPM would not delete the key (0x%X)", uint32(r))
+	}
 	return nil
 }
 

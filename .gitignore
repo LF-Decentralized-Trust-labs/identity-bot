@@ -88,3 +88,6 @@ identity-agent-core/build/
 
 # The ready-built login page: made by `npm run build:app`, never committed
 packages/*/bundle/
+
+# Dart tooling output
+.dart_tool/
