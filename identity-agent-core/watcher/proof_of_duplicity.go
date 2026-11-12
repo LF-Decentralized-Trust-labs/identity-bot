@@ -105,7 +105,20 @@ type Evidence struct {
 	// WrongIdentity is true when the watcher answered about a different
 	// identity, which a screen words apart from a signature that failed.
 	WrongIdentity bool `json:"wrong_identity,omitempty"`
+	// WhyCode names how a flagged watcher's answer failed, as one of the Fault*
+	// codes below, so a screen words it from the code and never from Why's English.
+	WhyCode string `json:"why_code,omitempty"`
 }
+
+// How a flagged watcher's answer did not hold up. These are stored and read by
+// clients: add to them, never rename one.
+const (
+	FaultLogDoesNotVerify   = "log_does_not_verify"   // its log's signatures or chaining fail
+	FaultWrongIdentity      = "wrong_identity"        // it answered about another identity
+	FaultEventDoesNotVerify = "event_does_not_verify" // an event of its log fails against the state before it
+	FaultEventUnreadable    = "event_unreadable"      // an event of its log does not parse
+	FaultEventRefused       = "event_refused"         // an event of its log breaks the presented log's own rules
+)
 
 // Reverify checks a duplicity alert's evidence from what it stores and nothing
 // else: the prior log verifies, and both events at the contested place verify
@@ -248,6 +261,8 @@ type proof struct {
 	// belongs to a different identity from the one asked about. That is not a
 	// failed signature: nothing in it was forged, it answered about someone else.
 	WrongIdentity bool
+	// Code is the Fault* code for a faulty watcher, so nothing reads the Reason.
+	Code string
 	// Latest is, for proofAhead and proofSuperseded, the verified log with the
 	// watcher's later events admitted, and LatestMessages its signed messages.
 	Latest         *keri.SignedKELResult
@@ -259,6 +274,8 @@ type proof struct {
 	AlsoFaulty string
 	// AlsoWrongIdentity says AlsoFaulty is a rival that belongs to another identity.
 	AlsoWrongIdentity bool
+	// AlsoCode is the Fault* code of AlsoFaulty.
+	AlsoCode string
 }
 
 // judgeWatcherLog is the classifier. presented are the presented log's signed
@@ -276,10 +293,10 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	}
 	theirLog, err := keri.ValidateSignedKEL(theirs.Messages)
 	if err != nil {
-		return proof{Kind: proofWatcherFaulty, Reason: "its log does not verify: " + err.Error()}
+		return proof{Kind: proofWatcherFaulty, Reason: "its log does not verify: " + err.Error(), Code: FaultLogDoesNotVerify}
 	}
 	if theirLog.Identifier != aid {
-		return proof{Kind: proofWatcherFaulty, Reason: "its log is for another identity", WrongIdentity: true}
+		return proof{Kind: proofWatcherFaulty, Reason: "its log is for another identity", WrongIdentity: true, Code: FaultWrongIdentity}
 	}
 
 	msgs := append([][]byte(nil), presented...) // the messages of cur, by place
@@ -298,7 +315,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		}
 		if _, err := keri.VerifyEvent(before, message); err != nil {
 			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log at place " +
-				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error()}, true
+				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error(), Code: FaultEventDoesNotVerify}, true
 		}
 		// The rival may be what a recovery rotation the presented log holds at this
 		// place retires: a recovery rotation replaces the interactions after the last
@@ -328,10 +345,10 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	admit := func(message []byte, rival bool) *proof {
 		ev, err := keri.ParseEvent(message)
 		if err != nil {
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log does not parse"}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log does not parse", Code: FaultEventUnreadable}
 		}
 		if ev.Identifier != aid {
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log belongs to another identity", WrongIdentity: true}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log belongs to another identity", WrongIdentity: true, Code: FaultWrongIdentity}
 		}
 		if held := cur.StateAt(ev.SN); held != nil && held.Digest() == ev.SAID {
 			return nil // the same event
@@ -355,7 +372,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		case errors.As(err, &ve) && ve.Has(keri.FaultSequenceSkip) && rival:
 			return nil // a branch beyond what the presented log holds says nothing about it
 		default:
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log is refused by the presented log's own rules: " + err.Error()}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log is refused by the presented log's own rules: " + err.Error(), Code: FaultEventRefused}
 		}
 	}
 
@@ -374,7 +391,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	}
 	// Every rival is examined. One that does not verify flags the watcher and is
 	// set aside; it does not hide a valid one behind it.
-	alsoFaulty, alsoWrong := "", false
+	alsoFaulty, alsoWrong, alsoCode := "", false, ""
 	for _, m := range theirs.Rival {
 		p, done := settle(admit(m, true))
 		if !done {
@@ -382,22 +399,22 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		}
 		if p.Kind == proofWatcherFaulty {
 			if alsoFaulty == "" {
-				alsoFaulty, alsoWrong = p.Reason, p.WrongIdentity
+				alsoFaulty, alsoWrong, alsoCode = p.Reason, p.WrongIdentity, p.Code
 			}
 			continue
 		}
-		p.AlsoFaulty, p.AlsoWrongIdentity = alsoFaulty, alsoWrong
+		p.AlsoFaulty, p.AlsoWrongIdentity, p.AlsoCode = alsoFaulty, alsoWrong, alsoCode
 		return p
 	}
 	switch {
 	case superseding:
 		return proof{Kind: proofSuperseded, Reason: "a recovery rotation the watcher holds replaces the presented log's later interactions",
-			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong, AlsoCode: alsoCode}
 	case moved:
 		return proof{Kind: proofAhead, Reason: "the watcher holds later signed events the presented log lacks",
-			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong, AlsoCode: alsoCode}
 	case alsoFaulty != "":
-		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty, WrongIdentity: alsoWrong}
+		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty, WrongIdentity: alsoWrong, Code: alsoCode}
 	}
 	// The same events, another digest: the two sides digest different renderings
 	// of them. Nothing is proven against either, so it is shown, not flagged.

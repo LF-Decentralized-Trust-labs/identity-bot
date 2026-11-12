@@ -107,7 +107,7 @@ void main() {
             {'role': 'rival', 'type': 'ixn', 'said': 'ERIVALSAID', 'signing_keys': ['DKEYONE']},
           ]}},
       {'id': 2, 'aid': 'EB', 'sequence_num': 5, 'detected_at': 't', 'kind': 'watcher', 'source_url': 'https://w2',
-        'evidence': {'kind': 'watcher', 'sequence_number': 5, 'watcher': 'https://w2', 'why': 'its log does not verify'}},
+        'evidence': {'kind': 'watcher', 'sequence_number': 5, 'watcher': 'https://w2', 'why': 'its log does not verify', 'why_code': 'log_does_not_verify'}},
       {'id': 3, 'aid': 'EC', 'sequence_num': 1, 'detected_at': 't', 'kind': 'escalation', 'source_url': 'https://w3'},
       {'id': 4, 'aid': 'ED', 'sequence_num': 2, 'detected_at': 't'},
       {'id': 5, 'aid': 'EB', 'sequence_num': 5, 'detected_at': 't', 'kind': 'watcher', 'source_url': 'https://w5',
@@ -133,6 +133,8 @@ void main() {
     expect(got[1].why, 'its log does not verify');
     expect(got[1].evidence, isNull);
     expect(got[1].wrongIdentity, isFalse);
+    expect(got[1].whyCode, 'log_does_not_verify');
+    expect(got[4].whyCode, '');
     expect(got[1].watcherFlagWords, 'its log does not verify', reason: 'a failed check keeps the core\'s sentence');
     expect(got[4].wrongIdentity, isTrue);
     expect(got[4].watcherFlagWords, allOf(contains('different identity'), isNot(contains('verify'))),

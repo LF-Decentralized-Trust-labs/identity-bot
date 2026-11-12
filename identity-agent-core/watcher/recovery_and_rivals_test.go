@@ -506,7 +506,7 @@ func TestAWatcherServingAnotherIdentitysLogIsFlagged(t *testing.T) {
 			t.Fatal(err)
 		}
 		found = true
-		if !ev.WrongIdentity || ev.Why != "its log is for another identity" {
+		if !ev.WrongIdentity || ev.WhyCode != FaultWrongIdentity || ev.Why != "its log is for another identity" {
 			t.Errorf("the flag is %+v, want a wrong-identity watcher", ev)
 		}
 	}

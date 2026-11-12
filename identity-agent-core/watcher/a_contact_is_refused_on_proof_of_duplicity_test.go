@@ -67,6 +67,10 @@ func TestAForgedBranchFromALyingWatcherIsIgnoredAndTheWatcherFlagged(t *testing.
 	if len(alerts) != 1 || alerts[0].Kind != AlertKindWatcher || alerts[0].SourceURL != liar.URL || alerts[0].Evidence == "" {
 		t.Fatalf("want one alert about the watcher: %+v", alerts)
 	}
+	var flagged Evidence
+	if err := json.Unmarshal([]byte(alerts[0].Evidence), &flagged); err != nil || flagged.WhyCode != FaultLogDoesNotVerify {
+		t.Fatalf("the flag carries the code %q (%v), want %q, so a screen never reads the English", flagged.WhyCode, err, FaultLogDoesNotVerify)
+	}
 	if ws.openAlertFor(honest.AID, 2, res.Digest) {
 		t.Fatal("an alert about a watcher blocks the contact")
 	}

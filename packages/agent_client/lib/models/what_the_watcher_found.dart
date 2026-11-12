@@ -214,6 +214,12 @@ class WatcherAlert {
   /// Nothing it said failed a signature check, so it is worded apart from one.
   final bool wrongIdentity;
 
+  /// For a "watcher" alert: how its answer failed, as the core's code
+  /// (`log_does_not_verify`, `wrong_identity`, `event_does_not_verify`,
+  /// `event_unreadable`, `event_refused`). Empty on an alert stored before the
+  /// code existed. Word the failure from this, never from [why]'s English.
+  final String whyCode;
+
   const WatcherAlert({
     required this.id,
     required this.aid,
@@ -227,6 +233,7 @@ class WatcherAlert {
     this.evidence,
     this.why = '',
     this.wrongIdentity = false,
+    this.whyCode = '',
   });
 
   /// An alert stays one until it is resolved; acknowledging only records it was read.
@@ -261,6 +268,7 @@ class WatcherAlert {
       evidence: DuplicityEvidence.fromJson(ev),
       why: ev is Map<String, dynamic> && ev['kind'] == 'watcher' ? (ev['why'] ?? '').toString() : '',
       wrongIdentity: ev is Map<String, dynamic> && ev['kind'] == 'watcher' && ev['wrong_identity'] == true,
+      whyCode: ev is Map<String, dynamic> && ev['kind'] == 'watcher' ? (ev['why_code'] ?? '').toString() : '',
     );
   }
 }
@@ -300,7 +308,7 @@ class ContactWatchCheck {
   });
 
   /// True only when a watcher the person trusts ("standing") answered and
-  /// agreed. A watcher the contact named ("hint"), another contact's app and
+  /// agreed. A watcher the contact named ("hint"), another Identity Agent and
   /// this agent's own memory never count: a forger names their own watcher.
   /// One that held the same history and later events ("ahead") agreed too: its
   /// signed log contains the history this contact showed.
