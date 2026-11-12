@@ -113,3 +113,24 @@ func TestAnUnprovenLogIsNeverKept(t *testing.T) {
 		t.Fatalf("a log that proved nothing was kept: %d messages", len(kept))
 	}
 }
+
+// Two checks of rival logs at the same moment cannot both be taken as "the
+// first": whichever runs second is judged against the first, so a fork is never
+// left unnoticed because both read an empty record.
+func TestTwoRivalLogsCheckedAtOnceAreNotBothAccepted(t *testing.T) {
+	for round := 0; round < 10; round++ {
+		ws, _ := migratedWatcher(t)
+		honest, rival := twoHistories(t)
+		blocked := make(chan bool, 2)
+		for _, l := range []*signedlog.Log{honest, rival} {
+			go func(l *signedlog.Log) {
+				res, err := ws.VerifyKel(context.Background(), presenting(t, l, SourceOOBI))
+				blocked <- err == nil && res.Blocked
+			}(l)
+		}
+		a, b := <-blocked, <-blocked
+		if a == b {
+			t.Fatalf("round %d: blocked=%v and %v, want exactly one refused", round, a, b)
+		}
+	}
+}

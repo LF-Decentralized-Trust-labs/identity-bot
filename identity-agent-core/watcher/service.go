@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	keri "github.com/grapeid/keri-go"
@@ -20,6 +21,10 @@ import (
 
 // Service is the watcher engine (L1 self-watch + L2/L3 clients).
 type Service struct {
+	// l1 serialises the read, judge and write of what this agent remembers of a
+	// contact, so two checks of rival logs cannot each judge against the same
+	// kept log and leave whichever finished last as the record.
+	l1 sync.Mutex
 	// PeerAllowed gates which peers this agent will cross-check with. See
 	// peer_boundary.go.
 	PeerAllowed PeerAllowed
@@ -194,6 +199,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		sourcesQueried: []SourceOutcome{},
 	}
 
+	s.l1.Lock()
 	existing, _ := s.Store.getFirstSeen(in.AID, seq)
 	firstContact := existing == nil
 	result.firstContact = firstContact
@@ -236,10 +242,12 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		if l1Outcome == "first_seen" || l1Outcome == "match" {
 			// Remembered, and a retired branch's digest at this place is replaced.
 			if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
+				s.l1.Unlock()
 				return nil, err
 			}
 			if keep != nil {
 				if err := s.Store.saveSeenLog(in.AID, keep, seq, s.now()); err != nil {
+					s.l1.Unlock()
 					return nil, err
 				}
 			}
@@ -247,6 +255,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	case existing == nil:
 		l1Outcome = "first_seen"
 		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false); err != nil {
+			s.l1.Unlock()
 			return nil, err
 		}
 	case existing.KelDigest == digest:
@@ -256,6 +265,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		// Shown, never refused on: this log proves nothing.
 		l1Outcome = "unproven_mismatch"
 	}
+	s.l1.Unlock()
 	result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{Type: "L1", Outcome: l1Outcome})
 
 	// Every standing watcher is asked. The first is the default one, whose

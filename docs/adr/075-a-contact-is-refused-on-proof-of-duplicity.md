@@ -113,6 +113,13 @@ was kept) it is shown to the owner and refuses nothing.
 - A watcher whose log is too long to fetch (the read is bounded), that would not
   show its log, or that served it without signed bytes is unprovable, so it
   refuses nothing.
+- A key that was once valid can still make the owner's log look like a fork: a
+  holder of a retired key, or of the current one, who gets a validly signed
+  event to this agent first leaves the owner's genuine log refused at that place
+  as duplicity, as KERI's first-seen rule has it. A recovery rotation then moves
+  the kept log on, but while the alert about it is open the contact stays held,
+  so the owner resolves the alert first. Nothing here distinguishes the owner's
+  event from the key-holder's.
 - A watcher that matches the presented log but also holds a rival branch is not
   asked for its log, since its digest says nothing of rivals; a fork it saw is
   shown to whoever presents the rival branch.
