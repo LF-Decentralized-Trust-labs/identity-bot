@@ -74,15 +74,21 @@ question to put to a watcher that disagrees is not "how many of you agree" but
    with the log, so it can hand over the evidence. Its `first_seen_at` is when it
    saw the log through that place, from its own observations.
 
-The agent's own record still refuses a repeat contact whose log differs from the
-one this agent first saw (L1), but only when both logs verify under their own
-controller's signatures. A first sighting from a log that proved nothing is
-remembered but marked unproven: a later log that verifies replaces it, and a log
-that does not never contradicts it into a refusal, so showing an agent a made-up
-log for somebody else's identifier cannot get that identifier refused. The agent
-keeps the digest of what it first saw, not the events, so this refusal still
-rests on the digest and not on shown evidence; keeping the first-seen signed log
-would make it provable.
+The agent's own record is judged the same way. It keeps the signed log it last
+accepted for each contact, only from a log that verified under its controller's
+signatures, and a later log that verifies is judged against it with the same
+rules as a watcher's log: events admitted to the kept log, a recovery rotation
+replacing only the interactions after the last establishment event. A later log
+that goes on from the kept one, or is an older part of it, or carries a recovery
+rotation over what the kept log held, is not duplicity and becomes the kept log
+where it moves it on. Two validly signed events at one place that no recovery
+explains are duplicity, shown by both events. A first sighting from a log that
+proved nothing is remembered as a digest but marked unproven: a later log that
+verifies replaces it, and a log that does not never contradicts it into a
+refusal, so showing an agent a made-up log for somebody else's identifier cannot
+get that identifier refused. Where the kept log cannot settle a difference
+(a delegated rotation at a taken place, or a proven digest from before the log
+was kept) it is shown to the owner and refuses nothing.
 
 ## Consequences
 

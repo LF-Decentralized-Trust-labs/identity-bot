@@ -205,24 +205,53 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// it. A proven log replaces a planted sighting; an unproven one never
 	// contradicts a proven one.
 	var l1Outcome string
+	var l1Fork *proof // the proof, when this agent's own kept log shows a fork
+	var keep [][]byte // the log to keep as the one last accepted
 	switch {
+	case proven:
+		seen, err := s.Store.getSeenLog(in.AID)
+		if err != nil {
+			log.Printf("[watcher] the kept log of %s could not be read: %v", in.AID, err)
+		}
+		switch {
+		case err != nil || (seen == nil && existing != nil && existing.Proven && existing.KelDigest != digest):
+			// A sighting from a proven log whose events are not kept (or cannot be
+			// read): a difference cannot be shown, so it is shown, not refused on.
+			l1Outcome = "unproven_mismatch"
+		case seen == nil:
+			l1Outcome, keep = "first_seen", in.Signed
+		default:
+			v, p, merged := judgeAgainstSeen(in.AID, seen, in.Signed)
+			switch v {
+			case seenFork:
+				l1Outcome, l1Fork = "mismatch", &p
+			case seenUnprovable:
+				l1Outcome = "unproven_mismatch"
+			case seenMoved:
+				l1Outcome, keep = "first_seen", merged
+			default:
+				l1Outcome = "match"
+			}
+		}
+		if l1Outcome == "first_seen" || l1Outcome == "match" {
+			// Remembered, and a retired branch's digest at this place is replaced.
+			if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
+				return nil, err
+			}
+			if keep != nil {
+				if err := s.Store.saveSeenLog(in.AID, keep, seq, s.now()); err != nil {
+					return nil, err
+				}
+			}
+		}
 	case existing == nil:
 		l1Outcome = "first_seen"
-		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, proven); err != nil {
+		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false); err != nil {
 			return nil, err
 		}
 	case existing.KelDigest == digest:
 		l1Outcome = "match"
-		_ = s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, proven)
-	case proven && !existing.Proven:
-		// What was remembered came from a log that proved nothing. The proven one
-		// takes its place, and nothing is refused.
-		l1Outcome = "first_seen"
-		if err := s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, true); err != nil {
-			return nil, err
-		}
-	case proven && existing.Proven:
-		l1Outcome = "mismatch"
+		_ = s.recordFirstSeen(in.AID, seq, digest, in.SourceType, in.SourceURL, false)
 	default:
 		// Shown, never refused on: this log proves nothing.
 		l1Outcome = "unproven_mismatch"
@@ -270,16 +299,19 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		})
 	}
 
-	// Blocking: this agent's own record of the contact differs from what it is
-	// shown, or a standing watcher proved two histories: two validly signed
-	// events at one place, which one watcher's evidence is enough to show.
+	// Blocking: a standing watcher proved two histories, or this agent's own kept
+	// log and the presented one hold two events at one place, each validly signed:
+	// two events by the one controller, which one source's evidence is enough to show.
 	shouldBlock := false
 	blockReason := ""
 	var heldAlert *DuplicityAlert
 	var evidence string
-	if l1Outcome == "mismatch" {
+	if l1Fork != nil {
+		// This agent's own kept log and the presented one hold two events at one
+		// place, each signed by the controller: proof, shown by both events.
 		shouldBlock = true
-		blockReason = "L1 digest mismatch at same sequence"
+		blockReason = "proof of duplicity: " + l1Fork.Reason
+		evidence = l1Fork.Evidence.json()
 	} else if fork != nil {
 		shouldBlock = true
 		blockReason = "proof of duplicity: " + fork.proof.Reason

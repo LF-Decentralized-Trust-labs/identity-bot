@@ -1233,6 +1233,21 @@ ALTER TABLE duplicity_alerts ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '';
 -- the identity's real log refused.
 ALTER TABLE kel_first_seen ADD COLUMN proven INTEGER NOT NULL DEFAULT 0;
 `},
+	{
+		Version:     58,
+		Description: "Keep the signed key log this agent last accepted for each contact, so a later log can be judged against it with KERI's superseding rules",
+		SQL: `
+-- JSON array of the log's signed messages (base64, one per event, in order), as
+-- keri.ValidateSignedKEL judges them. Only a log that verified is kept. A digest
+-- cannot say whether two logs that differ at one place are duplicity or a
+-- recovery rotation replacing interactions, and the events can.
+CREATE TABLE IF NOT EXISTS kel_seen_log (
+    aid TEXT PRIMARY KEY,
+    messages_json TEXT NOT NULL,
+    sequence_num INTEGER NOT NULL,
+    saved_at TEXT NOT NULL
+);
+`},
 }
 
 // execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD

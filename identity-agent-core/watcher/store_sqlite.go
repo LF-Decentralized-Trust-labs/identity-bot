@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -282,6 +283,47 @@ func (s *SQLiteStore) PruneIntermediate(aid string, keepSeqs []int) error {
 	return err
 }
 
+func (s *SQLiteStore) getSeenLog(aid string) ([][]byte, error) {
+	var js string
+	err := s.db.QueryRow(`SELECT messages_json FROM kel_seen_log WHERE aid = ?`, aid).Scan(&js)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var enc []string
+	if err := json.Unmarshal([]byte(js), &enc); err != nil {
+		return nil, fmt.Errorf("the kept log of %s does not read: %w", aid, err)
+	}
+	out := make([][]byte, 0, len(enc))
+	for _, e := range enc {
+		b, err := base64.StdEncoding.DecodeString(e)
+		if err != nil {
+			return nil, fmt.Errorf("the kept log of %s does not read: %w", aid, err)
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) saveSeenLog(aid string, messages [][]byte, seq int, at time.Time) error {
+	enc := make([]string, 0, len(messages))
+	for _, m := range messages {
+		enc = append(enc, base64.StdEncoding.EncodeToString(m))
+	}
+	js, err := json.Marshal(enc)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO kel_seen_log (aid, messages_json, sequence_num, saved_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(aid) DO UPDATE SET messages_json = excluded.messages_json,
+			sequence_num = excluded.sequence_num, saved_at = excluded.saved_at`,
+		aid, string(js), seq, at.UTC().Format(time.RFC3339))
+	return err
+}
+
 func (s *SQLiteStore) PruneStale(before time.Time) (int, error) {
 	res, err := s.db.Exec(`
 		DELETE FROM kel_first_seen
@@ -294,6 +336,10 @@ func (s *SQLiteStore) PruneStale(before time.Time) (int, error) {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+	// A kept log outlives nothing it was kept for.
+	if _, err := s.db.Exec(`DELETE FROM kel_seen_log WHERE aid NOT IN (SELECT aid FROM kel_first_seen)`); err != nil {
+		return int(n), err
+	}
 	return int(n), nil
 }
 
