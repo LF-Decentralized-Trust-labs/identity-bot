@@ -46,6 +46,16 @@ import (
 //
 // Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
 var controllerOwnerOnly = map[string]string{
+	// --- the lock of a logged-out identity (ADR-074) ---
+	// A peer never opens or closes this device's identity: a locked phone is
+	// unlocked by its person logging in on it, and a controller asking a locked
+	// phone is refused, not served.
+	"GET /api/lock/state":     "whether this device's identity is open is for the person at this device",
+	"POST /api/lock/unlock":   "a phone never unlocks because a peer asked; its person logs in on it",
+	"POST /api/lock/lock":     "logging an identity out of this device is for the person at this device",
+	"PUT /api/lock/secret":    "the secret that locks this identity is for the person at this device",
+	"DELETE /api/lock/secret": "the secret that locks this identity is for the person at this device",
+
 	// --- the root of trust ---
 	"POST /api/keystore/root-seed":                      "installing a root seed decides what this identity is",
 	"PUT /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",

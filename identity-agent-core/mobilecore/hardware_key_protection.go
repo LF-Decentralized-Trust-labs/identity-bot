@@ -69,6 +69,29 @@ type SeedWrapHost interface {
 	UnwrapKey(wrapped []byte) ([]byte, error)
 }
 
+// ProfileSeedWrapHost is the app's second half on Android: the same three calls
+// as SeedWrapHost, each naming the Keystore alias of a profile's own key (a key
+// per identity on the device, ADR-074). Make the key under that alias on first
+// use, with the same properties and the same attestation challenge as the
+// device-wide key. Register it beside SeedWrapHost; an app that registers none
+// keeps one key for every profile.
+type ProfileSeedWrapHost interface {
+	AvailableFor(alias string) bool
+	AttestationChainFor(alias string) []byte
+	UnwrapKeyFor(alias string, wrapped []byte) ([]byte, error)
+}
+
+// DeclareProfileSeedWrapHost registers the app's per-profile seed wrapper. Must
+// be called before StartServer, beside DeclareSeedWrapHost. Passing nil removes
+// it.
+func DeclareProfileSeedWrapHost(h ProfileSeedWrapHost) {
+	if h == nil {
+		secureenclave.DeclareProfileSeedWrapHost(nil)
+		return
+	}
+	secureenclave.DeclareProfileSeedWrapHost(h)
+}
+
 // SeedWrapAttestationChallenge is the challenge the key must be generated with.
 func SeedWrapAttestationChallenge() string { return secureenclave.SeedWrapAttestationChallenge }
 

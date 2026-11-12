@@ -29,9 +29,11 @@ package secureenclave
 // succeeding.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"sync"
 	"unsafe"
 
@@ -45,7 +47,59 @@ var (
 	procOpenKey   = ncrypt.NewProc("NCryptOpenKey")
 	procExportKey = ncrypt.NewProc("NCryptExportKey")
 	procSignHash  = ncrypt.NewProc("NCryptSignHash")
+	procDeleteKey = ncrypt.NewProc("NCryptDeleteKey")
 )
+
+// ncryptSilentFlag is NCRYPT_SILENT_FLAG: the provider may not show UI. Passed on
+// every call that can reach a key with an authorization value, so a core with no
+// desktop to show it on fails with a status instead of waiting for a prompt.
+const ncryptSilentFlag = 0x00000040
+
+func init() {
+	// A TPM key made for a profile is evidence the profile was gated, even when
+	// every file that said so is gone.
+	aHardwareKeyOfThisProfileExists = func(dataDir, profileID string) bool {
+		return theProfilesTPMKeyExists(ProfileKeyName(machineKeyName, profileID))
+	}
+}
+
+// theProfilesTPMKeyExists opens the named key without using it. A status that
+// is not "there is no such key" counts as existing: a key that cannot be asked
+// about is not shown to be absent.
+func theProfilesTPMKeyExists(name string) bool {
+	// Asked on the path of every signature and lock check, so a yes is kept: a
+	// key that was there marks the profile gated whatever later happens to it.
+	if _, ok := thePresentTPMKeys.Load(name); ok {
+		return true
+	}
+	if theTPMKeyIsThere(name) {
+		thePresentTPMKeys.Store(name, true)
+		return true
+	}
+	return false
+}
+
+var thePresentTPMKeys sync.Map
+
+func theTPMKeyIsThere(name string) bool {
+	provider, err := openProvider()
+	if err != nil {
+		return false
+	}
+	defer procFreeObject.Call(uintptr(provider))
+	n, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return false
+	}
+	var key windows.Handle
+	r, _, _ := procOpenKey.Call(uintptr(provider), uintptr(unsafe.Pointer(&key)),
+		uintptr(unsafe.Pointer(n)), 0, ncryptSilentFlag)
+	if r == 0 {
+		procFreeObject.Call(uintptr(key))
+		return true
+	}
+	return !meansNoKeyYet(uint32(r))
+}
 
 // machineKeyName is what this agent's key is called inside the provider.
 //
@@ -98,9 +152,49 @@ type tpmSigner struct {
 	mu     sync.Mutex
 	opened bool
 	pub    []byte
+	// dataDir is the profile this key belongs to, "" for the machine's own key
+	// with no profile. keyName is the key inside the provider: the device-wide
+	// name, or the profile's own when it has a gate (ADR-074 section 3).
+	dataDir string
+	keyName string
+	lastErr error
 }
 
-func newTPMSigner() PlatformSigner { return &tpmSigner{} }
+func (s *tpmSigner) whyUnavailable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
+}
+
+func newTPMSigner() PlatformSigner { return &tpmSigner{keyName: machineKeyName} }
+
+// forProfileAt is the controller key of the profile whose data is at dataDir:
+// a key of its own, and under the gate's authorization value when the profile
+// has a gate. NewPlatformSigner asks for it; a profile with no gate gets the
+// device-wide key, as before.
+func (s *tpmSigner) forProfileAt(dataDir string) PlatformSigner {
+	return &tpmSigner{dataDir: dataDir, keyName: controllerKeyNameFor(machineKeyName, dataDir)}
+}
+
+// authorization is the TPM authorization value of this key: HKDF(GK, "tpm-auth")
+// for a profile with a gate, nil for one without. A locked profile is
+// ErrIdentityLocked, so the TPM is not asked.
+func (s *tpmSigner) authorization() ([]byte, error) {
+	if s.dataDir == "" {
+		return nil, nil
+	}
+	return tpmAuthorizationFor(s.dataDir)
+}
+
+// stillOpen refuses once the profile has locked, even to a signer that opened
+// the key before.
+func (s *tpmSigner) stillOpen() error {
+	if s.dataDir == "" {
+		return nil
+	}
+	_, _, err := theGateForThisSeed(s.dataDir)
+	return err
+}
 
 func (s *tpmSigner) Platform() string { return "tpm2" }
 func (s *tpmSigner) Label() string    { return "TPM 2.0 (Platform Crypto Provider)" }
@@ -137,8 +231,20 @@ func (s *tpmSigner) ensure() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.opened {
-		return nil
+		return s.stillOpen()
 	}
+	err := s.open()
+	s.lastErr = err
+	return err
+}
+
+func (s *tpmSigner) open() error {
+	// The authorization value first: a locked profile never reaches the TPM.
+	auth, err := s.authorization()
+	if err != nil {
+		return err
+	}
+	defer zero(auth)
 
 	provider, err := openProvider()
 	if err != nil {
@@ -146,32 +252,79 @@ func (s *tpmSigner) ensure() error {
 	}
 	defer procFreeObject.Call(uintptr(provider))
 
-	name, err := windows.UTF16PtrFromString(machineKeyName)
+	name, err := windows.UTF16PtrFromString(s.keyName)
 	if err != nil {
 		return err
 	}
 
 	var key windows.Handle
 	r, _, _ := procOpenKey.Call(uintptr(provider), uintptr(unsafe.Pointer(&key)),
-		uintptr(unsafe.Pointer(name)), 0, 0)
+		uintptr(unsafe.Pointer(name)), 0, ncryptSilentFlag)
+	created := false
 	if meansNoKeyYet(uint32(r)) {
-		if key, err = createMachineKey(provider, name); err != nil {
+		if key, err = createMachineKey(provider, name, auth); err != nil {
 			return err
 		}
+		created = true
 	} else if r != 0 {
-		return fmt.Errorf("this machine's key could not be opened (0x%X)", uint32(r))
+		return fmt.Errorf("%w: this machine's key could not be opened (0x%X)",
+			errAHardwareKeyExistsAndWillNotOpen, uint32(r))
 	}
-	defer procFreeObject.Call(uintptr(key))
+	// NCryptDeleteKey frees the handle when it succeeds, so a key that was
+	// deleted is not freed again.
+	deleted := false
+	defer func() {
+		if !deleted {
+			procFreeObject.Call(uintptr(key))
+		}
+	}()
+	// A key this call just made and cannot show it recorded is not left behind:
+	// it would be found next time with no record, and refused as not ours.
+	takeBack := func() {
+		if created {
+			if r, _, _ := procDeleteKey.Call(uintptr(key), 0); r == 0 {
+				deleted = true
+			}
+		}
+	}
 
 	pub, err := exportPublic(key)
 	if err != nil {
+		takeBack()
 		return err
+	}
+	if auth != nil {
+		// A gated profile uses only a key it made. The core records the public
+		// key of the one it creates, under the gate key, and refuses any other:
+		// same-user code can make a key of this name with no authorization value.
+		if created {
+			if s.keyName != machineKeyName && theProfilesTPMKeyExists(machineKeyName) {
+				// ADR-074 section 3: a profile's key is a new key, so the root
+				// device's grant to the device-wide one no longer matches.
+				log.Printf("[secureenclave] this computer made a controller key of its own for this identity; the device-wide key it used before is kept and is no longer the one it signs with, so its root device must grant it again")
+			}
+			// An earlier record of this key means it is gone (deleted, or the TPM was
+			// cleared): the new key replaces it, said and never silent. Shared with
+			// the Mac signer, so the two do not drift.
+			if err := recordANewControllerKey(s.dataDir, "tpm2", s.keyName, pub); err != nil {
+				takeBack()
+				return fmt.Errorf("the controller key could not be recorded: %w", err)
+			}
+		} else if err := theControllerKeyIsTheOneWeMade(s.dataDir, s.keyName, pub); err != nil {
+			return fmt.Errorf("%w: %w", errAHardwareKeyExistsAndWillNotOpen, err)
+		}
 	}
 	s.pub, s.opened = pub, true
 	return nil
 }
 
-func createMachineKey(provider windows.Handle, name *uint16) (windows.Handle, error) {
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+func createMachineKey(provider windows.Handle, name *uint16, auth []byte) (windows.Handle, error) {
 	algorithm, err := windows.UTF16PtrFromString("ECDSA_P256")
 	if err != nil {
 		return 0, err
@@ -196,6 +349,15 @@ func createMachineKey(provider windows.Handle, name *uint16) (windows.Handle, er
 	// Nothing sets an export policy. The default is no export, and this provider
 	// cannot produce an exportable key even when asked — so the guarantee comes
 	// from the provider rather than from a flag somebody could change.
+	//
+	// A profile's key has an authorization value, set before it is finalised: the
+	// TPM then refuses to sign without it and counts failures itself (ADR-074).
+	if auth != nil {
+		if err := setUsageAuth(key, auth); err != nil {
+			procFreeObject.Call(uintptr(key))
+			return 0, err
+		}
+	}
 	if r, _, _ := procFinalizeKey.Call(uintptr(key), 0); r != 0 {
 		procFreeObject.Call(uintptr(key))
 		return 0, fmt.Errorf("the TPM would not finalise this machine's key (0x%X)", uint32(r))
@@ -276,6 +438,11 @@ func (s *tpmSigner) Sign(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("nothing to sign")
 	}
+	auth, err := s.authorization()
+	if err != nil {
+		return nil, err
+	}
+	defer zero(auth)
 
 	provider, err := openProvider()
 	if err != nil {
@@ -283,33 +450,87 @@ func (s *tpmSigner) Sign(data []byte) ([]byte, error) {
 	}
 	defer procFreeObject.Call(uintptr(provider))
 
-	name, err := windows.UTF16PtrFromString(machineKeyName)
+	name, err := windows.UTF16PtrFromString(s.keyName)
 	if err != nil {
 		return nil, err
 	}
 	var key windows.Handle
 	if r, _, _ := procOpenKey.Call(uintptr(provider), uintptr(unsafe.Pointer(&key)),
-		uintptr(unsafe.Pointer(name)), 0, 0); r != 0 {
+		uintptr(unsafe.Pointer(name)), 0, ncryptSilentFlag); r != 0 {
 		return nil, fmt.Errorf("this machine's key could not be opened to sign (0x%X)", uint32(r))
 	}
 	defer procFreeObject.Call(uintptr(key))
+	// The key opened by name now is the one that was checked when it was first
+	// opened: a key swapped in between is refused before the TPM is asked to sign.
+	if now, err := exportPublic(key); err != nil || !bytes.Equal(now, s.pub) {
+		return nil, fmt.Errorf("%w: the key of this name is not the one that was opened", ErrControllerKeyNotOurs)
+	}
+	if auth != nil {
+		if err := supplyUsageAuth(key, auth); err != nil {
+			return nil, err
+		}
+	}
 
 	sum := sha256.Sum256(data)
 	var need uint32
 	if r, _, _ := procSignHash.Call(uintptr(key), 0,
 		uintptr(unsafe.Pointer(&sum[0])), uintptr(len(sum)),
-		0, 0, uintptr(unsafe.Pointer(&need)), 0); r != 0 {
+		0, 0, uintptr(unsafe.Pointer(&need)), ncryptSilentFlag); r != 0 {
 		return nil, fmt.Errorf("the TPM would not size a signature (0x%X)", uint32(r))
 	}
 	sig := make([]byte, need)
 	if r, _, _ := procSignHash.Call(uintptr(key), 0,
 		uintptr(unsafe.Pointer(&sum[0])), uintptr(len(sum)),
 		uintptr(unsafe.Pointer(&sig[0])), uintptr(need),
-		uintptr(unsafe.Pointer(&need)), 0); r != 0 {
+		uintptr(unsafe.Pointer(&need)), ncryptSilentFlag); r != 0 {
 		return nil, fmt.Errorf("the TPM would not sign (0x%X)", uint32(r))
 	}
 	if int(need) != 64 {
 		return nil, fmt.Errorf("expected 64 bytes of raw r||s from a P-256 key, got %d", need)
 	}
 	return sig[:need], nil
+}
+
+// The one NCrypt property that carries a TPM key's authorization value. The core
+// does not compute the digest the TPM keeps: it gives the provider the value as
+// NCRYPT_PIN_PROPERTY, both when the key is made (before it is finalised) and
+// when it is used, and the provider derives the authorization from it the same
+// way both times. An earlier version set PCP_USAGEAUTH to a SHA-1 the core
+// computed over the ASCII text and supplied the text as UTF-16 at use, which
+// agrees only if the provider hashes it exactly that way; Microsoft's samples
+// hash the UTF-16LE string without its terminator.
+//
+// UNVERIFIED ON A TPM: that this provider accepts the property before
+// finalisation, and refuses the wrong value and counts it. scripts/tpm-authorization-probe
+// decides it on a real Windows machine (ADR-074 section 3).
+const ncryptPinProperty = "SmartCardPin" // NCRYPT_PIN_PROPERTY, the value as a wide string
+
+// setUsageAuth gives a key being made its authorization value.
+func setUsageAuth(key windows.Handle, auth []byte) error {
+	return setThePin(key, auth, "the TPM would not take the controller key's authorization value")
+}
+
+// supplyUsageAuth gives an opened key the authorization value it needs to sign.
+func supplyUsageAuth(key windows.Handle, auth []byte) error {
+	return setThePin(key, auth, "the TPM would not take the authorization value to sign")
+}
+
+// setThePin hands the provider the value as the wide string it takes, with its
+// terminator, and wipes every copy of it that this function made.
+func setThePin(key windows.Handle, auth []byte, failure string) error {
+	wide := tpmUsageAuthWide(auth)
+	defer func() {
+		for i := range wide {
+			wide[i] = 0
+		}
+	}()
+	p, err := windows.UTF16PtrFromString(ncryptPinProperty)
+	if err != nil {
+		return err
+	}
+	if r, _, _ := procSetProperty.Call(uintptr(key), uintptr(unsafe.Pointer(p)),
+		uintptr(unsafe.Pointer(&wide[0])), uintptr(len(wide)*2), ncryptSilentFlag); r != 0 {
+		return fmt.Errorf("%s (0x%X)", failure, uint32(r))
+	}
+	return nil
 }

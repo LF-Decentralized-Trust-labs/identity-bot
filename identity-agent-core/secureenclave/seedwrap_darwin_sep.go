@@ -34,6 +34,11 @@ import (
 // The seed cannot be copied to another machine and opened; its use can be
 // borrowed locally. Same property, same wording, as the signer next door.
 //
+// Per profile by construction (ADR-074 section 3): a key per wrap, whose blob
+// travels inside the wrapped bytes, so two profiles never share a hardware key
+// and there is no key name to give. The wrapper therefore does not implement
+// PerProfileKeys, and a Mac profile's envelope names no key.
+//
 // Built behind the sepblob tag with the Swift shim (scripts/build-sep-shim.sh),
 // like the signer. Without the tag the build has no macOS wrapper and says so.
 type sepSeedWrapper struct {

@@ -66,6 +66,12 @@ opens them to a controller. They are:
   owner's switches (`PUT /api/assets/{id}/front-ends`) and declaring, once, what
   an older app offers (`PUT /api/assets/{id}/front-ends/offered`). A paired
   controller may read the setting (`GET /api/assets/{id}/front-ends`).
+- the lock of a logged-out identity, as ADR-074 decides: asking whether the
+  identity is open (`GET /api/lock/state`), logging in (`POST /api/lock/unlock`),
+  logging out (`POST /api/lock/lock`) and setting or removing the optional
+  identity secret (`PUT /api/lock/secret`, `DELETE /api/lock/secret`). A paired
+  controller never opens or closes a device's identity; a locked phone is
+  unlocked by its person logging in on it.
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line

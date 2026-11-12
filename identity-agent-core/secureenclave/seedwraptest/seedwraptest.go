@@ -4,6 +4,9 @@
 package seedwraptest
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"identity-agent-core/secureenclave"
@@ -101,4 +104,55 @@ func ThisMachineIsAPhoneWithNoWrapper(t testing.TB) {
 	r3 := secureenclave.UseThisIsAPhone()
 	r4 := thisPlatformMayFound()
 	t.Cleanup(func() { r4(); r3(); r2(); r1() })
+}
+
+// PerProfileWrapper is a wrapper that holds a key per name, as each platform's
+// does (ADR-074): what ForKey(name) wrote opens only under ForKey(name). It is
+// not security either; it makes "wrapped under another profile's key" a failure a
+// test can see.
+type PerProfileWrapper struct{ name string }
+
+// ThisMachineHoldsAKeyPerProfile installs a machine that can protect a seed and
+// holds a hardware key per profile.
+func ThisMachineHoldsAKeyPerProfile(t testing.TB) {
+	t.Helper()
+	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
+		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}
+	})
+	r2 := secureenclave.UseSeedWrapper(PerProfileWrapper{})
+	r3 := thisPlatformMayFound()
+	t.Cleanup(func() { r3(); r2(); r1() })
+}
+
+func (PerProfileWrapper) Available() bool { return true }
+func (PerProfileWrapper) Scheme() string  { return "test-wrap-per-profile" }
+func (w PerProfileWrapper) tag() []byte {
+	sum := sha256.Sum256([]byte("test key|" + w.name))
+	return sum[:4]
+}
+func (w PerProfileWrapper) Wrap(p []byte) ([]byte, error) {
+	out := Wrapper{}.xor(p)
+	return append(out, w.tag()...), nil
+}
+func (w PerProfileWrapper) Unwrap(b []byte) ([]byte, error) {
+	if len(b) < 4 || !bytes.Equal(b[len(b)-4:], w.tag()) {
+		return nil, errors.New("this was wrapped under another key")
+	}
+	return Wrapper{}.xor(b[:len(b)-4]), nil
+}
+
+// KeyNameFor and ForKey make it a per-profile wrapper.
+func (PerProfileWrapper) KeyNameFor(profile string) string {
+	return secureenclave.ProfileKeyName("test-seed-key", profile)
+}
+func (PerProfileWrapper) ForKey(name string) secureenclave.SeedWrapper {
+	return PerProfileWrapper{name: name}
+}
+
+func (Wrapper) xor(p []byte) []byte {
+	out := make([]byte, len(p))
+	for i, b := range p {
+		out[i] = b ^ 0xA5
+	}
+	return out
 }

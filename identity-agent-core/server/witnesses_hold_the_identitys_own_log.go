@@ -26,7 +26,8 @@ type witnessState struct {
 	// One witnessing worker at a time: a request while it runs is coalesced
 	// into one more pass, which reads the key logs as they are then, so the
 	// newest anchoring is always sent and never overtaken by an older one.
-	witnessOnce sync.Once
+	// witnessKick is nil while no worker runs: before the identity is open,
+	// and after a lock has ended it (the_lock_work.go).
 	witnessKick chan struct{}
 	witnessMu   sync.Mutex
 	// sendMu is held while a key log is read and sent to its witnesses, and by
@@ -111,21 +112,37 @@ func (s *CoreServer) addWitnessJob(ownerAID, recordAID string, witnesses []strin
 // kickWitnessing asks the witnessing worker for one more pass, starting it
 // the first time.
 func (s *CoreServer) kickWitnessing() {
-	s.witnessing.witnessOnce.Do(func() {
-		s.witnessing.witnessKick = make(chan struct{}, 1)
-		s.anchorStopMu.Lock()
-		stop := s.anchorStop
-		s.anchorStopMu.Unlock()
-		s.inBackground(func(ctx context.Context) { s.keepWitnessing(ctx, stop) })
-	})
+	w := &s.witnessing
+	w.witnessMu.Lock()
+	if w.witnessKick == nil {
+		kick := make(chan struct{}, 1)
+		started := s.runSeedWork(func(ctx context.Context, stop <-chan struct{}) {
+			s.keepWitnessing(ctx, stop, kick)
+			w.witnessMu.Lock()
+			if w.witnessKick == kick {
+				w.witnessKick = nil
+			}
+			w.witnessMu.Unlock()
+		})
+		if started {
+			w.witnessKick = kick
+		}
+	}
+	kick := w.witnessKick
+	w.witnessMu.Unlock()
+	if kick == nil {
+		// The identity is locked. The job stays in witnessJobs, and the worker
+		// that starts on unlock takes it.
+		return
+	}
 	select {
-	case s.witnessing.witnessKick <- struct{}{}:
+	case kick <- struct{}{}:
 	default: // a pass is already due, and will read the newest
 	}
 }
 
 // keepWitnessing runs one witnessing pass per request, one at a time.
-func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{}) {
+func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{}, kick <-chan struct{}) {
 	for {
 		// stop is nil when the worker was started after the anchoring loop
 		// stopped, and a nil channel never closes, so it also ends with the
@@ -135,7 +152,7 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 			return
 		case <-running.Done():
 			return
-		case <-s.witnessing.witnessKick:
+		case <-kick:
 		}
 		s.witnessing.witnessMu.Lock()
 		jobs := make([]witnessJob, 0, len(s.witnessing.witnessJobs))

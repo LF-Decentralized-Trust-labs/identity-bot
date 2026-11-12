@@ -95,21 +95,38 @@ var (
 	attestationRoots = googleAttestationRoots
 	attestationClock = time.Now
 
-	// verifiedLevel is the level the last SUCCESSFUL check found. The scheme
-	// recorded with a seed comes from it, never from a second read of the app's
-	// chain, which the app could change between the check and the label.
-	verifiedLevel string
-	// verifiedCaveat is what the last successful check let through unchecked
-	// (a development build with no revocation list), "" when nothing.
-	verifiedCaveat string
+	// verified is what the last SUCCESSFUL check of each key found, by the key's
+	// alias ("" for the device-wide key). The scheme recorded with a seed comes
+	// from it, never from a second read of the app's chain, which the app could
+	// change between the check and the label. One entry per key: two profiles'
+	// keys can be at different hardware levels, and one's check must not name the
+	// other's.
+	verified = map[string]verifiedKey{}
 )
+
+// verifiedKey is what a successful check found about one key.
+type verifiedKey struct {
+	// level is the hardware level the attestation proved.
+	level string
+	// caveat is what the check let through unchecked (a development build with no
+	// revocation list), "" when nothing.
+	caveat string
+}
+
+func forgetEveryVerifiedKey() { verified = map[string]verifiedKey{} }
+
+func theVerifiedKey(alias string) verifiedKey {
+	seedWrapHostMu.RLock()
+	defer seedWrapHostMu.RUnlock()
+	return verified[alias]
+}
 
 // DeclareSeedWrapHost registers the app's wrapper. Called through mobilecore
 // before the server starts. Passing nil removes it.
 func DeclareSeedWrapHost(h SeedWrapHost) {
 	seedWrapHostMu.Lock()
 	seedWrapHost = h
-	verifiedLevel, verifiedCaveat = "", ""
+	forgetEveryVerifiedKey()
 	seedWrapHostMu.Unlock()
 }
 
@@ -119,8 +136,89 @@ func declaredSeedWrapHost() SeedWrapHost {
 	return seedWrapHost
 }
 
-// hostedSeedWrapper is the app's wrapper as the seam sees it.
-type hostedSeedWrapper struct{ host SeedWrapHost }
+// ProfileSeedWrapHost is what an app implements, besides SeedWrapHost, to hold a
+// Keystore key per profile (ADR-074 section 3): the same three calls, each
+// naming the Keystore alias the key is under. The app makes the key under that
+// alias on first use, with the same properties and the same attestation
+// challenge as the device-wide key. An app that registers none keeps one key for
+// every profile, as before, and says so by registering nothing.
+type ProfileSeedWrapHost interface {
+	AvailableFor(alias string) bool
+	AttestationChainFor(alias string) []byte
+	UnwrapKeyFor(alias string, wrapped []byte) ([]byte, error)
+}
+
+// androidSeedAliasBase is the Keystore alias prefix of a profile's key.
+const androidSeedAliasBase = "identity-agent-seed-wrap"
+
+var seedWrapProfileHost ProfileSeedWrapHost
+
+// DeclareProfileSeedWrapHost registers the app's per-profile wrapper. Called
+// through mobilecore before the server starts, beside DeclareSeedWrapHost.
+// Passing nil removes it.
+func DeclareProfileSeedWrapHost(h ProfileSeedWrapHost) {
+	seedWrapHostMu.Lock()
+	seedWrapProfileHost = h
+	forgetEveryVerifiedKey()
+	seedWrapHostMu.Unlock()
+}
+
+func declaredProfileSeedWrapHost() ProfileSeedWrapHost {
+	seedWrapHostMu.RLock()
+	defer seedWrapHostMu.RUnlock()
+	return seedWrapProfileHost
+}
+
+// hostedSeedWrapper is the app's wrapper as the seam sees it. With an alias it
+// is the app's key of that name, reached through the per-profile host.
+type hostedSeedWrapper struct {
+	host  SeedWrapHost
+	alias string
+}
+
+// KeyNameFor and ForKey make this a per-profile wrapper (PerProfileKeys) when
+// the app has registered a per-profile host. With none, KeyNameFor is empty and
+// every profile uses the device-wide key.
+func (w hostedSeedWrapper) KeyNameFor(profile string) string {
+	if declaredProfileSeedWrapHost() == nil {
+		return ""
+	}
+	return ProfileKeyName(androidSeedAliasBase, profile)
+}
+
+func (w hostedSeedWrapper) ForKey(name string) SeedWrapper {
+	return hostedSeedWrapper{host: w.host, alias: name}
+}
+
+// The three calls the host makes, to the device-wide key or the alias's.
+func (w hostedSeedWrapper) hostAvailable() bool {
+	if w.alias == "" {
+		return w.host.Available()
+	}
+	h := declaredProfileSeedWrapHost()
+	return h != nil && h.AvailableFor(w.alias)
+}
+
+func (w hostedSeedWrapper) hostChain() []byte {
+	if w.alias == "" {
+		return w.host.AttestationChain()
+	}
+	if h := declaredProfileSeedWrapHost(); h != nil {
+		return h.AttestationChainFor(w.alias)
+	}
+	return nil
+}
+
+func (w hostedSeedWrapper) hostUnwrapKey(wrapped []byte) ([]byte, error) {
+	if w.alias == "" {
+		return w.host.UnwrapKey(wrapped)
+	}
+	h := declaredProfileSeedWrapHost()
+	if h == nil {
+		return nil, fmt.Errorf("the app registered no per-profile seed wrapper, so key %q cannot be used", w.alias)
+	}
+	return h.UnwrapKeyFor(w.alias, wrapped)
+}
 
 // declaredHostSeedWrapper is the wrapper for whatever the app registered, or nil
 // when it registered nothing.
@@ -145,19 +243,18 @@ func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 	f, err := w.checkAttestation()
 	if err != nil {
 		seedWrapHostMu.Lock()
-		verifiedLevel, verifiedCaveat = "", ""
+		delete(verified, w.alias)
 		seedWrapHostMu.Unlock()
 		return nil, err
 	}
 	seedWrapHostMu.Lock()
-	verifiedLevel = f.LevelName()
-	verifiedCaveat = f.caveat()
+	verified[w.alias] = verifiedKey{level: f.LevelName(), caveat: f.caveat()}
 	seedWrapHostMu.Unlock()
 	return f, nil
 }
 
 func (w hostedSeedWrapper) checkAttestation() (*AndroidKeyFacts, error) {
-	chain := w.host.AttestationChain()
+	chain := w.hostChain()
 	if len(chain) == 0 {
 		return nil, notAttested("the app supplied no attestation chain")
 	}
@@ -180,9 +277,7 @@ func (w hostedSeedWrapper) checkAttestation() (*AndroidKeyFacts, error) {
 // caveat is what the check that licensed this wrapper let through unchecked:
 // storeSeedAs records it in the envelope, so the file says it.
 func (w hostedSeedWrapper) caveat() string {
-	seedWrapHostMu.RLock()
-	defer seedWrapHostMu.RUnlock()
-	return verifiedCaveat
+	return theVerifiedKey(w.alias).caveat
 }
 
 // Scheme says which hardware holds the key: the level the last successful check
@@ -196,12 +291,10 @@ func (w hostedSeedWrapper) caveat() string {
 // opensScheme below accepts any level there, so a chain that can no longer be
 // verified or read cannot make a stored seed unreadable.
 func (w hostedSeedWrapper) Scheme() string {
-	seedWrapHostMu.RLock()
-	level := verifiedLevel
-	seedWrapHostMu.RUnlock()
+	level := theVerifiedKey(w.alias).level
 	if level == "" {
 		level = "unattested"
-		if chain, err := splitChain(w.host.AttestationChain()); err == nil {
+		if chain, err := splitChain(w.hostChain()); err == nil {
 			if f, err := readKeyDescription(chain[0]); err == nil {
 				level = f.LevelName()
 			}
@@ -242,7 +335,7 @@ func (w hostedSeedWrapper) opensScheme(scheme string) bool {
 // the phone's key protection usable, AND the key's attestation proves it was
 // generated in a TEE or StrongBox and suits the seed.
 func (w hostedSeedWrapper) Available() bool {
-	if !detectCapability().RootKeyPermitted() || !w.host.Available() {
+	if !detectCapability().RootKeyPermitted() || !w.hostAvailable() {
 		return false
 	}
 	_, err := w.attested()
@@ -258,7 +351,7 @@ func (w hostedSeedWrapper) whyNotAttested() string {
 }
 
 func (w hostedSeedWrapper) Wrap(plain []byte) ([]byte, error) {
-	if !detectCapability().RootKeyPermitted() || !w.host.Available() {
+	if !detectCapability().RootKeyPermitted() || !w.hostAvailable() {
 		return nil, fmt.Errorf("the app's seed wrapper is not usable")
 	}
 	f, err := w.attested()
@@ -306,7 +399,7 @@ func (w hostedSeedWrapper) Unwrap(blob []byte) ([]byte, error) {
 		return nil, fmt.Errorf("the wrapped seed is cut off")
 	}
 	sealedKey, rest := blob[3:3+n], blob[3+n:]
-	dek, err := w.host.UnwrapKey(sealedKey)
+	dek, err := w.hostUnwrapKey(sealedKey)
 	if err != nil {
 		return nil, fmt.Errorf("the hardware key would not open the data key: %w", err)
 	}

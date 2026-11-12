@@ -214,6 +214,13 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		// once-only declaration for an app made before it could say.
 		"PUT /api/assets/{id}/front-ends",
 		"PUT /api/assets/{id}/front-ends/offered",
+		// The lock of a logged-out identity (ADR-074): a peer never opens or
+		// closes this device's identity.
+		"GET /api/lock/state",
+		"POST /api/lock/unlock",
+		"POST /api/lock/lock",
+		"PUT /api/lock/secret",
+		"DELETE /api/lock/secret",
 		// ADR-050 also records POST /api/sandbox/podman/setup. It is the
 		// sandboxed-apps add-on's route, so that add-on closes it with its
 		// own rule (Addon.ControllerOwnerOnly), tested with the add-on.

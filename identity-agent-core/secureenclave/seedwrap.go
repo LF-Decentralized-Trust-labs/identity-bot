@@ -136,6 +136,12 @@ type seedEnvelope struct {
 	// should not be can be told apart from a machine's own seed, which is
 	// legitimately held unwrapped on a desktop.
 	Holder string `json:"holder,omitempty"`
+	// Gate names the gate layer the blob is sealed under before the hardware
+	// wrap (ADR-074). Empty on a v1 envelope.
+	Gate string `json:"gate,omitempty"`
+	// Key names the per-profile hardware key the blob is wrapped under (ADR-074
+	// section 3). Empty is the device-wide key every earlier envelope used.
+	Key string `json:"key,omitempty"`
 }
 
 const (
@@ -244,6 +250,13 @@ func storeSeed(dataDir string, seed []byte, w SeedWrapper, requireWrap bool) err
 
 // storeSeedAs is storeSeed that records whose seed it is.
 func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, holder string) error {
+	return storeSeedSealedBy(dataDir, seed, w, requireWrap, holder, nil)
+}
+
+// storeSeedSealedBy is storeSeedAs with the gate layer's sealer given. With seal
+// nil the profile's own gate decides: a gated profile's seed is always sealed
+// under its key, and a locked one is not written at all.
+func storeSeedSealedBy(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, holder string, seal func([]byte) ([]byte, error)) error {
 	if len(seed) < 32 {
 		return fmt.Errorf("root seed must be at least 32 bytes")
 	}
@@ -251,11 +264,34 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 	if len(toStore) > 64 {
 		toStore = toStore[:64]
 	}
+	gateName := ""
+	if seal == nil {
+		sealer, gated, err := theGateForThisSeedToStore(dataDir)
+		if err != nil {
+			return err
+		}
+		if gated {
+			seal = sealer.Seal
+		}
+	}
+	if seal != nil {
+		sealed, err := seal(toStore)
+		if err != nil {
+			return fmt.Errorf("seal the root seed under the gate key: %w", err)
+		}
+		toStore, gateName = sealed, gateScheme
+	}
+
+	// The hardware key is the profile's own where the platform can name one.
+	w, wrapKey := wrapperAndKeyFor(w, dataDir)
 
 	// Why an unwrapped envelope is being written, said in the file itself.
 	why := whyNotWrapped()
 	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore),
-		Protection: ProtectionUnwrapped, Why: why, Holder: holder}
+		Protection: ProtectionUnwrapped, Why: why, Holder: holder, Gate: gateName}
+	if gateName != "" {
+		env.V = 2
+	}
 	if requireWrap && !wrapperWorksAt(w, dataDir) {
 		return cannotLiveHere(detectCapability(), "this machine has no working seed wrapper, "+
 			"so the seed could only be written as a plain file")
@@ -277,7 +313,10 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 			return err
 		}
 		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
-			Protection: protection, Why: why, Holder: holder}
+			Protection: protection, Why: why, Holder: holder, Gate: gateName, Key: wrapKey}
+		if gateName != "" {
+			env.V = 2
+		}
 	}
 	if requireWrap && env.Wrap == seedWrapNone {
 		return cannotLiveHere(detectCapability(), "the seed would have been written unwrapped")
@@ -466,6 +505,12 @@ func ProtectExistingSeed(dataDir string) error {
 // platform key. A legacy raw-bytes file is migrated to the envelope form (and
 // wrapped, when hardware is usable) on first load.
 func LoadRootSeed(dataDir string) ([]byte, error) {
+	// A gated profile that is locked has no seed to give, whatever is on disk:
+	// not even a v1 envelope left from before the gate (ADR-074 section 2).
+	sealer, _, lerr := theGateForThisSeed(dataDir)
+	if lerr != nil {
+		return nil, lerr
+	}
 	p := rootSeedPath(dataDir)
 	raw, err := os.ReadFile(p)
 	if errors.Is(err, os.ErrNotExist) {
@@ -519,11 +564,28 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("root seed envelope corrupt: %w", err)
 	}
+	if env.Gate != "" {
+		if !gateSchemeOf(env) {
+			return nil, errGateUnknown(env)
+		}
+		if sealer == nil {
+			// Sealed under a gate this profile no longer has, or opened with no
+			// gate installed: there is no key to open it with.
+			return nil, ErrIdentityLocked
+		}
+	}
 	// A person's root seed on a machine that may not hold one is said loudly
 	// whether or not it is wrapped, and is never re-wrapped below.
 	placement := announceRootIdentityHeldWhereItShouldNotBe(dataDir, env.Holder)
 	misplaced := placement != nil
 	if env.Wrap == seedWrapNone {
+		if env.Gate != "" {
+			opened, oerr := sealer.Open(blob)
+			if oerr != nil || len(opened) < 32 {
+				return nil, fmt.Errorf("root seed does not open under the gate key: %v", oerr)
+			}
+			return opened, nil
+		}
 		if len(blob) < 32 {
 			return nil, fmt.Errorf("invalid root seed size")
 		}
@@ -568,12 +630,38 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 	if w == nil || !wrapperOpensScheme(w, env.Wrap) {
 		return nil, fmt.Errorf("root seed is wrapped with %q, which this build/platform cannot open — restore from a backup archive with the seed phrase", env.Wrap)
 	}
+	// Under the key it was written under: the profile's own, or the device-wide
+	// one an earlier envelope names by leaving it empty.
+	w, err = wrapperThatOpens(w, env.Key)
+	if err != nil {
+		return nil, err
+	}
 	seed, err := w.Unwrap(blob)
 	if err != nil {
 		return nil, fmt.Errorf("root seed unwrap failed (%s) — the device key may be gone; restore from a backup archive with the seed phrase: %w", env.Wrap, err)
+	}
+	if env.Gate != "" {
+		opened, oerr := sealer.Open(seed)
+		if oerr != nil {
+			return nil, fmt.Errorf("root seed does not open under the gate key: %w", oerr)
+		}
+		seed = opened
 	}
 	if len(seed) < 32 {
 		return nil, fmt.Errorf("invalid root seed size after unwrap")
 	}
 	return seed, nil
+}
+
+// readEnvelope parses the stored seed envelope.
+func readEnvelope(dataDir string) (seedEnvelope, error) {
+	var env seedEnvelope
+	raw, err := os.ReadFile(rootSeedPath(dataDir))
+	if err != nil {
+		return env, err
+	}
+	if err := json.Unmarshal(raw, &env); err != nil || env.V < 1 || env.Wrap == "" {
+		return seedEnvelope{}, fmt.Errorf("root seed envelope unreadable")
+	}
+	return env, nil
 }

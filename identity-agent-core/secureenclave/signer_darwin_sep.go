@@ -43,6 +43,7 @@ import "C"
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,10 @@ type sepEnvelope struct {
 	Kind string `json:"kind"`
 	Len  int    `json:"len"`
 	Blob string `json:"blob"`
+	// Gate names the gate layer Blob is sealed under (ADR-074 section 3): the
+	// blob is ciphertext on disk, and Len is the length of the blob inside it.
+	// Empty on a key made before the profile had a gate.
+	Gate string `json:"gate,omitempty"`
 }
 
 type sepSigner struct {
@@ -71,6 +76,9 @@ type sepSigner struct {
 	dataDir string
 	blob    []byte
 	loaded  bool
+	// lastErr is why ensure last failed, for NewPlatformSigner to report when it
+	// refuses instead of falling through to the software signer.
+	lastErr error
 }
 
 // newDarwinSecureEnclaveSigner is the name NewPlatformSigner already calls, so
@@ -91,7 +99,17 @@ func (s *sepSigner) Available() bool {
 	if C.sep_available() != 1 {
 		return false
 	}
-	return s.ensure() == nil
+	err := s.ensure()
+	s.mu.Lock()
+	s.lastErr = err
+	s.mu.Unlock()
+	return err == nil
+}
+
+func (s *sepSigner) whyUnavailable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
 }
 
 // ensure loads the machine's key, or mints one the first time.
@@ -109,7 +127,13 @@ func (s *sepSigner) ensure() error {
 	if s.loaded {
 		return nil
 	}
-	if blob, err := s.read(); err == nil {
+	existing, needsGate, rerr := s.read()
+	if errors.Is(rerr, ErrIdentityLocked) {
+		// Locked: the blob is ciphertext and there is no key. Nothing is set
+		// aside and nothing is made: a locked profile's key is not replaced.
+		return rerr
+	}
+	if rerr == nil {
 		// USABLE, not merely well-formed. A blob wrapped by a DIFFERENT chip is
 		// the right size and passes every check above, because the wrapped size is
 		// the same on every Mac — so a data directory restored from a backup, or
@@ -117,17 +141,32 @@ func (s *sepSigner) ensure() error {
 		// and then fails every signature for the life of the installation, with no
 		// path that ever re-mints. Asking the enclave to use it once is the only
 		// thing that distinguishes our key from somebody else's.
-		if _, uerr := publicFrom(blob); uerr == nil {
-			s.blob, s.loaded = blob, true
+		if pub, uerr := publicFrom(existing); uerr == nil {
+			// The key must be the one this profile recorded (the same record and
+			// check as Windows): a key file swapped for another is refused, and
+			// never adopted and sealed (ADR-074 section 3).
+			if err := settleAnExistingControllerKey(s.dataDir, "secure_enclave", theMachineKeyFileOnDisk, pub); err != nil {
+				if errors.Is(err, ErrIdentityLocked) {
+					return err
+				}
+				return fmt.Errorf("%w: %w", errAHardwareKeyExistsAndWillNotOpen, err)
+			}
+			if needsGate {
+				// Made before the profile had a gate: seal it now that it does.
+				if err := s.write(existing); err != nil {
+					return fmt.Errorf("the controller key could not be sealed under the gate key: %w", err)
+				}
+			}
+			s.blob, s.loaded = existing, true
 			return nil
 		}
 		// KEPT, NOT DELETED. This machine cannot use it, but it is a real key
 		// belonging to whichever machine made it, and a file that turns out to
 		// matter is not one to remove on a guess.
 		aside := s.path() + ".not-this-machine"
-		if rerr := os.Rename(s.path(), aside); rerr != nil {
+		if err := os.Rename(s.path(), aside); err != nil {
 			return fmt.Errorf("this machine holds a key it cannot use and could not set "+
-				"it aside: %w", rerr)
+				"it aside: %w", err)
 		}
 	}
 
@@ -140,9 +179,7 @@ func (s *sepSigner) ensure() error {
 	blob := make([]byte, int(n))
 	copy(blob, buf[:int(n)])
 
-	env := sepEnvelope{V: 1, Kind: "sep-p256-signing", Len: len(blob),
-		Blob: base64.StdEncoding.EncodeToString(blob)}
-	data, err := json.Marshal(env)
+	data, err := s.envelopeFor(blob)
 	if err != nil {
 		return err
 	}
@@ -166,11 +203,25 @@ func (s *sepSigner) ensure() error {
 	// other process's key is just as much this machine's key, and the one thing
 	// that must not happen is two of them.
 	if err := atomicfile.Create(p, data, 0o600); err != nil {
-		if existing, rerr := s.read(); rerr == nil {
-			s.blob, s.loaded = existing, true
+		if adopted, _, rerr := s.read(); rerr == nil {
+			s.blob, s.loaded = adopted, true
 			return nil
 		}
 		return fmt.Errorf("this machine's key could not be stored: %w", err)
+	}
+	// A key this call just made and cannot show it recorded is not left behind: it
+	// would be found next time with no record of it and a record of nothing it
+	// could match. An earlier record of this key is said, never silent.
+	pub, err := publicFrom(blob)
+	if err == nil {
+		err = recordANewControllerKey(s.dataDir, "secure_enclave", theMachineKeyFileOnDisk, pub)
+	}
+	if err != nil {
+		_ = os.Remove(p)
+		if errors.Is(err, ErrIdentityLocked) {
+			return err
+		}
+		return fmt.Errorf("%w: the controller key could not be recorded: %w", errAHardwareKeyExistsAndWillNotOpen, err)
 	}
 	s.blob, s.loaded = blob, true
 	return nil
@@ -178,37 +229,78 @@ func (s *sepSigner) ensure() error {
 
 // read returns the stored blob, refusing anything whose length disagrees with
 // what this enclave produces.
-func (s *sepSigner) read() ([]byte, error) {
+//
+// A profile with a gate keeps the blob sealed under its gate key (ADR-074
+// section 3): a locked one is ErrIdentityLocked, whatever is on disk, and one
+// written before the gate is served with needsGate set so the caller seals it.
+func (s *sepSigner) read() (blob []byte, needsGate bool, err error) {
 	data, err := os.ReadFile(s.path())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var env sepEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("the machine key envelope could not be read: %w", err)
+		return nil, false, fmt.Errorf("the machine key envelope could not be read: %w", err)
 	}
-	blob, err := base64.StdEncoding.DecodeString(env.Blob)
+	stored, err := base64.StdEncoding.DecodeString(env.Blob)
 	if err != nil {
-		return nil, fmt.Errorf("the machine key is not valid base64: %w", err)
+		return nil, false, fmt.Errorf("the machine key is not valid base64: %w", err)
 	}
-	if len(blob) == 0 {
-		return nil, fmt.Errorf("the machine key file holds no key")
+	if len(stored) == 0 {
+		return nil, false, fmt.Errorf("the machine key file holds no key")
+	}
+	blob, needsGate, err = openFromTheGate(s.dataDir, stored, env.Gate)
+	if err != nil {
+		return nil, false, err
 	}
 	if len(blob) != env.Len {
-		return nil, fmt.Errorf("the machine key is %d bytes where its envelope says %d",
+		return nil, false, fmt.Errorf("the machine key is %d bytes where its envelope says %d",
 			len(blob), env.Len)
 	}
 	// The guard that matters: a blob this enclave would not accept must never
 	// reach it, because being refused is not one of the outcomes on offer.
 	if want := int(C.sep_blob_size()); want > 0 && len(blob) != want {
-		return nil, fmt.Errorf("the machine key is %d bytes where this enclave makes %d",
+		return nil, false, fmt.Errorf("the machine key is %d bytes where this enclave makes %d",
 			len(blob), want)
 	}
-	return blob, nil
+	return blob, needsGate, nil
+}
+
+// envelopeFor is the file's bytes for blob: sealed under the profile's gate key
+// when it has one, and refusing when the profile is locked.
+func (s *sepSigner) envelopeFor(blob []byte) ([]byte, error) {
+	sealed, scheme, err := sealForTheGate(s.dataDir, blob)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(sepEnvelope{V: 1, Kind: "sep-p256-signing", Len: len(blob),
+		Blob: base64.StdEncoding.EncodeToString(sealed), Gate: scheme})
+}
+
+// write replaces the stored key with blob under the profile's current gate.
+func (s *sepSigner) write(blob []byte) error {
+	data, err := s.envelopeFor(blob)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path()), 0o700); err != nil {
+		return err
+	}
+	return atomicfile.Write(s.path(), data, 0o600)
+}
+
+// stillOpen refuses once the profile has locked, even to a signer that loaded
+// the key before: the blob held in memory is not a reason to keep signing.
+func (s *sepSigner) stillOpen() error {
+	_, _, err := theGateForThisSeed(s.dataDir)
+	return err
 }
 
 func (s *sepSigner) PublicKey() ([]byte, error) {
 	if err := s.ensure(); err != nil {
+		return nil, err
+	}
+	if err := s.stillOpen(); err != nil {
 		return nil, err
 	}
 	return publicFrom(s.blob)
@@ -238,6 +330,9 @@ func publicFrom(blob []byte) ([]byte, error) {
 // Security.framework returns DER.
 func (s *sepSigner) Sign(data []byte) ([]byte, error) {
 	if err := s.ensure(); err != nil {
+		return nil, err
+	}
+	if err := s.stillOpen(); err != nil {
 		return nil, err
 	}
 	if len(data) == 0 {

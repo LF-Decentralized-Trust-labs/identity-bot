@@ -264,12 +264,13 @@ func (s *CoreServer) prepareAddons() {
 	}
 }
 
-// runAddons starts every add-on's background work, to end when stop closes.
-func (s *CoreServer) runAddons(stop <-chan struct{}) {
+// runAddons starts every add-on's background work, to end when the identity is
+// locked or the server stops (the stop it is given closes then).
+func (s *CoreServer) runAddons() {
 	for _, a := range registeredAddons() {
 		if a.Run != nil {
 			run := a.Run
-			s.inBackground(func(context.Context) { run(s, stop) })
+			s.runSeedWork(func(_ context.Context, stop <-chan struct{}) { run(s, stop) })
 		}
 	}
 }

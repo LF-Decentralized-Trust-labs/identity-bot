@@ -54,12 +54,13 @@ func (b *backgroundWork) contextLocked(parent context.Context) context.Context {
 // inBackground runs fn in its own goroutine, under the server's background
 // context, and counts it so that stopping the server waits for it. Once the
 // server has stopped, nothing more is started.
-func (s *CoreServer) inBackground(fn func(ctx context.Context)) {
+// It reports whether fn was started.
+func (s *CoreServer) inBackground(fn func(ctx context.Context)) bool {
 	b := &s.background
 	b.mu.Lock()
 	if b.ended {
 		b.mu.Unlock()
-		return
+		return false
 	}
 	ctx := b.contextLocked(s.AppCtx)
 	b.wg.Add(1)
@@ -68,6 +69,7 @@ func (s *CoreServer) inBackground(fn func(ctx context.Context)) {
 		defer b.wg.Done()
 		fn(ctx)
 	}()
+	return true
 }
 
 // endBackground cancels the background work, refuses any more, and waits up

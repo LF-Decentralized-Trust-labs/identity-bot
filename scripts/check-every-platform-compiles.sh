@@ -25,13 +25,13 @@ FAILED=0
 # iOS links against Apple frameworks, so it needs cgo — which is also how it is
 # actually built. Everything else is checked without, which is how it ships.
 check() {
-  local os="$1" arch="$2" cgo="$3"
-  printf '  %-8s %-6s ' "$os" "$arch"
-  if CGO_ENABLED="$cgo" GOOS="$os" GOARCH="$arch" go vet ./... >/tmp/vet-$os.log 2>&1; then
+  local os="$1" arch="$2" cgo="$3" tags="${4:-}"
+  printf '  %-8s %-6s %-8s ' "$os" "$arch" "$tags"
+  if CGO_ENABLED="$cgo" GOOS="$os" GOARCH="$arch" go vet ${tags:+-tags "$tags"} ./... >/tmp/vet-$os$tags.log 2>&1; then
     printf 'ok\n'
   else
     printf 'FAILED\n'
-    sed 's/^/      /' /tmp/vet-$os.log | head -20
+    sed 's/^/      /' /tmp/vet-$os$tags.log | head -20
     FAILED=1
   fi
 }
@@ -39,6 +39,10 @@ check() {
 printf 'Building the core for every platform it claims to run on\n'
 check darwin  arm64 1
 check darwin  amd64 1
+# The build the Mac app ships is the sepblob one, and its tests are compiled only
+# with the tag: a vet without it passed while they did not compile.
+check darwin  arm64 1 sepblob
+check darwin  amd64 1 sepblob
 check windows amd64 0
 check linux   amd64 0
 check linux   arm64 0
