@@ -220,6 +220,11 @@ type CoreServer struct {
 	// see acceptableMeasurement.
 	AcceptedMeasurements [][]byte
 
+	// measurementPolicy, when set, decides the policy at the moment of each
+	// adoption (see currentMeasurements); AcceptedMeasurements is then unused.
+	measurementPolicy   func(now time.Time) ([][]byte, string)
+	measurementPolicyMu sync.Mutex
+
 	// snpChainVerifier replaces the AMD chain check. Unexported and never read
 	// from configuration: it exists so a test can present a synthetic report,
 	// not so a deployment can decline to check one.
@@ -366,17 +371,28 @@ func New(cfg Config) (*CoreServer, error) {
 	// sign of a mistyped measurement is a box being refused, which reads as
 	// "that machine is running something else" and sends somebody to look at
 	// the wrong end of the problem.
-	accepted, err := acceptedMeasurements(cfg.DataDir, cfg.EntityType, time.Now())
-	if err != nil {
+	//
+	// Read once here only to surface a malformed bootstrap at startup; every
+	// adoption decision re-reads it (see currentMeasurements).
+	if _, err := acceptedMeasurements(cfg.DataDir, cfg.EntityType, time.Now()); err != nil {
 		cancel()
 		dataStore.Close()
 		return nil, err
 	}
+	policyAt := func(now time.Time) ([][]byte, string) {
+		accepted, why, err := measurementPolicy(cfg.DataDir, cfg.EntityType, now)
+		if err != nil {
+			return nil, err.Error()
+		}
+		if buildmode.IsDev() {
+			// A development build also adopts a box launched at the development
+			// measurement, which a development box carries. Production's allowlist
+			// never includes it, so a production owner will not adopt a development box.
+			accepted = append(accepted, secureenclave.DevMeasurement())
+		}
+		return accepted, why
+	}
 	if buildmode.IsDev() {
-		// A development build also adopts a box launched at the development
-		// measurement, which a development box carries. Production's allowlist
-		// never includes it, so a production owner will not adopt a development box.
-		accepted = append(accepted, secureenclave.DevMeasurement())
 		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** accepting the development launch measurement for adoption")
 	}
 
@@ -396,8 +412,8 @@ func New(cfg Config) (*CoreServer, error) {
 	go eventHub.Run()
 
 	s := &CoreServer{
-		AcceptedMeasurements: accepted,
-		DataStore:            dataStore,
+		measurementPolicy: policyAt,
+		DataStore:         dataStore,
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
 		Providers:          provider.Load(cfg.DataDir),

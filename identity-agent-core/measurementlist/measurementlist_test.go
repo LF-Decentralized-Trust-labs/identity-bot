@@ -374,3 +374,37 @@ func TestTheCommittedVectorsVerifyAndAreReproducible(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestADifferentListAtAnEqualSequenceIsRefusedAndTheSameListIsNot(t *testing.T) {
+	priv, key := vectorKey("a")
+	dir := t.TempDir()
+	path, floor := filepath.Join(dir, "list.json"), filepath.Join(dir, "floor")
+	a, b := baseDoc(), baseDoc()
+	b["expires_at"] = "2099-01-01T00:00:00Z" // same sequence, other content
+	rawA := sign(t, priv, a)
+	os.WriteFile(path, rawA, 0o600)
+	if _, err := LoadFile(path, floor, key, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(path, floor, key, now); err != nil {
+		t.Fatalf("the same list again: %v", err)
+	}
+	os.WriteFile(path, sign(t, priv, b), 0o600)
+	if _, err := LoadFile(path, floor, key, now); !errors.Is(err, ErrConflictingList) {
+		t.Fatalf("got %v, want ErrConflictingList", err)
+	}
+}
+
+func TestAFloorWithOnlyASequenceStillReadsAndGetsItsHashRecorded(t *testing.T) {
+	priv, key := vectorKey("a")
+	dir := t.TempDir()
+	path, floor := filepath.Join(dir, "list.json"), filepath.Join(dir, "floor")
+	os.WriteFile(floor, []byte("7\n"), 0o600) // as an earlier version wrote it
+	os.WriteFile(path, sign(t, priv, baseDoc()), 0o600)
+	if _, err := LoadFile(path, floor, key, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, d, err := ReadFloor(floor); err != nil || d == "" {
+		t.Fatalf("hash not recorded: %q %v", d, err)
+	}
+}

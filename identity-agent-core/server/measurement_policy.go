@@ -26,7 +26,8 @@ import (
 //     pinned in this build. When one verifies it is the policy, and nothing
 //     else is added to it.
 //   - AGENT_ACCEPTED_MEASUREMENTS on this agent, for a standing policy that
-//     survives restarts. It is the bootstrap: used only when no list verifies.
+//     survives restarts. It is the bootstrap: used only while no signed list
+//     has ever been accepted here; after one has, it is never used again.
 //   - accepted_measurements on the adoption request itself, for one adoption.
 //     /api/pairing/adopt is owner-only, so this is the owner speaking, not the
 //     box — but see the warning on the request field.
@@ -94,36 +95,74 @@ func shortMeasurement(v string) string {
 	return v[:20] + "…"
 }
 
-// measurementListFloorFile records the highest list sequence accepted here.
+// measurementListFloorFile records the highest list sequence accepted here,
+// and the hash of the list accepted at it.
 const measurementListFloorFile = "measurement_list_sequence"
 
-// acceptedMeasurements decides this agent's standing policy: the verified
-// signed list if there is one, otherwise the bootstrap from the environment.
-//
-// Fail closed at every step. A list that is absent, tampered, signed by the
-// wrong key, older than one already accepted, expired, or that names nothing
-// for this agent's image kind does not widen anything; it is reported and the
-// bootstrap stands. A list that DOES verify but names nothing for this kind
-// yields an empty policy, which acceptableMeasurement refuses — the publisher
-// has said nothing is acceptable, and the bootstrap must not override that.
+// acceptedMeasurements is measurementPolicy without the reason, for callers
+// that only need the measurements. The error is only for a malformed bootstrap.
 func acceptedMeasurements(dataDir, entityType string, now time.Time) ([][]byte, error) {
+	m, _, err := measurementPolicy(dataDir, entityType, now)
+	return m, err
+}
+
+// measurementPolicy decides this agent's standing policy at time now: the
+// verified signed list if there is one, otherwise the bootstrap from the
+// environment — but the bootstrap only until a signed list has ever been
+// accepted here.
+//
+// Once a list has been accepted (the recorded floor is above zero) the
+// bootstrap is never consulted again. The bootstrap is the oldest policy there
+// is; letting any list failure fall back to it would let a corrupted file, a
+// deleted file, an older list or an expired one force that policy, and undo the
+// rollback protection the floor exists for. From then on every failure of the
+// list means NO measurement is accepted, and the second result says why.
+//
+// Fail closed at every step. A verified list that names nothing for this
+// agent's image kind yields an empty policy, which acceptableMeasurement
+// refuses: the publisher has said nothing is acceptable.
+func measurementPolicy(dataDir, entityType string, now time.Time) ([][]byte, string, error) {
+	floor, _, floorErr := measurementlist.ReadFloor(filepath.Join(dataDir, measurementListFloorFile))
+	if floorErr != nil {
+		// A damaged record is not "nothing accepted yet".
+		why := fmt.Sprintf("the record of the newest accepted measurement list cannot be read, so no box is accepted: %v", floorErr)
+		log.Printf("[identity-agent-core] %s", why)
+		return nil, why, nil
+	}
+	everAccepted := floor > 0
+
 	path := strings.TrimSpace(os.Getenv("AGENT_MEASUREMENT_LIST_FILE"))
-	if path != "" {
+	var listErr error
+	switch {
+	case path != "":
 		list, err := verifiedMeasurementList(path, dataDir, now)
 		if err == nil {
 			if entityType == "" {
-				log.Printf("[identity-agent-core] a measurement list verified but this agent does not declare its image kind; using the bootstrap policy")
-			} else {
-				m := list.Measurements(entityType)
-				log.Printf("[identity-agent-core] using signed measurement list sequence %d: %d accepted for %q",
-					list.Sequence, len(m), entityType)
-				return m, nil
+				why := "a measurement list verified but this agent does not declare its image kind, so no box is accepted"
+				log.Printf("[identity-agent-core] %s", why)
+				return nil, why, nil
 			}
-		} else {
-			log.Printf("[identity-agent-core] the measurement list was NOT used (%v); using the bootstrap policy", err)
+			m := list.Measurements(entityType)
+			log.Printf("[identity-agent-core] using signed measurement list sequence %d: %d accepted for %q",
+				list.Sequence, len(m), entityType)
+			return m, "", nil
 		}
+		listErr = err
+	case everAccepted:
+		listErr = fmt.Errorf("AGENT_MEASUREMENT_LIST_FILE is not set")
 	}
-	return acceptedMeasurementsFromEnv()
+	if everAccepted {
+		why := fmt.Sprintf("a signed measurement list (sequence %d) was accepted here before and the list now cannot be used (%v); "+
+			"the older bootstrap policy is never used again, so no box is accepted until a valid list at that sequence or later is in place",
+			floor, listErr)
+		log.Printf("[identity-agent-core] %s", why)
+		return nil, why, nil
+	}
+	if listErr != nil {
+		log.Printf("[identity-agent-core] the measurement list was NOT used (%v); using the bootstrap policy", listErr)
+	}
+	m, err := acceptedMeasurementsFromEnv()
+	return m, "", err
 }
 
 // pinnedPublisherKey is the compiled-in key; a variable only so a test can pin its own.
@@ -135,4 +174,18 @@ func verifiedMeasurementList(path, dataDir string, now time.Time) (*measurementl
 		return nil, err
 	}
 	return measurementlist.LoadFile(path, filepath.Join(dataDir, measurementListFloorFile), key, now)
+}
+
+// currentMeasurements is the policy to decide with, right now. A server built
+// with a policy function re-reads the list file and re-checks its expiry and
+// entry windows on every call, so a list that expired or was replaced since
+// startup is not honoured on a decision made today. The second result is why
+// nothing is accepted, when that is the list's doing.
+func (s *CoreServer) currentMeasurements() ([][]byte, string) {
+	if s.measurementPolicy == nil {
+		return s.AcceptedMeasurements, ""
+	}
+	s.measurementPolicyMu.Lock()
+	defer s.measurementPolicyMu.Unlock()
+	return s.measurementPolicy(time.Now())
 }

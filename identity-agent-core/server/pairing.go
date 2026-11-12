@@ -838,6 +838,13 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// everyone who checks it afterwards will agree it is correct. Checking
 	// afterwards establishes nothing, because by then the statement exists.
 	accept := s.acceptableMeasurement
+	if len(req.AcceptedMeasurements) == 0 {
+		// Say why, when the list is the reason, instead of "not accepted".
+		if _, why := s.currentMeasurements(); why != "" {
+			writeError(w, http.StatusForbidden, "This box was not adopted", why)
+			return
+		}
+	}
 	if len(req.AcceptedMeasurements) > 0 {
 		extra, err := parseMeasurements(req.AcceptedMeasurements)
 		if err != nil {

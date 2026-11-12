@@ -128,13 +128,87 @@ func TestAListFromTheWrongKeyIsNotUsed(t *testing.T) {
 
 func TestAnOldListIsNotUsedAfterANewerOne(t *testing.T) {
 	f := newListFixture(t, "a")
-	t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", "")
+	// A non-empty bootstrap: the old behaviour fell back to it and passed only
+	// because it was empty here.
+	t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", aMeasurement(0x77))
 	f.publish(t, 9, map[string][]string{"individual": {aMeasurement(0x12)}}, f.priv)
 	mustAccepted(t, f.dir) // records sequence 9
 	f.publish(t, 4, map[string][]string{"individual": {aMeasurement(0x11)}}, f.priv)
 	s := serverAccepting(mustAccepted(t, f.dir))
-	if s.acceptableMeasurement(mustHex(t, aMeasurement(0x11))) {
-		t.Fatal("an image only an older list named was accepted")
+	for _, b := range []byte{0x11, 0x12, 0x77} {
+		if s.acceptableMeasurement(mustHex(t, aMeasurement(b))) {
+			t.Fatalf("%#x accepted after sequence 9 was accepted and an older list was put back", b)
+		}
+	}
+}
+
+// Once a list has been accepted, none of these may widen to the bootstrap.
+func TestOnceAListIsAcceptedNoFailureFallsBackToTheBootstrap(t *testing.T) {
+	cases := map[string]func(t *testing.T, f *listFixture){
+		"corrupted": func(t *testing.T, f *listFixture) {
+			os.WriteFile(filepath.Join(f.dir, "list.json"), []byte("{"), 0o600)
+		},
+		"deleted":        func(t *testing.T, f *listFixture) { os.Remove(filepath.Join(f.dir, "list.json")) },
+		"variable unset": func(t *testing.T, f *listFixture) { t.Setenv("AGENT_MEASUREMENT_LIST_FILE", "") },
+		"another key": func(t *testing.T, f *listFixture) {
+			seed := sha256.Sum256([]byte("attacker"))
+			f.publish(t, 10, map[string][]string{"individual": {aMeasurement(0x99)}}, ed25519.NewKeyFromSeed(seed[:]))
+		},
+		"damaged floor": func(t *testing.T, f *listFixture) {
+			os.WriteFile(filepath.Join(f.dir, measurementListFloorFile), []byte("x"), 0o600)
+		},
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newListFixture(t, "a")
+			t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", aMeasurement(0x77))
+			f.publish(t, 9, map[string][]string{"individual": {aMeasurement(0x12)}}, f.priv)
+			mustAccepted(t, f.dir)
+			breakIt(t, f)
+			m, why, err := measurementPolicy(f.dir, "individual", time.Now())
+			if err != nil || len(m) != 0 {
+				t.Fatalf("accepted %d measurements, err %v", len(m), err)
+			}
+			if why == "" {
+				t.Fatal("no reason was given for refusing every box")
+			}
+		})
+	}
+}
+
+func TestAListThatExpiredSinceItWasAcceptedRefusesAtAdoptionTime(t *testing.T) {
+	f := newListFixture(t, "a")
+	t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", aMeasurement(0x77))
+	f.publish(t, 3, map[string][]string{"individual": {aMeasurement(0x11)}}, f.priv) // expires in 24h
+	s := &CoreServer{localOwnerSecret: testOwnerSecret}
+	s.measurementPolicy = func(now time.Time) ([][]byte, string) {
+		m, why, _ := measurementPolicy(f.dir, "individual", now)
+		return m, why
+	}
+	if !s.acceptableMeasurement(mustHex(t, aMeasurement(0x11))) {
+		t.Fatal("a current list's measurement was refused")
+	}
+	// The same server, a day and a bit later: decided now, not at New().
+	s.measurementPolicy = func(time.Time) ([][]byte, string) {
+		m, why, _ := measurementPolicy(f.dir, "individual", time.Now().Add(25*time.Hour))
+		return m, why
+	}
+	for _, b := range []byte{0x11, 0x77} {
+		if s.acceptableMeasurement(mustHex(t, aMeasurement(b))) {
+			t.Fatalf("%#x accepted from an expired list", b)
+		}
+	}
+}
+
+func TestADifferentListAtTheSameSequenceIsRefused(t *testing.T) {
+	f := newListFixture(t, "a")
+	t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", "")
+	f.publish(t, 5, map[string][]string{"individual": {aMeasurement(0x11)}}, f.priv)
+	mustAccepted(t, f.dir)
+	f.publish(t, 5, map[string][]string{"individual": {aMeasurement(0x99)}}, f.priv) // validly signed, same sequence
+	m, why, _ := measurementPolicy(f.dir, "individual", time.Now())
+	if len(m) != 0 || why == "" {
+		t.Fatalf("different content at an equal sequence was accepted: %d, %q", len(m), why)
 	}
 }
 

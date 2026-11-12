@@ -63,13 +63,36 @@
 // Anything but a list signed by the pinned key under the pinned key id; an
 // unknown version; a sequence below the highest one this verifier has already
 // accepted (an old list, which may still name an image since found
-// vulnerable); a list past its expiry, or one that expires before it was
+// vulnerable), or a different list at that same sequence; a list past its expiry, or one that expires before it was
 // published; a malformed measurement; a repeated measurement or image kind.
 // There is no partial acceptance: any fault refuses the whole list.
+//
+// # What guards what, and what is left
+//
+// The floor file (LoadFile) holds the highest sequence accepted and that
+// list's hash. It is what stops an older list being put back, and a different
+// list being served at the same sequence. Once it is above zero the agent
+// never falls back to its bootstrap policy: every list failure then means no
+// box is accepted (see measurementPolicy in package server).
+//
+// A clock set back is not guarded by the floor: it can make an expired list
+// look current. What limits it is that an old list cannot be used below the
+// floor whatever the time, and that entries carry their own windows, so only
+// a list at or above the floor can be extended by a wrong clock.
+//
+// The floor and the list sit together on the same machine. Deleting both
+// returns the agent to "nothing ever accepted", which is the one remaining
+// attack; it needs write access to the agent's data directory. The floor is
+// written 0600 there, apart from wherever the list file is delivered to, so
+// whoever only delivers lists cannot delete it. Where a platform offers a
+// store the list's writer cannot reach (a keychain item, a sealed counter),
+// the floor belongs there; that is not done yet.
 package measurementlist
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -101,6 +124,7 @@ var (
 	ErrWrongKeyID       = errors.New("the list names a signing key other than the pinned one")
 	ErrBadSignature     = errors.New("the list's signature is not valid for the pinned key")
 	ErrOldList          = errors.New("the list is older than one already accepted")
+	ErrConflictingList  = errors.New("a different list than the one already accepted carries the same sequence")
 	ErrExpired          = errors.New("the list has expired")
 	ErrNotYetPublished  = errors.New("the list is dated in the future")
 	ErrBadMeasurement   = errors.New("the list holds a malformed measurement")
@@ -121,7 +145,11 @@ type Policy struct {
 	// MinSequence is the highest sequence already accepted. A list below it
 	// is refused; a list equal to it is the same list again and is fine.
 	MinSequence int64
-	Now         time.Time
+	// SeenDigest is the hash (hex) of the list accepted at MinSequence, or ""
+	// if unknown. A list at exactly MinSequence must hash to it: the same
+	// sequence is the same list, never a different one.
+	SeenDigest string
+	Now        time.Time
 }
 
 // ComputedFrom is what a measurement was computed from. Everything here is
@@ -160,6 +188,9 @@ type List struct {
 	Images map[string][]Entry
 	// At is the time the list was verified at.
 	At time.Time
+	// Digest is the hex SHA-256 of the signed bytes (canonical form), so
+	// re-serialising the same list does not change it.
+	Digest string
 }
 
 // Measurements returns the measurements accepted for one image kind at the
@@ -255,6 +286,10 @@ func Verify(raw []byte, p Policy) (*List, error) {
 	if w.Sequence < p.MinSequence {
 		return nil, fmt.Errorf("%w: sequence %d, already accepted %d", ErrOldList, w.Sequence, p.MinSequence)
 	}
+	digest := sha256.Sum256(msg)
+	if w.Sequence == p.MinSequence && p.SeenDigest != "" && hex.EncodeToString(digest[:]) != p.SeenDigest {
+		return nil, fmt.Errorf("%w: sequence %d", ErrConflictingList, w.Sequence)
+	}
 	published, err := time.Parse(time.RFC3339, w.PublishedAt)
 	if err != nil {
 		return nil, fmt.Errorf("%w: published_at: %v", ErrMalformed, err)
@@ -277,6 +312,7 @@ func Verify(raw []byte, p Policy) (*List, error) {
 	}
 
 	out := &List{Sequence: w.Sequence, PublishedAt: published, ExpiresAt: expires, At: p.Now,
+		Digest: hex.EncodeToString(digest[:]),
 		Images: make(map[string][]Entry, len(w.Images))}
 	seen := map[string]bool{}
 	for kind, entries := range w.Images {
