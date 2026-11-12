@@ -1,0 +1,239 @@
+package lockgate
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"sync"
+
+	"identity-agent-core/secureenclave"
+)
+
+// State is whether the identity this process serves can be used right now.
+type State string
+
+const (
+	// StateUngated: the profile has no gate (made before one existed). It is
+	// served as it always was, and says so; nothing about it is locked.
+	StateUngated State = "ungated"
+	// StateLocked: gated, and no key is held. The seed is not read.
+	StateLocked State = "locked"
+	// StateOpen: gated and logged in; the key is held in memory.
+	StateOpen State = "open"
+)
+
+// ErrNotLoggedOut is the answer when a lock could not complete because the
+// device-held copy of GK could not be deleted. The identity is then still open
+// and must be shown as logged in, never as locked.
+var ErrNotLoggedOut = errors.New("could not log out: the device-held key could not be deleted, so the identity is still open")
+
+type heldKey struct {
+	profile string
+	gk      GK
+}
+
+var (
+	ringMu sync.RWMutex
+	ring   = map[string]heldKey{}
+)
+
+type sealer struct {
+	profile string
+	gk      GK
+}
+
+func (s sealer) Seal(plain []byte) ([]byte, error)  { return Seal(s.gk, s.profile, plain) }
+func (s sealer) Open(sealed []byte) ([]byte, error) { return Open(s.gk, s.profile, sealed) }
+
+// lookup is what secureenclave asks, per data directory.
+func lookup(dataDir string) (secureenclave.GateSealer, bool) {
+	if !(&Profile{dir: dataDir}).Gated() {
+		return nil, false
+	}
+	ringMu.RLock()
+	h, ok := ring[dataDir]
+	ringMu.RUnlock()
+	if !ok {
+		return nil, true
+	}
+	return sealer{profile: h.profile, gk: h.gk}, true
+}
+
+// Install makes the seed layer ask this package whether a profile is gated and
+// open. Call once at start; returns the function that undoes it.
+func Install() (restore func()) { return secureenclave.UseGate(lookup) }
+
+func hold(dataDir, profile string, gk GK) {
+	ringMu.Lock()
+	if old, ok := ring[dataDir]; ok && &old.gk[0] != &gk[0] {
+		old.gk.Zero()
+	}
+	ring[dataDir] = heldKey{profile: profile, gk: gk}
+	ringMu.Unlock()
+}
+
+func drop(dataDir string) {
+	ringMu.Lock()
+	if old, ok := ring[dataDir]; ok {
+		old.gk.Zero()
+		delete(ring, dataDir)
+	}
+	ringMu.Unlock()
+}
+
+// Session is one identity's gate in a running core: its state, and the moves
+// between locked and open.
+type Session struct {
+	P *Profile
+	G *Gate
+}
+
+// NewSession ties a profile to its gate.
+func NewSession(p *Profile, g *Gate) *Session {
+	g.Profile = p
+	return &Session{P: p, G: g}
+}
+
+// State is derived from what is on disk and in memory, never from a flag that
+// could disagree with them.
+func (s *Session) State() State {
+	if !s.P.Gated() {
+		return StateUngated
+	}
+	ringMu.RLock()
+	_, ok := ring[s.P.dir]
+	ringMu.RUnlock()
+	if ok {
+		return StateOpen
+	}
+	return StateLocked
+}
+
+// Reopen is what a core does at start. A logged-in profile (device-held copy
+// present) opens by reading it, with nobody present: the phone killed by its
+// operating system. A logged-out one stays locked.
+func (s *Session) Reopen() error {
+	if !s.P.Gated() {
+		return nil
+	}
+	gk, err := s.P.ReadDeviceHeld()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		// Present and unreadable: the hardware key is gone or changed. Locked,
+		// and the person is told why; the phrase restores.
+		return fmt.Errorf("the device-held key is there and cannot be opened: %w", err)
+	}
+	hold(s.P.dir, s.P.id, gk)
+	return nil
+}
+
+// Found makes the gate for a profile being made and opens it: the new profile
+// is logged in.
+func (s *Session) Found() error {
+	gk, err := s.P.Create()
+	if err != nil {
+		return err
+	}
+	hold(s.P.dir, s.P.id, gk)
+	return nil
+}
+
+// Unlock opens a locked profile from a log-in result. secret is the optional
+// identity secret, "" when the owner set none.
+func (s *Session) Unlock(r ProviderResult, secret string) error {
+	if s.State() == StateUngated {
+		return ErrNoGate
+	}
+	gk, err := s.G.Release(r, secret)
+	if err != nil {
+		return err
+	}
+	if s.State() == StateOpen {
+		// Already open: the result was valid, and nothing changes.
+		gk.Zero()
+		return nil
+	}
+	if err := s.P.WriteDeviceHeld(gk); err != nil {
+		gk.Zero()
+		return fmt.Errorf("could not write the device-held key, so the identity stays locked: %w", err)
+	}
+	hold(s.P.dir, s.P.id, gk)
+	return nil
+}
+
+// Lock logs the identity out: deletes the device-held copy (and proves it gone),
+// then zeroes and drops the key. If the deletion fails the identity stays open
+// and ErrNotLoggedOut is returned. The caller has already stopped the identity
+// answering and drained what was in progress (section 5).
+func (s *Session) Lock() error {
+	if s.State() == StateUngated {
+		return ErrNoGate
+	}
+	if err := s.P.DeleteDeviceHeld(); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotLoggedOut, err)
+	}
+	drop(s.P.dir)
+	return nil
+}
+
+// Key is the key sealing the profile while it is open, for re-sealing. The copy
+// returned is the caller's to zero.
+func (s *Session) Key() (GK, error) {
+	ringMu.RLock()
+	h, ok := ring[s.P.dir]
+	ringMu.RUnlock()
+	if !ok {
+		return nil, secureenclave.ErrIdentityLocked
+	}
+	return append(GK(nil), h.gk...), nil
+}
+
+// ChangeSecret sets (secret != "") or removes (secret == "") the optional
+// identity secret, re-sealing the stored seed first. current is the secret now
+// in force, "" if none, and must be right: it is checked through the gate's own
+// counter, so this is no way round the delay.
+func (s *Session) ChangeSecret(current, secret string) error {
+	if s.State() != StateOpen {
+		return secureenclave.ErrIdentityLocked
+	}
+	base, err := s.P.readGateCopy()
+	if err != nil {
+		return err
+	}
+	defer base.Zero()
+	have, err := s.P.effective(base, current, s.G.now())
+	if err != nil {
+		return err
+	}
+	if &have[0] != &base[0] {
+		defer have.Zero()
+	}
+	reseal := func(old, new GK) error {
+		return secureenclave.ReSealRootSeed(s.P.dir,
+			func(b []byte) ([]byte, error) { return Open(old, s.P.id, b) },
+			func(b []byte) ([]byte, error) { return Seal(new, s.P.id, b) })
+	}
+	// reseal tolerates a profile with no seed yet (nothing is sealed under the key).
+	safeReseal := func(old, new GK) error {
+		if err := reseal(old, new); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	var cerr error
+	if secret == "" {
+		cerr = s.P.RemoveSecret(have, safeReseal)
+	} else {
+		cerr = s.P.SetSecret(have, secret, safeReseal)
+	}
+	if cerr != nil {
+		return cerr
+	}
+	// The held key is now the new effective key.
+	if gk, err := s.P.ReadDeviceHeld(); err == nil {
+		hold(s.P.dir, s.P.id, gk)
+	}
+	return nil
+}
