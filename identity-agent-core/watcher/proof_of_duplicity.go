@@ -86,10 +86,67 @@ type Evidence struct {
 	// verify either with keri.VerifyEvent against the state before the place.
 	HeldMessage  string `json:"held_message_b64,omitempty"`
 	RivalMessage string `json:"rival_message_b64,omitempty"`
+	// PriorMessages is the signed log up to the place before the contested one
+	// (base64, one message per event), which is what the key state the two
+	// events are checked against is made of. With it an alert can be
+	// re-verified from what it stores alone, whatever happens to the kept log.
+	PriorMessages []string `json:"prior_messages_b64,omitempty"`
 	// Watcher is the standing watcher the rival event came from, or the one flagged.
 	Watcher string `json:"watcher,omitempty"`
 	// Why says, for a watcher alert, how its answer did not hold up.
 	Why string `json:"why,omitempty"`
+}
+
+// Reverify checks a duplicity alert's evidence from what it stores and nothing
+// else: the prior log verifies, and both events at the contested place verify
+// against the state it leaves, and are two different events. Anyone can run it.
+func (e Evidence) Reverify() error {
+	if e.Kind != "duplicity" {
+		return errors.New("only duplicity evidence holds two signed events")
+	}
+	if e.HeldMessage == "" || e.RivalMessage == "" {
+		return errors.New("the evidence does not hold both events")
+	}
+	var before *keri.KeyState
+	if e.SequenceNum > 0 {
+		var prior [][]byte
+		for _, p := range e.PriorMessages {
+			m, err := base64.StdEncoding.DecodeString(p)
+			if err != nil {
+				return fmt.Errorf("a prior event does not decode: %w", err)
+			}
+			prior = append(prior, m)
+		}
+		if len(prior) != e.SequenceNum {
+			return fmt.Errorf("the log before place %d is not stored with the evidence", e.SequenceNum)
+		}
+		log, err := keri.ValidateSignedKEL(prior)
+		if err != nil {
+			return fmt.Errorf("the log before the contested place does not verify: %w", err)
+		}
+		before = log.State()
+	}
+	var said [2]string
+	for i, b64 := range []string{e.HeldMessage, e.RivalMessage} {
+		m, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return fmt.Errorf("an event does not decode: %w", err)
+		}
+		v, err := keri.VerifyEvent(before, m)
+		if err != nil {
+			return fmt.Errorf("an event at place %d does not verify: %w", e.SequenceNum, err)
+		}
+		ev, err := keri.ParseEvent(m)
+		if err != nil || int(ev.SN) != e.SequenceNum {
+			return errors.New("an event is not at the contested place")
+		}
+		_ = v
+		said[i] = ev.SAID
+	}
+	if said[0] == said[1] {
+		return errors.New("the two events are the same event")
+	}
+	return nil
 }
 
 func (e Evidence) json() string {
@@ -107,6 +164,10 @@ type proof struct {
 	Latest         *keri.SignedKELResult
 	LatestMessages [][]byte
 	LatestRecords  []map[string]interface{}
+	// AlsoFaulty is set when the watcher's answer held a rival that does not
+	// verify beside one that does: the verdict stands on the valid one, and the
+	// watcher is flagged for the other.
+	AlsoFaulty string
 }
 
 // judgeWatcherLog is the classifier. presented are the presented log's signed
@@ -148,20 +209,31 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log at place " +
 				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error()}, true
 		}
-		// The held event may be the one a recovery rotation retires. If the
-		// presented event at this place is a recovery rotation the watcher's own
-		// log could admit, the watcher is behind and nothing is duplicitous.
+		// The held event may be the one a recovery rotation retires, or the rival
+		// may be: a recovery rotation replaces the interactions after the last
+		// establishment event, and an interaction the retired key signed there is
+		// not a second history, whichever of the two logs holds the rotation
+		// (keripy does not call it duplicity either).
+		if int(ev.SN) < len(msgs) && recoveryRetires(msgs[:ev.SN], message, msgs[ev.SN]) {
+			return &proof{Kind: proofWatcherBehind, Reason: "the presented log holds a recovery rotation " +
+				"at place " + fmt.Sprint(ev.SN) + " that supersedes what the watcher holds"}, true
+		}
 		if int(ev.SN) < len(msgs) {
 			if adm, err := theirLog.Admit(msgs[ev.SN]); err == nil && adm.Supersedes > 0 {
 				return &proof{Kind: proofWatcherBehind, Reason: "the presented log holds a recovery rotation " +
 					"at place " + fmt.Sprint(ev.SN) + " that supersedes what the watcher holds"}, true
 			}
 		}
+		prior := make([]string, 0, ev.SN)
+		for _, m := range msgs[:ev.SN] {
+			prior = append(prior, base64.StdEncoding.EncodeToString(m))
+		}
 		return &proof{Kind: proofFork, Reason: fmt.Sprintf("two validly signed events at place %d", ev.SN),
 			Evidence: &Evidence{
 				Kind: "duplicity", SequenceNum: int(ev.SN),
-				HeldMessage:  base64.StdEncoding.EncodeToString(msgs[ev.SN]),
-				RivalMessage: base64.StdEncoding.EncodeToString(message),
+				HeldMessage:   base64.StdEncoding.EncodeToString(msgs[ev.SN]),
+				RivalMessage:  base64.StdEncoding.EncodeToString(message),
+				PriorMessages: prior,
 			}}, true
 	}
 
@@ -214,21 +286,52 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 			return p
 		}
 	}
+	// Every rival is examined. One that does not verify flags the watcher and is
+	// set aside; it does not hide a valid one behind it.
+	alsoFaulty := ""
 	for _, m := range theirs.Rival {
-		if p, done := settle(admit(m, true)); done {
-			return p
+		p, done := settle(admit(m, true))
+		if !done {
+			continue
 		}
+		if p.Kind == proofWatcherFaulty {
+			if alsoFaulty == "" {
+				alsoFaulty = p.Reason
+			}
+			continue
+		}
+		p.AlsoFaulty = alsoFaulty
+		return p
 	}
 	switch {
 	case superseding:
 		return proof{Kind: proofSuperseded, Reason: "a recovery rotation the watcher holds replaces the presented log's later interactions",
-			Latest: cur, LatestMessages: msgs}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty}
 	case moved:
 		return proof{Kind: proofAhead, Reason: "the watcher holds later signed events the presented log lacks",
-			Latest: cur, LatestMessages: msgs}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty}
+	case alsoFaulty != "":
+		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty}
 	}
 	// The same events, another digest: the two sides digest different renderings
 	// of them. Nothing is proven against either, so it is shown, not flagged.
 	return proof{Kind: proofUnprovable, Reason: "its digest differs from the presented log's, " +
 		"yet its own log holds exactly the presented events"}
+}
+
+// recoveryRetires says whether recovery, applied to the log made of prefix and
+// the event retired, replaces retired: the recovery rotation sits at the same
+// place and KERI's rule lets it supersede an interaction there. Both are signed
+// messages and are verified here, so nothing is taken on the caller's word.
+func recoveryRetires(prefix [][]byte, retired, recovery []byte) bool {
+	if len(prefix) == 0 {
+		return false
+	}
+	branch := append(append([][]byte(nil), prefix...), retired)
+	log, err := keri.ValidateSignedKEL(branch)
+	if err != nil {
+		return false
+	}
+	adm, err := log.Admit(recovery)
+	return err == nil && adm.Supersedes > 0
 }

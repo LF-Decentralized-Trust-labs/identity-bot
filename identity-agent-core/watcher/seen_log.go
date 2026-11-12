@@ -13,8 +13,7 @@ type seenVerdict int
 
 const (
 	// seenSame: the presented log is the kept one, or a part of it (an older
-	// sighting), or a branch the kept log has superseded by recovery. Nothing
-	// new, and nothing refused.
+	// sighting). Nothing new, and nothing refused.
 	seenSame seenVerdict = iota
 	// seenMoved: the presented log goes on from the kept one, or replaces its
 	// later interactions by a recovery rotation. Not duplicity; it becomes the
@@ -25,6 +24,11 @@ const (
 	// seenUnprovable: the two cannot be settled by their events (a delegated
 	// rotation at a taken place, a log this agent holds that does not read).
 	seenUnprovable
+	// seenStale: the presented log is a branch the kept log has superseded by a
+	// recovery rotation. Nothing is refused for it (the controller did nothing
+	// wrong), but the presented key state is the retired one, so the kept log is
+	// handed back as the latest and everything is verified against it.
+	seenStale
 )
 
 // judgeAgainstSeen judges a presented log that verified against the one kept.
@@ -40,7 +44,9 @@ func judgeAgainstSeen(aid string, seen, presented [][]byte) (v seenVerdict, p pr
 	case proofAhead, proofSuperseded:
 		return seenMoved, p, p.LatestMessages
 	case proofWatcherBehind:
-		return seenSame, p, nil // the kept log holds the recovery that retires this branch
+		// The kept log holds the recovery that retires this branch: it is the
+		// log to go on with, not the presented one.
+		return seenStale, p, seen
 	default:
 		return seenUnprovable, p, nil
 	}

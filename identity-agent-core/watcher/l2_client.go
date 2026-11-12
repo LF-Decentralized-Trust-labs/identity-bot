@@ -109,7 +109,7 @@ func (c *L2Client) verifyAnswer(r *DigestResponse, aid string, seq int) error {
 	if !trusted {
 		return fmt.Errorf("%s is not a watcher this agent trusts", r.SignedBy)
 	}
-	stmt, err := witnessproto.DigestStatement(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince)
+	stmt, err := witnessproto.DigestStatementWithRival(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince, r.RivalAtOrBelow)
 	if err != nil {
 		return err
 	}

@@ -77,8 +77,14 @@ type DigestResponse struct {
 	Digest         *string `json:"digest"`
 	ObservedSince  *string `json:"observed_since"`
 	FirstSeenAt    *string `json:"first_seen_at"`
-	SignedBy       string  `json:"signed_by,omitempty"`
-	Signature      string  `json:"signature,omitempty"`
+	// RivalAtOrBelow says the watcher also holds a validly signed event that
+	// conflicts with the one it holds at that place or below it. It is signed
+	// with the rest of the answer (witnessproto.DigestStatementWithRival), and
+	// when it is set the agent asks for the watcher's log, since the digest of
+	// the branch it matched cannot show the other one.
+	RivalAtOrBelow bool   `json:"rival_at_or_below,omitempty"`
+	SignedBy       string `json:"signed_by,omitempty"`
+	Signature      string `json:"signature,omitempty"`
 }
 
 // KelCheckRequest is the watcher /public/kel-check contract.
@@ -163,6 +169,10 @@ const (
 	VerdictDuplicity  = "duplicity"  // two histories were seen for the same event
 	VerdictUnreadable = "unreadable" // the log could not be placed
 	VerdictEscalated  = "escalated"  // the standing watcher disagreed; shown to the owner, nothing was blocked
+	// VerdictUnchecked: the check could not be completed (a fault in what this
+	// agent keeps, or a later log whose keys could not be handed on), so the log
+	// is refused for now. Not a finding about the identity.
+	VerdictUnchecked = "unchecked"
 )
 
 // Outcomes a source gave in a check, as the owner is told them. A source's
@@ -211,6 +221,8 @@ func (r *VerifyKelResult) Check() ContactCheck {
 		Verdict: VerdictConfirmed, Reason: r.Reason, Sources: []CheckSource{},
 	}
 	switch {
+	case r.OverallOutcome == "unchecked" || r.OverallOutcome == "stale":
+		c.Verdict = VerdictUnchecked
 	case r.OverallOutcome == "unreadable":
 		c.Verdict = VerdictUnreadable
 	case r.Blocked:

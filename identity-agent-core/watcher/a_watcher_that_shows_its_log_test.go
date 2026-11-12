@@ -24,6 +24,9 @@ type aWatcher struct {
 	LogFetches atomic.Int32
 	// Hide makes it refuse to show its log.
 	Hide atomic.Bool
+	// RivalFlag makes its signed digest answers say it holds a rival at or below
+	// the place asked about.
+	RivalFlag atomic.Bool
 	// Alter changes the served records on the way out.
 	Alter func([]map[string]interface{}) []map[string]interface{}
 
@@ -81,6 +84,10 @@ func aWatcherHolding(t *testing.T, trusted *testWatcherKey, log *signedlog.Log) 
 		if err != nil {
 			http.Error(rw, err.Error(), 500)
 			return
+		}
+		if w.RivalFlag.Load() {
+			resp.RivalAtOrBelow = true
+			serving.signDigest(resp)
 		}
 		_ = json.NewEncoder(rw).Encode(resp)
 	}))

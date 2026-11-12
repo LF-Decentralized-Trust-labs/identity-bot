@@ -203,7 +203,8 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		existing     *FirstSeenRecord
 		firstContact bool
 		l1Outcome    string
-		l1Fork       *proof // the proof, when this agent's own kept log shows a fork
+		l1Fork       *proof   // the proof, when this agent's own kept log shows a fork
+		l1Latest     [][]byte // the kept log, when it supersedes the presented one by recovery
 	)
 	// What is remembered of a contact is read, judged and written one check at a
 	// time, and released on any exit, a panic included.
@@ -243,6 +244,8 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 					l1Outcome = "unproven_mismatch"
 				case seenMoved:
 					l1Outcome, keep = "first_seen", merged
+				case seenStale:
+					l1Outcome, l1Latest = "match", merged
 				default:
 					l1Outcome = "match"
 				}
@@ -318,6 +321,22 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		})
 	}
 
+	// Every log that is ahead of the presented one is compared with the others
+	// before one is chosen (see reconcileAhead).
+	var cands []aheadLog
+	aheadReason := ""
+	if l1Latest != nil {
+		cands = append(cands, aheadLog{messages: l1Latest})
+		aheadReason = "the presented log is a branch a recovery rotation this agent kept has replaced"
+	}
+	for _, an := range answers {
+		if (an.outcome == "ahead" || an.outcome == "superseded") && an.proof != nil {
+			cands = append(cands, aheadLog{messages: an.proof.LatestMessages, url: an.w.URL})
+			aheadReason = an.proof.Reason
+		}
+	}
+	aheadBest, aheadFork, aheadForkURL := reconcileAhead(in.AID, cands)
+
 	// Blocking: a standing watcher proved two histories, or this agent's own kept
 	// log and the presented one hold two events at one place, each validly signed:
 	// two events by the one controller, which one source's evidence is enough to show.
@@ -331,6 +350,13 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		shouldBlock = true
 		blockReason = "proof of duplicity: " + l1Fork.Reason
 		evidence = l1Fork.Evidence.json()
+	} else if aheadFork != nil {
+		// Two logs that are each ahead of the presented one, and conflict, each
+		// validly signed: a fork, shown by the two events whoever holds them.
+		shouldBlock = true
+		blockReason = "proof of duplicity: " + aheadFork.Reason
+		l2URL = aheadForkURL
+		evidence = aheadFork.Evidence.json()
 	} else if fork != nil {
 		shouldBlock = true
 		blockReason = "proof of duplicity: " + fork.proof.Reason
@@ -375,7 +401,24 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		result.sourcesQueried = append(result.sourcesQueried, peerOutcomes...)
 	}
 
+	// A watcher whose answer did not hold up is raised as an alert about the
+	// watcher, not the contact, whether or not the contact goes ahead: a valid
+	// rival can be acted on beside an invalid one.
+	flagFaulty := func() {
+		for _, an := range answers {
+			switch {
+			case an.outcome == "faulty":
+				s.flagWatcher(in.AID, seq, digest, an, an.proof.Reason)
+				result.FlaggedWatchers = append(result.FlaggedWatchers, an.w.URL)
+			case an.proof != nil && an.proof.AlsoFaulty != "":
+				s.flagWatcher(in.AID, seq, digest, an, an.proof.AlsoFaulty)
+				result.FlaggedWatchers = append(result.FlaggedWatchers, an.w.URL)
+			}
+		}
+	}
+
 	if shouldBlock {
+		flagFaulty()
 		// Blocked by an alert that is already open: that alert is the record,
 		// and no second one is added for the same history.
 		alert := heldAlert
@@ -408,23 +451,24 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	result.OverallOutcome = "confirmed"
 	// A watcher whose answer did not hold up is raised as an alert about the
 	// watcher, not the contact, which goes ahead.
-	for _, an := range answers {
-		switch an.outcome {
-		case "faulty":
-			s.flagWatcher(in.AID, seq, digest, an)
-			result.FlaggedWatchers = append(result.FlaggedWatchers, an.w.URL)
-		case "ahead", "superseded":
-			// The watcher holds validly signed later events: the presented log
-			// showed a stale key state. Handed back for the caller to adopt before
-			// it verifies anything signed.
-			if result.Latest == nil || len(an.proof.LatestMessages) > len(result.Latest) {
-				result.Latest = an.proof.LatestMessages
-				result.LatestKeys = an.proof.Latest.Keys
-				result.LatestRecords = an.proof.LatestRecords
-				result.LatestSeq = int(an.proof.Latest.State().SN())
-			}
-			result.Reason = an.proof.Reason
+	flagFaulty()
+	if aheadBest != nil {
+		// A source holds validly signed later events, or this agent's own kept log
+		// holds the recovery that retired the presented branch: the presented log
+		// showed a stale key state. Handed back for the caller to adopt before it
+		// verifies anything signed.
+		v, err := keri.ValidateSignedKEL(aheadBest.messages)
+		recs, ok := drivers.RecordsFromSignedMessages(aheadBest.messages)
+		if err != nil || !ok {
+			// The key state in force cannot be handed on, and the presented one may
+			// be the retired one: nothing is verified against it.
+			result.OK, result.Blocked, result.OverallOutcome = false, true, "stale"
+			result.Reason = "a later log holds the keys now in force, and it could not be handed on"
+			return result, nil
 		}
+		result.Latest, result.LatestKeys, result.LatestRecords = aheadBest.messages, v.Keys, recs
+		result.LatestSeq = int(v.State().SN())
+		result.Reason = aheadReason
 	}
 	if escalate {
 		// Not a block: no proof. But a watcher holds a different digest, so the
@@ -758,7 +802,7 @@ func (s *Service) signDigest(r *DigestResponse) {
 	if s.SignDigest == nil {
 		return
 	}
-	stmt, err := witnessproto.DigestStatement(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince)
+	stmt, err := witnessproto.DigestStatementWithRival(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince, r.RivalAtOrBelow)
 	if err != nil {
 		return
 	}
@@ -850,7 +894,7 @@ func (s *Service) escalate(aid string, seq int) {
 // up: the alert is about the watcher (its URL), not the contact, and holds
 // nothing up. One alert is kept per watcher and sequence number however often
 // the same answer is met.
-func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAnswer) {
+func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAnswer, why string) {
 	their := ""
 	if an.resp != nil && an.resp.Digest != nil {
 		their = *an.resp.Digest
@@ -864,9 +908,9 @@ func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAns
 	_, _ = s.Store.InsertDuplicityAlert(DuplicityAlert{
 		AID: aid, SequenceNum: seq, OurDigest: digest, TheirDigest: their,
 		SourceURL: an.w.URL, DetectedAt: s.now().UTC(), Kind: AlertKindWatcher,
-		Evidence: Evidence{Kind: "watcher", SequenceNum: seq, Watcher: an.w.URL, Why: an.proof.Reason}.json(),
+		Evidence: Evidence{Kind: "watcher", SequenceNum: seq, Watcher: an.w.URL, Why: why}.json(),
 	})
-	s.emit("kel_watcher_flagged", map[string]interface{}{"aid": aid, "seq": seq, "watcher": an.w.URL, "why": an.proof.Reason})
+	s.emit("kel_watcher_flagged", map[string]interface{}{"aid": aid, "seq": seq, "watcher": an.w.URL, "why": why})
 }
 
 // AnchorAlertToKEL anchors a duplicity alert SAID to the verifier KEL (D12 default-on).

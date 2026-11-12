@@ -312,8 +312,13 @@ func (s *CoreServer) runWatcherOnKel(ctx context.Context, aid string, kel []map[
 	in := watcherInputFor(aid, kel, source, sourceURL, bootstrap)
 	res, err := s.WatcherService.VerifyKel(ctx, in)
 	if err != nil {
+		// Refused, not passed over: nil here would send every route on as if the
+		// check had found nothing, and a store fault would then be a way past a fork.
 		log.Printf("[watcher] VerifyKel %s: %v", aid, err)
-		return nil
+		return &watcher.VerifyKelResult{
+			OK: false, Blocked: true, AID: aid, SequenceNum: -1, OverallOutcome: "unchecked",
+			Reason: "the check of this key log could not be completed, so it is not trusted: " + err.Error(),
+		}
 	}
 	// Kept so a screen can say what was found and when. A failure to keep it
 	// is logged and does not change the verdict the caller acts on.

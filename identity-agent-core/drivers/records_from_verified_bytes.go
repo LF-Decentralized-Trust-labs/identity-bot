@@ -46,6 +46,9 @@ func RecordsFromVerifiedBytes(records []map[string]interface{}) ([]map[string]in
 		built["event_json"] = string(raw)
 		built["raw_bytes_b64"] = rawB64
 		built["cesr_signature"] = sig
+		if sigs := RecordSignatures(rec); len(sigs) > 1 {
+			built["cesr_signatures"] = sigs
+		}
 		if t, _ := ev["t"].(string); t != "" {
 			built["event_type"] = t
 		}

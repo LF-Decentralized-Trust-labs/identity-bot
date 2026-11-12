@@ -348,18 +348,19 @@ func TestTheSharedVectorSignaturesVerifyThroughTheClientsOwnCheck(t *testing.T) 
 		Digest    *string `json:"digest"`
 		FirstSeen *string `json:"first_seen_at"`
 		Observed  *string `json:"observed_since"`
+		Rival     bool    `json:"rival_at_or_below"`
 		SignedBy  string  `json:"signed_by"`
 		Signature string  `json:"signature"`
 	}
 	if err := json.Unmarshal(raw, &vs); err != nil {
 		t.Fatal(err)
 	}
-	if len(vs) < 2 {
+	if len(vs) < 5 {
 		t.Fatal("the vectors have lost cases")
 	}
 	for _, v := range vs {
 		c := &L2Client{TrustedSigners: func() []string { return []string{v.SignedBy} }}
-		r := &DigestResponse{AID: v.AID, SequenceNumber: v.Seq, Digest: v.Digest, FirstSeenAt: v.FirstSeen, ObservedSince: v.Observed, SignedBy: v.SignedBy, Signature: v.Signature}
+		r := &DigestResponse{AID: v.AID, SequenceNumber: v.Seq, Digest: v.Digest, FirstSeenAt: v.FirstSeen, ObservedSince: v.Observed, RivalAtOrBelow: v.Rival, SignedBy: v.SignedBy, Signature: v.Signature}
 		if err := c.verifyAnswer(r, v.AID, v.Seq); err != nil {
 			t.Errorf("%s: %v", v.Name, err)
 		}

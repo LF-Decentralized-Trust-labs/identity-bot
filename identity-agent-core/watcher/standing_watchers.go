@@ -95,6 +95,9 @@ type standingAnswer struct {
 	// later is a watcher that agrees at the presented tip yet holds an event after
 	// it: the presented log may be stale.
 	later bool
+	// rival is a watcher that agrees at the presented tip yet says, in its signed
+	// answer, that it holds a rival branch at or below it.
+	rival bool
 }
 
 // askStanding asks every standing watcher for its digest at seq.
@@ -114,6 +117,7 @@ func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest s
 			case resp.Digest == nil:
 			case *resp.Digest == digest:
 				a.outcome = "match"
+				a.rival = resp.RivalAtOrBelow
 				// A watcher that agrees at the tip may hold events after it. The
 				// digest at the next place says so, and the log it then shows
 				// either carries a later key state or is judged like any other.
@@ -133,7 +137,7 @@ func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest s
 // differs. A mismatch that cannot be proven stays "mismatch": the watcher
 // disagrees, nothing shows who is right, and that is shown, not acted on.
 func (s *Service) judge(ctx context.Context, in VerifyKelInput, a *standingAnswer) {
-	if a.outcome != "mismatch" && !a.later {
+	if a.outcome != "mismatch" && !a.later && !a.rival {
 		return
 	}
 	if len(in.Signed) == 0 {
@@ -147,7 +151,7 @@ func (s *Service) judge(ctx context.Context, in VerifyKelInput, a *standingAnswe
 	}
 	p := judgeWatcherLog(in.AID, in.Signed, theirs)
 	a.proof = &p
-	if a.later && p.Kind != proofAhead && p.Kind != proofSuperseded && p.Kind != proofFork && p.Kind != proofWatcherFaulty {
+	if (a.later || a.rival) && p.Kind != proofAhead && p.Kind != proofSuperseded && p.Kind != proofFork && p.Kind != proofWatcherFaulty {
 		return // it agrees where it matters, and nothing later changes that
 	}
 	switch p.Kind {
@@ -199,4 +203,39 @@ func recordsFor(presented [][]byte, presentedRecs []map[string]interface{}, thei
 		return nil
 	}
 	return rebuilt
+}
+
+// aheadLog is a log some source holds that goes on from what was presented: the
+// kept log (url empty) or a standing watcher's.
+type aheadLog struct {
+	messages [][]byte
+	url      string
+}
+
+// reconcileAhead picks the log to go on with from every log that is ahead of
+// the presented one, comparing them with each other, because choosing the
+// longest would let a thief win by holding the longer branch. Two ahead logs
+// that conflict and both verify are proof of a fork, and that is returned; one
+// that supersedes the other by recovery wins; one that is only a part of the
+// other is the shorter.
+func reconcileAhead(aid string, cands []aheadLog) (best *aheadLog, fork *proof, forkURL string) {
+	for i := range cands {
+		c := cands[i]
+		if best == nil {
+			best = &c
+			continue
+		}
+		p := judgeWatcherLog(aid, best.messages, &WatcherLog{Messages: c.messages})
+		switch p.Kind {
+		case proofFork:
+			p.Evidence.Watcher = c.url
+			if p.Evidence.Watcher == "" {
+				p.Evidence.Watcher = best.url
+			}
+			return nil, &p, p.Evidence.Watcher
+		case proofAhead, proofSuperseded:
+			best = &aheadLog{messages: p.LatestMessages, url: c.url}
+		}
+	}
+	return best, nil, ""
 }
