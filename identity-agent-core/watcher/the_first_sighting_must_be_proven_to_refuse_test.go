@@ -100,3 +100,37 @@ func TestOneHonestLogInTwoRecordShapesIsNotRefused(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
+
+// A late write from a log that proved nothing never replaces a proven digest, so
+// the order two checks happen to finish in cannot plant one.
+func TestAnUnprovenWriteNeverOverwritesAProvenDigest(t *testing.T) {
+	ws, _ := migratedWatcher(t)
+	const aid = "ERace000000000000000000000000000000000000000"
+	if err := ws.recordFirstSeen(aid, 2, "Ereal", SourceOOBI, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.recordFirstSeen(aid, 2, "Eplanted", SourceOOBI, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ws.Store.getFirstSeen(aid, 2); got == nil || got.KelDigest != "Ereal" || !got.Proven {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A peer cross-check of a served log that verifies matches the digest the asker
+// computes from the signed bytes, which is not the digest of the records.
+func TestAPeerCheckMatchesTheDigestOfAProvenLog(t *testing.T) {
+	honest, _ := twoHistories(t)
+	in := presenting(t, honest, SourceOOBI)
+	asker, _ := migratedWatcher(t)
+	res, err := asker.VerifyKel(context.Background(), in)
+	if err != nil || res.Digest == "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	s, now := checkingService(t)
+	served := func(aid string) ([]map[string]interface{}, bool) { return in.KEL, aid == honest.AID }
+	resp, _, err := s.KelCheck(signedCheck(honest.AID, res.SequenceNum, res.Digest, now.Unix()), checkedAt, served)
+	if err != nil || resp == nil || !resp.Match {
+		t.Fatalf("an honest proven log's digest did not match its own served log: %+v %v", resp, err)
+	}
+}

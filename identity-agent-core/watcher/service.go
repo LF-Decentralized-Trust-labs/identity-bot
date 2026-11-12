@@ -760,11 +760,22 @@ func (s *Service) KelCheck(req KelCheckRequest, to string, served func(aid strin
 	if served != nil {
 		kel, ok = served(req.AID)
 	}
+	// The asker digests a log that verifies from its signed bytes, and any other
+	// from the records as presented, so either of the two is a match.
 	ours, derr := witnessproto.KelDigestAtSeq(kel, req.Seq)
 	if !ok || opted || derr != nil {
 		return noMatch, true, nil
 	}
-	return &KelCheckResponse{Match: subtle.ConstantTimeCompare([]byte(ours), []byte(req.Digest)) == 1}, true, nil
+	match := subtle.ConstantTimeCompare([]byte(ours), []byte(req.Digest)) == 1
+	if signed, err := drivers.SignedMessagesFromRecords(kel); err == nil {
+		in := VerifyKelInput{AID: req.AID, KEL: kel, Signed: signed}
+		if events, proven := provenEvents(in); proven {
+			if d, err := witnessproto.KelDigestAtSeq(events, req.Seq); err == nil {
+				match = match || subtle.ConstantTimeCompare([]byte(d), []byte(req.Digest)) == 1
+			}
+		}
+	}
+	return &KelCheckResponse{Match: match}, true, nil
 }
 
 func (s *Service) now() time.Time {

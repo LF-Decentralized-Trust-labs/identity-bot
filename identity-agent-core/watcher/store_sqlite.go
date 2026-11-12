@@ -24,7 +24,8 @@ func (s *SQLiteStore) RecordFirstSeen(rec FirstSeenRecord) error {
 			seen_count, source_type, source_url, proven
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, sequence_num) DO UPDATE SET
-			kel_digest = excluded.kel_digest,
+			kel_digest = CASE WHEN kel_first_seen.proven = 1 AND excluded.proven = 0
+				THEN kel_first_seen.kel_digest ELSE excluded.kel_digest END,
 			proven = MAX(kel_first_seen.proven, excluded.proven),
 			last_confirmed_at = excluded.last_confirmed_at,
 			seen_count = kel_first_seen.seen_count + 1`,
