@@ -21,16 +21,24 @@ class ContactRefusedForDuplicity implements Exception {
     );
   }
 
-  /// What a person is told: what happened, what it means, what to do.
-  String get plainMessage =>
-      'This contact was not added. Two different versions of its key history '
-      'were seen for the same step, which means the identity may have been copied '
-      'or tampered with. Do not trust it. Ask the person to confirm who they are '
-      'by another way you already trust, and to send you a fresh contact link.';
+  /// What a person is told, naming nobody.
+  String get plainMessage => forkedHistoryWords('this identity');
+
+  /// The same, naming the contact whose keys signed both events.
+  String plainMessageFor(String name) => forkedHistoryWords(name);
 
   @override
   String toString() => 'ContactRefusedForDuplicity($aid): $reason';
 }
+
+/// What a proven fork means, said once so the refusal and the contact's panel
+/// word it the same. It claims no more than the proof: the identity's own key
+/// signed two different events, which copying cannot do, and a fresh contact
+/// link would carry the same fork.
+String forkedHistoryWords(String name) =>
+    'Whoever holds $name\u2019s keys signed two different versions of the same '
+    'event. Either they did this, or someone else has their keys. Do not trust '
+    'this identity. Tell them by another way you trust.';
 
 /// The agent has no watcher running. Said apart from "nothing found", so a
 /// screen never reads off as all clear.
@@ -278,11 +286,13 @@ class ContactWatchCheck {
     this.sources = const [],
   });
 
-  /// True only when a source other than this agent's own memory answered and
-  /// agreed. A watcher that held the same history and later events ("ahead")
-  /// agreed too: its signed log contains the history this contact showed.
+  /// True only when a watcher the person trusts ("standing") answered and
+  /// agreed. A watcher the contact named ("hint"), another contact's app and
+  /// this agent's own memory never count: a forger names their own watcher.
+  /// One that held the same history and later events ("ahead") agreed too: its
+  /// signed log contains the history this contact showed.
   bool get anotherWatcherAgreed => sources.any(
-      (s) => s.type != 'own_record' && (s.outcome == 'agrees' || s.outcome == 'ahead'));
+      (s) => s.type == 'standing' && (s.outcome == 'agrees' || s.outcome == 'ahead'));
 
   factory ContactWatchCheck.fromJson(Map<String, dynamic> j) => ContactWatchCheck(
         aid: j['aid'] ?? '',

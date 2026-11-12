@@ -83,11 +83,6 @@ void main() {
         reason: 'acknowledging does not clear an alert; resolving does');
   });
 
-  test('the refusal says what happened, what it means and what to do', () {
-    final m = const ContactRefusedForDuplicity(aid: 'EA', reason: 'x').plainMessage;
-    expect(m, allOf(contains('not added'), contains('tampered'), contains('Ask the person')));
-  });
-
   test('with the watcher off the contact list has no blocked entries rather than failing', () async {
     final core = svc((_) async => http.Response(jsonEncode({'error': 'watcher not running', 'code': 'watcher_off'}), 404));
     expect(await core.getAidsWithOpenAlerts(), isEmpty);
@@ -155,5 +150,33 @@ void main() {
     expect(check('ahead').anotherWatcherAgreed, isTrue);
     expect(check('faulty').anotherWatcherAgreed, isFalse);
     expect(check('behind').anotherWatcherAgreed, isFalse);
+  });
+
+  test('only a watcher the person trusts corroborates: one the contact named, or another contact\'s device, never does', () {
+    ContactWatchCheck check(String type, String outcome) => ContactWatchCheck.fromJson({
+          'aid': 'EA', 'checked_at': 't', 'verdict': 'confirmed',
+          'sources': [{'type': 'own_record', 'outcome': 'agrees'}, {'type': type, 'outcome': outcome}],
+        });
+    for (final outcome in ['agrees', 'ahead']) {
+      expect(check('standing', outcome).anotherWatcherAgreed, isTrue);
+      // A forger names their own watcher: it agreeing proves nothing.
+      expect(check('hint', outcome).anotherWatcherAgreed, isFalse);
+      expect(check('peer', outcome).anotherWatcherAgreed, isFalse);
+    }
+  });
+
+  test('the refusal says what the proof shows and offers no advice that does not work', () {
+    const e = ContactRefusedForDuplicity(aid: 'EA', reason: 'x');
+    expect(
+        e.plainMessageFor('Sam Rivera'),
+        'Whoever holds Sam Rivera\u2019s keys signed two different versions of the same event. '
+        'Either they did this, or someone else has their keys. Do not trust this identity. '
+        'Tell them by another way you trust.');
+    expect(e.plainMessage, contains('this identity\u2019s keys'));
+    for (final m in [e.plainMessage, e.plainMessageFor('Sam')]) {
+      expect(m, isNot(contains('copied')));
+      expect(m, isNot(contains('tampered')));
+      expect(m, isNot(contains('fresh contact link')));
+    }
   });
 }
