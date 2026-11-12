@@ -50,11 +50,20 @@ class DuplicityEvidence {
   final String rivalMessageB64;
   final String watcher;
 
+  /// The identity the two events belong to.
+  final String identifier;
+
+  /// The signed log up to the place before the contested one (base64, one event
+  /// each): what the two events are checked against.
+  final List<String> priorMessagesB64;
+
   const DuplicityEvidence({
     required this.sequenceNumber,
     required this.heldMessageB64,
     required this.rivalMessageB64,
     this.watcher = '',
+    this.identifier = '',
+    this.priorMessagesB64 = const [],
   });
 
   /// True when both signed events are present. An older alert carries none.
@@ -80,7 +89,13 @@ class DuplicityEvidence {
   String get copyText => [
         'Two signed events at place $sequenceNumber of one identity\'s key history.',
         if (watcher.isNotEmpty) 'The second was held by $watcher.',
+        if (identifier.isNotEmpty) 'Identity: $identifier',
         'Verify each against the history before place $sequenceNumber.',
+        if (priorMessagesB64.isNotEmpty) ...[
+          '',
+          'The history before place $sequenceNumber (base64, one event per line):',
+          ...priorMessagesB64,
+        ],
         '',
         'Event held by this agent (base64):',
         heldMessageB64,
@@ -96,6 +111,11 @@ class DuplicityEvidence {
       heldMessageB64: (j['held_message_b64'] ?? '').toString(),
       rivalMessageB64: (j['rival_message_b64'] ?? '').toString(),
       watcher: (j['watcher'] ?? '').toString(),
+      identifier: (j['identifier'] ?? '').toString(),
+      priorMessagesB64: [
+        for (final m in (j['prior_messages_b64'] is List ? j['prior_messages_b64'] as List : const []))
+          m.toString(),
+      ],
     );
   }
 }
