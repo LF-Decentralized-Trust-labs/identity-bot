@@ -33,6 +33,7 @@ import (
 	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/linkverifier"
+	"identity-agent-core/lockgate"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
 	"identity-agent-core/provider"
@@ -256,6 +257,8 @@ type CoreServer struct {
 	running         bool
 	// anchorStop ends the record's anchoring when the server stops.
 	anchorStop chan struct{}
+	// lock is the identity lock state (the_lock.go); nil for a core with no data directory.
+	lock *theLock
 	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
 	anchorStopMu sync.Mutex
 	// signedElsewhere holds, while a waiting grant is appended, the signature
@@ -319,6 +322,14 @@ type Config struct {
 	// core sets it; left empty, the core mints one. Either way it is written
 	// to DataDir for local tools.
 	LocalOwnerSecret string
+
+	// ProfileID names the identity this core serves, for its lock (the_lock.go).
+	// Left empty it is the data directory's own name.
+	ProfileID string
+	// GateMode says whether this device holds the root (a phone, the default) or
+	// acts as a controller for a root held elsewhere (a desktop), whose log-in
+	// must be vouched for by its person's root device (ADR-074 section 2).
+	GateMode lockgate.Mode
 }
 
 func DefaultConfig() Config {
@@ -412,6 +423,7 @@ func New(cfg Config) (*CoreServer, error) {
 		cancel:             cancel,
 	}
 	s.checkEntityTypeDeclared()
+	s.settleTheLock(cfg)
 	if err := s.loadChallengeState(cfg.DataDir); err != nil {
 		cancel()
 		return nil, fmt.Errorf("load login challenges: %w", err)
@@ -784,21 +796,6 @@ func (s *CoreServer) Start() error {
 
 	s.running = true
 
-	// Machines granted as an app's back end before an app signed as itself are
-	// withdrawn, so no credential of this identity still says they act for it.
-	go s.withdrawTheGrantsOfRetiredAppBackEnds()
-
-	if cfg, err := s.backupService().LoadConfig(); err == nil && cfg.Enabled && cfg.ScheduleDaily {
-		// Give the scheduler a way to reach this agent's own seed, or every
-		// backup it schedules will skip. It reads the seed rather than asking
-		// for the words: an agent has the first and never has the second, and a
-		// backup that waits to be typed at is not a backup.
-		s.backupService().Scheduler.SetSeedProvider(func() ([]byte, error) {
-			return secureenclave.LoadRootSeed(s.DataDir)
-		})
-		s.backupService().Scheduler.StartDaily()
-	}
-
 	addr := rootListenAddr(s.Port)
 	log.Printf("[identity-agent-core] Server listening on %s", addr)
 	log.Printf("[identity-agent-core] Endpoint URL: %s (source: %s)", s.EndpointService.CurrentURL(), s.EndpointService.Source())
@@ -847,19 +844,12 @@ func (s *CoreServer) Start() error {
 		}
 	})
 
-	// Bring up the URL relay when one is configured. It is the single URL
-	// manager: a live relay allocation is a durable, provably-ours address, so
-	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
-	// relay this returns immediately, leaving the tunnel/direct path in place.
-	s.inBackground(func(context.Context) { s.startRelay() })
 	s.anchorStopMu.Lock()
 	s.anchorStop = make(chan struct{})
-	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
-	s.beginWitnessing()
-	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
-	s.inBackground(func(context.Context) { s.backfillRegistryEvents() })
-	s.runAddons(stop)
+	// What needs the identity's seed starts now if the identity is open, and
+	// on unlock if it is locked (the_lock.go).
+	s.startWhatNeedsTheIdentityIfOpen()
 
 	// Taken into locals before the goroutine starts: Stop clears the fields
 	// under mu, and one that ran before this goroutine did would leave it
@@ -887,6 +877,11 @@ func (s *CoreServer) Stop() {
 		return
 	}
 	s.running = false
+	if s.lock != nil {
+		s.lock.mu.Lock()
+		s.lock.workStarted = false
+		s.lock.mu.Unlock()
+	}
 	httpSrv, tunnelSrv, listener := s.httpSrv, s.tunnelSrv, s.listener
 	s.httpSrv, s.tunnelSrv, s.listener = nil, nil, nil
 	directSrv, directLn := s.directSrv, s.directLn
@@ -1087,6 +1082,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 	// Before authorisation, because "this core has no business answering" does
 	// not depend on who is asking, and the caller should get the same clear
 	// answer either way.
+	// A locked identity answers only the lock routes, before anything else
+	// looks at the request (the_lock.go).
+	r.Use(s.refuseWhileLocked)
 	r.Use(s.refuseWhatBelongsToTheAgent(r))
 	r.Use(s.authorize(r))
 
@@ -1104,6 +1102,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
+		s.mountLockRoutes(r)
 		s.conversationHeadRoutes(r)
 		// The core proves it holds the local owner secret before an app sends
 		// it (the_owner_at_this_computer.go).

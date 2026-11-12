@@ -58,7 +58,7 @@ secret            = root seed (phone) | controller-key blob (desktop)
   - **The device-held copy** is made at log-in and **deleted at log-out**. A phone is killed by its operating system routinely, and the identity must reopen after the restart with nobody present (section 1), so the core reopens a **logged-in** profile by reading this copy, with no log-in step. A locked identity can be reopened only through the gate.
 - **What this adds, and what it exposes, plainly.** *Locked* stops a copied profile directory or a deleted `locked` file from opening anything, because every copy of `GK` is under a key that does not leave the device. **It does not stop code running as the same user on the unlocked device**: while the provider is a placeholder, the key that seals the gate copy needs no person to be present, so such code can unwrap it and ask the gate (section 4). That is `lock_class` `app_only`. Once a real provider exists (`provider_bound`) the gate copy is unwrapped only with something the provider releases (section 3), and the device-held copy then differs from it in a way that matters: a locked identity has no copy that opens without the provider. *Logged in* exposes the device-held copy to anyone holding the unlocked device and to same-user code, which is what the seed already allows today; the copy is what lets a phone survive being killed, not a protection against the person at the device.
 - **A logged-out identity vouches for nothing.** A desktop's score is vouched for by its person's root device (below). A phone whose identity is logged out holds no `GK`, so it cannot sign that voucher and its desktops stay locked. A locked identity is not available to its desktops until the person logs in on the phone.
-- **Opening is the same everywhere.** The app runs the log-in through the provider, and on a pass calls an unlock route on the locked core. **The unlock route requires the local owner proof** (`LocalOwnerSecretHeader`, the same proof that lets the app stop a core), so a request without it is refused. Under `app_only` (section 4) any process running as the owner can read that proof, so this keeps out other users, other machines and web pages and does not keep out the owner's own code. The core asks the gate, unseals, **keeps the secret only in memory** and serves. **A locked core is started (or left) answering only a lock-state route and unlock.** It reads no seed.
+- **Opening is the same everywhere.** The app runs the log-in through the provider, and on a pass calls an unlock route on the locked core. **The unlock route requires the local owner proof** (`LocalOwnerSecretHeader`, the same proof that lets the app stop a core), so a request without it is refused. Under `app_only` (section 4) any process running as the owner can read that proof, so this keeps out other users, other machines and web pages and does not keep out the owner's own code. The core asks the gate, unseals, **keeps the secret only in memory** and serves. **A locked core is started (or left) answering only a lock-state route and unlock** (and the route an app asks for the proof that a core holds the owner proof, before it sends it anything). It reads no seed.
 - **A desktop's score is vouched for.** A machine may not score itself. The result a desktop's gate accepts is a `VouchedAuthentication` (level, time, score, `vouchedBy`) signed over that machine by the person's root device. If the root device cannot be reached, the desktop stays locked. That is the design, not a fault.
 - **The envelope names its scheme and version**, so a reader can open an envelope written under an earlier scheme and an interrupted migration can resume (section 6).
 
@@ -196,17 +196,20 @@ Every SQLite database in the profile is opened through `sqlitedb.Open`, so that 
 - the refusal to store a root seed unwrapped in a production build
 - `VouchedAuthentication` for a desktop's score, signed by its root device
 - a `locked` marker that an app writes on an explicit log-out
+- the gate (`lockgate`: `Gate.Release`, `ProviderResult`), which releases only for a measured score of at least `permission.DefaultMinimumScore`, a fresh result used once, and (desktop) a voucher that verifies
+- the two copies of `GK` (the gate copy and the device-held copy, deleted and proved deleted at log-out), each under the platform's wrapper, refused in a production build where there is none
+- the gate layer of a stored seed and envelope version 2 (`secureenclave`, `GateSealer`), so a locked profile reads no seed, not even one stored before it had a gate
+- the lock routes (`GET /api/lock/state`, `POST /api/lock/unlock`, `POST /api/lock/lock`, `PUT` and `DELETE /api/lock/secret`), closed to a controller, with the local owner proof required on each; a locked core answers only these and the owner-proof route
+- locking drains a running request for up to 30 seconds, then cancels it and never completes it
+- `lock_class` (`none`, `app_only`, `secret_bound`) and the statement a screen shows; `provider_bound` is named and cannot be reached yet
+- the optional identity secret, with the delay counted before any key-stretching
+- a log-out whose deletion fails reports the identity as still open
 
 **Not built:**
-- the gate and its unlock and lock-state routes
-- per-profile wrapping keys
-- the gate layer and envelope version 2
-- locking on a switch
-- `lock_class`
-- the optional identity secret
+- the per-profile key name inside each platform's wrapper (the wrappers are still device-wide)
+- sealing a desktop's controller key under `GK`, and the Windows TPM authorization value
+- locking on a switch (the app's step)
 - the migration of the seed envelopes and the removal of the device-wide key
-- the device-held copy of `GK`, and its deletion at log-out
-- the local-owner-proof requirement on the unlock route
 - the audit
 - the encrypting SQLite driver, the data keys, and opening and closing the stores on unlock and lock (section 7)
 - the migration of each plaintext database (section 7)
