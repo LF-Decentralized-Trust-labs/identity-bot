@@ -57,7 +57,7 @@ function Run-Phase($phase) {
     # stderr must not become a terminating error: a panic is output to read, and the
     # cleanup at the end has to run.
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $lines = & $exe -test.run TestTPMAuthorizationProbe -test.v 2>&1 | ForEach-Object { "$_" }
+    $lines = & $exe '-test.run' TestTPMAuthorizationProbe '-test.v' 2>&1 | ForEach-Object { "$_" }
     $ErrorActionPreference = $prev
     $lines | Out-Host
     return $lines
@@ -69,7 +69,7 @@ $all += Run-Phase 'create'
 $all += Run-Phase 'sign'
 
 # The same signing, from a process with no desktop and no prompt available.
-$cmd = "`$env:PROBE_PHASE='sign'; `$env:PROBE_STATE='$state'; & '$exe' -test.run TestTPMAuthorizationProbe -test.v *> '$out'"
+$cmd = "`$env:PROBE_PHASE='sign'; `$env:PROBE_STATE='$state'; & '$exe' '-test.run' TestTPMAuthorizationProbe '-test.v' *> '$out'"
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -Command `"$cmd`""
 $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType S4U -RunLevel Limited
 $task = 'IdentityAgentTpmProbe'
