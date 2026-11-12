@@ -25,6 +25,12 @@ package secureenclave
 // scheduled task with no desktop (which is what the core is), and prints the
 // verdict.
 //
+// NOTE: LOCKOUT only means something if the provider's keys are under the TPM's
+// dictionary-attack protection. If the counter does not rise, that is the finding:
+// the design may not count on the TPM to limit guesses. The "no desktop" run adds
+// a different logon token, not proof of no desktop (NCRYPT_SILENT_FLAG already
+// forbids prompting in your own session).
+//
 // COST: the probe sends ONE wrong value and ONE missing value to a key of its own.
 // A TPM counts failed authorizations toward a lockout it shares with everything
 // else on the machine, Windows Hello included. The probe reads the counter first
@@ -46,6 +52,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -304,6 +311,16 @@ func probeRefuse(t *testing.T, st aProbeState) {
 	wrong[0] ^= 0xff
 	msg := []byte("tpm authorization probe")
 
+	// A refusal only counts when the key demonstrably opens and signs first, and
+	// when it is the signing that is refused: a bad handle or a failed open is
+	// not the TPM refusing an authorization value.
+	if _, status, at := signWith(t, st.Name, auth, msg); status != 0 {
+		verdict(t, "WRONG", false, fmt.Sprintf("NOT RUN: the right value fails first at %q (0x%X)", at, status))
+		verdict(t, "NONE", false, "NOT RUN, as above")
+		return
+	}
+	refusedAtSigning := func(at string) bool { return at == "sign" || at == "size the signature" }
+
 	before, haveBefore := theTPMProperty(theLockoutCounter)
 	max, haveMax := theTPMProperty(theLockoutMaxFails)
 	if haveBefore && haveMax {
@@ -313,16 +330,22 @@ func probeRefuse(t *testing.T, st aProbeState) {
 			verdict(t, "NONE", false, "NOT RUN, as above")
 			return
 		}
+	} else if os.Getenv("PROBE_ALLOW_BLIND") != "1" {
+		verdict(t, "WRONG", false, "NOT RUN: the lockout counter cannot be read here, so the probe cannot promise not to lock the TPM; set PROBE_ALLOW_BLIND=1 to accept that")
+		verdict(t, "NONE", false, "NOT RUN, as above")
+		return
 	} else {
 		info("the TPM lockout counter cannot be read from this process, so LOCKOUT will be reported as UNKNOWN")
 	}
 
 	_, status, at := signWith(t, st.Name, wrong, msg)
-	verdict(t, "WRONG", status != 0, fmt.Sprintf("the wrong value: status 0x%X at %q (a nonzero status is a refusal)", status, at))
+	verdict(t, "WRONG", status != 0 && refusedAtSigning(at), fmt.Sprintf("the wrong value: status 0x%X at %q (a refusal at signing is the TPM refusing)", status, at))
 	mid, haveMid := theTPMProperty(theLockoutCounter)
 
 	_, status, at = signWith(t, st.Name, nil, msg)
-	verdict(t, "NONE", status != 0, fmt.Sprintf("no value: status 0x%X at %q (nonzero is a refusal, and it did not wait for a prompt)", status, at))
+	// 0x80090022 is NTE_SILENT_CONTEXT: the provider wanted to ask a person. That
+	// is a refusal, and is what no value looks like in a process that may not prompt.
+	verdict(t, "NONE", status != 0 && refusedAtSigning(at), fmt.Sprintf("no value: status 0x%X at %q (refused at signing, without waiting for a prompt)", status, at))
 	after, haveAfter := theTPMProperty(theLockoutCounter)
 
 	switch {
@@ -331,7 +354,7 @@ func probeRefuse(t *testing.T, st aProbeState) {
 		fmt.Println(line)
 		theProbeVerdicts = append(theProbeVerdicts, line)
 	default:
-		verdict(t, "LOCKOUT", mid > before, fmt.Sprintf("the counter went %d -> %d after the wrong value, and %d after no value", before, mid, after))
+		verdict(t, "LOCKOUT", mid > before, fmt.Sprintf("the counter went %d -> %d after the wrong value, and %d after no value. If it did not rise, PCP keys here are exempt from the TPM's lockout, which the design must not count on", before, mid, after))
 	}
 
 	// And the right value still works afterwards: a refusal did not break the key.
@@ -385,14 +408,14 @@ func probeCore(t *testing.T) {
 	procFreeObject.Call(uintptr(provider))
 	third := mk()
 	_, serr := third.Sign(msg)
-	verdict(t, "CORE-OWN", perr == nil && !third.Available() && serr != nil,
+	verdict(t, "CORE-OWN", perr == nil && !third.Available() && (errors.Is(serr, ErrControllerKeyNotOurs) || errors.Is(serr, errAHardwareKeyExistsAndWillNotOpen)),
 		"a key of the profile's name made by someone else, with no authorization value, is refused (planting: "+fmt.Sprint(perr)+")")
 	deleteTheKey(keyName)
 
 	// Locked: the TPM is not asked at all.
 	theGateIs(t, dir, aTestGate{profile, false})
 	_, lerr := mk().Sign(msg)
-	verdict(t, "CORE-LOCK", lerr != nil, "a locked profile's signer refuses: "+fmt.Sprint(lerr))
+	verdict(t, "CORE-LOCK", errors.Is(lerr, ErrIdentityLocked), "a locked profile's signer refuses: "+fmt.Sprint(lerr))
 }
 
 func probeCleanup(t *testing.T, st aProbeState, statePath string) {

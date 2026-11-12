@@ -21,10 +21,15 @@
 #      refuse when locked)
 #   6. deletes every key it made
 #
+# If a phase leaves a key behind (a crash), run the script again: the probe's
+# keys are named IdentityAgentAuthProbe.* and the core's test keys
+# IdentityAgentMachineKey.v1.p-*; delete them with certutil -csp "Microsoft Platform Crypto Provider" -key.
+#
 # COST: step 4 adds one or two failures to the TPM's lockout counter, which
 # Windows Hello shares, and it decays by itself. The probe refuses to run step 4 if
 # fewer than 3 failures remain.
 $ErrorActionPreference = 'Stop'
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $repo = Split-Path -Parent $PSScriptRoot
 $pkg = Join-Path $repo 'identity-agent-core'
 $work = Join-Path $env:TEMP ("tpm-probe-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -34,11 +39,16 @@ $state = Join-Path $work 'state.json'
 $out = Join-Path $work 'task-output.txt'
 
 Push-Location $pkg
-try { go test -c -tags tpmprobe -o $exe ./secureenclave } finally { Pop-Location }
+try { go test -c -tags tpmprobe -o $exe ./secureenclave; if ($LASTEXITCODE -ne 0) { throw 'the probe did not build' } } finally { Pop-Location }
 
 function Run-Phase($phase) {
     $env:PROBE_PHASE = $phase; $env:PROBE_STATE = $state
-    & $exe -test.run TestTPMAuthorizationProbe -test.v 2>&1 | Tee-Object -Variable lines | Out-Host
+    # stderr must not become a terminating error: a panic is output to read, and the
+    # cleanup at the end has to run.
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $lines = & $exe -test.run TestTPMAuthorizationProbe -test.v 2>&1 | ForEach-Object { "$_" }
+    $ErrorActionPreference = $prev
+    $lines | Out-Host
     return $lines
 }
 
@@ -49,9 +59,10 @@ $all += Run-Phase 'sign'
 # The same signing, from a process with no desktop and no prompt available.
 $cmd = "`$env:PROBE_PHASE='sign'; `$env:PROBE_STATE='$state'; & '$exe' -test.run TestTPMAuthorizationProbe -test.v *> '$out'"
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -Command `"$cmd`""
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+$principal = New-ScheduledTaskPrincipal -UserId $me -LogonType S4U -RunLevel Limited
 $task = 'IdentityAgentTpmProbe'
-Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Force | Out-Null
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $task
 $deadline = (Get-Date).AddSeconds(90)
 do { Start-Sleep -Seconds 2 } while ((Get-ScheduledTask -TaskName $task).State -eq 'Running' -and (Get-Date) -lt $deadline)
@@ -67,9 +78,9 @@ Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 
 Write-Host ''
 Write-Host '---- summary ----'
-$lines = $all | Where-Object { $_ -match '^PROBE ' -and $_ -notmatch '^PROBE info' } | Sort-Object -Unique
+$lines = $all | Where-Object { $_ -match '^PROBE ' -and $_ -notmatch '^PROBE info' }
 $lines | ForEach-Object { Write-Host $_ }
-$need = @('CREATE', 'SIGN', 'WRONG', 'NONE', 'LOCKOUT', 'CORE', 'CORE-OWN', 'CORE-LOCK')
+$need = @('CREATE', 'SIGN', 'WRONG', 'NONE', 'LOCKOUT', 'SIGN2', 'CORE', 'CORE-OWN', 'CORE-LOCK')
 $bad = $need | Where-Object { $n = $_; -not ($lines | Where-Object { $_ -match "^PROBE $n\s+PASS" }) }
 $noint = $lines | Where-Object { $_ -match '^PROBE SIGN-NOINTERACTIVE\s+PASS' }
 if (-not $noint) { $bad += 'SIGN-NOINTERACTIVE' }
