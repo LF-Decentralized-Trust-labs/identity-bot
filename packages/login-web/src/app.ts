@@ -179,7 +179,7 @@ export async function checkAppChallenge(c: ChallengeCheck): Promise<CheckedChall
 
 // ---- the app's answers ---------------------------------------------------
 
-export const ANSWER_INCEPTION = "x-keri-app-answer-inception";
+export const ANSWER_LOG = "x-keri-app-answer-log";
 export const ANSWER_SIG = "x-keri-app-answer-sig";
 const BROWSER_HOST = "browser";
 
@@ -192,42 +192,197 @@ export async function answerText(rid: string, nonce: string, status: number, con
   return ["APP-ANSWER-V1", rid, BROWSER_HOST, nonce, String(status), contentType, await sha256hex(body)].join("\n");
 }
 
+// ---- the relay identifier's key log --------------------------------------
+
+/** The most a relay takes of a key log (relayproto.MaxKELBytes, MaxKELEvents). */
+const MAX_LOG_BYTES = 64 << 10;
+const MAX_LOG_EVENTS = 256;
+
+export interface LogEvent {
+  sn: number;
+  ilk: string;
+  said: string;
+}
+
+export interface CheckedLog {
+  /** The key the log names now. */
+  key: Uint8Array;
+  events: LogEvent[];
+}
+
+/** Reads the signed key log a relay identifier's answer carries (a CESR stream:
+ *  each event's JSON followed by exactly one controller signature group) and
+ *  returns the key it names now. Throws, saying why, unless the log is the
+ *  identifier `rid`'s own from its inception: every event's SAID derives, each
+ *  rotation carries on from the one before (sequence number, prior SAID), is
+ *  made with exactly the key the event before committed to, and every event is
+ *  signed by the key it names. One key at a time, and only an inception and
+ *  rotations: the identifiers an app serves under have no other kind of event,
+ *  so anything else is refused rather than skipped. */
+async function readAnswerLog(rid: string, encoded: string | null | undefined, fail: (why: string) => never): Promise<CheckedLog> {
+  const bytes = decodeBase64UrlStrict(encoded ?? "");
+  if (!bytes || !bytes.length) fail("it is not signed");
+  if (bytes!.length > MAX_LOG_BYTES) fail("its key log is larger than a relay takes");
+  if (bytes!.some((b) => b >= 0x80)) fail("its key log is not text");
+  let text = "";
+  for (let o = 0; o < bytes!.length; o += 8192) text += String.fromCharCode(...bytes!.subarray(o, o + 8192));
+  const parts: { event: string; sig: string }[] = [];
+  for (let pos = 0; pos < text.length; ) {
+    const head = /^\{"v":"KERI10JSON([0-9a-f]{6})_"/.exec(text.slice(pos, pos + 40));
+    if (!head) fail("its key log has something that is not an event where one must begin");
+    const len = parseInt(head![1], 16);
+    const event = text.slice(pos, pos + len);
+    if (event.length !== len || !event.endsWith("}")) fail("an event of its key log is not as long as it says");
+    pos += len;
+    // Exactly one controller signature (one key, so one place), as the relay makes them.
+    if (!text.startsWith("-AAB", pos) || pos + 92 > text.length) fail("an event of its key log is not followed by exactly one signature");
+    parts.push({ event, sig: text.slice(pos + 4, pos + 92) });
+    pos += 92;
+    if (parts.length > MAX_LOG_EVENTS) fail("its key log has more events than a relay takes");
+  }
+  if (!parts.length) fail("it is not signed");
+
+  const events: LogEvent[] = [];
+  let key: Uint8Array | undefined;
+  let prev: { d: string; n: string } | undefined;
+  for (let i = 0; i < parts.length; i++) {
+    const { event, sig } = parts[i];
+    let ev: { t?: string; d?: string; i?: string; s?: string; p?: string; di?: string; kt?: string; k?: string[]; nt?: string; n?: string[] };
+    try {
+      ev = JSON.parse(event);
+    } catch {
+      return fail("an event of its key log is unreadable");
+    }
+    if (typeof ev.d !== "string" || !ev.d) fail("an event of its key log has no SAID");
+    if (i === 0) {
+      if (ev.t !== "icp" || ev.i !== rid || ev.d !== rid || ev.di) fail("its inception is not the identifier the link names");
+      if (ev.s !== "0") fail("its inception is not sequence number 0");
+      deriveIdentifier(event, rid, fail);
+    } else {
+      if (ev.t !== "rot" || ev.i !== rid) fail("an event after the inception is not a rotation of the identifier the link names");
+      if (ev.s !== i.toString(16)) fail("a rotation is out of sequence");
+      if (ev.p !== prev!.d) fail("a rotation does not carry on from the event before it");
+      const needle = `"d":"${ev.d}"`;
+      if (event.split(needle).length !== 2) fail("a rotation names its SAID other than once");
+      if (blake3Qb64(utf8.encode(event.replace(needle, `"d":"${"#".repeat(ev.d.length)}"`))) !== ev.d) fail("a rotation's SAID is not the digest of the rotation");
+    }
+    if (ev.kt !== "1" || !Array.isArray(ev.k) || ev.k.length !== 1 || ev.nt !== "1" || !Array.isArray(ev.n) || ev.n.length !== 1 || typeof ev.n[0] !== "string") {
+      fail("only a single-key identity that commits to its next key is read");
+    }
+    const k = decodeMatterRaw(ev.k![0], "D", 32);
+    if (!k) fail("its key is not spelled one way");
+    // A rotation is made with exactly the key the event before committed to.
+    if (prev && blake3Qb64(utf8.encode(ev.k![0])) !== prev.n) fail("a rotation is made with a key the event before did not commit to");
+    const raw = decodeMatterRaw(sig, "AA", 64);
+    if (!raw) fail("an event's signature is not spelled one way");
+    if (!(await verifyEd25519(raw!, utf8.encode(event), k!))) fail("an event of its key log is not signed by the key it names");
+    key = k!;
+    prev = { d: ev.d, n: ev.n![0] };
+    events.push({ sn: i, ilk: ev.t as string, said: ev.d });
+  }
+  return { key: key!, events };
+}
+
+/** The key the relay identifier `rid`'s key log (`encoded`, base64url, as the
+ *  X-Keri-App-Answer-Log header carries it) names now; throws, saying why,
+ *  when it is not the identifier's own valid log. */
+export async function checkAnswerKeyLog(rid: string, encoded: string): Promise<CheckedLog> {
+  return readAnswerLog(rid, encoded, (why: string): never => {
+    throw new Error("the answer's key log is refused: " + why);
+  });
+}
+
+/** Whether `log` holds every event `base` holds, in the same order, and perhaps
+ *  more after them: the one rule for taking a newer log in place of one already
+ *  held. Events are compared by sequence number, type and SAID. */
+export function logExtends(log: LogEvent[], base: LogEvent[]): boolean {
+  return log.length >= base.length && base.every((e, i) => log[i].sn === e.sn && log[i].ilk === e.ilk && log[i].said === e.said);
+}
+
+/** What a page remembers of an app's key log between answers, per relay
+ *  identifier: the longest it has been shown. Without it a key the log has since
+ *  left would be believed again by showing its own shorter log. */
+export interface LogMemory {
+  get(rid: string): string | null;
+  set(rid: string, log: string): void;
+}
+
+const memoryOnly = new Map<string, string>();
+
+/** The page's memory: this browser's local storage, and in the page alone when
+ *  there is none (a private window, a test). */
+export function browserLogMemory(): LogMemory {
+  const slot = (rid: string) => "app-answer-log:" + rid;
+  const store = (): Pick<Storage, "getItem" | "setItem"> | undefined => {
+    try {
+      return typeof localStorage === "undefined" ? undefined : localStorage;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    get(rid) {
+      try {
+        return store()?.getItem(slot(rid)) ?? memoryOnly.get(rid) ?? null;
+      } catch {
+        return memoryOnly.get(rid) ?? null;
+      }
+    },
+    set(rid, log) {
+      memoryOnly.set(rid, log);
+      try {
+        store()?.setItem(slot(rid), log);
+      } catch {
+        // The page's own copy still holds for this load.
+      }
+    },
+  };
+}
+
 export interface AnswerCheck {
   rid: string;
   nonce: string;
   status: number;
   contentType: string;
   body: Uint8Array;
-  inception: string | null;
+  /** The X-Keri-App-Answer-Log header: the identifier's signed key log. */
+  log: string | null;
+  /** The longest log this page already holds for `rid` (`LogMemory`), if any. */
+  known?: string | null;
   sig: string | null;
 }
 
-/** Throws unless this answer is the app's: signed with the key of the relay
- *  identifier `rid` the link named, for the call made with `nonce`, carrying
- *  exactly this status, content type and body. */
-export async function checkAppAnswer(a: AnswerCheck): Promise<void> {
+/** Throws unless this answer is the app's: signed with the CURRENT key of the
+ *  relay identifier `rid` the link named, as its key log names it, a log that
+ *  carries on from the longest one this page already holds; for the call made
+ *  with `nonce`, carrying exactly this status, content type and body. Gives the
+ *  log to remember: the longer of the two. */
+export async function checkAppAnswer(a: AnswerCheck): Promise<{ log: string }> {
   const fail = (why: string): never => {
     throw new Error("the answer is not the app's: " + why);
   };
   if (typeof a.rid !== "string" || !a.rid) fail("the link names no relay identifier to check it against");
-  const raw = decodeBase64UrlStrict(a.inception ?? "");
   const sigRaw = decodeBase64UrlStrict(a.sig ?? "");
-  if (!raw || !raw.length || !sigRaw || !sigRaw.length) fail("it is not signed");
-  let text: string;
-  let ev: { t?: string; i?: string; d?: string; di?: string; kt?: string; k?: string[] };
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(raw!);
-    ev = JSON.parse(text);
-  } catch {
-    return fail("its inception is unreadable");
+  if (!sigRaw || !sigRaw.length) fail("it is not signed");
+  const got = await readAnswerLog(a.rid, a.log, fail);
+  let keep = a.log as string;
+  if (a.known) {
+    let held: CheckedLog | undefined;
+    try {
+      held = await readAnswerLog(a.rid, a.known, (why): never => {
+        throw new Error(why);
+      });
+    } catch {
+      held = undefined; // what was kept is unreadable: it is no memory, and not something an app can write
+    }
+    if (held) {
+      if (!logExtends(got.events, held.events)) fail("its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away");
+      if (held.events.length === got.events.length) keep = a.known;
+    }
   }
-  if (ev.t !== "icp" || ev.i !== a.rid || ev.d !== a.rid || ev.di) fail("its inception is not the identifier the link names");
-  deriveIdentifier(text, a.rid, fail);
-  if (ev.kt !== "1" || !Array.isArray(ev.k) || ev.k.length !== 1) fail("only a single-key identity is read");
-  const key = decodeMatterRaw(ev.k![0], "D", 32);
-  if (!key) fail("its key is not spelled one way");
   const signed = utf8.encode(await answerText(a.rid, a.nonce, a.status, a.contentType, a.body));
-  if (!(await verifyEd25519(sigRaw!, signed, key!))) fail("its signature does not hold for this call");
+  if (!(await verifyEd25519(sigRaw!, signed, got.key))) fail("its signature does not hold for this call");
+  return { log: keep };
 }
 
 // ---- the browser's key ---------------------------------------------------
@@ -340,8 +495,9 @@ export interface AppFetch {
  *  a proof made with the key. A refusal is an Error the button shows. */
 export async function appFetch(
   link: AppLink,
-  opts: { fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey> } = {},
+  opts: { fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory } = {},
 ): Promise<AppFetch> {
+  const logs = opts.logs ?? browserLogMemory();
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const appKey = await checkAppKeyLog(link.aid, link.kel);
   const mine = await (opts.browserKey ?? appBrowserKey)(linkSlot(link));
@@ -363,8 +519,8 @@ export async function appFetch(
     headers["X-Browser-Answer-Nonce"] = nonce;
     const r = await underlying(url, { ...init, method, headers, body, cache: "no-store" });
     const bytes = new Uint8Array(await r.arrayBuffer());
-    await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
-      inception: r.headers.get(ANSWER_INCEPTION), sig: r.headers.get(ANSWER_SIG) });
+    logs.set(link.rid, (await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
+      log: r.headers.get(ANSWER_LOG), known: logs.get(link.rid), sig: r.headers.get(ANSWER_SIG) })).log);
     if (isStart && r.ok) {
       const s = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
       skew = serverSkew(s.server_time);
@@ -422,8 +578,9 @@ export interface AppSession {
  *  app's, keeps its session and ends it. A page has no copy of any of it. */
 export function appSession(
   link: AppLink,
-  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey> } = {},
+  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory } = {},
 ): AppSession {
+  const logs = opts.logs ?? browserLogMemory();
   const storage = opts.storage ?? sessionStorage;
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const slot = "session:" + linkSlot(link);
@@ -443,8 +600,8 @@ export function appSession(
     if (method !== "GET") headers["Content-Type"] = "application/json";
     const r = await underlying(link.api + path, { method, cache: "no-store", headers, ...(method === "GET" ? {} : { body }) });
     const bytes = new Uint8Array(await r.arrayBuffer());
-    await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
-      inception: r.headers.get(ANSWER_INCEPTION), sig: r.headers.get(ANSWER_SIG) });
+    logs.set(link.rid, (await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
+      log: r.headers.get(ANSWER_LOG), known: logs.get(link.rid), sig: r.headers.get(ANSWER_SIG) })).log);
     if (r.status === 401) {
       storage.removeItem(slot);
       throw new SessionEnded();
