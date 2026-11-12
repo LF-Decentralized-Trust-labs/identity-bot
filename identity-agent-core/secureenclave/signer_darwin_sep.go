@@ -260,6 +260,9 @@ func (s *sepSigner) write(blob []byte) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(s.path()), 0o700); err != nil {
+		return err
+	}
 	return atomicfile.Write(s.path(), data, 0o600)
 }
 
