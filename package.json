@@ -1,0 +1,9 @@
+{
+  "name": "identity-bot-packages",
+  "private": true,
+  "description": "npm workspace root: lets the JavaScript SDKs under packages/ install together from a clean checkout, resolving each other from the workspace rather than the registry.",
+  "workspaces": [
+    "packages/login-verify",
+    "packages/login-web"
+  ]
+}
