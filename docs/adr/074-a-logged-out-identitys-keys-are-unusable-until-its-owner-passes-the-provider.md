@@ -210,6 +210,8 @@ Every SQLite database in the profile is opened through `sqlitedb.Open`, so that 
 - a desktop core (macOS, Windows) is a controller by default and refuses an unlock with no voucher from its root device, which names this machine's controller identifier; a Linux core and any core with a box identity is not gated when founded; the public `GET /api/health` is answered while locked
 - the optional identity secret, with the delay counted before any key-stretching
 - a log-out whose deletion fails reports the identity as still open
+- a hardware key per profile in each wrapper: the iOS keychain tag, the Android Keystore alias (the app registers a per-profile host beside the device-wide one; with none, every profile keeps the one key) and the Windows TPM key name, each made by `ProfileKeyName` and recorded in what it wrapped (the seed envelope's `key`, a held key's and a recovery phrase's `wrap_key`). macOS makes a key per wrap already. An envelope with no name opens under the device-wide key, which is not deleted
+- a desktop's controller key under `GK`: the macOS key blob is sealed under it (a locked profile's blob on disk is ciphertext and the profile gets a signer that signs nothing, never the software signer), and the Windows TPM key is the profile's own with authorization value `HKDF(GK, "tpm-auth")`. **Written, not run:** the macOS enclave file compiles only on a Mac and the Windows TPM property names are unverified until the probe (section 3)
 
 **Not built:**
 - the optional inactivity timeout (section 5)
@@ -217,8 +219,6 @@ Every SQLite database in the profile is opened through `sqlitedb.Open`, so that 
 - hiding all but the name of a locked identity in the list of identities (section 5): the recovery-phrase and backup-key files are sealed, but other files in a locked profile directory are readable until data at rest (section 7) is built
 - the sealing of every other secret a profile holds under `GK`; only the seed, the recovery phrases and the backup key are
 - the hijacked connections of a locked core are closed only if they were hijacked before the lock fired
-- the per-profile key name inside each platform's wrapper (the wrappers are still device-wide)
-- sealing a desktop's controller key under `GK`, and the Windows TPM authorization value
 - locking on a switch (the app's step)
 - the migration of the seed envelopes and the removal of the device-wide key
 - the audit
