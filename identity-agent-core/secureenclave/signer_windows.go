@@ -303,12 +303,10 @@ func (s *tpmSigner) open() error {
 				// device's grant to the device-wide one no longer matches.
 				log.Printf("[secureenclave] this computer made a controller key of its own for this identity; the device-wide key it used before is kept and is no longer the one it signs with, so its root device must grant it again")
 			}
-			if _, err := readControllerKeyRecord(s.dataDir); err == nil {
-				// The record of an earlier key, and the key is gone (deleted, or the
-				// TPM was cleared). The new key replaces it; it is said, never silent.
-				log.Printf("[secureenclave] the controller key recorded for this identity is gone, and a new one was made: its public key changed, so its root device must grant it again")
-			}
-			if err := recordTheControllerKey(s.dataDir, "tpm2", s.keyName, pub); err != nil {
+			// An earlier record of this key means it is gone (deleted, or the TPM was
+			// cleared): the new key replaces it, said and never silent. Shared with
+			// the Mac signer, so the two do not drift.
+			if err := recordANewControllerKey(s.dataDir, "tpm2", s.keyName, pub); err != nil {
 				takeBack()
 				return fmt.Errorf("the controller key could not be recorded: %w", err)
 			}

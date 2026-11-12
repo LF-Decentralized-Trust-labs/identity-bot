@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -182,6 +183,45 @@ func theControllerKeyIsTheOneWeMade(dataDir, name string, pub []byte) error {
 		return ErrControllerKeyNotOurs
 	}
 	return nil
+}
+
+// recordANewControllerKey is what a signer does with a controller key it has just
+// made, on every platform: record it, sealed under the gate key. A profile with no
+// gate has no record. A record of an earlier key under this same name means that
+// key is gone (deleted, the chip replaced, the TPM cleared): the new key replaces
+// it, with a log line, and its root device must grant it again; refusing instead
+// would leave the profile unable to sign for good. A record for a key of another
+// name is not this signer's to replace, and is a refusal.
+func recordANewControllerKey(dataDir, platform, name string, pub []byte) error {
+	if _, gated, err := theGateForThisSeed(dataDir); err != nil || !gated {
+		return err
+	}
+	if rec, err := readControllerKeyRecord(dataDir); err == nil {
+		if rec.Name != name || rec.Platform != platform {
+			return fmt.Errorf("%w: the record is for a different key", ErrControllerKeyNotOurs)
+		}
+		log.Printf("[secureenclave] the controller key recorded for this identity is gone, and a new one was made: its public key changed, so its root device must grant it again")
+	}
+	return recordTheControllerKey(dataDir, platform, name, pub)
+}
+
+// settleAnExistingControllerKey is what a signer does with a key blob it found
+// and the hardware opened, when the blob itself proves the core made it (a Mac's
+// blob is sealed under GK, so same-user code cannot plant one). A recorded key must
+// be this one: a different blob is refused, which is what stops a planted
+// un-sealed key file from being adopted and sealed. With no record, the key is
+// recorded: it is one made before the record existed, or its record was deleted,
+// and a key that opens under GK was made by this core. That includes a key made
+// before the profile had a gate, which is adopted only when no other key is
+// recorded. A damaged record is a refusal. A profile with no gate has no record.
+func settleAnExistingControllerKey(dataDir, platform, name string, pub []byte) error {
+	if _, gated, err := theGateForThisSeed(dataDir); err != nil || !gated {
+		return err
+	}
+	if _, err := readControllerKeyRecord(dataDir); err != nil && os.IsNotExist(err) {
+		return recordTheControllerKey(dataDir, platform, name, pub)
+	}
+	return theControllerKeyIsTheOneWeMade(dataDir, name, pub)
 }
 
 // refusingControllerKey is the signer for a hardware controller key that exists

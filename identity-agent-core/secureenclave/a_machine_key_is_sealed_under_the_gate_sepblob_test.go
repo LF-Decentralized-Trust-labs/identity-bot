@@ -306,3 +306,55 @@ func TestAGatedMachineKeyIsMadeSealedAndRefusedWhenLocked(t *testing.T) {
 		t.Fatal("a locked Mac fell through to the software signer")
 	}
 }
+
+// With a real enclave: a gated profile's key file swapped for another key's is
+// refused, never adopted and sealed, and the profile's own record still names its
+// own key. A deleted key file is replaced by a new key and the record follows.
+func TestAGatedMacRefusesAKeyItsRecordDoesNotNameAndRecordsANewOne(t *testing.T) {
+	dir := t.TempDir()
+	theKeyedGateIs(t, dir, aKeyedGate{key: 0x42, profile: "profile-a", open: true})
+	s := newSepSigner(dir).(*sepSigner)
+	if !s.Available() {
+		t.Skip("no usable Secure Enclave on this machine")
+	}
+	pub, err := s.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := theControllerKeyIsTheOneWeMade(dir, theMachineKeyFileOnDisk, pub); err != nil {
+		t.Fatalf("the key it made is not recorded: %v", err)
+	}
+
+	// Planted: an un-sealed file holding some other enclave key of this machine.
+	planter := newSepSigner(t.TempDir()).(*sepSigner)
+	if !planter.Available() {
+		t.Skip("no usable Secure Enclave on this machine")
+	}
+	planted, err := os.ReadFile(planter.path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.path(), planted, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused := newSepSigner(dir).(*sepSigner)
+	if err := refused.ensure(); !errors.Is(err, ErrControllerKeyNotOurs) {
+		t.Fatalf("a key file swapped for another key was adopted: %v", err)
+	}
+	if env, _ := theStoredEnvelope(t, dir); env.Gate != "" {
+		t.Fatal("the planted key was sealed under the gate key")
+	}
+
+	// Deleted: the key file is gone and the record is of this signer's own key.
+	if err := os.Remove(s.path()); err != nil {
+		t.Fatal(err)
+	}
+	fresh := newSepSigner(dir).(*sepSigner)
+	newPub, err := fresh.PublicKey()
+	if err != nil || bytes.Equal(newPub, pub) {
+		t.Fatalf("a new key was not made after the old one was deleted: %v", err)
+	}
+	if err := theControllerKeyIsTheOneWeMade(dir, theMachineKeyFileOnDisk, newPub); err != nil {
+		t.Fatalf("the new key is not recorded: %v", err)
+	}
+}

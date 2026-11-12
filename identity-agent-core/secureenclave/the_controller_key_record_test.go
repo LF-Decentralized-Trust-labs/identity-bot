@@ -114,9 +114,15 @@ func TestAHardwareControllerKeyThatWillNotOpenGivesARefusingSignerNotTheSoftware
 			}
 		})
 	}
-	t.Run("a machine that never had a hardware key still gets the software signer", func(t *testing.T) {
-		if s := NewPlatformSigner(t.TempDir()); s.Platform() != "software" {
-			t.Fatalf("got %s", s.Platform())
+	t.Run("a machine that never had a hardware key gets whatever its own hardware offers, else the software signer", func(t *testing.T) {
+		// Independent of the machine this runs on: a Mac with a Secure Enclave
+		// (built with sepblob) rightly gets the enclave signer.
+		want := "software"
+		if hw := newDarwinSecureEnclaveSigner(t.TempDir()); hw != nil && hw.Available() {
+			want = hw.Platform()
+		}
+		if s := NewPlatformSigner(t.TempDir()); s.Platform() != want {
+			t.Fatalf("got %s, want %s", s.Platform(), want)
 		}
 	})
 }
@@ -174,5 +180,101 @@ func TestTheCoreRefusesAControllerKeyItCannotShowItMade(t *testing.T) {
 	}
 	if err := theControllerKeyIsTheOneWeMade(free, "k", pub); err != nil {
 		t.Fatalf("an ungated profile's key was refused: %v", err)
+	}
+}
+
+// A Mac's key found under a gate is checked against the record, as a Windows key
+// is: the key the profile recorded is accepted, a different blob is refused (a
+// planted key file must not be adopted and sealed), a record that was deleted is
+// written again for a key that opened, and a damaged record is a refusal.
+func TestAMacControllerKeyIsCheckedAgainstItsRecord(t *testing.T) {
+	pub := bytes.Repeat([]byte{4}, 65)
+	other := bytes.Repeat([]byte{5}, 65)
+	const mk, plat = theMachineKeyFileOnDisk, "secure_enclave"
+
+	dir := t.TempDir()
+	theGateIs(t, dir, aTestGate{"profile-a", true})
+	if err := settleAnExistingControllerKey(dir, plat, mk, pub); err != nil {
+		t.Fatalf("a sealed key with no record was refused: %v", err)
+	}
+	if err := settleAnExistingControllerKey(dir, plat, mk, pub); err != nil {
+		t.Fatalf("the recorded key was refused: %v", err)
+	}
+	if err := settleAnExistingControllerKey(dir, plat, mk, other); !errors.Is(err, ErrControllerKeyNotOurs) {
+		t.Fatalf("a different key was adopted over the recorded one: %v", err)
+	}
+	if err := os.WriteFile(controllerKeyPath(dir, controllerKeyRecordFile), []byte(`{"v":1,`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := settleAnExistingControllerKey(dir, plat, mk, pub); !errors.Is(err, ErrControllerKeyNotOurs) {
+		t.Fatalf("a damaged record was taken for none: %v", err)
+	}
+	theGateIs(t, dir, aTestGate{"profile-a", false})
+	if err := settleAnExistingControllerKey(dir, plat, mk, pub); !errors.Is(err, ErrIdentityLocked) {
+		t.Fatalf("locked: %v", err)
+	}
+	free := t.TempDir()
+	if err := settleAnExistingControllerKey(free, plat, mk, pub); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(controllerKeyPath(free, controllerKeyRecordFile)); err == nil {
+		t.Fatal("an ungated profile got a record")
+	}
+}
+
+// A key just made is recorded; a record of the same key that is gone is replaced;
+// a record of a key of another name or platform is not this signer's to replace.
+func TestANewControllerKeyReplacesItsOwnRecordAndNeverAnotherKeys(t *testing.T) {
+	pub := bytes.Repeat([]byte{4}, 65)
+	other := bytes.Repeat([]byte{5}, 65)
+	const mk, plat = theMachineKeyFileOnDisk, "secure_enclave"
+	dir := t.TempDir()
+	theGateIs(t, dir, aTestGate{"profile-a", true})
+	if err := recordANewControllerKey(dir, plat, mk, pub); err != nil {
+		t.Fatal(err)
+	}
+	if err := theControllerKeyIsTheOneWeMade(dir, mk, pub); err != nil {
+		t.Fatalf("the new key is not recorded: %v", err)
+	}
+	if err := recordANewControllerKey(dir, plat, mk, other); err != nil {
+		t.Fatalf("a new key could not replace its own gone key's record: %v", err)
+	}
+	if err := theControllerKeyIsTheOneWeMade(dir, mk, other); err != nil {
+		t.Fatalf("the replacement is not recorded: %v", err)
+	}
+	if err := recordANewControllerKey(dir, "tpm2", "k", pub); !errors.Is(err, ErrControllerKeyNotOurs) {
+		t.Fatalf("another platform's record was replaced: %v", err)
+	}
+	if err := theControllerKeyIsTheOneWeMade(dir, mk, other); err != nil {
+		t.Fatalf("the refused replacement changed the record: %v", err)
+	}
+	theGateIs(t, dir, aTestGate{"profile-a", false})
+	if err := recordANewControllerKey(dir, plat, mk, pub); !errors.Is(err, ErrIdentityLocked) {
+		t.Fatalf("locked: %v", err)
+	}
+}
+
+// openFromTheGate with a blob sealed under a gate and no gate key to open it: the
+// stored bytes are never handed back as the key. (Fails if it returns them.)
+func TestASealedBlobWithNoGateKeyIsNeverServedAsTheKey(t *testing.T) {
+	dir := t.TempDir()
+	theGateIs(t, dir, aTestGate{"profile-a", true})
+	sealed, scheme, err := sealForTheGate(dir, []byte("the blob"))
+	if err != nil || scheme != gateScheme {
+		t.Fatalf("seal: %v %q", err, scheme)
+	}
+	for name, gate := range map[string]func(t *testing.T){
+		"a locked profile": func(t *testing.T) { theGateIs(t, dir, aTestGate{"profile-a", false}) },
+		"a profile that has no gate": func(t *testing.T) {
+			t.Cleanup(UseGate(func(string) (GateSealer, bool) { return nil, false }))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gate(t)
+			blob, needs, err := openFromTheGate(dir, sealed, gateScheme)
+			if !errors.Is(err, ErrIdentityLocked) || blob != nil || needs {
+				t.Fatalf("got %q needs=%v err=%v", blob, needs, err)
+			}
+		})
 	}
 }

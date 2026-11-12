@@ -141,7 +141,16 @@ func (s *sepSigner) ensure() error {
 		// and then fails every signature for the life of the installation, with no
 		// path that ever re-mints. Asking the enclave to use it once is the only
 		// thing that distinguishes our key from somebody else's.
-		if _, uerr := publicFrom(existing); uerr == nil {
+		if pub, uerr := publicFrom(existing); uerr == nil {
+			// The key must be the one this profile recorded (the same record and
+			// check as Windows): a key file swapped for another is refused, and
+			// never adopted and sealed (ADR-074 section 3).
+			if err := settleAnExistingControllerKey(s.dataDir, "secure_enclave", theMachineKeyFileOnDisk, pub); err != nil {
+				if errors.Is(err, ErrIdentityLocked) {
+					return err
+				}
+				return fmt.Errorf("%w: %w", errAHardwareKeyExistsAndWillNotOpen, err)
+			}
 			if needsGate {
 				// Made before the profile had a gate: seal it now that it does.
 				if err := s.write(existing); err != nil {
@@ -199,6 +208,20 @@ func (s *sepSigner) ensure() error {
 			return nil
 		}
 		return fmt.Errorf("this machine's key could not be stored: %w", err)
+	}
+	// A key this call just made and cannot show it recorded is not left behind: it
+	// would be found next time with no record of it and a record of nothing it
+	// could match. An earlier record of this key is said, never silent.
+	pub, err := publicFrom(blob)
+	if err == nil {
+		err = recordANewControllerKey(s.dataDir, "secure_enclave", theMachineKeyFileOnDisk, pub)
+	}
+	if err != nil {
+		_ = os.Remove(p)
+		if errors.Is(err, ErrIdentityLocked) {
+			return err
+		}
+		return fmt.Errorf("%w: the controller key could not be recorded: %w", errAHardwareKeyExistsAndWillNotOpen, err)
 	}
 	s.blob, s.loaded = blob, true
 	return nil
