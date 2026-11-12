@@ -322,20 +322,21 @@ func (s *tpmSigner) open() error {
 }
 
 // deleteMachineKey deletes an open key. A key made with an authorization value is
-// deleted only by a caller that has it: the Platform Crypto Provider asks for the
-// value first, and, told it may not ask (NCRYPT_SILENT_FLAG, which no call on this
-// path may omit: deleting a profile must never put a prompt on a screen nobody is at),
-// refuses, and the key stays. So the value is given to the handle first, and a refusal
-// is an error the caller reads, never a delete that did not happen. On success the
-// handle is freed by the provider; on failure it is still the caller's. auth is nil for
-// a key made without one.
+// deleted only by a caller that has it, so the value is given to the handle first:
+// with it supplied, the Platform Crypto Provider has nothing to ask, and no prompt
+// appears. The delete itself passes no flags. The provider refuses NCryptDeleteKey
+// with NCRYPT_SILENT_FLAG outright, NTE_BAD_FLAGS (0x80090009), with or without the
+// value, as a real TPM 2.0 showed; so silence comes from supplying the value, not
+// from the flag. A refusal is an error the caller reads, never a delete that did not
+// happen. On success the handle is freed by the provider; on failure it is still the
+// caller's. auth is nil for a key made without one.
 func deleteMachineKey(key windows.Handle, auth []byte) error {
 	if auth != nil {
 		if err := supplyUsageAuth(key, auth); err != nil {
 			return err
 		}
 	}
-	if r, _, _ := procDeleteKey.Call(uintptr(key), ncryptSilentFlag); r != 0 {
+	if r, _, _ := procDeleteKey.Call(uintptr(key), 0); r != 0 {
 		return fmt.Errorf("the TPM would not delete the key (0x%X)", uint32(r))
 	}
 	return nil
