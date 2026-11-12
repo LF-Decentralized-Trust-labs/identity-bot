@@ -40,6 +40,48 @@ class WatcherNotRunning implements Exception {
   String toString() => 'The watcher is not running on this agent.';
 }
 
+/// What one of the two events is, read by the core from the signed message:
+/// its type (icp, rot, ixn, dip, drt), its SAID and the key that signed it.
+/// [role] is "held" (this agent's copy) or "rival" (the other watcher's).
+class EventDetail {
+  final String role;
+  final String type;
+  final String said;
+  final List<String> signingKeys;
+  const EventDetail({
+    required this.role,
+    required this.type,
+    required this.said,
+    this.signingKeys = const [],
+  });
+
+  /// The type in words a person reads.
+  String get typeLabel => switch (type) {
+        'icp' => 'inception',
+        'rot' => 'rotation',
+        'ixn' => 'interaction',
+        'dip' => 'delegated inception',
+        'drt' => 'delegated rotation',
+        _ => type,
+      };
+
+  /// One line: what the event is, its SAID and its signing key.
+  String get summaryLine => '$typeLabel ($type), SAID $said, signed by '
+      '${signingKeys.isEmpty ? 'a key that could not be read' : signingKeys.join(', ')}';
+
+  static EventDetail? fromJson(Object? j) {
+    if (j is! Map<String, dynamic>) return null;
+    return EventDetail(
+      role: (j['role'] ?? '').toString(),
+      type: (j['type'] ?? '').toString(),
+      said: (j['said'] ?? '').toString(),
+      signingKeys: [
+        for (final k in (j['signing_keys'] is List ? j['signing_keys'] as List : const [])) k.toString(),
+      ],
+    );
+  }
+}
+
 /// The two signed events at the place where an identity's key history forked.
 /// Each is an event with its controller's signatures, so anyone can verify
 /// either one without trusting this agent. [watcher] is the watcher that held
@@ -57,6 +99,10 @@ class DuplicityEvidence {
   /// each): what the two events are checked against.
   final List<String> priorMessagesB64;
 
+  /// What each event is: [held, rival]. Empty on an alert raised before the core
+  /// described them; the fingerprints still tell the two apart.
+  final List<EventDetail> events;
+
   const DuplicityEvidence({
     required this.sequenceNumber,
     required this.heldMessageB64,
@@ -64,7 +110,11 @@ class DuplicityEvidence {
     this.watcher = '',
     this.identifier = '',
     this.priorMessagesB64 = const [],
+    this.events = const [],
   });
+
+  EventDetail? get heldDetail => events.where((e) => e.role == 'held').firstOrNull;
+  EventDetail? get rivalDetail => events.where((e) => e.role == 'rival').firstOrNull;
 
   /// True when both signed events are present. An older alert carries none.
   bool get hasBoth => heldMessageB64.isNotEmpty && rivalMessageB64.isNotEmpty;
@@ -96,6 +146,8 @@ class DuplicityEvidence {
           'The history before place $sequenceNumber (base64, one event per line):',
           ...priorMessagesB64,
         ],
+        if (heldDetail != null) ...['', 'Held by this agent: ${heldDetail!.summaryLine}'],
+        if (rivalDetail != null) 'Rival: ${rivalDetail!.summaryLine}',
         '',
         'Event held by this agent (base64):',
         heldMessageB64,
@@ -115,6 +167,10 @@ class DuplicityEvidence {
       priorMessagesB64: [
         for (final m in (j['prior_messages_b64'] is List ? j['prior_messages_b64'] as List : const []))
           m.toString(),
+      ],
+      events: [
+        for (final e in (j['events'] is List ? j['events'] as List : const []))
+          if (EventDetail.fromJson(e) case final d?) d,
       ],
     );
   }

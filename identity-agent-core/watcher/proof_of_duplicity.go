@@ -94,6 +94,10 @@ type Evidence struct {
 	// events are checked against is made of. With it an alert can be
 	// re-verified from what it stores alone, whatever happens to the kept log.
 	PriorMessages []string `json:"prior_messages_b64,omitempty"`
+	// Events says what each of the two events is, so a person or a checker can
+	// see what forked without decoding the messages: [held, rival]. It is read
+	// from the signed messages and adds nothing to what they prove.
+	Events []EventDetail `json:"events,omitempty"`
 	// Watcher is the standing watcher the rival event came from, or the one flagged.
 	Watcher string `json:"watcher,omitempty"`
 	// Why says, for a watcher alert, how its answer did not hold up.
@@ -164,8 +168,71 @@ func (e Evidence) Reverify() error {
 	return nil
 }
 
+// EventDetail is what one of the two events at the contested place is.
+type EventDetail struct {
+	// Role is "held" (this agent's copy) or "rival" (the other watcher's).
+	Role string `json:"role"`
+	// Type is the event's own type: icp, rot, ixn, dip or drt.
+	Type string `json:"type"`
+	// SAID is the event's self-addressing identifier, which names its content.
+	SAID string `json:"said"`
+	// SigningKeys are the keys in force once the event is applied, which are the
+	// keys that signed it: a rotation is signed by the keys it brings in.
+	// Empty when the event does not verify against the log before it.
+	SigningKeys []string `json:"signing_keys,omitempty"`
+}
+
+// eventDetails reads the type, SAID and signing keys of the held and rival
+// messages. before is the key state at the place before the contested one (nil
+// at place 0).
+func eventDetails(before *keri.KeyState, held, rival []byte) []EventDetail {
+	var out []EventDetail
+	for i, m := range [][]byte{held, rival} {
+		d := EventDetail{Role: []string{"held", "rival"}[i]}
+		if ev, err := keri.ParseEvent(m); err == nil {
+			d.Type, d.SAID = ev.Ilk, ev.SAID
+		}
+		if v, err := keri.VerifyEvent(before, m); err == nil {
+			d.SigningKeys = v.State.Keys()
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// withEvents fills Events from the stored messages, so an alert stored before
+// the field existed carries it when it is read.
+func (e Evidence) withEvents() Evidence {
+	if e.Kind != "duplicity" || len(e.Events) > 0 || e.HeldMessage == "" || e.RivalMessage == "" {
+		return e
+	}
+	held, err1 := base64.StdEncoding.DecodeString(e.HeldMessage)
+	rival, err2 := base64.StdEncoding.DecodeString(e.RivalMessage)
+	if err1 != nil || err2 != nil {
+		return e
+	}
+	var before *keri.KeyState
+	if e.SequenceNum > 0 {
+		var prior [][]byte
+		for _, p := range e.PriorMessages {
+			m, err := base64.StdEncoding.DecodeString(p)
+			if err != nil {
+				return e
+			}
+			prior = append(prior, m)
+		}
+		log, err := keri.ValidateSignedKEL(prior)
+		if err != nil {
+			return e
+		}
+		before = log.State()
+	}
+	e.Events = eventDetails(before, held, rival)
+	return e
+}
+
 func (e Evidence) json() string {
-	b, _ := json.Marshal(e)
+	b, _ := json.Marshal(e.withEvents())
 	return string(b)
 }
 

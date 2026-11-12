@@ -106,7 +106,11 @@ void main() {
     final alerts = [
       {'id': 1, 'aid': 'EA', 'sequence_num': 3, 'detected_at': 't', 'kind': 'duplicity', 'source_url': 'https://w1',
         'evidence': {'kind': 'duplicity', 'sequence_number': 3, 'held_message_b64': held, 'rival_message_b64': rival, 'watcher': 'https://w1',
-          'identifier': 'EA', 'prior_messages_b64': [base64.encode(utf8.encode('prior one'))]}},
+          'identifier': 'EA', 'prior_messages_b64': [base64.encode(utf8.encode('prior one'))],
+          'events': [
+            {'role': 'held', 'type': 'ixn', 'said': 'EHELDSAID', 'signing_keys': ['DKEYONE']},
+            {'role': 'rival', 'type': 'ixn', 'said': 'ERIVALSAID', 'signing_keys': ['DKEYONE']},
+          ]}},
       {'id': 2, 'aid': 'EB', 'sequence_num': 5, 'detected_at': 't', 'kind': 'watcher', 'source_url': 'https://w2',
         'evidence': {'kind': 'watcher', 'sequence_number': 5, 'watcher': 'https://w2', 'why': 'its log does not verify'}},
       {'id': 3, 'aid': 'EC', 'sequence_num': 1, 'detected_at': 't', 'kind': 'escalation', 'source_url': 'https://w3'},
@@ -122,6 +126,12 @@ void main() {
     expect(fork.heldFingerprint, hasLength(12));
     expect(fork.copyText, allOf(contains(held), contains(rival), contains('Identity: EA'), contains(base64.encode(utf8.encode('prior one')))),
         reason: 'somebody else can only verify the two events with the history before them');
+    expect(fork.heldDetail!.said, 'EHELDSAID');
+    expect(fork.rivalDetail!.said, 'ERIVALSAID');
+    expect(fork.heldDetail!.typeLabel, 'interaction');
+    expect(fork.copyText, allOf(contains('interaction (ixn), SAID EHELDSAID, signed by DKEYONE'), contains('SAID ERIVALSAID')),
+        reason: 'a person or a checker sees what forked without decoding the messages');
+    expect(got[3].evidence, isNull);
     expect(got[1].isWatcherFlag, isTrue);
     expect(got[1].why, 'its log does not verify');
     expect(got[1].evidence, isNull);

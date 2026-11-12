@@ -131,6 +131,38 @@ func TestARealValidlySignedForkFromOneWatcherRefuses(t *testing.T) {
 	if ev.HeldMessage == ev.RivalMessage {
 		t.Fatal("the evidence holds one event twice")
 	}
+	// Each event says what it is, matching what keri-go reads from the message,
+	// and names the key that signed it; the two differ in SAID, which is the fork.
+	if len(ev.Events) != 2 || ev.Events[0].Role != "held" || ev.Events[1].Role != "rival" {
+		t.Fatalf("the evidence does not describe both events: %+v", ev.Events)
+	}
+	for i, b64 := range []string{ev.HeldMessage, ev.RivalMessage} {
+		m, _ := base64.StdEncoding.DecodeString(b64)
+		parsed, err := keri.ParseEvent(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := ev.Events[i]
+		if d.Type == "" || d.Type != parsed.Ilk || d.SAID == "" || d.SAID != parsed.SAID {
+			t.Fatalf("event %d described as %+v, the message says %s %s", i, d, parsed.Ilk, parsed.SAID)
+		}
+		v, err := keri.VerifyEvent(state.State(), m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.SigningKeys) == 0 || d.SigningKeys[0] != v.State.Keys()[0] {
+			t.Fatalf("event %d signing keys %v, want %v", i, d.SigningKeys, v.State.Keys())
+		}
+	}
+	if ev.Events[0].SAID == ev.Events[1].SAID {
+		t.Fatal("the two events share a SAID")
+	}
+	// An alert stored before the field existed is described when it is read back.
+	old := ev
+	old.Events = nil
+	if got := old.withEvents(); len(got.Events) != 2 {
+		t.Fatalf("a stored alert without the description was not described: %+v", got.Events)
+	}
 }
 
 // The one place that cannot be proven here is a delegated rotation, which keri-go
