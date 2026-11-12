@@ -8,6 +8,7 @@
 **Amended:** 2026-11-10 — what keeps the trail is an add-on's, not the core's (see "Where the store lives", below)
 **Amended:** 2026-11-10 — the proof kept for a person's message carries the statement, never the words (see "What the core keeps of an app's request", below)
 **Amended:** 2026-11-11 — the app keeps the entries and the words, and the Identity Agent keeps the head and the count (see "Where the trail is kept", below)
+**Amended:** 2026-11-12 — how a conversation the Identity Agent already holds moves to the app, and how long the Identity Agent keeps its copy (see "Moving a conversation the Identity Agent already holds", below)
 
 ---
 
@@ -155,6 +156,26 @@ committed, so step 6 of the order of a write and the *pending* and *not kept*
 states no longer apply to it. The Identity Agent no longer holds the chain and
 serves `Trail.Read`: the read is the app's, checked against the head. The
 *not-delivered* outcome to an AI agent stays. A refusal still joins the trail.
+
+**Moving a conversation the Identity Agent already holds.** *Amendment,
+2026-11-12.* A conversation an app keeps may still be held whole by the Identity
+Agent, from before this rule. It moves in this order, and each step waits for
+the one before:
+
+1. The entries are copied to the app, which keeps them with their words.
+2. The copy is checked against the head and count with
+   `conversationbundle.CheckCopy`, as any reader would check it.
+3. Only when the check shows *matches* does the Identity Agent stop serving its
+   own entries; from then on the read is the app's.
+4. The Identity Agent keeps its own copy for **30 days after a successful check**,
+   so that a fault found in the app's copy can be undone. After 30 days it
+   drops the copy and keeps only the head, the count and what it needs to decide
+   a write.
+
+A check that does not show *matches* leaves the conversation whole in the
+Identity Agent, still served by it, and is logged with what it showed; the move
+is tried again, never forced. A conversation is never served from two places:
+until step 3 it is the Identity Agent's, after it the app's.
 
 **Not done here.** `conversationbundle.Verify` and the entry format still read a
 person's *pending* entry and a *not kept* outcome, which nothing is to write; the
