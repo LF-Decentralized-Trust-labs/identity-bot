@@ -2,6 +2,8 @@ package measurementlist
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -23,6 +25,8 @@ type negativeVector struct {
 	File        string `json:"file"`
 	Refusal     string `json:"refusal"` // name of the error; "" means it verifies
 	MinSequence int64  `json:"min_sequence,omitempty"`
+	// SeenDigest is the hash of the list accepted at MinSequence.
+	SeenDigest string `json:"seen_digest,omitempty"`
 	// AcceptedForIndividual is how many measurements a list that verifies
 	// accepts for "individual" at the evaluation time.
 	AcceptedForIndividual *int   `json:"accepted_for_individual,omitempty"`
@@ -30,9 +34,10 @@ type negativeVector struct {
 }
 
 var refusals = map[string]error{
-	"ErrBadSignature": ErrBadSignature,
-	"ErrOldList":      ErrOldList,
-	"ErrExpired":      ErrExpired,
+	"ErrBadSignature":    ErrBadSignature,
+	"ErrOldList":         ErrOldList,
+	"ErrConflictingList": ErrConflictingList,
+	"ErrExpired":         ErrExpired,
 }
 
 func TestTheNegativeVectorsAreRefusedAsTheirFilesSay(t *testing.T) {
@@ -63,6 +68,13 @@ func TestTheNegativeVectorsAreRefusedAsTheirFilesSay(t *testing.T) {
 	e["valid_until"] = "2026-11-10T00:00:00Z" // ended before the evaluation time
 	outside["images"] = map[string]any{"individual": []any{e}}
 
+	// Same sequence as the list already accepted (baseDoc, sequence 7), other content.
+	accepted := sign(t, priv, baseDoc())
+	acceptedMsg, _ := SignedBytes(accepted)
+	acceptedDigest := sha256.Sum256(acceptedMsg)
+	conflicting := baseDoc()
+	conflicting["images"] = map[string]any{"individual": []any{entry("individual-v19", 0x11), entry("individual-v21", 0x13)}}
+
 	zero := 0
 	vectors := []struct {
 		v   negativeVector
@@ -72,6 +84,7 @@ func TestTheNegativeVectorsAreRefusedAsTheirFilesSay(t *testing.T) {
 		{negativeVector{File: "another_key.json", Refusal: "ErrBadSignature", Note: "validly signed by a key that is not the pinned one"}, anotherKey},
 		{negativeVector{File: "missing_domain_prefix.json", Refusal: "ErrBadSignature", Note: "signed over the canonical bytes without the measurement-list-v1 line"}, noPrefixRaw},
 		{negativeVector{File: "old_sequence.json", Refusal: "ErrOldList", MinSequence: 7, Note: "sequence 6 after sequence 7 was accepted"}, sign(t, priv, oldSeq)},
+		{negativeVector{File: "same_sequence_different_content.json", Refusal: "ErrConflictingList", MinSequence: 7, SeenDigest: hex.EncodeToString(acceptedDigest[:]), Note: "sequence 7 again, but not the list accepted at sequence 7"}, sign(t, priv, conflicting)},
 		{negativeVector{File: "expired.json", Refusal: "ErrExpired", Note: "expires_at is before the evaluation time"}, sign(t, priv, expired)},
 		{negativeVector{File: "entry_outside_window.json", AcceptedForIndividual: &zero, Note: "the list verifies, but its only entry ended before the evaluation time, so nothing is accepted"}, sign(t, priv, outside)},
 	}
@@ -107,7 +120,7 @@ func TestTheNegativeVectorsAreRefusedAsTheirFilesSay(t *testing.T) {
 		if string(raw) != string(vectors[i].raw) {
 			t.Errorf("%s differs from what the fixed key produces", v.File)
 		}
-		l, err := Verify(raw, Policy{Key: key, MinSequence: v.MinSequence, Now: now})
+		l, err := Verify(raw, Policy{Key: key, MinSequence: v.MinSequence, SeenDigest: v.SeenDigest, Now: now})
 		if v.Refusal != "" {
 			if want := refusals[v.Refusal]; !errors.Is(err, want) {
 				t.Errorf("%s: got %v, want %s", v.File, err, v.Refusal)

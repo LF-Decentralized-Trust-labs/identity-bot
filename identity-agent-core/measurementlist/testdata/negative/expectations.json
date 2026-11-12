@@ -21,6 +21,13 @@
     "note": "sequence 6 after sequence 7 was accepted"
   },
   {
+    "file": "same_sequence_different_content.json",
+    "refusal": "ErrConflictingList",
+    "min_sequence": 7,
+    "seen_digest": "bf56e040a0395d79b97c42d407dd96fc35793a2b22d2b71587555fa21d201aee",
+    "note": "sequence 7 again, but not the list accepted at sequence 7"
+  },
+  {
     "file": "expired.json",
     "refusal": "ErrExpired",
     "note": "expires_at is before the evaluation time"

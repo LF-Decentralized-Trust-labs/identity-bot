@@ -27,6 +27,10 @@ import (
 //     pinned in this build. When one verifies it is the policy, and nothing
 //     else is added to it — except by the owner's own statement on one
 //     adoption request, below, which survives an accepted list on purpose.
+//     When the variable is unset the file measurement_list.json in the data
+//     directory is read instead, which is how an app hands the core a list
+//     (desktop and embedded alike): the app supplies the bytes and the core
+//     decides.
 //   - AGENT_ACCEPTED_MEASUREMENTS on this agent, for a standing policy that
 //     survives restarts. It is the bootstrap: used only while no signed list
 //     has ever been accepted here; after one has, it is never used again.
@@ -137,7 +141,7 @@ func measurementPolicy(dataDir, entityType string, now time.Time) ([][]byte, str
 	}
 	everAccepted := floor > 0
 
-	path := strings.TrimSpace(os.Getenv("AGENT_MEASUREMENT_LIST_FILE"))
+	path := measurementListPath(dataDir)
 	var listErr error
 	switch {
 	case path != "":
@@ -155,7 +159,7 @@ func measurementPolicy(dataDir, entityType string, now time.Time) ([][]byte, str
 		}
 		listErr = err
 	case everAccepted:
-		listErr = fmt.Errorf("AGENT_MEASUREMENT_LIST_FILE is not set")
+		listErr = fmt.Errorf("there is no measurement list: AGENT_MEASUREMENT_LIST_FILE is not set and %s is absent", defaultMeasurementListFile)
 	}
 	if everAccepted {
 		why := fmt.Sprintf("a signed measurement list (sequence %d) was accepted here before and the list now cannot be used (%v); "+
@@ -169,6 +173,29 @@ func measurementPolicy(dataDir, entityType string, now time.Time) ([][]byte, str
 	}
 	m, err := acceptedMeasurementsFromEnv()
 	return m, "", err
+}
+
+// defaultMeasurementListFile is where an app that launches this core, or an
+// embedded one that has no environment to give, leaves the signed list: inside
+// the data directory, under this name. It is only bytes; the core verifies it
+// against the pinned key, the floor and the expiry on every decision, so
+// whoever writes it decides nothing.
+const defaultMeasurementListFile = "measurement_list.json"
+
+// measurementListPath is AGENT_MEASUREMENT_LIST_FILE when set, otherwise the
+// default file in the data directory when one is there, otherwise "".
+func measurementListPath(dataDir string) string {
+	if p := strings.TrimSpace(os.Getenv("AGENT_MEASUREMENT_LIST_FILE")); p != "" {
+		return p
+	}
+	if dataDir == "" {
+		return ""
+	}
+	p := filepath.Join(dataDir, defaultMeasurementListFile)
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return ""
 }
 
 // pinnedPublisherKey is the compiled-in key; a variable only so a test can pin its own.

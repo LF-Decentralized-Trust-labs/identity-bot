@@ -276,3 +276,27 @@ func TestTheOwnersNamedMeasurementOnlyAddsAndNeverLiftsAListRefusal(t *testing.T
 		t.Error("the owner's one-adoption statement leaked into the standing policy")
 	}
 }
+
+// An app that launches the core, or embeds it with no environment to give,
+// leaves the signed list in the data directory. The core verifies it exactly
+// as it does a list named by the variable.
+func TestAListLeftInTheDataDirectoryIsVerifiedAndDecidesLikeAnyOther(t *testing.T) {
+	f := newListFixture(t, "a")
+	t.Setenv("AGENT_MEASUREMENT_LIST_FILE", "")
+	t.Setenv("AGENT_ACCEPTED_MEASUREMENTS", aMeasurement(0x77))
+	raw := f.publish(t, 3, map[string][]string{"individual": {aMeasurement(0x12)}}, f.priv)
+	os.Rename(filepath.Join(f.dir, "list.json"), filepath.Join(f.dir, defaultMeasurementListFile))
+	m, why, err := measurementPolicy(f.dir, "individual", time.Now())
+	if err != nil || why != "" || len(m) != 1 || m[0][0] != 0x12 {
+		t.Fatalf("policy %v, why %q, err %v: the list in the data directory was not the policy", m, why, err)
+	}
+	// Signed by someone else: refused, and the bootstrap is not reopened.
+	seed := sha256.Sum256([]byte("attacker"))
+	f.publish(t, 4, map[string][]string{"individual": {aMeasurement(0x99)}}, ed25519.NewKeyFromSeed(seed[:]))
+	os.Rename(filepath.Join(f.dir, "list.json"), filepath.Join(f.dir, defaultMeasurementListFile))
+	m, why, _ = measurementPolicy(f.dir, "individual", time.Now())
+	if len(m) != 0 || why == "" {
+		t.Fatalf("a list signed by another key was accepted from the data directory: %v", m)
+	}
+	_ = raw
+}
