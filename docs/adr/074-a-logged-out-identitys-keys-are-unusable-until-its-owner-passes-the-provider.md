@@ -229,6 +229,7 @@ Every SQLite database in the profile is opened through `sqlitedb.Open`, so that 
 
 **Not built:**
 - a root device that signs `IA-UNLOCK-VOUCHER-V1`: nothing outside the tests does yet. Until one does, a desktop (macOS, Windows) founded after this change cannot be reopened once it is logged out, because it cannot get a voucher. The signer is logged as later work
+- a way back in for a development build's root on a Mac or Windows computer: a development build may found a root there (`FoundingPermitted` with `dev`), but the computer is gated as a controller and the root has no other root device to vouch for a log-in, so **such a root must not be logged out**: once logged out it cannot be unlocked. Only a development desktop organisation uses this; it is not a supported way to hold an identity
 - the optional inactivity timeout (section 5)
 - stopping the core on a lock: secrets are zeroed and the core refuses requests, but the process keeps running, and the relay, witnessing and add-ons keep running with whatever key material they cached, until the app ends the process (section 5 is not met until it does or the work is stopped)
 - hiding all but the name of a locked identity in the list of identities (section 5): the recovery-phrase and backup-key files are sealed, but other files in a locked profile directory are readable until data at rest (section 7) is built
