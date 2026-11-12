@@ -30,6 +30,8 @@ package authprovider
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -206,4 +208,21 @@ func Of(p Provider) Result {
 		res.At = time.Now().UTC()
 	}
 	return res
+}
+
+// CanonicalAuthLevelStatement is the string a person's root device signs to
+// vouch for how well that person was authenticated, for one Identity Agent and
+// one machine acting for it. It lives here so the check on a controller's
+// request and the check on a desktop's unlock read one definition: a second
+// copy of this string is a signature that verifies in one place and not the
+// other.
+func CanonicalAuthLevelStatement(agentAID, controllerAID string, level Level, at time.Time, score int) string {
+	return strings.Join([]string{
+		"IA-AUTH-LEVEL-V2",
+		agentAID,
+		controllerAID,
+		string(level),
+		at.UTC().Format(time.RFC3339),
+		strconv.Itoa(score),
+	}, "\n")
 }

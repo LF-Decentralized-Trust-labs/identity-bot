@@ -84,14 +84,7 @@ const (
 func canonicalAuthLevelStatement(
 	agentAID, controllerAID string, level authprovider.Level, at time.Time, score int,
 ) string {
-	return strings.Join([]string{
-		"IA-AUTH-LEVEL-V2",
-		agentAID,
-		controllerAID,
-		string(level),
-		at.UTC().Format(time.RFC3339),
-		strconv.Itoa(score),
-	}, "\n")
+	return authprovider.CanonicalAuthLevelStatement(agentAID, controllerAID, level, at, score)
 }
 
 // controllerContextKey carries which machine acted, for anything downstream that
