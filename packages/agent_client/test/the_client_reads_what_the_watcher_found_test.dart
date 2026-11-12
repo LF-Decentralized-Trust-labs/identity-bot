@@ -99,4 +99,49 @@ void main() {
     final core = svc((_) async => http.Response('boom', 500));
     await expectLater(core.getAidsWithOpenAlerts(), throwsException);
   });
+
+  test('a proven fork carries its two signed events, and a flagged watcher says why', () async {
+    final held = base64.encode(utf8.encode('event held'));
+    final rival = base64.encode(utf8.encode('event rival'));
+    final alerts = [
+      {'id': 1, 'aid': 'EA', 'sequence_num': 3, 'detected_at': 't', 'kind': 'duplicity', 'source_url': 'https://w1',
+        'evidence': {'kind': 'duplicity', 'sequence_number': 3, 'held_message_b64': held, 'rival_message_b64': rival, 'watcher': 'https://w1'}},
+      {'id': 2, 'aid': 'EB', 'sequence_num': 5, 'detected_at': 't', 'kind': 'watcher', 'source_url': 'https://w2',
+        'evidence': {'kind': 'watcher', 'sequence_number': 5, 'watcher': 'https://w2', 'why': 'its log does not verify'}},
+      {'id': 3, 'aid': 'EC', 'sequence_num': 1, 'detected_at': 't', 'kind': 'escalation', 'source_url': 'https://w3'},
+      {'id': 4, 'aid': 'ED', 'sequence_num': 2, 'detected_at': 't'},
+    ];
+    final core = svc((_) async => http.Response(jsonEncode({'alerts': alerts}), 200));
+    final got = await core.getWatcherAlerts(onlyOpen: true);
+    final fork = got[0].evidence!;
+    expect(fork.hasBoth, isTrue);
+    expect(fork.sequenceNumber, 3);
+    expect(fork.watcher, 'https://w1');
+    expect(fork.heldFingerprint, isNot(fork.rivalFingerprint));
+    expect(fork.heldFingerprint, hasLength(12));
+    expect(fork.copyText, allOf(contains(held), contains(rival)));
+    expect(got[1].isWatcherFlag, isTrue);
+    expect(got[1].why, 'its log does not verify');
+    expect(got[1].evidence, isNull);
+    expect(got[3].kind, 'duplicity', reason: 'an alert with no kind is a duplicity alert');
+    expect(got[3].evidence, isNull);
+    // Only the proven fork holds its contact: a flagged watcher or an escalation blocks nothing.
+    expect(aidsWithOpenAlerts(got), {'EA', 'ED'});
+  });
+
+  test('the status counts the flagged watchers beside the forks', () {
+    final s = WatcherStatus.fromJson({'running': true, 'state': 'checking', 'open_alerts': 1, 'open_watcher_flags': 2});
+    expect([s.openAlerts, s.openWatcherFlags], [1, 2]);
+    expect(WatcherStatus.fromJson({'running': true}).openWatcherFlags, 0);
+  });
+
+  test('a watcher that was ahead agreed with the history, one that was faulty or behind did not', () {
+    ContactWatchCheck check(String outcome) => ContactWatchCheck.fromJson({
+          'aid': 'EA', 'checked_at': 't', 'verdict': 'confirmed',
+          'sources': [{'type': 'own_record', 'outcome': 'agrees'}, {'type': 'standing', 'outcome': outcome}],
+        });
+    expect(check('ahead').anotherWatcherAgreed, isTrue);
+    expect(check('faulty').anotherWatcherAgreed, isFalse);
+    expect(check('behind').anotherWatcherAgreed, isFalse);
+  });
 }
