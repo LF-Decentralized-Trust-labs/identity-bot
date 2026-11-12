@@ -102,6 +102,9 @@ type Evidence struct {
 	Watcher string `json:"watcher,omitempty"`
 	// Why says, for a watcher alert, how its answer did not hold up.
 	Why string `json:"why,omitempty"`
+	// WrongIdentity is true when the watcher answered about a different
+	// identity, which a screen words apart from a signature that failed.
+	WrongIdentity bool `json:"wrong_identity,omitempty"`
 }
 
 // Reverify checks a duplicity alert's evidence from what it stores and nothing
@@ -241,6 +244,10 @@ type proof struct {
 	Kind     proofKind
 	Reason   string
 	Evidence *Evidence
+	// WrongIdentity is set on a faulty watcher whose log, or an event of it,
+	// belongs to a different identity from the one asked about. That is not a
+	// failed signature: nothing in it was forged, it answered about someone else.
+	WrongIdentity bool
 	// Latest is, for proofAhead and proofSuperseded, the verified log with the
 	// watcher's later events admitted, and LatestMessages its signed messages.
 	Latest         *keri.SignedKELResult
@@ -250,6 +257,8 @@ type proof struct {
 	// verify beside one that does: the verdict stands on the valid one, and the
 	// watcher is flagged for the other.
 	AlsoFaulty string
+	// AlsoWrongIdentity says AlsoFaulty is a rival that belongs to another identity.
+	AlsoWrongIdentity bool
 }
 
 // judgeWatcherLog is the classifier. presented are the presented log's signed
@@ -270,7 +279,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		return proof{Kind: proofWatcherFaulty, Reason: "its log does not verify: " + err.Error()}
 	}
 	if theirLog.Identifier != aid {
-		return proof{Kind: proofWatcherFaulty, Reason: "its log is for another identity"}
+		return proof{Kind: proofWatcherFaulty, Reason: "its log is for another identity", WrongIdentity: true}
 	}
 
 	msgs := append([][]byte(nil), presented...) // the messages of cur, by place
@@ -322,7 +331,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log does not parse"}
 		}
 		if ev.Identifier != aid {
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log belongs to another identity"}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log belongs to another identity", WrongIdentity: true}
 		}
 		if held := cur.StateAt(ev.SN); held != nil && held.Digest() == ev.SAID {
 			return nil // the same event
@@ -365,7 +374,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	}
 	// Every rival is examined. One that does not verify flags the watcher and is
 	// set aside; it does not hide a valid one behind it.
-	alsoFaulty := ""
+	alsoFaulty, alsoWrong := "", false
 	for _, m := range theirs.Rival {
 		p, done := settle(admit(m, true))
 		if !done {
@@ -373,22 +382,22 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		}
 		if p.Kind == proofWatcherFaulty {
 			if alsoFaulty == "" {
-				alsoFaulty = p.Reason
+				alsoFaulty, alsoWrong = p.Reason, p.WrongIdentity
 			}
 			continue
 		}
-		p.AlsoFaulty = alsoFaulty
+		p.AlsoFaulty, p.AlsoWrongIdentity = alsoFaulty, alsoWrong
 		return p
 	}
 	switch {
 	case superseding:
 		return proof{Kind: proofSuperseded, Reason: "a recovery rotation the watcher holds replaces the presented log's later interactions",
-			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong}
 	case moved:
 		return proof{Kind: proofAhead, Reason: "the watcher holds later signed events the presented log lacks",
-			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong}
 	case alsoFaulty != "":
-		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty}
+		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty, WrongIdentity: alsoWrong}
 	}
 	// The same events, another digest: the two sides digest different renderings
 	// of them. Nothing is proven against either, so it is shown, not flagged.

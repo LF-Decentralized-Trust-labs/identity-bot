@@ -210,6 +210,10 @@ class WatcherAlert {
   /// For a "watcher" alert: the sentence saying how its answer did not hold up.
   final String why;
 
+  /// For a "watcher" alert: the watcher answered about a different identity.
+  /// Nothing it said failed a signature check, so it is worded apart from one.
+  final bool wrongIdentity;
+
   const WatcherAlert({
     required this.id,
     required this.aid,
@@ -222,6 +226,7 @@ class WatcherAlert {
     this.sourceUrl = '',
     this.evidence,
     this.why = '',
+    this.wrongIdentity = false,
   });
 
   /// An alert stays one until it is resolved; acknowledging only records it was read.
@@ -229,6 +234,13 @@ class WatcherAlert {
 
   /// Whether this alert is a watcher being flagged, not a contact being held.
   bool get isWatcherFlag => kind == 'watcher';
+
+  /// What a person is told about a flagged watcher, naming no contact. A
+  /// watcher that answered about someone else is said so; any other fault is
+  /// the sentence the core gave, which for a failed signature is a failed check.
+  String get watcherFlagWords => wrongIdentity
+      ? 'This watcher answered with the key history of a different identity than the one asked about.'
+      : why;
 
   /// Whether this alert blocks its contact until resolved: a proven fork only.
   bool get blocksContact => kind == 'duplicity';
@@ -248,6 +260,7 @@ class WatcherAlert {
       sourceUrl: (j['source_url'] ?? '').toString(),
       evidence: DuplicityEvidence.fromJson(ev),
       why: ev is Map<String, dynamic> && ev['kind'] == 'watcher' ? (ev['why'] ?? '').toString() : '',
+      wrongIdentity: ev is Map<String, dynamic> && ev['kind'] == 'watcher' && ev['wrong_identity'] == true,
     );
   }
 }

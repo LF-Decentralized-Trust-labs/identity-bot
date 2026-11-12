@@ -110,6 +110,8 @@ void main() {
         'evidence': {'kind': 'watcher', 'sequence_number': 5, 'watcher': 'https://w2', 'why': 'its log does not verify'}},
       {'id': 3, 'aid': 'EC', 'sequence_num': 1, 'detected_at': 't', 'kind': 'escalation', 'source_url': 'https://w3'},
       {'id': 4, 'aid': 'ED', 'sequence_num': 2, 'detected_at': 't'},
+      {'id': 5, 'aid': 'EB', 'sequence_num': 5, 'detected_at': 't', 'kind': 'watcher', 'source_url': 'https://w5',
+        'evidence': {'kind': 'watcher', 'sequence_number': 5, 'watcher': 'https://w5', 'why': 'its log is for another identity', 'wrong_identity': true}},
     ];
     final core = svc((_) async => http.Response(jsonEncode({'alerts': alerts}), 200));
     final got = await core.getWatcherAlerts(onlyOpen: true);
@@ -130,6 +132,11 @@ void main() {
     expect(got[1].isWatcherFlag, isTrue);
     expect(got[1].why, 'its log does not verify');
     expect(got[1].evidence, isNull);
+    expect(got[1].wrongIdentity, isFalse);
+    expect(got[1].watcherFlagWords, 'its log does not verify', reason: 'a failed check keeps the core\'s sentence');
+    expect(got[4].wrongIdentity, isTrue);
+    expect(got[4].watcherFlagWords, allOf(contains('different identity'), isNot(contains('verify'))),
+        reason: 'a watcher answering about someone else is not a failed signature');
     expect(got[3].kind, 'duplicity', reason: 'an alert with no kind is a duplicity alert');
     expect(got[3].evidence, isNull);
     // Only the proven fork holds its contact: a flagged watcher or an escalation blocks nothing.
