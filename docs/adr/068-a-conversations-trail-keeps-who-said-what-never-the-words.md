@@ -8,6 +8,7 @@
 **Amended:** 2026-11-10 — what keeps the trail is an add-on's, not the core's (see "Where the store lives", below)
 **Amended:** 2026-11-10 — the proof kept for a person's message carries the statement, never the words (see "What the core keeps of an app's request", below)
 **Amended:** 2026-11-11 — the app keeps the entries and the words, and the Identity Agent keeps the head and the count (see "Where the trail is kept", below)
+**Amended:** 2026-11-12 — how a conversation the Identity Agent already holds moves to the utility app that keeps it, and how long the Identity Agent keeps its copy (see "Moving a conversation the Identity Agent already holds", below)
 
 ---
 
@@ -155,6 +156,48 @@ committed, so step 6 of the order of a write and the *pending* and *not kept*
 states no longer apply to it. The Identity Agent no longer holds the chain and
 serves `Trail.Read`: the read is the app's, checked against the head. The
 *not-delivered* outcome to an AI agent stays. A refusal still joins the trail.
+
+**Moving a conversation the Identity Agent already holds.** *Amendment,
+2026-11-12.* A conversation a utility app keeps (ADR-072) may still be held whole by the Identity
+Agent, from before this rule. It moves in this order, and each step waits for
+the one before:
+
+1. The entries (each countersigned entry, not words) are put to the app as any
+   entry is. The app already holds the words it was given; the Identity Agent
+   never held them and sends none.
+2. The app's copy is read back and checked against the head and count with
+   `conversationbundle.CheckCopy`, as any reader would check it.
+3. Only when the check shows *matches*, and the conversation's head and count are
+   still the ones checked, does the Identity Agent stop serving its own entries;
+   from then on the read is the app's. An entry committed while the check ran
+   means the check is made again next round.
+4. The Identity Agent keeps its own copy for **30 days after a successful check**,
+   and checks the app's copy again every round in that time. If a later check
+   shows anything but *matches* (and it still does with new entries held, so an
+   entry on its way in is not taken for a fault), the move is undone: the read is
+   the Identity Agent's own copy again, the failure is logged, one problem is
+   raised, and the move is made again once the app's copy matches. An app that
+   cannot be reached shows nothing either way, and changes nothing.
+5. At 30 days the app's copy is checked once more, and the Identity Agent's copy
+   is dropped **only if that check shows *matches*** (and no entry was committed
+   meanwhile). The check made 30 days earlier is never what the drop rests on,
+   which also covers a clock that jumped. What stays is the head, the count and
+   what it needs to decide a write.
+
+A check that does not show *matches* leaves the conversation whole in the
+Identity Agent, still served by it, and is logged with what it showed; the move is
+tried again, never forced. A move that fails on several rounds in a row, or a
+conversation the app does not know, raises one problem for that conversation,
+and not one per try. A move that keeps losing to new entries is made with new
+entries for that conversation held for the time one check takes (at most 30
+seconds), so under constant traffic it still finishes. A conversation is never
+served from two places: until step 3 it is the Identity Agent's, after it the
+app's, and again the Identity Agent's if step 4 undoes it.
+
+**Conversations an earlier build already trimmed are not moved.** A conversation
+whose entries the Identity Agent had already shed has the app as its only copy:
+there is nothing here to put to the app or to check it against but the head and
+count, so it is served by the app from the start and is not part of this move.
 
 **Not done here.** `conversationbundle.Verify` and the entry format still read a
 person's *pending* entry and a *not kept* outcome, which nothing is to write; the
