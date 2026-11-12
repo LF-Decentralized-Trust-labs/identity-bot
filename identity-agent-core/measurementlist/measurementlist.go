@@ -10,7 +10,11 @@
 // the publisher's key, and is visible to everyone who compares lists.
 //
 // The list names more than one measurement per image kind, so a rollout with
-// two live versions rejects nobody.
+// two live versions rejects nobody. A measurement is not a bare number: one
+// image measures differently for each firmware, vCPU count and CPU model, so
+// each entry says which image it is, what the number was computed from (so
+// anyone can rebuild the image and recompute it offline with sev-snp-measure)
+// and the window in which it is accepted.
 //
 // # Format (list_version 1)
 //
@@ -22,9 +26,32 @@
 //	  "published_at": "2026-11-12T00:00:00Z",
 //	  "expires_at":   "2026-12-12T00:00:00Z",
 //	  "signing_key_id": "measurements-prod-1",
-//	  "images": { "<image kind>": ["<96 lowercase hex>", ...], ... },
+//	  "images": { "<image kind>": [ <entry>, ... ], ... },
 //	  "signature": "<86 chars unpadded base64url>"
 //	}
+//
+// An entry:
+//
+//	{
+//	  "image": "individual-v19",
+//	  "measurement": "<96 lowercase hex>",
+//	  "computed_from": {
+//	    "ovmf_sha256": "<64 lowercase hex>",    // the pinned firmware
+//	    "vcpus": 1,
+//	    "cpu_model": "EPYC-v4",
+//	    "cmdline_sha256": "<64 lowercase hex>", // the measured kernel command line
+//	    "kernel_sha256": "<64 hex, optional>",
+//	    "initrd_sha256": "<64 hex, optional>",
+//	    "root_hash": "<hex, optional>"          // the verity root hash
+//	  },
+//	  "valid_from":  "2026-11-01T00:00:00Z",
+//	  "valid_until": "2026-12-01T00:00:00Z"     // or null: until a newer list drops it
+//	}
+//
+// During an update the old and the new image both have entries valid at once.
+// An entry stops being accepted at its valid_until, or when a newer list (a
+// higher sequence) leaves it out; an entry outside its window is carried in a
+// list for the record and is not accepted.
 //
 // The signature is Ed25519 over the ASCII line "measurement-list-v1\n"
 // followed by the RFC 8785 canonical form of the object with "signature"
@@ -78,6 +105,7 @@ var (
 	ErrNotYetPublished  = errors.New("the list is dated in the future")
 	ErrBadMeasurement   = errors.New("the list holds a malformed measurement")
 	ErrDuplicateEntries = errors.New("the list repeats a measurement or an image kind")
+	ErrBadEntry         = errors.New("a list entry does not say what its measurement was computed from, or when it is valid")
 )
 
 // PinnedKey is the publisher's key as an app holds it.
@@ -96,33 +124,85 @@ type Policy struct {
 	Now         time.Time
 }
 
+// ComputedFrom is what a measurement was computed from. Everything here is
+// public, and with the published image anyone can recompute the measurement.
+type ComputedFrom struct {
+	OVMFSHA256    string `json:"ovmf_sha256"`
+	VCPUs         int    `json:"vcpus"`
+	CPUModel      string `json:"cpu_model"`
+	CmdlineSHA256 string `json:"cmdline_sha256"`
+	KernelSHA256  string `json:"kernel_sha256,omitempty"`
+	InitrdSHA256  string `json:"initrd_sha256,omitempty"`
+	RootHash      string `json:"root_hash,omitempty"`
+}
+
+// Entry is one accepted measurement of one image.
+type Entry struct {
+	Image        string
+	Measurement  []byte
+	ComputedFrom ComputedFrom
+	ValidFrom    time.Time
+	// ValidUntil is the zero time for an entry with no end of its own.
+	ValidUntil time.Time
+}
+
+// ValidAt reports whether the entry is in its window at t.
+func (e Entry) ValidAt(t time.Time) bool {
+	return !t.Before(e.ValidFrom) && (e.ValidUntil.IsZero() || t.Before(e.ValidUntil))
+}
+
 // List is a verified list. It exists only as the result of Verify.
 type List struct {
 	Sequence    int64
 	PublishedAt time.Time
 	ExpiresAt   time.Time
-	// Images maps an image kind to the measurements accepted for it.
-	Images map[string][][]byte
+	// Images maps an image kind to its entries, valid or not.
+	Images map[string][]Entry
+	// At is the time the list was verified at.
+	At time.Time
 }
 
-// Measurements returns the accepted measurements for one image kind. A kind
-// the list does not name has none, which a caller must treat as "accept
+// Measurements returns the measurements accepted for one image kind at the
+// time the list was verified. A kind the list does not name, or whose entries
+// are all outside their window, has none, which a caller must treat as "accept
 // nothing", never as "no restriction".
 func (l *List) Measurements(kind string) [][]byte {
 	if l == nil {
 		return nil
 	}
-	return l.Images[kind]
+	return l.MeasurementsAt(kind, l.At)
+}
+
+// MeasurementsAt is Measurements for another time, for a long-running process.
+func (l *List) MeasurementsAt(kind string, t time.Time) [][]byte {
+	if l == nil {
+		return nil
+	}
+	var out [][]byte
+	for _, e := range l.Images[kind] {
+		if e.ValidAt(t) {
+			out = append(out, e.Measurement)
+		}
+	}
+	return out
+}
+
+type wireEntry struct {
+	Image        string       `json:"image"`
+	Measurement  string       `json:"measurement"`
+	ComputedFrom ComputedFrom `json:"computed_from"`
+	ValidFrom    string       `json:"valid_from"`
+	ValidUntil   *string      `json:"valid_until"`
 }
 
 type wireList struct {
-	ListVersion  int                 `json:"list_version"`
-	Sequence     int64               `json:"sequence"`
-	PublishedAt  string              `json:"published_at"`
-	ExpiresAt    string              `json:"expires_at"`
-	SigningKeyID string              `json:"signing_key_id"`
-	Images       map[string][]string `json:"images"`
-	Signature    string              `json:"signature"`
+	ListVersion  int                    `json:"list_version"`
+	Sequence     int64                  `json:"sequence"`
+	PublishedAt  string                 `json:"published_at"`
+	ExpiresAt    string                 `json:"expires_at"`
+	SigningKeyID string                 `json:"signing_key_id"`
+	Images       map[string][]wireEntry `json:"images"`
+	Signature    string                 `json:"signature"`
 }
 
 // SignedBytes returns the exact bytes the signature covers for a list in raw
@@ -196,31 +276,73 @@ func Verify(raw []byte, p Policy) (*List, error) {
 		return nil, fmt.Errorf("%w: no image kinds", ErrMalformed)
 	}
 
-	out := &List{Sequence: w.Sequence, PublishedAt: published, ExpiresAt: expires,
-		Images: make(map[string][][]byte, len(w.Images))}
+	out := &List{Sequence: w.Sequence, PublishedAt: published, ExpiresAt: expires, At: p.Now,
+		Images: make(map[string][]Entry, len(w.Images))}
 	seen := map[string]bool{}
-	for kind, values := range w.Images {
+	for kind, entries := range w.Images {
 		if kind == "" {
 			return nil, fmt.Errorf("%w: an empty image kind", ErrMalformed)
 		}
-		if len(values) == 0 {
+		if len(entries) == 0 {
 			return nil, fmt.Errorf("%w: image kind %q has no measurements", ErrMalformed, kind)
 		}
-		for _, v := range values {
-			raw, err := iacrypto.DecodeHex(v)
-			if err != nil || len(raw) != MeasurementSize {
-				return nil, fmt.Errorf("%w: in %q", ErrBadMeasurement, kind)
+		for _, we := range entries {
+			e, err := parseEntry(we)
+			if err != nil {
+				return nil, fmt.Errorf("%w: in %q", err, kind)
 			}
 			// A measurement listed twice, or under two kinds, is a publishing
 			// mistake that would let one image stand as another.
-			if seen[v] {
+			if seen[we.Measurement] {
 				return nil, fmt.Errorf("%w: in %q", ErrDuplicateEntries, kind)
 			}
-			seen[v] = true
-			out.Images[kind] = append(out.Images[kind], raw)
+			seen[we.Measurement] = true
+			out.Images[kind] = append(out.Images[kind], e)
 		}
 	}
 	return out, nil
+}
+
+func isHex(s string, n int) bool {
+	b, err := iacrypto.DecodeHex(s)
+	return err == nil && len(b) == n
+}
+
+func parseEntry(we wireEntry) (Entry, error) {
+	raw, err := iacrypto.DecodeHex(we.Measurement)
+	if err != nil || len(raw) != MeasurementSize {
+		return Entry{}, ErrBadMeasurement
+	}
+	c := we.ComputedFrom
+	switch {
+	case we.Image == "":
+		return Entry{}, fmt.Errorf("%w: no image name", ErrBadEntry)
+	case !isHex(c.OVMFSHA256, 32):
+		return Entry{}, fmt.Errorf("%w: ovmf_sha256", ErrBadEntry)
+	case c.VCPUs < 1:
+		return Entry{}, fmt.Errorf("%w: vcpus", ErrBadEntry)
+	case c.CPUModel == "":
+		return Entry{}, fmt.Errorf("%w: cpu_model", ErrBadEntry)
+	case !isHex(c.CmdlineSHA256, 32):
+		return Entry{}, fmt.Errorf("%w: cmdline_sha256", ErrBadEntry)
+	case c.KernelSHA256 != "" && !isHex(c.KernelSHA256, 32):
+		return Entry{}, fmt.Errorf("%w: kernel_sha256", ErrBadEntry)
+	case c.InitrdSHA256 != "" && !isHex(c.InitrdSHA256, 32):
+		return Entry{}, fmt.Errorf("%w: initrd_sha256", ErrBadEntry)
+	}
+	from, err := time.Parse(time.RFC3339, we.ValidFrom)
+	if err != nil {
+		return Entry{}, fmt.Errorf("%w: valid_from", ErrBadEntry)
+	}
+	e := Entry{Image: we.Image, Measurement: raw, ComputedFrom: c, ValidFrom: from}
+	if we.ValidUntil != nil {
+		until, err := time.Parse(time.RFC3339, *we.ValidUntil)
+		if err != nil || !until.After(from) {
+			return Entry{}, fmt.Errorf("%w: valid_until", ErrBadEntry)
+		}
+		e.ValidUntil = until
+	}
+	return e, nil
 }
 
 // ParseKeyHex reads a pinned public key written as lowercase hex.

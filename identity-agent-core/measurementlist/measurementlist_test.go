@@ -27,6 +27,21 @@ func vectorKey(label string) (ed25519.PrivateKey, PinnedKey) {
 
 func meas(b byte) string { return strings.Repeat(hex.EncodeToString([]byte{b}), MeasurementSize) }
 
+func entry(image string, b byte) map[string]any {
+	return map[string]any{
+		"image":       image,
+		"measurement": meas(b),
+		"computed_from": map[string]any{
+			"ovmf_sha256":    strings.Repeat("0a", 32),
+			"vcpus":          1,
+			"cpu_model":      "EPYC-v4",
+			"cmdline_sha256": strings.Repeat("0c", 32),
+		},
+		"valid_from":  "2026-11-01T00:00:00Z",
+		"valid_until": nil,
+	}
+}
+
 func baseDoc() map[string]any {
 	return map[string]any{
 		"list_version":   1,
@@ -35,8 +50,8 @@ func baseDoc() map[string]any {
 		"expires_at":     "2026-12-01T00:00:00Z",
 		"signing_key_id": "test-publisher-1",
 		"images": map[string]any{
-			"individual":   []string{meas(0x11), meas(0x12)},
-			"organization": []string{meas(0x21)},
+			"individual":   []any{entry("individual-v19", 0x11), entry("individual-v20", 0x12)},
+			"organization": []any{entry("organization-v10", 0x21)},
 		},
 	}
 }
@@ -83,7 +98,7 @@ func TestATamperedListIsRefused(t *testing.T) {
 	signed := sign(t, priv, d)
 	var m map[string]any
 	json.Unmarshal(signed, &m)
-	m["images"].(map[string]any)["individual"] = append(m["images"].(map[string]any)["individual"].([]any), meas(0x99))
+	m["images"].(map[string]any)["individual"] = append(m["images"].(map[string]any)["individual"].([]any), entry("individual-v21", 0x99))
 	added, _ := json.Marshal(m)
 	if _, err := Verify(added, policy(key)); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("an appended measurement: got %v, want ErrBadSignature", err)
@@ -156,6 +171,49 @@ func TestAMeasurementNotOnTheListIsNotAccepted(t *testing.T) {
 	}
 }
 
+// Item 7: during an update both images are valid; an entry is retired by its
+// date, and a retired entry is carried but not accepted.
+func TestEntriesAreAcceptedOnlyInsideTheirWindow(t *testing.T) {
+	priv, key := vectorKey("a")
+	d := baseDoc()
+	old, next, future := entry("individual-v19", 0x11), entry("individual-v20", 0x12), entry("individual-v21", 0x13)
+	old["valid_until"] = "2026-11-20T00:00:00Z"
+	future["valid_from"] = "2026-12-01T00:00:00Z"
+	d["images"] = map[string]any{"individual": []any{old, next, future}}
+	l, err := Verify(sign(t, priv, d), policy(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(l.Measurements("individual")); got != 2 {
+		t.Fatalf("during the update %d measurements are accepted, want the old and the new (2)", got)
+	}
+	at := func(y int, m time.Month, day int) int {
+		return len(l.MeasurementsAt("individual", time.Date(y, m, day, 0, 0, 0, 0, time.UTC)))
+	}
+	if got := at(2026, 11, 21); got != 1 {
+		t.Errorf("after the old entry's date %d are accepted, want only the new one", got)
+	}
+	if got := at(2026, 12, 2); got != 2 {
+		t.Errorf("when the next image starts %d are accepted, want 2", got)
+	}
+	if got := at(2026, 10, 1); got != 0 {
+		t.Errorf("before any window %d are accepted, want none", got)
+	}
+}
+
+func TestEveryEntryKeepsWhatItWasComputedFrom(t *testing.T) {
+	priv, key := vectorKey("a")
+	l, err := Verify(sign(t, priv, baseDoc()), policy(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := l.Images["individual"][0]
+	if e.Image != "individual-v19" || e.ComputedFrom.VCPUs != 1 || e.ComputedFrom.CPUModel != "EPYC-v4" ||
+		e.ComputedFrom.OVMFSHA256 != strings.Repeat("0a", 32) || e.ComputedFrom.CmdlineSHA256 != strings.Repeat("0c", 32) {
+		t.Fatalf("entry lost its provenance: %+v", e)
+	}
+}
+
 func TestNoPinnedKeyVerifiesNothing(t *testing.T) {
 	priv, _ := vectorKey("a")
 	if _, err := Verify(sign(t, priv, baseDoc()), Policy{Now: now}); !errors.Is(err, ErrNoKey) {
@@ -175,16 +233,63 @@ func TestAPublishedTestKeyCannotBePinned(t *testing.T) {
 func TestMalformedContentIsRefusedEvenWhenSigned(t *testing.T) {
 	priv, key := vectorKey("a")
 	cases := map[string]func(map[string]any){
-		"short measurement": func(d map[string]any) { d["images"] = map[string]any{"individual": []string{meas(0x11)[:90]}} },
+		"short measurement": func(d map[string]any) {
+			e := entry("i", 0x11)
+			e["measurement"] = meas(0x11)[:90]
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
 		"upper case": func(d map[string]any) {
-			d["images"] = map[string]any{"individual": []string{strings.ToUpper(meas(0xab))}}
+			e := entry("i", 0xab)
+			e["measurement"] = strings.ToUpper(meas(0xab))
+			d["images"] = map[string]any{"individual": []any{e}}
 		},
-		"duplicate": func(d map[string]any) { d["images"] = map[string]any{"individual": []string{meas(1), meas(1)}} },
+		"duplicate": func(d map[string]any) {
+			d["images"] = map[string]any{"individual": []any{entry("a", 1), entry("b", 1)}}
+		},
 		"shared across kinds": func(d map[string]any) {
-			d["images"] = map[string]any{"individual": []string{meas(1)}, "organization": []string{meas(1)}}
+			d["images"] = map[string]any{"individual": []any{entry("a", 1)}, "organization": []any{entry("b", 1)}}
 		},
-		"empty kind":      func(d map[string]any) { d["images"] = map[string]any{"individual": []string{}} },
-		"no kinds":        func(d map[string]any) { d["images"] = map[string]any{} },
+		"empty kind": func(d map[string]any) { d["images"] = map[string]any{"individual": []any{}} },
+		"no kinds":   func(d map[string]any) { d["images"] = map[string]any{} },
+		"no image name": func(d map[string]any) {
+			e := entry("", 1)
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"no firmware hash": func(d map[string]any) {
+			e := entry("i", 1)
+			delete(e["computed_from"].(map[string]any), "ovmf_sha256")
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"no cpu model": func(d map[string]any) {
+			e := entry("i", 1)
+			e["computed_from"].(map[string]any)["cpu_model"] = ""
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"zero vcpus": func(d map[string]any) {
+			e := entry("i", 1)
+			e["computed_from"].(map[string]any)["vcpus"] = 0
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"no command-line hash": func(d map[string]any) {
+			e := entry("i", 1)
+			delete(e["computed_from"].(map[string]any), "cmdline_sha256")
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"no validity start": func(d map[string]any) {
+			e := entry("i", 1)
+			e["valid_from"] = ""
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"window ends before it starts": func(d map[string]any) {
+			e := entry("i", 1)
+			e["valid_until"] = "2026-10-01T00:00:00Z"
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
+		"unknown entry field": func(d map[string]any) {
+			e := entry("i", 1)
+			e["note"] = "x"
+			d["images"] = map[string]any{"individual": []any{e}}
+		},
 		"unknown version": func(d map[string]any) { d["list_version"] = 2 },
 		"unknown field":   func(d map[string]any) { d["extra"] = true },
 		"zero sequence":   func(d map[string]any) { d["sequence"] = 0 },

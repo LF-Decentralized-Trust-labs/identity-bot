@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,10 +42,23 @@ func newListFixture(t *testing.T, label string) *listFixture {
 func (f *listFixture) publish(t *testing.T, seq int, images map[string][]string, signWith ed25519.PrivateKey) []byte {
 	t.Helper()
 	now := time.Now().UTC()
+	entries := map[string][]map[string]any{}
+	for kind, ms := range images {
+		for i, m := range ms {
+			entries[kind] = append(entries[kind], map[string]any{
+				"image": fmt.Sprintf("%s-v%d", kind, i+1), "measurement": m,
+				"computed_from": map[string]any{
+					"ovmf_sha256": strings.Repeat("0a", 32), "vcpus": 1, "cpu_model": "EPYC-v4",
+					"cmdline_sha256": strings.Repeat("0c", 32),
+				},
+				"valid_from": now.Add(-2 * time.Hour).Format(time.RFC3339), "valid_until": nil,
+			})
+		}
+	}
 	doc := map[string]any{"list_version": 1, "sequence": seq,
 		"published_at":   now.Add(-time.Hour).Format(time.RFC3339),
 		"expires_at":     now.Add(24 * time.Hour).Format(time.RFC3339),
-		"signing_key_id": "test-publisher-1", "images": images}
+		"signing_key_id": "test-publisher-1", "images": entries}
 	unsigned, _ := json.Marshal(doc)
 	msg, err := measurementlist.SignedBytes(unsigned)
 	if err != nil {
