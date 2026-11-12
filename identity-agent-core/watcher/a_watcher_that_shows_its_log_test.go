@@ -42,8 +42,18 @@ func aWatcherHolding(t *testing.T, trusted *testWatcherKey, log *signedlog.Log) 
 		aid = log.AID
 	}
 	_, serving := servedBy(t, trusted, nil)
+	// A watcher digests the events themselves, as the hosted one does, not the
+	// signature and bytes served beside them.
+	pure := make([]map[string]interface{}, 0, len(w.records))
+	for _, rec := range w.records {
+		var ev map[string]interface{}
+		if err := json.Unmarshal([]byte(rec["event_json"].(string)), &ev); err != nil {
+			t.Fatal(err)
+		}
+		pure = append(pure, ev)
+	}
 	for seq := range w.records {
-		d, err := witnessproto.KelDigestAtSeq(w.records, seq)
+		d, err := witnessproto.KelDigestAtSeq(pure, seq)
 		if err != nil {
 			t.Fatal(err)
 		}

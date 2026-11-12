@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"encoding/json"
+	"log"
 
 	"identity-agent-core/drivers"
 )
@@ -194,6 +195,7 @@ func recordsFor(presented [][]byte, presentedRecs []map[string]interface{}, thei
 	// bytes alone.
 	rebuilt, ok := drivers.RecordsFromVerifiedBytes(out)
 	if !ok {
+		log.Printf("[watcher] a watcher's later log could not be rebuilt from its signed bytes; its key state is not adopted as records")
 		return nil
 	}
 	return rebuilt

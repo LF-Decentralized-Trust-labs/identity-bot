@@ -59,3 +59,44 @@ func TestTwoProvenLogsThatDifferAtOnePlaceStillRefuse(t *testing.T) {
 		t.Fatalf("a signed rival log was not refused: %+v", res)
 	}
 }
+
+// Real signed bytes with one parsed field edited must not found a sighting the
+// real log then contradicts: the digest is of what the bytes are.
+func TestARealSignedLogWithAnEditedFieldDoesNotPlantADigest(t *testing.T) {
+	ws, _ := migratedWatcher(t)
+	honest, _ := twoHistories(t)
+	edited := presenting(t, honest, SourceOOBI)
+	edited.KEL = append([]map[string]interface{}(nil), edited.KEL...)
+	last := map[string]interface{}{}
+	for k, v := range edited.KEL[len(edited.KEL)-1] {
+		last[k] = v
+	}
+	last["x"] = "planted"
+	edited.KEL[len(edited.KEL)-1] = last
+	if res, err := ws.VerifyKel(context.Background(), edited); err != nil || res.Blocked {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if real := verifying(t, ws, honest); real.Blocked || !real.OK {
+		t.Fatalf("the real log was refused for differing from a digest planted by an edited field: %+v", real)
+	}
+}
+
+// One honest log shown in two record shapes is one log.
+func TestOneHonestLogInTwoRecordShapesIsNotRefused(t *testing.T) {
+	ws, _ := migratedWatcher(t)
+	honest, _ := twoHistories(t)
+	if res := verifying(t, ws, honest); res.Blocked {
+		t.Fatalf("%+v", res)
+	}
+	slim := presenting(t, honest, SourceOOBI)
+	slim.KEL = nil
+	for _, rec := range honest.Records() {
+		slim.KEL = append(slim.KEL, map[string]interface{}{
+			"raw_bytes_b64": rec["raw_bytes_b64"], "cesr_signature": rec["cesr_signature"],
+		})
+	}
+	// Placement reads the bytes, so records that only carry them still place.
+	if res, err := ws.VerifyKel(context.Background(), slim); err != nil || res.Blocked || res.OverallOutcome == "escalated" {
+		t.Fatalf("%+v %v", res, err)
+	}
+}

@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	keri "github.com/grapeid/keri-go"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 )
 
@@ -159,7 +161,17 @@ func (s *Service) detectDuplicity(aid string, seq int, digest string) (bool, *Fi
 
 // VerifyKel runs the L1 + L2-standing verification pipeline for a KEL encounter.
 func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelResult, error) {
-	seq, err := witnessproto.CurrentSeq(in.KEL)
+	// A log that verifies is placed and digested from the events its signed bytes
+	// are, and from nothing served beside them: fields a signature does not cover
+	// could otherwise make "proven" and "digest" describe different logs, which
+	// would let a digest be planted from a real signed log with one field edited,
+	// or make one honest log digest differently by the shape it arrived in.
+	proven := false
+	basis := digestBasis(in)
+	if _, ok := provenEvents(in); ok {
+		proven = true
+	}
+	seq, err := witnessproto.CurrentSeq(basis)
 	if err != nil {
 		// Refused rather than passed over. An error here reaches callers as
 		// "nothing to say", so a log that could not be placed would skip every
@@ -172,7 +184,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	if seq < 0 {
 		return &VerifyKelResult{OK: false, Reason: "empty KEL"}, nil
 	}
-	digest, err := witnessproto.KelDigestAtSeq(in.KEL, seq)
+	digest, err := witnessproto.KelDigestAtSeq(basis, seq)
 	if err != nil {
 		return nil, err
 	}
@@ -192,13 +204,6 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// made-up log, and the identity's real log would be refused for differing from
 	// it. A proven log replaces a planted sighting; an unproven one never
 	// contradicts a proven one.
-	proven := false
-	if len(in.Signed) > 0 {
-		if v, err := keri.ValidateSignedKEL(in.Signed); err == nil && v.Identifier == in.AID {
-			proven = true
-		}
-	}
-
 	var l1Outcome string
 	switch {
 	case existing == nil:
@@ -449,7 +454,7 @@ func (s *Service) forkedByOpenAlert(ctx context.Context, in VerifyKelInput, answ
 		if a.SequenceNum == seq {
 			continue // the tip, already confirmed above
 		}
-		d, err := witnessproto.KelDigestAtSeq(in.KEL, a.SequenceNum)
+		d, err := witnessproto.KelDigestAtSeq(digestBasis(in), a.SequenceNum)
 		if err != nil {
 			continue // the log does not reach that far
 		}
@@ -857,4 +862,48 @@ func (s *Service) emit(eventType string, payload map[string]interface{}) {
 	if s.OnEvent != nil {
 		s.OnEvent(eventType, payload)
 	}
+}
+
+// provenEvents is the events of a presented log when it verifies: its signed
+// messages are exactly those its own records carry, the log is self-certifying
+// and every event is signed by the key in force, and it is the identity's own.
+// The events are read from the signed bytes, one per message, in order.
+func provenEvents(in VerifyKelInput) ([]map[string]interface{}, bool) {
+	if len(in.Signed) == 0 || len(in.Signed) != len(in.KEL) {
+		return nil, false
+	}
+	own, err := drivers.SignedMessagesFromRecords(in.KEL)
+	if err != nil || len(own) != len(in.Signed) {
+		return nil, false
+	}
+	events := make([]map[string]interface{}, 0, len(in.KEL))
+	for i, rec := range in.KEL {
+		if !bytes.Equal(own[i], in.Signed[i]) {
+			return nil, false
+		}
+		rawB64, _ := rec["raw_bytes_b64"].(string)
+		raw, err := drivers.DecodeRawBytes(rawB64)
+		if err != nil {
+			return nil, false
+		}
+		var ev map[string]interface{}
+		if json.Unmarshal(raw, &ev) != nil || ev == nil {
+			return nil, false
+		}
+		events = append(events, ev)
+	}
+	v, err := keri.ValidateSignedKEL(in.Signed)
+	if err != nil || v.Identifier != in.AID {
+		return nil, false
+	}
+	return events, true
+}
+
+// digestBasis is what a presented log is placed and digested from: the events
+// of its signed bytes when it verifies, otherwise the records as presented.
+func digestBasis(in VerifyKelInput) []map[string]interface{} {
+	if events, ok := provenEvents(in); ok {
+		return events
+	}
+	return in.KEL
 }
