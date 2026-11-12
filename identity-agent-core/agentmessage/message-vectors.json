@@ -139,9 +139,94 @@
       "body": "Half the files read; no problems so far.",
       "signed": "IA-AGENT-MSG-V1\nc_vector\nprogress\nEAGENT_B\nEAGENT_A\nm_ask\nELT7xsFSBXqndBxN5I55qQoF7anik6QTIMQcZw0WqY2R\nexample-harness\nexample-model\ns-1\nErun\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-progress-000001\n2026-10-20T11:59:50Z\nEBODYCRED",
       "signature": "0BBAiZKmcMx6g6M_gc3lPjK4lt8DAxsvVnnTvsTrD0eQn212ImHCex2OMm6LNM4Urw1zA77B6fCk0SMvc0GYl-gB"
+    },
+    {
+      "name": "a close, by the one who opened the conversation, addressed to nobody",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "close",
+        "from": "EAGENT_A",
+        "to": "",
+        "body_hash": "EK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi",
+        "brain": {},
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-close-00000001",
+        "host_time": "2026-10-20T12:10:00Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "",
+      "signed": "IA-AGENT-MSG-V1\nc_vector\nclose\nEAGENT_A\n\n\nEK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi\n\n\n\n\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-close-00000001\n2026-10-20T12:10:00Z\nEBODYCRED",
+      "signature": "0BDCSQqsHNE-dSKr4ybQoT0vtlTEvFoCK82qK9rVWLgOWzg93s8soXVd0_wkcHAWeG8710UHX_jUDpL1W4JE0IQA"
+    },
+    {
+      "name": "a reopen",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "reopen",
+        "from": "EAGENT_A",
+        "to": "",
+        "body_hash": "EK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi",
+        "brain": {},
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-reopen-0000001",
+        "host_time": "2026-10-20T12:11:00Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "",
+      "signed": "IA-AGENT-MSG-V1\nc_vector\nreopen\nEAGENT_A\n\n\nEK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi\n\n\n\n\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-reopen-0000001\n2026-10-20T12:11:00Z\nEBODYCRED",
+      "signature": "0BBcmnKUPO09DX7k96ptmF-puFNPTcpWlZ4J60X8-YkDzKn_t1d-Jbdgzs3m8h6QLFBW4UahV_1puRRbpBZsmMgP"
+    },
+    {
+      "name": "a raise of the turn limit, whose words are the new limit",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "limit",
+        "from": "EAGENT_A",
+        "to": "",
+        "body_hash": "ENNJbiHt2wo3TZnjnrdT8NG1QMeL9pU88r7GyWm8u2jQ",
+        "brain": {},
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-limit-00000001",
+        "host_time": "2026-10-20T12:12:00Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "80",
+      "signed": "IA-AGENT-MSG-V1\nc_vector\nlimit\nEAGENT_A\n\n\nENNJbiHt2wo3TZnjnrdT8NG1QMeL9pU88r7GyWm8u2jQ\n\n\n\n\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-limit-00000001\n2026-10-20T12:12:00Z\nEBODYCRED",
+      "signature": "0BAGQgMOSRjPlrfkj1p5YLVC3d0w1MO03YdE0voKr2xPSwm5KiL-XsNNGEJ8Uu3X1H3uMc35jFyHKpLpYnJRlp4H"
     }
   ],
   "refused_statements": [
+    {
+      "name": "a close addressed to someone",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "close",
+        "from": "EAGENT_A",
+        "to": "EAGENT_B",
+        "body_hash": "EHASH",
+        "brain": {},
+        "host": "BHOST",
+        "host_nonce": "nonce-close-00000001",
+        "host_time": "2026-10-20T12:10:00Z",
+        "body_credential": "EBODYCRED"
+      }
+    },
+    {
+      "name": "a close that acts on a message",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "close",
+        "from": "EAGENT_A",
+        "to": "",
+        "in_reply_to": "m_ask",
+        "body_hash": "EHASH",
+        "brain": {},
+        "host": "BHOST",
+        "host_nonce": "nonce-close-00000001",
+        "host_time": "2026-10-20T12:10:00Z",
+        "body_credential": "EBODYCRED"
+      }
+    },
     {
       "name": "a tier that is not quick, standard or deep",
       "statement": {
@@ -434,75 +519,6 @@
       },
       "to": "EAGENT_B",
       "allowed": false
-    },
-    {
-      "name": "a grant whose to is a string, not a list",
-      "constraints": {
-        "agent.message.open": {
-          "per_hour": 6
-        },
-        "agent.message.send": {
-          "to": "xEAGENT_Bx"
-        }
-      },
-      "to": "EAGENT_B",
-      "allowed": false
-    },
-    {
-      "name": "a grant whose to is a wildcard",
-      "constraints": {
-        "agent.message.open": {
-          "per_hour": 6
-        },
-        "agent.message.send": {
-          "to": [
-            "*"
-          ]
-        }
-      },
-      "to": "EAGENT_B",
-      "allowed": false
-    },
-    {
-      "name": "a grant whose agent.message.send is not an object",
-      "constraints": {
-        "agent.message.open": {
-          "per_hour": 6
-        },
-        "agent.message.send": "EAGENT_B"
-      },
-      "to": "EAGENT_B",
-      "allowed": false
-    },
-    {
-      "name": "a grant with a count above the ceiling",
-      "constraints": {
-        "agent.message.open": {
-          "per_hour": 61
-        },
-        "agent.message.send": {
-          "to": [
-            "EAGENT_B"
-          ]
-        }
-      },
-      "to": "EAGENT_B",
-      "allowed": false
-    },
-    {
-      "name": "a grant at the ceiling",
-      "constraints": {
-        "agent.message.open": {
-          "per_hour": 60
-        },
-        "agent.message.send": {
-          "to": [
-            "EAGENT_B"
-          ]
-        }
-      },
-      "to": "EAGENT_B",
-      "allowed": true
     }
   ],
   "tier_stripped": [

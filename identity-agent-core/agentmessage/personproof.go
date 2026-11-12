@@ -31,6 +31,16 @@ const (
 	// sender. The entry stays committed and readable; this says it did not
 	// reach its recipient.
 	OutcomeNotDelivered = "not-delivered"
+	// OutcomeClosedUnanswered follows an AI agent's ask that was still
+	// unanswered when its conversation was closed: the work under it is over,
+	// and the AI agent that owed the answer is told. An answer that comes
+	// after is still kept, and does not reopen the conversation.
+	OutcomeClosedUnanswered = "closed-unanswered"
+	// OutcomeBodyLost follows an AI agent's ask that was still unanswered when
+	// the body that held it was lost, revoked or archived, so nothing is working
+	// on it any more. It is addressed to the one who asked, who is told, and
+	// ends the ask once, in a conversation that is still open.
+	OutcomeBodyLost = "body-lost"
 )
 
 // PersonProof is the sender's own proof for an entry a person signed as a
@@ -128,6 +138,14 @@ func (r Record) checkOutcome() error {
 	case OutcomeNotDelivered:
 		if o.Reason == "" {
 			return errors.New("a not-delivered entry gives its reason")
+		}
+	case OutcomeClosedUnanswered:
+		if o.Reason != "" {
+			return errors.New("a closed-unanswered entry has no reason: the close is the reason")
+		}
+	case OutcomeBodyLost:
+		if o.Reason == "" {
+			return errors.New("a body-lost entry gives its reason")
 		}
 	default:
 		return fmt.Errorf("%q is not an outcome", o.State)

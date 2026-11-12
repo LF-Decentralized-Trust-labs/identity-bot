@@ -49,6 +49,9 @@ var theAppRoutes = []string{
 	"GET /api/app-reads/{id}",
 	"GET /api/conversations/{id}/head",
 	"POST /api/mcp/agents/{id}/conversations",
+	"POST /api/mcp/conversations/{cid}/close",
+	"POST /api/mcp/conversations/{cid}/limit",
+	"POST /api/mcp/conversations/{cid}/reopen",
 }
 
 // An app's key is refused on every route that is not one an app may use, by

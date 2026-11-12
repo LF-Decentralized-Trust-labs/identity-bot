@@ -66,6 +66,13 @@ type AppRoute struct {
 func coreAppRoutes() map[string]AppRoute {
 	return map[string]AppRoute{
 		"POST /api/mcp/agents/{id}/conversations": {Capability: "agent.message.send", Arguments: map[string]string{"to": "id"}},
+		// A person says a conversation is done, takes that back, or raises its turn
+		// limit (ADR-077): the same capability as speaking, with the person's own
+		// statement of it. The route names a conversation and no AI agent, so a
+		// grant that limits the AI agents an app may message is not read as none.
+		"POST /api/mcp/conversations/{cid}/close":  {Capability: "agent.message.send"},
+		"POST /api/mcp/conversations/{cid}/reopen": {Capability: "agent.message.send"},
+		"POST /api/mcp/conversations/{cid}/limit":  {Capability: "agent.message.send"},
 		// The head and count carry no words and name no person; the handler
 		// serves an app only the conversations it keeps.
 		"GET /api/conversations/{id}/head": {Capability: CapabilityConversationHeadRead},

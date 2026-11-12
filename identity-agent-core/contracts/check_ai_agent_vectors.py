@@ -269,18 +269,23 @@ def statement_bytes(s):
 
 def statement_refused(s):
 
-    req = ("kind", "from", "to", "body_hash", "host", "host_nonce", "host_time", "body_credential")
+    # A close, a reopen and a raise of the turn limit address nobody and act on
+    # no message; every other kind names who it is to.
+    control = s.get("kind") in ("close", "reopen", "limit")
+    req = ("kind", "from", "body_hash", "host", "host_nonce", "host_time", "body_credential") + (() if control else ("to",))
     if any(not s.get(x) for x in req):
+        return True
+    if control and (s.get("to") or s.get("in_reply_to")):
         return True
     # An ask that acts on no message opens a conversation and names none; any
     # other statement names its conversation, and a message it acts on.
     opens = s["kind"] == "ask" and not s.get("in_reply_to")
     if opens == bool(s.get("conversation")):
         return True
-    vals = [s.get(x, "") for x in req + ("conversation", "in_reply_to", "tier")] + list(s.get("brain", {}).values())
+    vals = [s.get(x, "") for x in req + ("to", "conversation", "in_reply_to", "tier")] + list(s.get("brain", {}).values())
     if any("\n" in x or "\r" in x for x in vals):
         return True
-    if s["kind"] not in ("ask", "reply", "receipt", "failure", "progress") or not (s.get("in_reply_to") or opens):
+    if s["kind"] not in ("ask", "reply", "receipt", "failure", "progress", "close", "reopen", "limit") or not (s.get("in_reply_to") or opens or control):
         return True
     if s.get("tier") and (s["tier"] not in ("quick", "standard", "deep") or s["kind"] != "ask"):
         return True

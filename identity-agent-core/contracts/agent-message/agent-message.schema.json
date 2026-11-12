@@ -110,9 +110,10 @@
         "split",
         "close",
         "reopen",
+        "limit",
         "outcome"
       ],
-      "description": "An AI agent's kinds are ask, reply, receipt, failure and progress. A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close or reopen. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
+      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
     },
     "party": {
       "description": "An AI agent's identifier, or person: followed by a person's identifier.",
@@ -582,12 +583,14 @@
           "enum": [
             "committed",
             "not-kept",
-            "not-delivered"
+            "not-delivered",
+            "closed-unanswered",
+            "body-lost"
           ]
         },
         "reason": {
           "type": "string",
-          "description": "required for not-kept and not-delivered, absent for committed. not-delivered follows a committed entry once, when the message was not delivered before the delivery queue's age ran out"
+          "description": "required for not-kept and not-delivered, absent for committed. not-delivered follows a committed entry once, when the message was not delivered before the delivery queue's age ran out. closed-unanswered names an AI agent's ask (its message id) that was still unanswered when its conversation closed; it has no reason, is addressed to the AI agent that owed the answer, and ends an ask once (ADR-077). body-lost names an AI agent's ask that was unanswered when the body that held it was lost or archived; it gives a reason, is addressed to the one who asked, and ends the ask once, in a conversation still open"
         }
       }
     }

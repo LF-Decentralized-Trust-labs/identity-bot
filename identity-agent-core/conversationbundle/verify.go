@@ -204,6 +204,12 @@ type verifier struct {
 	people   map[string]*personEntry
 	used     map[string]bool
 	versions []int
+	// closed is whether the conversation is closed at this point in the chain:
+	// a close sets it, a reopen clears it, and nothing else does.
+	closed bool
+	// endedAsk is every ask that ended unanswered, by a close or a lost body,
+	// and has been given its one outcome.
+	endedAsk map[string]bool
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -849,7 +855,10 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 	default:
 		v.checkPersonSpoke(where, rec, at, m)
 	}
-	if t := rec.To; t != "" && rec.PersonProof == nil {
+	v.checkControl(where, rec, body)
+	if t := rec.To; t != "" && rec.PersonProof == nil && !(rec.Kind == agentmessage.KindReceipt && t == v.b.Root) {
+		// A receipt for one of the Identity Agent's own entries (an outcome) is
+		// addressed to the Identity Agent, which is the root and no delegate of it.
 		if _, person := agentmessage.IsPerson(t); !person {
 			if why := v.delegatedFromRoot(t); why != "" {
 				v.fault(where, "it is addressed to %s: %s", t, why)
@@ -940,6 +949,10 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 // checkThread checks that a body spoke only about a message it was given, and
 // answered only whoever asked it.
 func (v *verifier) checkThread(where string, rec agentmessage.Record) {
+	if agentmessage.IsControl(rec.Kind) {
+		// A close, a reopen or a limit acts on no message; checkControl holds it.
+		return
+	}
 	if rec.Statement != nil && rec.Statement.Opens() {
 		// The only message that acts on none: the entry that opened the conversation.
 		if rec.Seq != 1 {
@@ -1440,5 +1453,101 @@ func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args 
 	}
 	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
 		v.fault(where, "the conversation's opener, %s, could not have asked %s: %v", v.opener.From, rec.To, err)
+	}
+}
+
+// checkControl checks what a close, a reopen and a raise of the limit may be,
+// and that nothing is asked in a conversation that is closed. Only the one who
+// opened the conversation closes it, reopens it or raises its limit, except
+// that the organisation's owner may close any conversation (the owner's own
+// statement, standing "owner"). Nothing closes a conversation for being quiet,
+// so a close is an entry of the chain and nothing else closes one. An answer
+// that comes after a close is kept and is no fault: it never reopens the
+// conversation.
+func (v *verifier) checkControl(where string, rec agentmessage.Record, body []byte) {
+	if rec.Refusal != "" || rec.Outcome != nil {
+		// A refusal records an attempt that changed nothing, and an outcome is
+		// the Identity Agent's note about an earlier entry.
+		return
+	}
+	switch {
+	case rec.Kind == agentmessage.KindAsk && v.closed:
+		v.fault(where, "an ask was recorded in a conversation that had been closed and not reopened")
+		return
+	case !agentmessage.IsControl(rec.Kind):
+		return
+	}
+	if rec.To != "" || rec.InReplyTo != "" {
+		v.fault(where, "a %s addresses nobody and acts on no message", rec.Kind)
+	}
+	byOpener := rec.From == rec.OpenedBy
+	byOwner := rec.Kind == agentmessage.KindClose && rec.PersonProof != nil && rec.Person != nil &&
+		rec.Person.Standing == "owner" && rec.From == agentmessage.Person(rec.Person.AID)
+	switch rec.Kind {
+	case agentmessage.KindClose:
+		switch {
+		case !byOpener && !byOwner:
+			v.fault(where, "a conversation is closed by the one who opened it, or by the organisation's owner, and %s is neither", rec.From)
+		case v.closed:
+			v.fault(where, "it closes a conversation that was already closed")
+		}
+		v.closed = true
+	case agentmessage.KindReopen:
+		switch {
+		case !byOpener:
+			v.fault(where, "a conversation is reopened only by the one who opened it, and %s did not", rec.From)
+		case !v.closed:
+			v.fault(where, "it reopens a conversation that was not closed")
+		}
+		v.closed = false
+	case agentmessage.KindLimit:
+		if !byOpener {
+			v.fault(where, "a conversation's turn limit is raised only by the one who opened it, and %s did not", rec.From)
+		}
+		// A person's words are the app's and may not be in the bundle: the number
+		// is checked wherever it is carried.
+		if rec.PersonProof == nil || len(body) > 0 {
+			if _, err := agentmessage.ParseTurnLimit(body); err != nil {
+				v.fault(where, "the limit it raises to is not one a conversation may have: %v", err)
+			}
+		}
+	}
+	if (rec.Kind == agentmessage.KindClose || rec.Kind == agentmessage.KindReopen) && len(body) != 0 {
+		v.fault(where, "a %s carries no words", rec.Kind)
+	}
+}
+
+// checkAskEnded checks the Identity Agent's note that an AI agent's ask ended
+// unanswered: because its conversation closed (closed-unanswered, addressed to
+// the AI agent that owed the answer) or because the body that held it was lost
+// (body-lost, addressed to the one who asked, in a conversation still open).
+// The ask is an earlier one, not yet answered, and it ends once. That a body
+// was lost is the Identity Agent's word: nothing in the bundle shows it.
+func (v *verifier) checkAskEnded(where string, rec agentmessage.Record) {
+	ask, ok := v.entries[rec.Outcome.Entry]
+	lost := rec.Outcome.State == agentmessage.OutcomeBodyLost
+	switch {
+	case !ok || ask.Seq >= rec.Seq || ask.Kind != agentmessage.KindAsk:
+		v.fault(where, "it says %s ended unanswered, which is not an earlier ask of this conversation", rec.Outcome.Entry)
+	case !lost && !v.closed:
+		v.fault(where, "it says %s ended unanswered because the conversation closed, and the conversation is not closed", rec.Outcome.Entry)
+	case lost && v.closed:
+		v.fault(where, "it says the body that held %s was lost, in a conversation that had closed: a close ends an ask itself", rec.Outcome.Entry)
+	case v.answered[ask.MessageID]:
+		v.fault(where, "it says %s ended unanswered, but it had been answered", rec.Outcome.Entry)
+	case v.endedAsk[ask.MessageID]:
+		v.fault(where, "it says %s ended unanswered, and an ask ends so once", rec.Outcome.Entry)
+	case !lost && rec.To != ask.To:
+		v.fault(where, "it is not addressed to %s, the one who owed the answer", ask.To)
+	case lost && rec.To != ask.From:
+		v.fault(where, "it is not addressed to %s, the one who asked", ask.From)
+	default:
+		if v.endedAsk == nil {
+			v.endedAsk = map[string]bool{}
+		}
+		v.endedAsk[ask.MessageID] = true
+		if lost {
+			v.cannotRuleOut("An ask ended because its AI agent's body was lost: that the body was lost is the Identity Agent's word, which nothing in the bundle shows.")
+		}
 	}
 }
