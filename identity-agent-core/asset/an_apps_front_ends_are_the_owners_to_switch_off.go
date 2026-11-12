@@ -85,7 +85,7 @@ func SwitchOff(offered, off []string) ([]string, error) {
 	}
 	for _, k := range off {
 		if !containsKind(offered, k) {
-			return nil, fmt.Errorf("this app does not offer a '%s' front end, so there is none to switch off", k)
+			return nil, fmt.Errorf("this utility app does not offer a '%s' front end, so there is none to switch off", k)
 		}
 	}
 	out := append([]string(nil), off...)
