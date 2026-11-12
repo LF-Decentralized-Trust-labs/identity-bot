@@ -6,6 +6,7 @@ import { createHash, createPrivateKey, createPublicKey, sign as edSign } from "n
 import { writeFileSync } from "node:fs";
 import { blake3Qb64, ed25519SigQb64, ed25519VerkeyQb64 } from "../../login-verify/dist/browser.js";
 import { answerText, browserKeyThumbprint, proofText } from "../dist/app.js";
+import { inception, keyFor, logHeader, relayChain, rotation } from "../src/app-test-support.mjs";
 
 const enc = new TextEncoder();
 const b64u = (b) => Buffer.from(b).toString("base64url");
@@ -70,21 +71,66 @@ export async function make() {
   ch("another challenge's code", {}, { pointer: "https://ia.example/i/other", refuse: "not this challenge's" });
   ch("a code that is not https", {}, { pointer: "http://ia.example/i/tok", refuse: "not this challenge's" });
 
-  const answers = [];
+  // What the app answers with is signed by the CURRENT key of its relay identifier, and the answer
+  // carries that identifier's whole signed key log. `chain` is one rotated twice: keys k0 (the first
+  // machine's), k1, k2 (current); `known` is the longest log the page already holds for it.
+  const chain = relayChain("relay-chain", 2);
+  const unrotated = relayChain("relay-chain", 0); // the same keys, before any rotation: the same identifier
   const body = enc.encode('{"ok":true}');
+  const answers = [];
   const an = async (name, o = {}) => {
+    const rid = o.rid ?? chain.aid;
     const nonce = o.nonce ?? "n1";
-    const signed = b64u(relay.sign(enc.encode(await answerText(relay.aid, "n1", 200, "application/json", body))));
-    const a = { name, rid: o.rid ?? relay.aid, nonce, status: o.status ?? 200, content_type: "application/json", body_b64: Buffer.from(o.body ?? body).toString("base64"),
-      inception: b64u(enc.encode(relay.text)), sig: o.sig === undefined ? signed : o.sig };
-    answers.push(o.refuse ? { ...a, refuse: o.refuse } : a);
+    const sigBy = o.sigBy ?? chain.keys[2];
+    const signed = b64u(sigBy.sign(enc.encode(await answerText(rid, "n1", 200, "application/json", body))));
+    const a = { name, rid, nonce, status: o.status ?? 200, content_type: "application/json", body_b64: Buffer.from(o.body ?? body).toString("base64"),
+      log: o.log === undefined ? chain.log() : o.log, known: o.known ?? null, sig: o.sig === undefined ? signed : o.sig };
+    answers.push(o.refuse ? { ...a, refuse: o.refuse } : { ...a, expect_log: o.expect_log ?? a.log });
   };
-  await an("the app's answer to this call");
+  // the same cases whatever the log, rotated or not
+  await an("the app's answer to this call, rotated twice", {});
+  await an("an app that has not rotated", { rid: unrotated.aid, log: unrotated.log(), sigBy: unrotated.keys[0] });
+  await an("a rotated app, the page already holds its log up to the first rotation", { known: chain.log(2) });
+  await an("a rotated app, the page already holds the same log", { known: chain.log() });
   await an("an answer to another call", { nonce: "n2", refuse: "does not hold for this call" });
   await an("a changed body", { body: enc.encode('{"ok":false}'), refuse: "does not hold for this call" });
   await an("a changed status", { status: 500, refuse: "does not hold for this call" });
   await an("an unsigned answer", { sig: null, refuse: "not signed" });
-  await an("another identifier", { rid: app.aid, refuse: "not the identifier the link names" });
+  await an("no key log", { log: null, refuse: "not signed" });
+  await an("a link naming another identifier", { rid: app.aid, refuse: "not the identifier the link names" });
+  // the key the log has left
+  await an("the first machine's key with its own short log, before the rotation was seen", { log: chain.log(1), sigBy: chain.keys[0], expect_log: chain.log(1) });
+  await an("the first machine's key with its own short log, after the rotation was seen", { log: chain.log(1), sigBy: chain.keys[0], known: chain.log(), refuse: "behind or apart" });
+  await an("an intermediate roll-back", { log: chain.log(2), sigBy: chain.keys[1], known: chain.log(), refuse: "behind or apart" });
+  await an("the first machine's key under the current log", { sigBy: chain.keys[0], refuse: "does not hold for this call" });
+  await an("the previous key under the current log", { sigBy: chain.keys[1], refuse: "does not hold for this call" });
+  { // a fork: a rotation to the committed key (k1) that commits to another next key, so every later event differs
+    const icp = chain.events[0];
+    const fork = { ...rotation(chain.aid, 1, icp.said, chain.keys[1], keyFor("a-fork:next")), signer: chain.keys[1] };
+    await an("a fork of the log the page already holds", { log: logHeader([icp, fork]), sigBy: chain.keys[1], known: chain.log(), refuse: "behind or apart" });
+  }
+  { // a rotation to a key the event before did not commit to, signed with that key
+    const stray = keyFor("a-stray");
+    const bad = { ...rotation(chain.aid, 1, chain.events[0].said, stray, keyFor("a-stray:next")), signer: stray };
+    await an("a rotation to a key that was not committed to", { log: logHeader([chain.events[0], bad]), sigBy: stray, refuse: "did not commit to" });
+  }
+  { // a rotation signed by the key before it, not the key it names
+    const e = chain.events[1];
+    await an("a rotation signed by the key it replaces", { log: logHeader([chain.events[0], { ...e, signer: chain.keys[0] }]), sigBy: chain.keys[1], refuse: "not signed by the key it names" });
+  }
+  { const e = rotation(chain.aid, 1, chain.events[0].said, chain.keys[1], chain.keys[2], { s: "2" });
+    await an("a rotation out of sequence", { log: logHeader([chain.events[0], { ...e, signer: chain.keys[1] }]), sigBy: chain.keys[1], refuse: "out of sequence" }); }
+  { const e = rotation(chain.aid, 1, chain.events[0].said, chain.keys[1], chain.keys[2], { p: chain.aid.slice(0, -1) + "A" });
+    await an("a rotation that does not carry on from the event before it", { log: logHeader([chain.events[0], { ...e, signer: chain.keys[1] }]), sigBy: chain.keys[1], refuse: "carry on from the event before" }); }
+  { // an event changed after its SAID was made
+    const e = chain.events[1];
+    const text = e.text.replace('"bt":"0"', '"bt":"1"');
+    await an("a rotation changed after it was made", { log: logHeader([chain.events[0], { ...e, text, signer: chain.keys[1] }]), sigBy: chain.keys[1], refuse: "not the digest of the rotation" }); }
+  { // a log of another identifier presented under this one's name
+    const other2 = relayChain("some-other-relay", 1);
+    await an("another identifier's log", { log: other2.log(), sigBy: other2.keys[1], refuse: "not the identifier the link names" }); }
+  await an("a log with an event cut short", { log: b64u(Buffer.from(chain.log(), "base64url").subarray(0, -10)), refuse: "not followed by exactly one signature" });
+  await an("a log with something after it", { log: b64u(Buffer.concat([Buffer.from(chain.log(), "base64url"), Buffer.from("x")])), refuse: "not an event where one must begin" });
 
   const proofs = [];
   for (const p of [
@@ -92,7 +138,7 @@ export async function make() {
     { method: "POST", target: "/session/chat/send", ts: "2026-11-11T12:00:06Z", nonce: "nonce2", binding: "bindingvalue", body: '{"words":"héllo"}' },
   ]) proofs.push({ ...p, expect: await proofText(p.method, p.target, p.ts, p.nonce, p.binding, p.body) });
 
-  const answerTexts = [{ rid: relay.aid, nonce: "n1", status: 200, content_type: "application/json", body_b64: Buffer.from(body).toString("base64"), expect: await answerText(relay.aid, "n1", 200, "application/json", body) }];
+  const answerTexts = [{ rid: chain.aid, nonce: "n1", status: 200, content_type: "application/json", body_b64: Buffer.from(body).toString("base64"), expect: await answerText(chain.aid, "n1", 200, "application/json", body) }];
   const thumbprints = [{ x, y, expect: thumb }];
   const skews = [
     { server_time: "2026-11-11T12:00:10Z", now_ms: NOW, expect_ms: 10000 },

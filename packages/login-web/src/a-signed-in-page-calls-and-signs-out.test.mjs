@@ -3,11 +3,11 @@
 // session says so in a sentence and is forgotten, and sign-out ends it.
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
-import { ANSWER_INCEPTION, ANSWER_SIG, SessionEnded, answerText, appSession, browserKeyThumbprint, readAppLink, signInProblem } from "../dist/app.js";
-import { b64u, enc, identity } from "./app-test-support.mjs";
+import { ANSWER_LOG, ANSWER_SIG, SessionEnded, answerText, appSession, browserKeyThumbprint, readAppLink, signInProblem } from "../dist/app.js";
+import { b64u, enc, identity, logMemory, relayChain } from "./app-test-support.mjs";
 
 const app = identity();
-const relay = identity();
+const relay = relayChain("relay");
 const other = identity();
 const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example`);
 const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
@@ -26,10 +26,10 @@ function backEnd({ signer = relay, status = () => 200 } = {}) {
     const body = enc.encode(JSON.stringify(path === "/session/whoami" ? { pairwise_aid: "EP", browser_key: mine.thumbprint, server_time: "2030-01-01T00:00:00Z" } : { ok: true }));
     const sg = typeof signer === "function" ? signer(path) : signer;
     const sig = b64u(sg.sign(enc.encode(await answerText(relay.aid, nonce, code, "application/json", body))));
-    return new Response(body, { status: code, headers: { "content-type": "application/json", [ANSWER_INCEPTION]: b64u(enc.encode(relay.text)), [ANSWER_SIG]: sig } });
+    return new Response(body, { status: code, headers: { "content-type": "application/json", [ANSWER_LOG]: relay.log(), [ANSWER_SIG]: sig } });
   };
 }
-const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, browserKey: async () => mine });
+const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, browserKey: async () => mine, logs: logMemory() });
 
 // no session yet
 {
@@ -84,7 +84,7 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, b
 {
   const st = store();
   const keys = [];
-  const asking = (link) => appSession(link, { storage: st, fetchFn: backEnd(), browserKey: async (slot) => (keys.push(slot), mine) });
+  const asking = (link) => appSession(link, { storage: st, fetchFn: backEnd(), browserKey: async (slot) => (keys.push(slot), mine), logs: logMemory() });
   const real = asking(L);
   real.keep("tok-real");
   const crafted = [

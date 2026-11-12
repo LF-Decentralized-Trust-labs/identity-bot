@@ -5,14 +5,14 @@
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
 import { ed25519SigQb64 } from "../../login-verify/dist/browser.js";
-import { b64u, enc, identity } from "./app-test-support.mjs";
+import { b64u, enc, identity, logMemory, relayChain } from "./app-test-support.mjs";
 import {
-  ANSWER_INCEPTION, ANSWER_SIG, answerText, appFetch, browserKeyThumbprint, checkAppAnswer, checkAppChallenge,
+  ANSWER_LOG, ANSWER_SIG, answerText, appFetch, browserKeyThumbprint, checkAppAnswer, checkAppChallenge,
   checkAppKeyLog, proofHeaders, proofText, readAppLink, serverSkew,
 } from "../dist/app.js";
 
 const app = identity();
-const relay = identity();
+const relay = relayChain("relay");
 const refuses = (p, re, what) => assert.rejects(p, (e) => re.test(e.message), what);
 
 // the link
@@ -52,7 +52,7 @@ await refuses(checkAppChallenge({ ...challenge(), pointer: "http://ia.example/i/
 const answer = async (over = {}) => {
   const a = { rid: relay.aid, nonce: "n1", status: 200, contentType: "application/json", body: enc.encode('{"ok":true}'), ...over };
   const sig = b64u(relay.sign(enc.encode(await answerText(relay.aid, "n1", 200, "application/json", enc.encode('{"ok":true}')))));
-  return { ...a, inception: b64u(enc.encode(relay.text)), sig };
+  return { ...a, log: relay.log(), sig };
 };
 await checkAppAnswer(await answer());
 await refuses(checkAppAnswer(await answer({ nonce: "n2" })), /does not hold for this call/, "an answer to another call");
@@ -82,11 +82,11 @@ function backEnd({ lie = false } = {}) {
       ? (() => { const c = challenge(lie ? { site_aid: relay.aid } : {}); return { session_token: "sid1", relay_or_qr_url: c.pointer, canonical_body: c.body, sig: c.sig, server_time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") }; })()
       : { state: "connecting" }));
     const sig = b64u(relay.sign(enc.encode(await answerText(relay.aid, nonce, 200, "application/json", body))));
-    return new Response(body, { status: 200, headers: { "content-type": "application/json", [ANSWER_INCEPTION]: b64u(enc.encode(relay.text)), [ANSWER_SIG]: sig } });
+    return new Response(body, { status: 200, headers: { "content-type": "application/json", [ANSWER_LOG]: relay.log(), [ANSWER_SIG]: sig } });
   };
 }
 const L = readAppLink(link);
-const a = await appFetch(L, { fetchFn: backEnd(), browserKey: async () => mine });
+const a = await appFetch(L, { fetchFn: backEnd(), browserKey: async () => mine, logs: logMemory() });
 assert.equal(a.sessionEndpoint, "https://tasks.example/signin/session");
 assert.equal(a.browserKey, thumb);
 const started = await (await a.fetchFn(a.sessionEndpoint, { method: "POST", body: JSON.stringify({ browserKey: thumb }) })).json();
@@ -95,10 +95,32 @@ assert.deepEqual(JSON.parse(calls[0].body).jwk, jwk, "the start carries this bro
 const polled = await (await a.fetchFn(`${a.sessionEndpoint}/sid1`, {})).json();
 assert.equal(polled.state, "connecting");
 assert.ok(calls[1].headers["X-Browser-Proof"] && calls[1].headers["X-Browser-Proof-Nonce"], "a poll carries a proof");
-const liar = await appFetch(L, { fetchFn: backEnd({ lie: true }), browserKey: async () => mine });
+const liar = await appFetch(L, { fetchFn: backEnd({ lie: true }), browserKey: async () => mine, logs: logMemory() });
 await refuses(liar.fetchFn(liar.sessionEndpoint, { method: "POST", body: "{}" }), /another app/, "a back end that hands over another app's challenge");
-const unsigned = await appFetch(L, { fetchFn: async () => new Response("{}", { status: 200 }), browserKey: async () => mine });
+const unsigned = await appFetch(L, { fetchFn: async () => new Response("{}", { status: 200 }), browserKey: async () => mine, logs: logMemory() });
 await refuses(unsigned.fetchFn(unsigned.sessionEndpoint, { method: "POST", body: "{}" }), /not signed/, "an answer nobody signed");
 await refuses(appFetch({ ...L, kel: app.log({ cesr_signatures: [ed25519SigQb64(new Uint8Array(64))] }) }, { browserKey: async () => mine }), /key log is refused/, "a link whose key log is not the app's");
+
+// the app's key rotates: the page goes by the key the log names now, remembers the longest log, and
+// never believes the key the log has left, shown with its own shorter log.
+{
+  const rot = relayChain("relay", 2); // the same identifier as `relay`? no: a chain of its own, rotated twice
+  const ans = async (chain, upTo, signerIndex, nonce = "n1") => {
+    const body = enc.encode('{"ok":true}');
+    const sig = b64u(chain.keys[signerIndex].sign(enc.encode(await answerText(chain.aid, nonce, 200, "application/json", body))));
+    return { rid: chain.aid, nonce, status: 200, contentType: "application/json", body, log: chain.log(upTo), sig };
+  };
+  const mem = logMemory();
+  const seen = async (a) => mem.set(a.rid, (await checkAppAnswer({ ...a, known: mem.get(a.rid) })).log);
+  await seen(await ans(rot, 1, 0)); // the inception's key, before any rotation
+  await seen(await ans(rot, 3, 2)); // after two rotations, the current key
+  assert.equal(mem.get(rot.aid), rot.log(3));
+  await refuses(checkAppAnswer({ ...(await ans(rot, 1, 0)), known: mem.get(rot.aid) }), /behind or apart/, "the first machine's key with its own short log, after the rotation was seen");
+  await refuses(checkAppAnswer({ ...(await ans(rot, 2, 1)), known: mem.get(rot.aid) }), /behind or apart/, "an intermediate roll-back");
+  await refuses(checkAppAnswer({ ...(await ans(rot, 3, 0)), known: mem.get(rot.aid) }), /does not hold for this call/, "the old key under the current log");
+  // a page that has seen nothing still reads the log from its inception, so a log that does not verify never gets in
+  const forkedKeys = relayChain("relay-fork", 2);
+  await refuses(checkAppAnswer({ ...(await ans(forkedKeys, 3, 2)), rid: rot.aid }), /not the identifier the link names/, "another identifier's log under this one's name");
+}
 
 console.log("a utility app's page believes only its own app: key log, challenge, answers, and the sign-in through appFetch");
