@@ -97,6 +97,8 @@ func aWebsiteFor(t *testing.T, s *CoreServer, policy asset.EnrollmentPolicy) *aW
 	r.Get("/public/oobi/{aid}", s.handleOobiServe)
 	r.Get("/i/{token}", s.handleChallengeBundleServe)
 	r.Post("/api/login/callback", s.handleLoginCallback)
+	r.Post("/api/login/app-key/end/begin", s.handleBeginEndAppKey)
+	r.Post("/api/login/app-key/end", s.handleEndAppKey)
 	w.srv = httptest.NewServer(r)
 	t.Cleanup(w.srv.Close)
 	return w

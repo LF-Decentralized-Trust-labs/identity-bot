@@ -863,3 +863,54 @@ func TestTheEndNonceCapCountsTheVisitorBehindAProxyNotTheProxy(t *testing.T) {
 		t.Fatalf("one visitor behind the proxy stopped another: %d", code)
 	}
 }
+
+// The person's own Identity Agent keeps what they approved, lists it, and ends
+// it with the signed end the app's host already takes.
+func TestThePersonsIdentityAgentListsAnInstalledAppTheyApprovedAndEndsIt(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := aPersonsIdentityAgent(t)
+	list := func() []login.InstalledAppSignIn {
+		rec := httptest.NewRecorder()
+		person.HandleInstalledAppSignIns(rec, httptest.NewRequest("GET", "/x", nil))
+		var out struct {
+			L []login.InstalledAppSignIn `json:"installed_app_sign_ins"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.L
+	}
+	if len(list()) != 0 {
+		t.Fatal("the list holds something never approved")
+	}
+	if _, err := person.Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	got := list()
+	if len(got) != 1 || got[0].Key != iw.key {
+		t.Fatalf("the approved sign-in is not listed: %+v", got)
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); !ok {
+		t.Fatal("the grant is not live before it is ended")
+	}
+	body, _ := json.Marshal(map[string]string{"site_aid": got[0].SiteAID, "key": got[0].Key})
+	rec := httptest.NewRecorder()
+	person.HandleEndInstalledAppSignIn(rec, httptest.NewRequest("POST", "/x", bytes.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("ending it: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok {
+		t.Fatal("the grant still speaks after the person ended it from their list")
+	}
+	if len(list()) != 0 {
+		t.Fatal("an ended sign-in is still listed")
+	}
+	// A key the person never approved is refused, not forwarded.
+	rec = httptest.NewRecorder()
+	person.HandleEndInstalledAppSignIn(rec, httptest.NewRequest("POST", "/x", bytes.NewReader(body)))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("ending a sign-in not on the list answered %d", rec.Code)
+	}
+}

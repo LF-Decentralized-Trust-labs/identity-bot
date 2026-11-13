@@ -37,11 +37,13 @@ func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
 }
 
 type Handler struct {
-	Store      *RelationshipStore
-	Pending    *PendingStore
-	KeriDriver drivers.KeriEngine
-	DevRelay   string
-	HTTPClient *http.Client
+	Store   *RelationshipStore
+	Pending *PendingStore
+	// InstalledApps is the person's own record of the installed-app sign-ins they approved.
+	InstalledApps *InstalledAppSignInStore
+	KeriDriver    drivers.KeriEngine
+	DevRelay      string
+	HTTPClient    *http.Client
 	// PeerClient, when set, is the client for a call to rawURL, an address a site
 	// supplied (its challenge, callback, introductions and registry). The server
 	// sets it to the guarded client; unset, HTTPClient is used.
@@ -111,14 +113,19 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	apps, err := NewInstalledAppSignInStore(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	relay := OwnerRelayURL()
 	return &Handler{
-		Store:      store,
-		Pending:    NewPendingStore(),
-		KeriDriver: keri,
-		DevRelay:   relay,
-		HTTPClient: &http.Client{Timeout: 15 * time.Second},
-		dataDir:    dataDir,
+		InstalledApps: apps,
+		Store:         store,
+		Pending:       NewPendingStore(),
+		KeriDriver:    keri,
+		DevRelay:      relay,
+		HTTPClient:    &http.Client{Timeout: 15 * time.Second},
+		dataDir:       dataDir,
 	}, nil
 }
 
@@ -758,7 +765,14 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 		return nil, err
 	}
 
+	// An installed app's approval lasts until it is ended, so the person's own
+	// record is kept first: a grant the host accepts always has one to end it by.
+	undo, err := h.recordInstalledAppSignIn(rel, bundle)
+	if err != nil {
+		return nil, fmt.Errorf("could not keep a record of this sign-in, so it was not approved: %w", err)
+	}
 	if err := h.postAssertion(bundle.CallbackURL, bundle.SessionToken, assertion, creds); err != nil {
+		undo()
 		return nil, err
 	}
 
