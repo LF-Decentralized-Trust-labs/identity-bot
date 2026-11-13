@@ -382,6 +382,22 @@ Future<Uint8List> checkedSealKeyWitnessed(
   return r.key;
 }
 
+/// The link's sealing key, checked once and then held: the first call checks it
+/// (and asks the relay identifier's witnesses, `checkedSealKeyWitnessed`), and
+/// the ones after use what was found. A check that fails is tried again by the
+/// next call, so a witness that was out of reach, or a link that was refused, is
+/// not remembered as the answer.
+class CheckedSealKey {
+  final AppLink link;
+  final AnswerLogs logs;
+  final http.Client client;
+  CheckedSealKey(this.link, this.logs, this.client);
+  Uint8List? _key;
+
+  Future<Uint8List> get() async =>
+      _key ??= await checkedSealKeyWitnessed(link, logs, client);
+}
+
 /// The relay that carries a call to the utility app's back end did not carry it (it
 /// answered with something other than the one sealed answer), as in a restart.
 /// Nothing was believed or refused: the call can be made again. Not a [TrustRefused].
