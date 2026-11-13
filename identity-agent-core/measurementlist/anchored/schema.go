@@ -13,9 +13,8 @@ import (
 // credential naming that SAID names exactly these bytes. A credential under any
 // other schema SAID is refused, however well it is anchored.
 //
-// It lives here because another party needs it to verify a list it receives
-// (D22). The checker does not run a JSON Schema validator: the same rules are
-// held by measurementlist.ContentOfAttributes and FromContent, and
+// It lives here because another party needs it to verify a list it receives. The checker does not run a JSON Schema validator: the same rules
+// are held by measurementlist.ContentOfAttributes and FromContent, and
 // testdata/schema_conformance.json is what both the schema's author and any
 // other implementation check their reading of the rules against.
 //

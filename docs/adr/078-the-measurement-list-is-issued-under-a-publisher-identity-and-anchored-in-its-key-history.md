@@ -4,7 +4,7 @@
 **Date:** 2026-11-12
 **Deciders:** to be decided; no released version holds a list
 **Builds on:** ADR-076 (the list is the policy; the owner may add to it once), ADR-075 (duplicity), ADR-035 (what a verifier checks for itself)
-**Supersedes in part:** ADR-076's statement that the list is signed by a publisher key pinned in the build. Its decisions 1 to 7 stand.
+**Supersedes in part:** ADR-076's statement that the list is signed by a publisher key pinned in the build. Its decisions 1 to 4, 6 and 7 stand; decision 5 stands except for how the list is delivered and what it is checked against, which this ADR replaces.
 
 ---
 
@@ -39,7 +39,7 @@ ADR-076 takes the list of accepted launch measurements from a document signed wi
 - `PinnedKeyID` and `PinnedKeyHex` are gone, replaced by the pin of decision 3; a build without a pin accepts no list. The signed-document reader in `measurementlist` (`Verify`, `SignedBytes`, the pinned key and its vectors) is deleted; the rules for a list's content stay in `measurementlist` (`FromContent`) and are tested through the credential's attribute block.
 - An anchored list may say `list_version` 2 in its attribute block, and its entries then carry `environment`, `svn`, `smt` and `retired`, read by the same code as a signed list's.
 - ADR-076 decision 7 stands and applies to whatever issues a list: the issuing tool refuses an entry marked as development.
-- The floors (the highest list sequence and its hash, the newest place of the publisher's history this device has held, and the newest `published_at` accepted) never fall below the build's bundled snapshot.
+- The floors (the highest list sequence and its hash, the newest place of the publisher's history this device has held, and the newest `published_at` accepted) are kept in the floors file in the data directory and are never lowered: a check re-reads them and merges just before saving, and one check runs at a time. A build carries no bundled snapshot of them. So deleting the floors file between restarts brings the bootstrap policy back and removes the protection against an older list, until a list is accepted again: the owner who deletes it by hand gets exactly the rollback exposure of a fresh install. A damaged file is not the same as a missing one and refuses every list.
 - A peer watcher answers `POST /public/kel-tip` for the pinned publisher only, to a contact who signed the request, from the floors of this core.
 - Tests: `identity-agent-core/measurementlist/anchored`. `verify_test.go` and `every_refusal_has_its_own_case_test.go` give a negative case to each refusal of the list, the anchor, the witnessing, the credential and the freshness guard, built so the bundle is right in every other respect. A few refusals are guarded twice (a repeated registry event, a withdrawal that does not follow its issuance) and fail on the other check as well when one is removed; a registry inception that is not the pinned one is refused earlier, as an event the history never sealed, so its own identifier check cannot be reached and is a second defence. `the_freshness_guard_test.go` forges a signed answer and has the witnesses name another event at the bundle's tip; `the_clock_floor_test.go` and `the_peer_watchers_test.go` hold decisions 4 and 9; `engine_test.go` is the engine's own output end to end.
 
