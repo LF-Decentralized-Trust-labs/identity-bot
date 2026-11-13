@@ -55,6 +55,11 @@ Uint8List? _matter(Object? qb64, String code, int len) {
   return Uint8List.sublistView(raw, ps);
 }
 
+/// CESR fixed-size material under [code] (see [_matter]), for the codes the
+/// witnessed log reader meets besides a key and a signature.
+Uint8List? decodeMatter(Object? q, String code, int len) =>
+    _matter(q, code, len);
+
 Uint8List? decodeVerkey(Object? q) => _matter(q, 'D', 32);
 Uint8List? decodeSig(Object? q) => _matter(q, '0B', 64);
 
@@ -173,7 +178,8 @@ class AppLink {
 /// The key the link's key log puts in force for [aid], or a [TrustRefused] saying why not.
 Uint8List checkKeyLog(String aid, String encoded) {
   Never fail(String why) => _fail('the link\'s key log is refused: ', why);
-  if (aid.isEmpty || encoded.isEmpty) fail('the link names no utility app key log');
+  if (aid.isEmpty || encoded.isEmpty)
+    fail('the link names no utility app key log');
   final json = b64uDecode(encoded);
   if (json == null) fail('it is not readable');
   Object? kl;
@@ -267,7 +273,8 @@ Map<String, dynamic> checkChallenge({
   if (c['v'] != 'ASK1' || c['t'] != 1) {
     fail('the signed text is not a login challenge');
   }
-  if (c['site_aid'] != aid) fail('the challenge is signed for another utility app');
+  if (c['site_aid'] != aid)
+    fail('the challenge is signed for another utility app');
   if (c['browser_key'] != ownThumbprint) {
     fail('the challenge does not name this page\'s own key');
   }

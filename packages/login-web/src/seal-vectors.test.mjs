@@ -6,6 +6,7 @@ import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { make } from "../test-vectors/make-seal-vectors.mjs";
 import { checkSealKey, clockAnswerSkew } from "../dist/app.js";
+import { readWitnessedLog } from "../dist/witnessed.js";
 import { openRequest, sealRequest, sealPaddedRequestForVectors, SealError } from "../dist/seal.js";
 
 const v = JSON.parse(readFileSync(new URL("../test-vectors/seal.json", import.meta.url), "utf8"));
@@ -35,6 +36,12 @@ assert.equal((await checkSealKey(v.rid, v.seal_key.statement, "!!", v.seal_key.m
 await assert.rejects(checkSealKey(v.rid, v.seal_key.statement, "!!"), /cannot be read/, "an unreadable memory with no minimum is not taken for none");
 for (const c of v.statement_refusals) {
   await assert.rejects(checkSealKey(c.rid, c.statement, c.known_log, c.min), (e) => /sealing key is refused/.test(e.message), "a statement: " + c.name);
+}
+
+// the log a relay identifier's witnesses vouch for
+for (const c of v.witnessed.cases) {
+  if (c.refuse) await assert.rejects(readWitnessedLog(c.rid, c.answers), /witnesses' key log is refused/, "witnessed: " + c.name);
+  else assert.equal((await readWitnessedLog(c.rid, c.answers)).events, c.events, "witnessed: " + c.name);
 }
 
 for (const c of v.requests) {

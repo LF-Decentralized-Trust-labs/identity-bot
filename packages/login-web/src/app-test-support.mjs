@@ -96,15 +96,16 @@ function sealed(template) {
 }
 
 /** The inception of an identifier whose first key is `k` and which commits to `next`. */
-export function inception(k, next) {
-  const ev = sealed((v, d) => `{"v":"${v}","t":"icp","d":"${d}","i":"${d}","s":"0","kt":"1","k":["${k.key}"],"nt":"1","n":["${next.digest}"],"bt":"0","b":[],"c":[],"a":[]}`);
+export function inception(k, next, w = {}) {
+  const b = JSON.stringify(w.b ?? []);
+  const ev = sealed((v, d) => `{"v":"${v}","t":"icp","d":"${d}","i":"${d}","s":"0","kt":"1","k":["${k.key}"],"nt":"1","n":["${next.digest}"],"bt":"${w.bt ?? "0"}","b":${b},"c":[],"a":[]}`);
   return { ...ev, aid: ev.said };
 }
 
 /** A rotation to key `k`, committing to `next`, carrying on from the event whose SAID is `prior`. */
 export function rotation(aid, sn, prior, k, next, over = {}) {
   const s = over.s ?? sn.toString(16);
-  return sealed((v, d) => `{"v":"${v}","t":"rot","d":"${d}","i":"${aid}","s":"${s}","p":"${over.p ?? prior}","kt":"1","k":["${k.key}"],"nt":"1","n":["${next.digest}"],"bt":"0","br":[],"ba":[],"a":[]}`);
+  return sealed((v, d) => `{"v":"${v}","t":"rot","d":"${d}","i":"${aid}","s":"${s}","p":"${over.p ?? prior}","kt":"1","k":["${k.key}"],"nt":"1","n":["${next.digest}"],"bt":"${over.bt ?? "0"}","br":${JSON.stringify(over.br ?? [])},"ba":${JSON.stringify(over.ba ?? [])},"a":[]}`);
 }
 
 /** A key log as the header carries it: each event with its signer's signature, base64url. */
@@ -113,12 +114,12 @@ export function logHeader(events) {
 }
 
 /** A relay identifier rotated `rotations` times: keys k0..kN, and its events, each signed by the key it names. */
-export function relayChain(label, rotations = 0) {
+export function relayChain(label, rotations = 0, w = {}) {
   const keys = Array.from({ length: rotations + 2 }, (_, i) => keyFor(`${label}:${i}`));
-  const icp = inception(keys[0], keys[1]);
+  const icp = inception(keys[0], keys[1], w);
   const events = [{ ...icp, signer: keys[0] }];
   for (let i = 1; i <= rotations; i++) {
-    events.push({ ...rotation(icp.aid, i, events[i - 1].said, keys[i], keys[i + 1]), signer: keys[i] });
+    events.push({ ...rotation(icp.aid, i, events[i - 1].said, keys[i], keys[i + 1], { bt: w.bt ?? "0", ...(w.over?.[i] ?? {}) }), signer: keys[i] });
   }
   const upTo = (n) => events.slice(0, n);
   return { aid: icp.aid, keys, events, log: (n = events.length) => logHeader(upTo(n)), key: (i) => keys[i],
@@ -134,3 +135,25 @@ export function logMemory() {
 
 /** The `iat` of a link made just now: whole seconds since 1970. */
 export const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+// ---- a witness, and what it answers --------------------------------------
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/** A witness made from a label: a non-transferable identifier (its key with code B), and its receipts. */
+export function witnessFor(label) {
+  const k = keyFor("witness:" + label);
+  const aid = "B" + k.key.slice(1);
+  /** The witness's receipt of an event's text, indexed at its place in the list. */
+  const receipt = (text, index) => ({ witness: aid, cesr_signature: "A" + B64[index] + indexedSigQb64(k.sign(enc.encode(text))).slice(2) });
+  return { aid, receipt, sign: k.sign };
+}
+
+/** What a witness answers to GET /witness/kel/{rid}: the events of `chain` it holds (its first `n`),
+ *  each with its bytes, the controller's signature, and the receipts given (a list per event). */
+export function witnessAnswer(chain, n, receiptsFor = () => []) {
+  return { aid: chain.aid, kel: chain.events.slice(0, n).map((e, i) => ({
+    raw_bytes_b64: Buffer.from(e.text).toString("base64"),
+    cesr_signature: indexedSigQb64(e.signer.sign(enc.encode(e.text))),
+    ...(receiptsFor(i, e).length ? { witness_receipts: receiptsFor(i, e) } : {}),
+  })) };
+}

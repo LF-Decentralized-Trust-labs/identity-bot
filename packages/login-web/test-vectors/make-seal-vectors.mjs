@@ -5,7 +5,7 @@
 // `node test-vectors/make-seal-vectors.mjs` after `npm run build` to rewrite it.
 import { createECDH, createHash, hkdfSync, webcrypto } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { minimum, relayChain, sealStatement } from "../src/app-test-support.mjs";
+import { keyFor, minimum, relayChain, rotation, sealStatement, witnessAnswer, witnessFor } from "../src/app-test-support.mjs";
 import { sealAnswerWithAnyNForVectors, sealPaddedRequestForVectors, sealRequest } from "../dist/seal.js";
 
 const enc = new TextEncoder();
@@ -164,6 +164,48 @@ export async function make() {
     { name: "a key log whose last event is not signed by the key it names", rid: RID, statement: stmt({ log: (() => { const t = Buffer.from(chain.log(), "base64url").toString(); const i = t.length - 10; return b64u(t.slice(0, i) + (t[i] === "A" ? "B" : "A") + t.slice(i + 1)); })() }) },
   ];
 
+
+  // A relay identifier's key log as its witnesses hold it (ADR-072 Amendment 5, src/witnessed.ts): each case is the
+  // answers of the witnesses a page asked (GET /witness/kel/{rid}) and what must be made of them: the number of
+  // leading events that have their threshold of receipts (`events`), or a refusal. Declared here from how each was
+  // built, never by running a reader, so every reader is held to the same expectation.
+  const W = [0, 1, 2, 3].map((i) => witnessFor("w" + i));
+  const stranger = witnessFor("stranger");
+  const chainW = relayChain("witnessed", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2" });
+  const receiptOf = (w, index) => (i, e) => [w.receipt(e.text, index)];
+  const ans = (w, index, n = chainW.events.length, chain = chainW) => witnessAnswer(chain, n, receiptOf(w, index));
+  // the same inception and the same first key, and a rotation to another next key: a second history from event 1
+  const forkChain = (() => {
+    const fork = rotation(chainW.aid, 1, chainW.events[0].said, chainW.keys[1], keyFor("witnessed:fork-next"), { bt: "2" });
+    return { aid: chainW.aid, events: [chainW.events[0], { ...fork, signer: chainW.keys[1] }] };
+  })();
+  const case_ = (name, answers, expect, over = {}) => ({ name, rid: over.rid ?? chainW.aid, answers, ...(expect === null ? { refuse: true } : { events: expect }) });
+  const swapReceipt = (a, i, r) => ({ ...a, kel: a.kel.map((e, j) => (j === i ? { ...e, witness_receipts: [r] } : e)) });
+  const rewrite = (a) => ({ ...a, kel: a.kel.map((e, j) => (j === 1 ? { ...e, raw_bytes_b64: Buffer.from(Buffer.from(e.raw_bytes_b64, "base64").toString().replace(/"k":\["D/, '"k":["E')).toString("base64") } : e)) });
+  const chainRot = relayChain("witnessed-rot", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { br: [W[2].aid], ba: [W[3].aid], bt: "2" } } });
+  const plain = relayChain("witnessed-none", 1);
+  const witnessed = {
+    about: "A relay identifier's key log as its witnesses hold it (packages/login-web/src/witnessed.ts, packages/login-dart/lib/witnessed.dart, and in Go identity-agent-core/drivers through witnessed_vectors_test.go). Each case gives `answers` (what each witness the identifier names answered to GET /witness/kel/{rid}: every event with its bytes, the controller's signature and that witness's own receipt) and `rid`. A reader pools the receipts, reads each answer as a key log, counts for each event the distinct witnesses designated at that event whose indexed signature over the event's bytes verifies, and takes the longest log every event of which has its threshold: `events` is how many events that is. `refuse` means no log is taken.",
+    cases: [
+      case_("every witness gives the whole log, with its receipt", [ans(W[0], 0), ans(W[1], 1), ans(W[2], 2)], 2),
+      case_("exactly a threshold of witnesses answers", [ans(W[0], 0), ans(W[1], 1)], 2),
+      case_("one receipt too few", [ans(W[0], 0)], null),
+      case_("a witness that is behind does not hold the others back", [ans(W[0], 0), ans(W[1], 1), ans(W[2], 2, 1)], 2),
+      case_("the last event has one receipt and the one before it has two", [ans(W[0], 0), { ...ans(W[1], 1), kel: ans(W[1], 1).kel.map((e, i) => (i === 1 ? { raw_bytes_b64: e.raw_bytes_b64, cesr_signature: e.cesr_signature } : e)) }], 1),
+      case_("a receipt by a key the identifier did not name", [ans(W[0], 0), ans(stranger, 1)], null),
+      case_("a receipt over another event", [ans(W[0], 0), swapReceipt(ans(W[1], 1), 0, W[1].receipt(chainW.events[1].text, 1))], null),
+      case_("a receipt at another witness's place in the list", [ans(W[0], 0), ans(W[1], 0)], null),
+      case_("one witness's receipt given twice counts once", [ans(W[0], 0), ans(W[0], 0)], null),
+      case_("a receipt that is not an indexed signature", [ans(W[0], 0), swapReceipt(ans(W[1], 1), 0, { witness: W[1].aid, cesr_signature: "0B" + W[1].receipt(chainW.events[0].text, 1).cesr_signature.slice(2) })], null),
+      case_("a rewritten history: the rotation's bytes changed, the receipt over the original kept", [ans(W[0], 0), rewrite(ans(W[1], 1))], null),
+      case_("an answer for another identifier", [ans(W[0], 0), ans(W[1], 1)], null, { rid: chainRot.aid }),
+      case_("two histories, each receipted by a threshold, that disagree", [ans(W[0], 0), ans(W[1], 1), ans(W[1], 1, 2, forkChain), ans(W[2], 2, 2, forkChain)], null),
+      case_("a witness list that a rotation changed: the witness it added counts, at its place", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[3], 2, 2, chainRot)], 2, { rid: chainRot.aid }),
+      case_("a witness list that a rotation changed: the witness it cut does not count", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[2], 2, 2, chainRot)], 1, { rid: chainRot.aid }),
+      case_("an identifier whose inception names no witnesses", [witnessAnswer(plain, 2)], null, { rid: plain.aid }),
+    ],
+  };
+
   // What the relay sees of size: the ciphertext's length is its bucket and the tag, nothing finer.
   const sizes = [0, 1, 1019, 1020, 1021, 2043, 2044, 5000].map((n) => ({ content_len: n, ct_len: Math.max(1024, 2 ** Math.ceil(Math.log2(n + 4))) + 16 }));
 
@@ -191,7 +233,7 @@ export async function make() {
     relay_sn: SN,
     relay_seed_hex: hex(seed),
     seal_key: { private_hex: hex(sk.d), public_b64u: b64u(sk.pub), statement, min: MIN },
-    requests, refusals, answer_refusals, statement_refusals, sizes, clock_answer,
+    requests, refusals, answer_refusals, statement_refusals, sizes, clock_answer, witnessed,
   };
 }
 

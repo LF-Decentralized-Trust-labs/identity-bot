@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:login_dart/app_checks.dart';
 import 'package:login_dart/seal.dart';
+import 'package:login_dart/witnessed.dart';
 import 'package:test/test.dart';
 
 // The Dart port of sealed front-end traffic is held to the cases the TypeScript
@@ -24,6 +25,24 @@ List<Map<String, dynamic>> of(String k) =>
     (v[k] as List).cast<Map<String, dynamic>>();
 
 void main() {
+  test('the log a relay identifier\u2019s witnesses vouch for, case by case', () {
+    final w = v['witnessed'] as Map<String, dynamic>;
+    final cases = (w['cases'] as List).cast<Map<String, dynamic>>();
+    expect(cases.length, greaterThanOrEqualTo(10));
+    for (final c in cases) {
+      final rid = c['rid'] as String;
+      final answers = c['answers'] as List<Object?>;
+      if (c['refuse'] == true) {
+        expect(() => readWitnessedLog(rid, answers),
+            throwsA(isA<TrustRefused>()),
+            reason: 'witnessed: ${c['name']}');
+      } else {
+        expect(readWitnessedLog(rid, answers).events, c['events'],
+            reason: 'witnessed: ${c['name']}');
+      }
+    }
+  });
+
   final rid = v['rid'] as String;
   final spk = unb64((v['seal_key'] as Map)['public_b64u'] as String);
   final serverD = big((v['seal_key'] as Map)['private_hex'] as String);
