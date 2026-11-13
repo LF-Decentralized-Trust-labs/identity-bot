@@ -414,10 +414,10 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 		for _, an := range answers {
 			switch {
 			case an.outcome == "faulty":
-				s.flagWatcher(in.AID, seq, digest, an, an.proof.Reason)
+				s.flagWatcher(in.AID, seq, digest, an, an.proof.Reason, an.proof.Code, an.proof.WrongIdentity)
 				result.FlaggedWatchers = append(result.FlaggedWatchers, an.w.URL)
 			case an.proof != nil && an.proof.AlsoFaulty != "":
-				s.flagWatcher(in.AID, seq, digest, an, an.proof.AlsoFaulty)
+				s.flagWatcher(in.AID, seq, digest, an, an.proof.AlsoFaulty, an.proof.AlsoCode, an.proof.AlsoWrongIdentity)
 				result.FlaggedWatchers = append(result.FlaggedWatchers, an.w.URL)
 			}
 		}
@@ -886,13 +886,13 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// escalate tells the owner that the hosted watcher disagrees with this agent's
+// escalate tells the owner that the standing watcher disagrees with this Identity Agent's
 // own record on a repeat contact. It is a broadcast event and nothing more:
 // no duplicity alert is stored, because every open alert blocks the next check
 // of that identity, and a disagreement that is not proof of anything must not.
 func (s *Service) escalate(aid string, seq int) {
 	s.emit("kel_l3_escalation", map[string]interface{}{
-		"aid": aid, "seq": seq, "reason": "the hosted watcher disagrees with this agent's record",
+		"aid": aid, "seq": seq, "reason": "the standing watcher disagrees with this Identity Agent's record",
 	})
 }
 
@@ -900,7 +900,7 @@ func (s *Service) escalate(aid string, seq int) {
 // up: the alert is about the watcher (its URL), not the contact, and holds
 // nothing up. One alert is kept per watcher and sequence number however often
 // the same answer is met.
-func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAnswer, why string) {
+func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAnswer, why, code string, wrongIdentity bool) {
 	their := ""
 	if an.resp != nil && an.resp.Digest != nil {
 		their = *an.resp.Digest
@@ -914,9 +914,9 @@ func (s *Service) flagWatcher(aid string, seq int, digest string, an standingAns
 	_, _ = s.Store.InsertDuplicityAlert(DuplicityAlert{
 		AID: aid, SequenceNum: seq, OurDigest: digest, TheirDigest: their,
 		SourceURL: an.w.URL, DetectedAt: s.now().UTC(), Kind: AlertKindWatcher,
-		Evidence: Evidence{Kind: "watcher", SequenceNum: seq, Watcher: an.w.URL, Why: why}.json(),
+		Evidence: Evidence{Kind: "watcher", SequenceNum: seq, Watcher: an.w.URL, Why: why, WhyCode: code, WrongIdentity: wrongIdentity}.json(),
 	})
-	s.emit("kel_watcher_flagged", map[string]interface{}{"aid": aid, "seq": seq, "watcher": an.w.URL, "why": why})
+	s.emit("kel_watcher_flagged", map[string]interface{}{"aid": aid, "seq": seq, "watcher": an.w.URL, "why": why, "why_code": code})
 }
 
 // AnchorAlertToKEL anchors a duplicity alert SAID to the verifier KEL (D12 default-on).

@@ -36,7 +36,7 @@ type InvocationEvent struct {
 	GrantSAID       string   `json:"grant_said,omitempty"`
 	CapabilityID    string   `json:"capability_id"`
 	ArgsHash        string   `json:"args_hash,omitempty"`
-	ResultStatus    string   `json:"result_status"` // ok | denied | error | started (recorded before an action runs)
+	ResultStatus    string   `json:"result_status"` // ok | denied | error | started (recorded before an action runs) | escalated (a finding for the owner, nothing refused)
 	DurationMs      int64    `json:"duration_ms"`
 	Transport       string   `json:"transport,omitempty"`
 	ExecutorType    string   `json:"executor_type,omitempty"`
@@ -1033,7 +1033,7 @@ type InvocationEventFilter struct {
 	// they usually actually have: not "what did this caller do" but "what was done
 	// for this task, by whoever did it".
 	WorkItem string
-	// ResultStatus is ok | denied | error | started. Anything else matches nothing rather than
+	// ResultStatus is ok | denied | error | started | escalated. Anything else matches nothing rather than
 	// being ignored, so a typo shows up as an empty result instead of silently
 	// widening the query back to everything.
 	ResultStatus string

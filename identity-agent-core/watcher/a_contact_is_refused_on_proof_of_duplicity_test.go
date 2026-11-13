@@ -67,6 +67,10 @@ func TestAForgedBranchFromALyingWatcherIsIgnoredAndTheWatcherFlagged(t *testing.
 	if len(alerts) != 1 || alerts[0].Kind != AlertKindWatcher || alerts[0].SourceURL != liar.URL || alerts[0].Evidence == "" {
 		t.Fatalf("want one alert about the watcher: %+v", alerts)
 	}
+	var flagged Evidence
+	if err := json.Unmarshal([]byte(alerts[0].Evidence), &flagged); err != nil || flagged.WhyCode != FaultLogDoesNotVerify {
+		t.Fatalf("the flag carries the code %q (%v), want %q, so a screen never reads the English", flagged.WhyCode, err, FaultLogDoesNotVerify)
+	}
 	if ws.openAlertFor(honest.AID, 2, res.Digest) {
 		t.Fatal("an alert about a watcher blocks the contact")
 	}
@@ -130,6 +134,38 @@ func TestARealValidlySignedForkFromOneWatcherRefuses(t *testing.T) {
 	}
 	if ev.HeldMessage == ev.RivalMessage {
 		t.Fatal("the evidence holds one event twice")
+	}
+	// Each event says what it is, matching what keri-go reads from the message,
+	// and names the key that signed it; the two differ in SAID, which is the fork.
+	if len(ev.Events) != 2 || ev.Events[0].Role != "held" || ev.Events[1].Role != "rival" {
+		t.Fatalf("the evidence does not describe both events: %+v", ev.Events)
+	}
+	for i, b64 := range []string{ev.HeldMessage, ev.RivalMessage} {
+		m, _ := base64.StdEncoding.DecodeString(b64)
+		parsed, err := keri.ParseEvent(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := ev.Events[i]
+		if d.Type == "" || d.Type != parsed.Ilk || d.SAID == "" || d.SAID != parsed.SAID {
+			t.Fatalf("event %d described as %+v, the message says %s %s", i, d, parsed.Ilk, parsed.SAID)
+		}
+		v, err := keri.VerifyEvent(state.State(), m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.SigningKeys) == 0 || d.SigningKeys[0] != v.State.Keys()[0] {
+			t.Fatalf("event %d signing keys %v, want %v", i, d.SigningKeys, v.State.Keys())
+		}
+	}
+	if ev.Events[0].SAID == ev.Events[1].SAID {
+		t.Fatal("the two events share a SAID")
+	}
+	// An alert stored before the field existed is described when it is read back.
+	old := ev
+	old.Events = nil
+	if got := old.withEvents(); len(got.Events) != 2 {
+		t.Fatalf("a stored alert without the description was not described: %+v", got.Events)
 	}
 }
 

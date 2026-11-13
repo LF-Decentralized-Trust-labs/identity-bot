@@ -94,11 +94,31 @@ type Evidence struct {
 	// events are checked against is made of. With it an alert can be
 	// re-verified from what it stores alone, whatever happens to the kept log.
 	PriorMessages []string `json:"prior_messages_b64,omitempty"`
+	// Events says what each of the two events is, so a person or a checker can
+	// see what forked without decoding the messages: [held, rival]. It is read
+	// from the signed messages and adds nothing to what they prove.
+	Events []EventDetail `json:"events,omitempty"`
 	// Watcher is the standing watcher the rival event came from, or the one flagged.
 	Watcher string `json:"watcher,omitempty"`
 	// Why says, for a watcher alert, how its answer did not hold up.
 	Why string `json:"why,omitempty"`
+	// WrongIdentity is true when the watcher answered about a different
+	// identity, which a screen words apart from a signature that failed.
+	WrongIdentity bool `json:"wrong_identity,omitempty"`
+	// WhyCode names how a flagged watcher's answer failed, as one of the Fault*
+	// codes below, so a screen words it from the code and never from Why's English.
+	WhyCode string `json:"why_code,omitempty"`
 }
+
+// How a flagged watcher's answer did not hold up. These are stored and read by
+// clients: add to them, never rename one.
+const (
+	FaultLogDoesNotVerify   = "log_does_not_verify"   // its log's signatures or chaining fail
+	FaultWrongIdentity      = "wrong_identity"        // it answered about another identity
+	FaultEventDoesNotVerify = "event_does_not_verify" // an event of its log fails against the state before it
+	FaultEventUnreadable    = "event_unreadable"      // an event of its log does not parse
+	FaultEventRefused       = "event_refused"         // an event of its log breaks the presented log's own rules
+)
 
 // Reverify checks a duplicity alert's evidence from what it stores and nothing
 // else: the prior log verifies, and both events at the contested place verify
@@ -164,8 +184,71 @@ func (e Evidence) Reverify() error {
 	return nil
 }
 
+// EventDetail is what one of the two events at the contested place is.
+type EventDetail struct {
+	// Role is "held" (this agent's copy) or "rival" (the other watcher's).
+	Role string `json:"role"`
+	// Type is the event's own type: icp, rot, ixn, dip or drt.
+	Type string `json:"type"`
+	// SAID is the event's self-addressing identifier, which names its content.
+	SAID string `json:"said"`
+	// SigningKeys are the keys in force once the event is applied, which are the
+	// keys that signed it: a rotation is signed by the keys it brings in.
+	// Empty when the event does not verify against the log before it.
+	SigningKeys []string `json:"signing_keys,omitempty"`
+}
+
+// eventDetails reads the type, SAID and signing keys of the held and rival
+// messages. before is the key state at the place before the contested one (nil
+// at place 0).
+func eventDetails(before *keri.KeyState, held, rival []byte) []EventDetail {
+	var out []EventDetail
+	for i, m := range [][]byte{held, rival} {
+		d := EventDetail{Role: []string{"held", "rival"}[i]}
+		if ev, err := keri.ParseEvent(m); err == nil {
+			d.Type, d.SAID = ev.Ilk, ev.SAID
+		}
+		if v, err := keri.VerifyEvent(before, m); err == nil {
+			d.SigningKeys = v.State.Keys()
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// withEvents fills Events from the stored messages, so an alert stored before
+// the field existed carries it when it is read.
+func (e Evidence) withEvents() Evidence {
+	if e.Kind != "duplicity" || len(e.Events) > 0 || e.HeldMessage == "" || e.RivalMessage == "" {
+		return e
+	}
+	held, err1 := base64.StdEncoding.DecodeString(e.HeldMessage)
+	rival, err2 := base64.StdEncoding.DecodeString(e.RivalMessage)
+	if err1 != nil || err2 != nil {
+		return e
+	}
+	var before *keri.KeyState
+	if e.SequenceNum > 0 {
+		var prior [][]byte
+		for _, p := range e.PriorMessages {
+			m, err := base64.StdEncoding.DecodeString(p)
+			if err != nil {
+				return e
+			}
+			prior = append(prior, m)
+		}
+		log, err := keri.ValidateSignedKEL(prior)
+		if err != nil {
+			return e
+		}
+		before = log.State()
+	}
+	e.Events = eventDetails(before, held, rival)
+	return e
+}
+
 func (e Evidence) json() string {
-	b, _ := json.Marshal(e)
+	b, _ := json.Marshal(e.withEvents())
 	return string(b)
 }
 
@@ -174,6 +257,12 @@ type proof struct {
 	Kind     proofKind
 	Reason   string
 	Evidence *Evidence
+	// WrongIdentity is set on a faulty watcher whose log, or an event of it,
+	// belongs to a different identity from the one asked about. That is not a
+	// failed signature: nothing in it was forged, it answered about someone else.
+	WrongIdentity bool
+	// Code is the Fault* code for a faulty watcher, so nothing reads the Reason.
+	Code string
 	// Latest is, for proofAhead and proofSuperseded, the verified log with the
 	// watcher's later events admitted, and LatestMessages its signed messages.
 	Latest         *keri.SignedKELResult
@@ -183,6 +272,10 @@ type proof struct {
 	// verify beside one that does: the verdict stands on the valid one, and the
 	// watcher is flagged for the other.
 	AlsoFaulty string
+	// AlsoWrongIdentity says AlsoFaulty is a rival that belongs to another identity.
+	AlsoWrongIdentity bool
+	// AlsoCode is the Fault* code of AlsoFaulty.
+	AlsoCode string
 }
 
 // judgeWatcherLog is the classifier. presented are the presented log's signed
@@ -200,10 +293,10 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	}
 	theirLog, err := keri.ValidateSignedKEL(theirs.Messages)
 	if err != nil {
-		return proof{Kind: proofWatcherFaulty, Reason: "its log does not verify: " + err.Error()}
+		return proof{Kind: proofWatcherFaulty, Reason: "its log does not verify: " + err.Error(), Code: FaultLogDoesNotVerify}
 	}
 	if theirLog.Identifier != aid {
-		return proof{Kind: proofWatcherFaulty, Reason: "its log is for another identity"}
+		return proof{Kind: proofWatcherFaulty, Reason: "its log is for another identity", WrongIdentity: true, Code: FaultWrongIdentity}
 	}
 
 	msgs := append([][]byte(nil), presented...) // the messages of cur, by place
@@ -222,7 +315,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		}
 		if _, err := keri.VerifyEvent(before, message); err != nil {
 			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log at place " +
-				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error()}, true
+				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error(), Code: FaultEventDoesNotVerify}, true
 		}
 		// The rival may be what a recovery rotation the presented log holds at this
 		// place retires: a recovery rotation replaces the interactions after the last
@@ -252,10 +345,10 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	admit := func(message []byte, rival bool) *proof {
 		ev, err := keri.ParseEvent(message)
 		if err != nil {
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log does not parse"}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log does not parse", Code: FaultEventUnreadable}
 		}
 		if ev.Identifier != aid {
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log belongs to another identity"}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log belongs to another identity", WrongIdentity: true, Code: FaultWrongIdentity}
 		}
 		if held := cur.StateAt(ev.SN); held != nil && held.Digest() == ev.SAID {
 			return nil // the same event
@@ -279,7 +372,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		case errors.As(err, &ve) && ve.Has(keri.FaultSequenceSkip) && rival:
 			return nil // a branch beyond what the presented log holds says nothing about it
 		default:
-			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log is refused by the presented log's own rules: " + err.Error()}
+			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log is refused by the presented log's own rules: " + err.Error(), Code: FaultEventRefused}
 		}
 	}
 
@@ -298,7 +391,7 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 	}
 	// Every rival is examined. One that does not verify flags the watcher and is
 	// set aside; it does not hide a valid one behind it.
-	alsoFaulty := ""
+	alsoFaulty, alsoWrong, alsoCode := "", false, ""
 	for _, m := range theirs.Rival {
 		p, done := settle(admit(m, true))
 		if !done {
@@ -306,22 +399,22 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		}
 		if p.Kind == proofWatcherFaulty {
 			if alsoFaulty == "" {
-				alsoFaulty = p.Reason
+				alsoFaulty, alsoWrong, alsoCode = p.Reason, p.WrongIdentity, p.Code
 			}
 			continue
 		}
-		p.AlsoFaulty = alsoFaulty
+		p.AlsoFaulty, p.AlsoWrongIdentity, p.AlsoCode = alsoFaulty, alsoWrong, alsoCode
 		return p
 	}
 	switch {
 	case superseding:
 		return proof{Kind: proofSuperseded, Reason: "a recovery rotation the watcher holds replaces the presented log's later interactions",
-			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong, AlsoCode: alsoCode}
 	case moved:
 		return proof{Kind: proofAhead, Reason: "the watcher holds later signed events the presented log lacks",
-			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty}
+			Latest: cur, LatestMessages: msgs, AlsoFaulty: alsoFaulty, AlsoWrongIdentity: alsoWrong, AlsoCode: alsoCode}
 	case alsoFaulty != "":
-		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty}
+		return proof{Kind: proofWatcherFaulty, Reason: alsoFaulty, WrongIdentity: alsoWrong, Code: alsoCode}
 	}
 	// The same events, another digest: the two sides digest different renderings
 	// of them. Nothing is proven against either, so it is shown, not flagged.

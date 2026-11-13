@@ -488,8 +488,29 @@ func TestAWatcherServingAnotherIdentitysLogIsFlagged(t *testing.T) {
 	// for its log, and the log it hands over is somebody else's.
 	w := aWatcherHolding(t, &trusted, rival)
 	w.Alter = func([]map[string]interface{}) []map[string]interface{} { return someoneElse }
-	r := verifying(t, serviceAsking(t, trusted, w.URL), honest)
+	ws := serviceAsking(t, trusted, w.URL)
+	r := verifying(t, ws, honest)
 	if r.Blocked || !r.OK || len(r.FlaggedWatchers) == 0 {
 		t.Fatalf("blocked=%v ok=%v flagged=%v %s", r.Blocked, r.OK, r.FlaggedWatchers, r.Reason)
+	}
+	// The alert says the watcher answered about someone else, which is not a
+	// signature that failed: a screen words the two apart.
+	alerts, _ := ws.Store.listDuplicityAlerts(presenting(t, honest, SourceOOBI).AID)
+	found := false
+	for _, a := range alerts {
+		if a.Kind != AlertKindWatcher {
+			continue
+		}
+		var ev Evidence
+		if err := json.Unmarshal([]byte(a.Evidence), &ev); err != nil {
+			t.Fatal(err)
+		}
+		found = true
+		if !ev.WrongIdentity || ev.WhyCode != FaultWrongIdentity || ev.Why != "its log is for another identity" {
+			t.Errorf("the flag is %+v, want a wrong-identity watcher", ev)
+		}
+	}
+	if !found {
+		t.Fatalf("no watcher alert was stored (%v)", r.FlaggedWatchers)
 	}
 }
