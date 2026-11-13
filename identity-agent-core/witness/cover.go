@@ -60,9 +60,11 @@ type CoverRequest struct {
 // AcceptCover is the witness's side: it holds the log of req.AID from now on,
 // under req.Owner, when the owner is one this witness witnesses for whose
 // agreement covers the identities it makes (and the operator's settings allow
-// another), the declaration is the owner's own, fresh, for this witness, and
-// the inception is the identifier's own. The reasons are for the owner's
-// agent; nothing else is told them.
+// another), the declaration is the owner's own, fresh, for this witness, the
+// key log is the identifier's own, and the key that log leaves in force signed
+// it too: an inception is public, so the owner's word alone would let any
+// witnessed owner claim another's identifier first and keep the real owner out.
+// The reasons are for the owner's agent; nothing else is told them.
 func (s *Service) AcceptCover(req CoverRequest) error {
 	if req.Owner == "" || req.AID == "" || req.Owner == req.AID {
 		return fmt.Errorf("not_covered: the declaration names no owner and identifier")
@@ -101,30 +103,33 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	mu := s.receivingLock(req.AID)
 	mu.Lock()
 	defer mu.Unlock()
-	// The log is the identifier's own and correctly signed, from an inception
-	// that derives it, and the key it leaves in force is one key.
-	log, err := keri.ValidateSignedKEL(messages)
-	if err != nil {
-		return fmt.Errorf("not_covered: the key log does not verify")
-	}
+	// The cheap checks first, so a stranger spends this witness's work on a
+	// signature and nothing more: the first event is the identifier's inception,
+	// and the owner, which this witness witnesses for, signed the declaration.
 	first, err := keri.ParseEvent(eventBytesOf(req.Log[0]))
 	if err != nil || first.Ilk != "icp" || first.Identifier != req.AID {
 		return fmt.Errorf("not_covered: the key log is not this identifier's")
+	}
+	statement := CoverStatement(req.Owner, own, req.AID, first.SAID, req.Stamp)
+	if !s.signedBy(req.Owner, statement, req.Signature) {
+		return fmt.Errorf("not_covered: the declaration is not signed by the owner")
+	}
+	if meta, _ := s.Store.GetContactMeta(req.Owner); meta == nil || !meta.WitnessingFor {
+		return fmt.Errorf("not_covered: this witness does not witness for the owner")
+	}
+	// Then the proof of control. The log is the identifier's own and correctly
+	// signed, from an inception that derives it, and the key it leaves in force is
+	// one key, which signed the same statement.
+	log, err := keri.ValidateSignedKEL(messages)
+	if err != nil {
+		return fmt.Errorf("not_covered: the key log does not verify")
 	}
 	keys := log.State().Keys()
 	if len(keys) != 1 {
 		return fmt.Errorf("not_covered: the identifier's control cannot be shown by one key")
 	}
-	statement := CoverStatement(req.Owner, own, req.AID, first.SAID, req.Stamp)
-	// The owner's word, and the identifier's own.
-	if !s.signedBy(req.Owner, statement, req.Signature) {
-		return fmt.Errorf("not_covered: the declaration is not signed by the owner")
-	}
 	if !signedByKey(keys[0], statement, req.AIDSignature) {
 		return fmt.Errorf("not_covered: the identifier did not sign the declaration")
-	}
-	if meta, _ := s.Store.GetContactMeta(req.Owner); meta == nil || !meta.WitnessingFor {
-		return fmt.Errorf("not_covered: this witness does not witness for the owner")
 	}
 	// An identifier already held is held under whoever it is held under: a
 	// declaration cannot take it from them, nor take a contact this witness
