@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"identity-agent-core/schemas"
 	"log"
 	"net/http"
@@ -40,6 +41,9 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 		// The user's agent posts the completed assertion here; the browser polls for completion.
 		r.Post("/callback", s.handleLoginCallback)
 		r.Get("/challenge/{token}/status", s.handleChallengeStatus)
+		// The person ends their own installed-app grant: a nonce, then a signed answer.
+		r.Post("/app-key/end/begin", s.handleBeginEndAppKey)
+		r.Post("/app-key/end", s.handleEndAppKey)
 	})
 }
 
@@ -327,8 +331,28 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		now := time.Now().UTC()
-		if err := s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(browserKeyLife), now,
-			s.presentedForGate(assetID, a.PresentedACDCs)); err != nil {
+		presented := s.presentedForGate(assetID, a.PresentedACDCs)
+		var err error
+		if bundle.FrontEnd == login.FrontEndInstalledApp {
+			// Only a sign-in the core itself proved the key for is kept as a
+			// grant that does not lapse; one it holds no proof for (the process
+			// restarted since it started) is not kept at all.
+			fact, proved := s.takeInstalledAppFact(token)
+			if !proved {
+				s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the installed app's key was not proved for this sign-in"})
+				http.Error(w, "not authorized", http.StatusForbidden)
+				return
+			}
+			err = s.browserKeys().RecordAppKey(assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
+		} else {
+			err = s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(browserKeyLife), now, presented)
+		}
+		if errors.Is(err, errGrantHeld) {
+			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "this key already speaks for another person"})
+			http.Error(w, "not authorized", http.StatusForbidden)
+			return
+		}
+		if err != nil {
 			log.Printf("[identity-agent-core] a browser key's sign-in could not be kept: %v", err)
 			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the sign-in could not be recorded"})
 			http.Error(w, "could not record the sign-in", http.StatusInternalServerError)

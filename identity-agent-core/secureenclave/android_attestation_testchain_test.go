@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -27,7 +26,7 @@ type chainSpec struct {
 	noAuth       bool
 	imported     bool
 	created      time.Time
-	leafKey      *rsa.PublicKey
+	leafKey      any               // *rsa.PublicKey or *ecdsa.PublicKey
 	rootKey      *ecdsa.PrivateKey // nil: a fresh one
 	skipIntermed bool
 	noOAEP       bool
@@ -36,6 +35,9 @@ type chainSpec struct {
 	extraPadding int       // a second hardware-enforced padding beside OAEP; 0 none
 	appPackage   string    // attestationApplicationId: the package; "" states none
 	appDigests   [][]byte  // ... and the signing certificate digests
+	rootOfTrust  bool      // state a RootOfTrust: the bootloader and boot state below
+	bootUnlocked bool      // ... the bootloader is unlocked
+	bootState    int       // ... verifiedBootState: 0 verified, 1 self signed, 2 unverified, 3 failed
 	caValidFrom  time.Time // the CA certificates' first valid moment; zero: a day before created
 }
 
@@ -102,7 +104,11 @@ func keyDescription(s chainSpec) []byte {
 	if s.dupPurpose {
 		hw = append(hw, explicit(kmTagPurpose, set(kmPurposeDecrypt)))
 	}
-	hw = append(hw, explicit(kmTagAlgorithm, mustDER(kmAlgorithmRSA)))
+	if _, isEC := s.leafKey.(*ecdsa.PublicKey); isEC {
+		hw = append(hw, explicit(kmTagAlgorithm, mustDER(kmAlgorithmEC)))
+	} else {
+		hw = append(hw, explicit(kmTagAlgorithm, mustDER(kmAlgorithmRSA)))
+	}
 	if s.noAuth {
 		hw = append(hw, explicit(kmTagNoAuthRequired, mustDER(asn1.NullRawValue)))
 	}
@@ -111,6 +117,13 @@ func keyDescription(s chainSpec) []byte {
 		origin = 2
 	}
 	hw = append(hw, explicit(kmTagOrigin, mustDER(origin)))
+	if s.rootOfTrust {
+		hw = append(hw, explicit(kmTagRootOfTrust, mustDER(struct {
+			Key    []byte
+			Locked bool
+			State  asn1.Enumerated
+		}{[]byte("a verified boot key, 32 bytes long."), !s.bootUnlocked, asn1.Enumerated(s.bootState)})))
+	}
 	sw := []asn1.RawValue{explicit(kmTagCreationTime, mustDER(s.created.UnixMilli()))}
 	if s.appPackage != "" {
 		sw = append(sw, explicit(kmTagAppID, appIDDER(s.appPackage, s.appDigests)))

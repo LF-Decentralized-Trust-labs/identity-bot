@@ -114,6 +114,8 @@ var publicRoutes = map[string]string{
 	"POST /api/login/challenge":                     "a site mints a challenge for its own sign-in page",
 	"POST /api/login/callback":                      "the completed assertion is posted back by the agent that signed it",
 	"GET /api/login/challenge/{token}/status":       "the waiting browser polls for completion",
+	"POST /api/login/app-key/end/begin":             "a person starts ending their own installed-app grant: a one-use nonce for their Identity Agent to sign",
+	"POST /api/login/app-key/end":                   "the person's signed answer ends their installed-app grant; only the person it is for can",
 	"POST /api/login/session/{asset_id}":            "sign-in widget: a browser starts a session",
 	"GET /api/login/session/{asset_id}/{token}":     "sign-in widget: the browser polls its own session",
 	"OPTIONS /api/login/session/{asset_id}":         "CORS preflight for the sign-in widget",

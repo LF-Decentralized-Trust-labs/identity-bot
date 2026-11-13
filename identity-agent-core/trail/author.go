@@ -7,10 +7,14 @@
 package trail
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"errors"
 	"time"
 
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/authorisation"
+	"identity-agent-core/iacrypto"
 )
 
 // KeyRoster says whose a key is, from the Identity Agent's own records and
@@ -19,6 +23,18 @@ type KeyRoster interface {
 	// KeySpeaksFor says whether the key (signer identifier and verkey) was
 	// approved to act as the person.
 	KeySpeaksFor(person, signer, verkey string) bool
+}
+
+// AssertionRoster is a KeyRoster that also knows a key which cannot sign a plain
+// statement. An Apple App Attest key signs only App Attest assertions, so the
+// signature a person's statement carries for such a key is an assertion over the
+// statement's SHA-256 (clientDataHash), not a signature over its bytes.
+type AssertionRoster interface {
+	KeyRoster
+	// VerifyAssertion is handled=false for a key that signs plain statements
+	// (the check is then agentmessage.VerifyPerson's). For a key that does not,
+	// it is whether signature is the key's assertion over clientDataHash.
+	VerifyAssertion(person, signer, verkey string, clientDataHash [32]byte, signature string) (handled bool, err error)
 }
 
 // Write is a person's statement as it is checked: the statement, the key that
@@ -54,7 +70,7 @@ func (r *Rejected) Error() string { return "rejected: " + r.Reason }
 // second reader of what makes a statement a person's. The failure is a *Rejected.
 func CheckAuthor(w Write, agent string, keys KeyRoster) error {
 	s := w.Statement
-	if err := agentmessage.VerifyPerson(s, w.Verkey, w.Signature); err != nil {
+	if err := verifyAuthor(w, keys); err != nil {
 		return &Rejected{err.Error()}
 	}
 	if s.Agent != agent {
@@ -64,6 +80,35 @@ func CheckAuthor(w Write, agent string, keys KeyRoster) error {
 		return &Rejected{"the key does not speak for " + s.From}
 	}
 	return nil
+}
+
+// verifyAuthor is the signature check: a plain signature over the statement, or,
+// for a key the roster says signs only assertions, its assertion over the
+// statement's hash. A key that signs only assertions is never read as signing a
+// plain statement, and the statement is checked well formed either way.
+func verifyAuthor(w Write, keys KeyRoster) error {
+	if ar, ok := keys.(AssertionRoster); ok {
+		if err := w.Statement.Check(); err != nil {
+			return err
+		}
+		// The identifier and the key must be one key, as agentbody.Verify holds.
+		fromID, err := iacrypto.KeyFromMachineIdentifier(w.Statement.Signer)
+		if err != nil {
+			return err
+		}
+		fromKey, err := iacrypto.KeyFromMachineVerkey(w.Verkey)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(fromID, fromKey) {
+			return errors.New("the signer's identifier and its key are not the same key")
+		}
+		handled, err := ar.VerifyAssertion(w.Statement.From, w.Statement.Signer, w.Verkey, sha256.Sum256(w.Statement.Bytes()), w.Signature)
+		if handled {
+			return err
+		}
+	}
+	return agentmessage.VerifyPerson(w.Statement, w.Verkey, w.Signature)
 }
 
 // CheckFresh holds a statement to the rule the verifier holds every person's

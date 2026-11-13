@@ -178,9 +178,12 @@ type CoreServer struct {
 	extraOpen map[string]string
 
 	// G-052: asset login challenge store (per-session bundles for /i/{token})
-	challengeMu     sync.Mutex
-	challenges      map[string]login.ChallengeBundle  // keyed by session_token
-	challengeStatus map[string]map[string]interface{} // keyed by session_token; tracks pending/complete
+	challengeMu       sync.Mutex
+	challenges        map[string]login.ChallengeBundle  // keyed by session_token
+	challengeStatus   map[string]map[string]interface{} // keyed by session_token; tracks pending/complete
+	installedAppAskMu sync.Mutex
+	installedAppAsks  map[string]installedAppAsk  // keyed by ask id; one attestation's challenge, until it is used or expires
+	installedAppFacts map[string]installedAppFact // keyed by session_token; what the core proved of an installed app's key, until the sign-in settles
 	// The secret that COLLECTS a finished login, hashed. Keyed by session_token.
 	//
 	// The session token cannot do this job: it is in the QR code and in the

@@ -27,6 +27,15 @@ type Handler struct {
 	// this package stays free of the identity store. Nil is treated as "".
 	RootAID func() string
 
+	// OnFrontEndsSwitchedOff is told, after the owner's setting is saved, which
+	// front ends it has just switched off for the asset, so what was granted
+	// through them is ended and not merely paused (ADR-072 section 3). Nil is
+	// told nothing.
+	OnFrontEndsSwitchedOff func(assetID string, kinds []string)
+	// OnMemberRemoved is told after a person is removed from the asset, so a
+	// grant that does not lapse cannot wake when they are added again.
+	OnMemberRemoved func(assetID, memberAID string)
+
 	// VaultHas reports whether the credential vault holds an entry of a name,
 	// so a brain's reference to one is shown and a key in its place is not.
 	// Injected by the server; nil knows of none.
@@ -151,12 +160,18 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		Policy          EnrollmentPolicy `json:"policy"`
 		// DeviceFrontEnds: for an app, the front ends its manifest offers.
 		DeviceFrontEnds []string `json:"device_front_ends"`
+		// InstalledApp: who the app's installed front end is (ADR-072 section 4).
+		InstalledApp InstalledAppIdentity `json:"installed_app_identity"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeJSON(w, map[string]string{"error": "bad request"}, http.StatusBadRequest)
 		return
 	}
 	if err := CheckOfferedFrontEnds(body.AssetType, body.DeviceFrontEnds); err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
+	if err := CheckInstalledAppIdentity(body.AssetType, body.DeviceFrontEnds, body.InstalledApp); err != nil {
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
 		return
 	}
@@ -273,6 +288,7 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		ApprovalPending:   approvalPending,
 		Policy:            body.Policy,
 		DeviceFrontEnds:   body.DeviceFrontEnds,
+		InstalledApp:      body.InstalledApp,
 		FrontEndsDeclared: DeclaresFrontEnds(body.AssetType, body.DeviceFrontEnds),
 		SigningIndex:      signingIndex,
 		CreatedAt:         time.Now().UTC(),
@@ -386,11 +402,20 @@ func (h *Handler) HandlePutFrontEnds(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
 		return
 	}
+	var newlyOff []string
+	for _, k := range off {
+		if !containsKind(a.FrontEndsOff, k) {
+			newlyOff = append(newlyOff, k)
+		}
+	}
 	a.FrontEndsOff = off
 	a.UpdatedAt = time.Now().UTC()
 	if err := h.Store.UpsertAsset(a); err != nil {
 		h.writeJSON(w, map[string]string{"error": "the setting could not be saved"}, http.StatusInternalServerError)
 		return
+	}
+	if h.OnFrontEndsSwitchedOff != nil && len(newlyOff) > 0 {
+		h.OnFrontEndsSwitchedOff(a.ID, newlyOff)
 	}
 	h.writeJSON(w, frontEndsOf(a), http.StatusOK)
 }
@@ -402,7 +427,8 @@ func (h *Handler) HandlePutFrontEnds(w http.ResponseWriter, r *http.Request) {
 // offers is not for the owner's switches to grow (ADR-072 section 3).
 func (h *Handler) HandleSetOfferedFrontEnds(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		DeviceFrontEnds *[]string `json:"device_front_ends"`
+		DeviceFrontEnds *[]string            `json:"device_front_ends"`
+		InstalledApp    InstalledAppIdentity `json:"installed_app_identity"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DeviceFrontEnds == nil {
 		h.writeJSON(w, map[string]string{"error": "bad request: device_front_ends is required (the app's manifest list, which may be empty)"}, http.StatusBadRequest)
@@ -413,6 +439,10 @@ func (h *Handler) HandleSetOfferedFrontEnds(w http.ResponseWriter, r *http.Reque
 		offered = []string{}
 	}
 	if err := CheckOfferedFrontEnds("app", offered); err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
+	if err := CheckInstalledAppIdentity("app", offered, body.InstalledApp); err != nil {
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
 		return
 	}
@@ -431,6 +461,7 @@ func (h *Handler) HandleSetOfferedFrontEnds(w http.ResponseWriter, r *http.Reque
 	}
 	a.DeviceFrontEnds = offered
 	a.FrontEndsDeclared = true
+	a.InstalledApp = body.InstalledApp
 	a.UpdatedAt = time.Now().UTC()
 	if err := h.Store.UpsertAsset(a); err != nil {
 		h.writeJSON(w, map[string]string{"error": "the setting could not be saved"}, http.StatusInternalServerError)
@@ -580,6 +611,9 @@ func (h *Handler) HandleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	aid := chi.URLParam(r, "aid")
 	h.Store.RemoveMember(id, aid)
+	if h.OnMemberRemoved != nil {
+		h.OnMemberRemoved(id, aid)
+	}
 	h.writeJSON(w, map[string]bool{"removed": true}, http.StatusOK)
 }
 

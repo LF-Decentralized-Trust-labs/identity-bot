@@ -15,10 +15,11 @@ import (
 // The kind is what the caller says, and a public page can say anything, so a
 // kind is believed only as far as the request backs it (ADR-072 section 3):
 //
-//   - installed_app is accepted only when the request carries an installed
-//     app's own key (installedAppKey). Until that key exists nothing can carry
-//     it, so it is refused: otherwise a page that calls itself the installed
-//     app gets round a switched-off browser.
+//   - installed_app is accepted only when the core has verified a hardware
+//     attestation of the installed app's own key (installedAppKey, set by
+//     startFrontEndKeySignIn after verifyInstalledAppKey). Naming the kind is
+//     no proof: otherwise a page that calls itself the installed app gets
+//     round a switched-off browser.
 //   - a request from a web page (a browser Origin header) or for a browser's
 //     key is a browser's, and is refused if it names any other kind.
 //   - an app that has declared its front ends admits only a kind it offers and
@@ -33,14 +34,18 @@ func refuseFrontEnd(a asset.Asset, kind, browserKey string, fromAPage, installed
 	if kind != "" && kind != asset.FrontEndBrowser && kind != asset.FrontEndInstalledApp {
 		return "", http.StatusForbidden, "this sign-in does not say which front end it is for, 'browser' or 'installed_app'"
 	}
-	if (browserKey != "" || fromAPage) && kind != "" && kind != asset.FrontEndBrowser {
+	// installedAppKey is the caller's PROOF, never its claim: it is true only
+	// where the core has itself verified a hardware attestation of the key
+	// (startFrontEndKeySignIn), and never for a request from a page.
+	anInstalledApp := installedAppKey && kind == asset.FrontEndInstalledApp && !fromAPage
+	if (browserKey != "" || fromAPage) && kind != "" && kind != asset.FrontEndBrowser && !anInstalledApp {
 		return "", http.StatusForbidden, "a sign-in asked for from a web page, or for a browser's key, is a browser front end's"
 	}
-	if browserKey != "" {
+	if browserKey != "" && !anInstalledApp {
 		kind = asset.FrontEndBrowser
 	}
-	if kind == asset.FrontEndInstalledApp && !installedAppKey {
-		return "", http.StatusForbidden, "an installed-app sign-in needs the key of the utility app's installed front end, and this request has none"
+	if kind == asset.FrontEndInstalledApp && !anInstalledApp {
+		return "", http.StatusForbidden, "an installed-app sign-in needs the key of the utility app's installed front end proved in its device's hardware, and this request has none"
 	}
 	if why := a.FrontEndRefusal(kind); why != "" {
 		return "", http.StatusForbidden, why

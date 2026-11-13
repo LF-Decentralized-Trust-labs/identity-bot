@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"identity-agent-core/atomicfile"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/trail"
 )
@@ -34,10 +39,20 @@ import (
 const browserKeyLife = 12 * time.Hour
 
 type browserKeyRecord struct {
-	Asset      string    `json:"asset"`
-	Person     string    `json:"person"`
-	Thumbprint string    `json:"thumbprint"`
-	Until      time.Time `json:"until"`
+	Asset      string `json:"asset"`
+	Person     string `json:"person"`
+	Thumbprint string `json:"thumbprint"`
+	// Until is when the key stops speaking. Zero means it speaks until it is
+	// ended: an installed app's key is held in the device's secure hardware, so
+	// its sign-in is an app-key grant that lasts until revoked, not a working
+	// day's session (ADR-072 section 4).
+	Until time.Time `json:"until"`
+	// FrontEnd is the kind of front end the key belongs to: "browser" (or empty,
+	// as before) or "installed_app".
+	FrontEnd string `json:"front_end,omitempty"`
+	// Proof is how the core established that an installed app's key is held in
+	// hardware (nil for a browser's key).
+	Proof *installedAppFact `json:"proof,omitempty"`
 	// Presented is what the person presented at sign-in that the asset's
 	// required credential was judged on (nil when the asset requires none), kept
 	// so the same gate can be asked again whenever the key is used: a credential
@@ -79,6 +94,34 @@ func browserKeyEntry(asset, thumbprint string) string { return asset + "\n" + th
 // until the time given. A key speaks for one person at one asset: recording it
 // again replaces the earlier, so a key cannot speak for two people.
 func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.Time, presented []interface{}) error {
+	return b.record(asset, person, thumbprint, login.FrontEndBrowser, until, now, presented)
+}
+
+// RecordAppKey keeps that an installed app's hardware key speaks for person at
+// asset until it is ended (an app-key grant, ADR-072 section 4).
+func (b *browserKeys) RecordAppKey(asset, person, thumbprint string, now time.Time, presented []interface{}, proof installedAppFact) error {
+	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, time.Time{}, now, presented, &proof)
+}
+
+// liveAt: a record with a lapse time lives until it; only an installed app's
+// grant, which the core recorded after proving the key in hardware, lives
+// without one. A browser record with no lapse time is not forever: it speaks
+// for no one.
+func (b *browserKeyRecord) liveAt(now time.Time) bool {
+	if b.Until.IsZero() {
+		return b.FrontEnd == login.FrontEndInstalledApp
+	}
+	return now.Before(b.Until)
+}
+
+func (b *browserKeys) record(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}) error {
+	return b.recordWith(asset, person, thumbprint, frontEnd, until, now, presented, nil)
+}
+
+// errGrantHeld is a live app-key grant for another person at the key.
+var errGrantHeld = errors.New("this key already speaks for another person: that grant must end first")
+
+func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}, proof *installedAppFact) error {
 	if asset == "" || person == "" {
 		return errors.New("a browser key speaks for a person at an asset")
 	}
@@ -91,12 +134,20 @@ func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.T
 	if err != nil {
 		return err
 	}
+	// A live app-key grant is never replaced by a different person's: it does
+	// not lapse, so whoever it was made for would lose it to a sign-in anyone
+	// could start naming their key. The grant ends first (the person, the owner,
+	// the app), then the key can speak for someone else.
+	if held, live := all[browserKeyEntry(asset, thumbprint)]; live && held.FrontEnd == login.FrontEndInstalledApp &&
+		held.liveAt(now) && held.Person != person {
+		return errGrantHeld
+	}
 	for k, r := range all {
-		if !now.Before(r.Until) {
+		if !r.liveAt(now) {
 			delete(all, k)
 		}
 	}
-	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, Presented: presented}
+	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, FrontEnd: frontEnd, Proof: proof, Presented: presented}
 	return b.save(all)
 }
 
@@ -120,7 +171,7 @@ func (b *browserKeys) Get(asset, thumbprint string, now time.Time) (browserKeyRe
 		return browserKeyRecord{}, false
 	}
 	r, ok := all[browserKeyEntry(asset, thumbprint)]
-	if !ok || !now.Before(r.Until) {
+	if !ok || !r.liveAt(now) {
 		return browserKeyRecord{}, false
 	}
 	return r, true
@@ -142,7 +193,7 @@ func (b *browserKeys) Of(asset, person string, now time.Time) []browserKeyRecord
 	}
 	var out []browserKeyRecord
 	for _, r := range all {
-		if r.Asset == asset && r.Person == person && now.Before(r.Until) {
+		if r.Asset == asset && r.Person == person && r.liveAt(now) {
 			out = append(out, r)
 		}
 	}
@@ -189,7 +240,60 @@ type keysSpeakingAt struct {
 	asset string
 }
 
-var _ trail.KeyRoster = keysSpeakingAt{}
+var _ trail.AssertionRoster = keysSpeakingAt{}
+
+// VerifyAssertion: an installed app's key on Apple signs only App Attest
+// assertions, so a statement it signed is checked as one, for the program the
+// owner names now (the owner's setting, asked on every use). Every other key
+// signs a plain statement (handled is false).
+func (k keysSpeakingAt) VerifyAssertion(person, signer, verkey string, clientDataHash [32]byte, signature string) (bool, error) {
+	tp, err := login.BrowserKeyThumbprintOfMachineKey(verkey)
+	if err != nil {
+		return false, nil
+	}
+	rec, ok := k.s.browserKeys().Get(k.asset, tp, time.Now())
+	if !ok || rec.FrontEnd != login.FrontEndInstalledApp || rec.Proof == nil || rec.Proof.Platform != "apple" {
+		return false, nil
+	}
+	if k.s.assetHandler == nil {
+		return true, errors.New("the assets are not open")
+	}
+	a, found, err := k.s.assetHandler.Store.GetAsset(k.asset)
+	if err != nil || !found || a.InstalledApp.AppleAppID == "" {
+		return true, errors.New("the owner names no Apple program for this app")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(signature)
+	if err != nil {
+		return true, errors.New("an App Attest assertion is base64url")
+	}
+	pub, err := p256FromMachineVerkey(verkey)
+	if err != nil {
+		return true, err
+	}
+	if _, err := verifyAppleInstalledAssertion(raw, clientDataHash[:], pub, a.InstalledApp.AppleAppID); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// p256FromMachineVerkey is the P-256 public key a machine verkey stands for.
+func p256FromMachineVerkey(verkey string) (*ecdsa.PublicKey, error) {
+	raw, err := iacrypto.KeyFromMachineVerkey(verkey)
+	if err != nil {
+		return nil, err
+	}
+	var x, y *big.Int
+	switch len(raw) {
+	case 33:
+		x, y = elliptic.UnmarshalCompressed(elliptic.P256(), raw)
+	case 65:
+		x, y = elliptic.Unmarshal(elliptic.P256(), raw)
+	}
+	if x == nil {
+		return nil, errors.New("the key is not a P-256 point")
+	}
+	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+}
 
 func (k keysSpeakingAt) KeySpeaksFor(person, signer, verkey string) bool {
 	tp, err := login.BrowserKeyThumbprintOfMachineKey(verkey)
@@ -215,6 +319,19 @@ func (s *CoreServer) assetStillStands(rec browserKeyRecord) bool {
 	a, found, err := s.assetHandler.Store.GetAsset(rec.Asset)
 	if err != nil || !found {
 		return false
+	}
+	// The owner's setting, asked on every use and not only at sign-in: a front
+	// end the owner has switched off stops speaking now, however long ago it was
+	// approved (ADR-072 section 3). Only a key's record is asked: the bare
+	// person-at-asset question has no front end.
+	if rec.Thumbprint != "" {
+		kind := rec.FrontEnd
+		if kind == "" {
+			kind = login.FrontEndBrowser
+		}
+		if a.FrontEndRefusal(kind) != "" {
+			return false
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

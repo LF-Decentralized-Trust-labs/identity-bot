@@ -61,6 +61,8 @@ type Enrolment struct {
 	// DeviceFrontEnds are the front ends the app offers, set by the owner who
 	// issues the token and never by the machine that enrols (see Asset).
 	DeviceFrontEnds []string `json:"device_front_ends,omitempty"`
+	// InstalledApp is the installed front end's identity, owner-set like the list.
+	InstalledApp InstalledAppIdentity `json:"installed_app_identity,omitempty"`
 	// FrontEndsDeclared: the owner named the list, even an empty one.
 	FrontEndsDeclared bool `json:"front_ends_declared,omitempty"`
 

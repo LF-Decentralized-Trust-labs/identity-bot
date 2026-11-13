@@ -2,6 +2,8 @@ package secureenclave
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -71,6 +73,8 @@ const (
 	kmDigestSHA256   = 4
 	kmPaddingOAEP    = 2
 	kmAlgorithmRSA   = 1
+	kmAlgorithmEC    = 3
+	kmPurposeSign    = 2
 	kmOriginGen      = 0
 )
 
@@ -109,8 +113,10 @@ type AndroidKeyFacts struct {
 	Challenge []byte
 	// Created is when the key was made, from the leaf (zero if it did not say).
 	Created time.Time
-	// PublicKey is the attested key's public half.
-	PublicKey *rsa.PublicKey
+	// PublicKey is the attested key's public half when it is an RSA key, and
+	// ECPublicKey when it is an EC key; exactly one is set.
+	PublicKey   *rsa.PublicKey
+	ECPublicKey *ecdsa.PublicKey
 	// Purposes are the key's purposes, as hardware enforces them.
 	Purposes []int
 	// Digests and Paddings are the values hardware enforces on the key.
@@ -125,6 +131,9 @@ type AndroidKeyFacts struct {
 	// the chain carried no root of trust. DeviceLocked is the bootloader state.
 	BootState    string
 	DeviceLocked bool
+	// VerifiedBootKey is the root of trust's key: the key the phone's verified
+	// boot was anchored to. A caller that pins the keys it accepts reads it here.
+	VerifiedBootKey []byte
 	// Serials are the serial numbers of every certificate in the chain, leaf
 	// first, as Google's status list spells them: lower-case hex, no leading zeros.
 	Serials []string
@@ -310,9 +319,15 @@ func readKeyDescription(leaf *x509.Certificate) (*AndroidKeyFacts, error) {
 	if ext == nil {
 		return nil, notAttested("the key's certificate has no attestation extension")
 	}
-	pub, ok := leaf.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return nil, notAttested("the attested key is not an RSA key")
+	var rsaPub *rsa.PublicKey
+	var ecPub *ecdsa.PublicKey
+	switch k := leaf.PublicKey.(type) {
+	case *rsa.PublicKey:
+		rsaPub = k
+	case *ecdsa.PublicKey:
+		ecPub = k
+	default:
+		return nil, notAttested("the attested key is neither an RSA nor an EC key")
 	}
 
 	var kd struct {
@@ -352,7 +367,7 @@ func readKeyDescription(leaf *x509.Certificate) (*AndroidKeyFacts, error) {
 	f := &AndroidKeyFacts{
 		Level:     level,
 		Challenge: kd.AttestationChallenge,
-		PublicKey: pub,
+		PublicKey: rsaPub, ECPublicKey: ecPub,
 	}
 	// The key's properties count only where hardware enforces them. A purpose
 	// listed in the software-enforced list is something Android's framework
@@ -375,8 +390,9 @@ func readKeyDescription(leaf *x509.Certificate) (*AndroidKeyFacts, error) {
 	}
 	_, f.NeedsUnlockedDevice = hw[kmTagUnlockedDevice]
 	if v, ok := hw[kmTagAlgorithm]; ok {
-		if n, e := intOf(v); e != nil || n != kmAlgorithmRSA {
-			return nil, notAttested("the key's algorithm is not RSA")
+		n, e := intOf(v)
+		if e != nil || (rsaPub != nil && n != kmAlgorithmRSA) || (ecPub != nil && n != kmAlgorithmEC) {
+			return nil, notAttested("the key's algorithm is not the one its public key is")
 		}
 	} else {
 		return nil, notAttested("the hardware did not state the key's algorithm")
@@ -399,7 +415,7 @@ func readKeyDescription(leaf *x509.Certificate) (*AndroidKeyFacts, error) {
 		}
 	}
 	if v, ok := hw[kmTagRootOfTrust]; ok {
-		f.BootState, f.DeviceLocked = readRootOfTrust(v)
+		f.BootState, f.DeviceLocked, f.VerifiedBootKey = readRootOfTrust(v)
 	}
 	// The application id is stated by the Keystore service, so it sits in the
 	// software-enforced list; an attestation made by the TEE signs over it all the same.
@@ -467,10 +483,10 @@ func intSet(b []byte) ([]int, error) {
 
 // readRootOfTrust: RootOfTrust is SEQUENCE { verifiedBootKey OCTET STRING,
 // deviceLocked BOOLEAN, verifiedBootState ENUMERATED, ... }.
-func readRootOfTrust(b []byte) (state string, locked bool) {
+func readRootOfTrust(b []byte) (state string, locked bool, bootKey []byte) {
 	var seq asn1.RawValue
 	if _, err := asn1.Unmarshal(b, &seq); err != nil || seq.Tag != asn1.TagSequence {
-		return "", false
+		return "", false, nil
 	}
 	var key asn1.RawValue
 	var st asn1.Enumerated
@@ -482,7 +498,7 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 		_, err = asn1.Unmarshal(rest, &st)
 	}
 	if err != nil {
-		return "", false
+		return "", false, nil
 	}
 	switch int(st) {
 	case 0:
@@ -494,7 +510,7 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 	case 3:
 		state = "failed"
 	}
-	return state, locked
+	return state, locked, key.Bytes
 }
 
 // seedWrapKeyPolicy is what a key must be, beyond being in hardware, to be the
@@ -522,6 +538,9 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 // attestation key lets someone sign a chain for a software key and have it read
 // as hardware, and a chain made for another app is not this app's key.
 func seedWrapKeyPolicy(f *AndroidKeyFacts) error {
+	if f.PublicKey == nil {
+		return notAttested("the key is not an RSA key")
+	}
 	if !f.Generated {
 		return notAttested("the key was imported, not generated in the hardware, so someone else may hold a copy")
 	}
@@ -605,4 +624,69 @@ func readAppID(v []byte) (packages []string, digests [][]byte, err error) {
 		digests = append(digests, d)
 	}
 	return packages, digests, nil
+}
+
+// InstalledAppKeyFacts is what a verified Android attestation says about an
+// installed app's own signing key: the P-256 key the app signs with, generated
+// and held in the TEE or StrongBox, asked for with a challenge the core chose.
+type InstalledAppKeyFacts struct {
+	Public *ecdsa.PublicKey
+	// Platform is "android", "apple" or "tpm": which hardware proof vouched.
+	Platform string
+	// Level is "strongbox" or "tee" (android), "secure_enclave" (apple) or
+	// "tpm" (tpm).
+	Level string
+	// AppPackages and AppSigners are the Android package names and signing
+	// certificate digests the hardware stated; AppleAppID is the App Attest
+	// application identifier ("<team id>.<bundle id>"). TPM proves no app.
+	AppPackages  []string
+	AppSigners   [][]byte
+	AppleAppID   string
+	AppIDPresent bool
+	// VerifiedBootKey is the key the phone's verified boot is anchored to (an
+	// Android attestation's root of trust), for a caller that pins it.
+	VerifiedBootKey []byte
+}
+
+// VerifyInstalledAppKeyAttestation checks that blob is an Android key
+// attestation chain, to a pinned Google root, for a P-256 key the hardware
+// generated, limited in hardware to signing, asked for with wantChallenge, on a phone whose
+// bootloader is locked and whose boot verified. The
+// caller then compares Public with the key the sign-in names and the package
+// with the app it is for.
+func VerifyInstalledAppKeyAttestation(blob, wantChallenge []byte, now time.Time) (*InstalledAppKeyFacts, error) {
+	return verifyInstalledAppKeyAttestation(blob, wantChallenge, now, googleAttestationRoots)
+}
+
+func verifyInstalledAppKeyAttestation(blob, wantChallenge []byte, now time.Time, roots [][sha256.Size]byte) (*InstalledAppKeyFacts, error) {
+	f, err := verifyAndroidKeyAttestation(blob, wantChallenge, now, roots)
+	if err != nil {
+		return nil, err
+	}
+	if f.ECPublicKey == nil || f.ECPublicKey.Curve != elliptic.P256() {
+		return nil, notAttested("the key is not a P-256 key")
+	}
+	if !f.Generated {
+		return nil, notAttested("the key was imported, not generated in the hardware, so someone else may hold a copy")
+	}
+	if !onlyInt(f.Purposes, kmPurposeSign) {
+		return nil, notAttested("the key is not limited to signing in the hardware")
+	}
+	// Unlike the seed key above, this key's whole worth is that no one but the
+	// installed app can sign with it, and on a phone with an unlocked bootloader
+	// or a boot that did not verify, anyone with root can ask the hardware to
+	// sign. The hardware still attests honestly, so the state is read here and
+	// refused. A chain that states no root of trust is refused too: it proves
+	// nothing about the boot.
+	if f.BootState != "verified" {
+		return nil, notAttested("the phone's boot is not verified (state %q), so its software cannot be trusted to be the app's", f.BootState)
+	}
+	if !f.DeviceLocked {
+		return nil, notAttested("the phone's bootloader is unlocked, so its software cannot be trusted to be the app's")
+	}
+	if err := checkRevocation(f, now); err != nil {
+		return nil, err
+	}
+	return &InstalledAppKeyFacts{Public: f.ECPublicKey, Platform: "android", Level: f.LevelName(),
+		AppPackages: f.AppPackages, AppSigners: f.AppSignerDigests, AppIDPresent: f.AppIDPresent, VerifiedBootKey: f.VerifiedBootKey}, nil
 }

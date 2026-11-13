@@ -597,6 +597,7 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		PairwiseAID:           rel.PairwiseAID,
 		RelationshipAnchorAID: bundle.RelationshipAnchorAID,
 		FrontEnd:              bundle.FrontEnd,
+		LastsUntilEnded:       bundle.FrontEnd == FrontEndInstalledApp,
 		RPSessionURL:          req.RPSessionURL,
 	}
 	return bundle, rel, preview, nil
@@ -867,6 +868,7 @@ func (h *Handler) HandlePendingList(w http.ResponseWriter, _ *http.Request) {
 			Expiry:               p.Bundle.Expiry,
 			PairwiseAID:          p.Relationship.PairwiseAID,
 			FrontEnd:             p.Bundle.FrontEnd,
+			LastsUntilEnded:      p.Bundle.FrontEnd == FrontEndInstalledApp,
 			RPSessionURL:         p.RPSessionURL,
 		})
 	}

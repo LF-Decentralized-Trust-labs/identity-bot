@@ -154,12 +154,13 @@ sequenceDiagram
 - an app's back end signing as the app, with its App Body key, to the routes an app may use (Amendment 1)
 - the front-end kind in a challenge and an assertion, with test vectors (Amendment 2)
 - the owner's setting of which front ends an app offers may be used through, and its enforcement when a sign-in starts and again when it is approved (Amendment 2)
+- an installed front end's hardware key, proved by a hardware attestation the core verifies, and its app-key grant, which lasts until it is ended and which the person and the owner can end (Amendment 3)
 - sealed front-end traffic: the format, test vectors, the page's side in TypeScript and in Dart (`packages/login-dart`, which every installed front end uses), and the Go side (Amendment 4)
 - a relay identifier's witnesses, the owner's declaration that makes a witness hold its log, and the page's and Dart's reading of the log from them, with test vectors (Amendment 5)
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
-- an installed front end's hardware key and its app-key grant
+- an installed front end's hardware key proved on **Windows** (the TPM verifier is written and refuses everything until the manufacturers' roots and the credential round trip exist, Amendment 3)
 - an app claiming its own relay name
 - the back end carrying a front end's signed request to the core
 - an app's approval request for one action
@@ -194,7 +195,7 @@ The talk-route path that ADR-066 describes is built, and conforms to this ADR as
 **The kind is in the signed challenge and repeated in the assertion.** A challenge for a utility app carries `front_end` (`browser` or `installed_app`) in its signed body, written between `browser_key` and `callback_url` and left out when the challenge names none, so every other challenge keeps its form. The person's assertion repeats it as `front_end`, the signature covers it, and a verifier refuses an assertion whose kind is not the one the challenge named, or that names one where the challenge named none, with the reason `front end mismatch`. It is checked after the browser key and before the signature. The person's Identity Agent carries the kind in its consent preview; showing it on the consent screen is not built yet, and matters once installed apps can sign in, since an installed_app sign-in is refused until then. Test vectors: `packages/login-verify/test-vectors/verify-decisions.json` (the front-end cases) and `core-canonical-and-spellings.json` (one challenge and one assertion that name a kind), held in Go and TypeScript alike. A challenge with a kind that is not one of the two is refused by the person's Identity Agent before consent.
 
 **A kind is believed only as far as the request backs it.** The kind is what the caller says, and a web page can say anything. So:
-- `installed_app` is accepted only when the request carries an installed app's own key. That key (the installed front end's hardware key and its app-key grant) is not built, so until it is, **every `installed_app` sign-in is refused on every route.** Without it an installed-app sign-in is a bearer QR sign-in that nothing tells from a browser's, and a page could call itself the installed app to get round a switched-off browser.
+- `installed_app` is accepted only when the request carries an installed app's own key. *(Amendment 3 builds that key. What follows is true of every route except the one add-on call Amendment 3 describes, and there it is true unless the core has verified a hardware attestation.)* That key (the installed front end's hardware key and its app-key grant) was not built when this was written, so until it is, **every `installed_app` sign-in is refused on every route.** Without it an installed-app sign-in is a bearer QR sign-in that nothing tells from a browser's, and a page could call itself the installed app to get round a switched-off browser.
 - A request from a web page (it carries a browser `Origin` header), or for a browser's key, is a browser's, and is refused if it names any other kind.
 
 **Older apps.** An app made before it could declare its front ends has no list, and a missing list means *not declared*, never *offers none*: such an app signs people in as it always did. Whether the owner has declared is stored apart from the list, so a declared empty list still refuses every sign-in. The list is set when the app is made or its enrolment token is issued, by the owner and never by the enrolling machine, or when it is provisioned as a delegated app (`ProvisionAppAsset` takes it). For an app that has none, the owner may declare it once, from its manifest's `device_front_ends` (`PUT /api/assets/{id}/front-ends/offered`); a second declaration is refused, because what an app offers is not for the owner's switches to grow. This route and `PUT /api/assets/{id}/front-ends` are the owner's alone, and reading is open to the owner's paired controllers (ADR-050).
@@ -206,6 +207,35 @@ The talk-route path that ADR-066 describes is built, and conforms to this ADR as
 **Not built, still:** the installed front end's hardware key and app-key grant (the proof `installed_app` waits for), and revocation pushed to the app.
 
 **Accepted for now: an installed app signs in as `browser`.** Until an installed app has a key of its own (above), the installed Flutter apps sign in with a browser key and name the `browser` kind, because `installed_app` is refused on every route. So **switching off "browser" on an app also stops its installed apps, and switching off "installed app" stops nothing yet.** The owner's switch says so in plain words where it is shown. When the installed app's own key is built, installed apps move to `installed_app` and the two switches mean what they say.
+
+## Amendment 3 (2026-11-13): an installed app's key is proved in hardware, and its grant can be ended
+
+*Amended 2026-11-13. This builds what Amendment 2 listed as not built: the installed front end's hardware key and its app-key grant. Edits above, each made by this amendment: two lines of "What is built", and a pointer inside Amendment 2's bullet on `installed_app`. Nothing else above is changed.*
+
+**The kind is proved, never claimed.** Amendment 2 refused `installed_app` everywhere because naming the kind is no proof. The core now accepts it on one path only: the add-on call that starts a sign-in for an app's front end (`addon.Host.StartFrontEndKeySignIn`), when all of these hold, each checked by the core and none read from the caller:
+
+- the caller is the app's back end, shown either by the core's own check of an App Body signature or, on a route an add-on authenticates itself, by the app the add-on found asking (and where both exist they must agree); the request did not come from a web page (a browser `Origin` or Fetch-Metadata header refuses it, however it reached the add-on's route); and the asset is that app's own;
+- the request carries a **hardware attestation of the key**, which the core verifies itself and which names the same key the sign-in names:
+  - **Android:** Android Key Attestation to a pinned Google root, for a P-256 key the hardware generated and limits to signing, on a phone whose bootloader is locked and whose boot verified (an unlocked or unverified phone attests honestly and is refused, because anyone with root on it can ask the hardware to sign), whose attested package and signing certificates are the ones the owner named. The attestation also states the verified boot key, which the core reads and does not yet pin;
+  - **iOS and macOS:** Apple App Attest to Apple's pinned root, for the owner's `<team id>.<bundle id>`;
+  - **Windows:** a TPM key certify to pinned manufacturer roots. A TPM proves the key is in the computer's TPM and not which program holds it, so it is accepted only where the owner has said they accept that (`tpm_keys`);
+- the attestation is **fresh**. The app's back end first asks the core for one attestation (`addon.Host.BeginInstalledAppKey`): the core answers a random challenge, which the hardware attests the key with, and the ask is for that asset, used once and expires in five minutes, and capped per asset. The ask is spent when the proof is read, whether or not it holds, so a leaked attestation cannot be shown again. And **the key signs each sign-in**: a statement naming the asset, the ask's challenge and the key (`InstalledAppSignInStatement`), so only whoever holds the key can start one. For an Apple App Attest key, which signs only assertions, that is an App Attest assertion whose client data hash is the statement's SHA-256.
+
+The public routes still pass no proof, so a page cannot get `installed_app` from them.
+
+**The owner names the installed program.** An attestation proves a key is in hardware, and only the program's identity says it is held by this app's program and not another on the same phone. The owner states it when the app is made or enrolled, beside `device_front_ends` (ADR-012 Amendment 5, row `front_and_back_end`, `installed_app_identity`): `android_package` with `android_signers` (SHA-256 digests of the signing certificates), `apple_app_id`, and `tpm_keys`. It is never supplied by the app's back end at sign-in. An app whose owner named none accepts no installed-app key.
+
+**The person sees what they approve.** The consent data the person's Identity Agent gives its screens carries the front-end kind (as before) and `lasts_until_ended`, true for `installed_app`. The screens show the kind and "until you end it" before approving.
+
+**An Apple key speaks by assertion.** An App Attest key cannot sign a plain statement, so a person's statement signed by such a key carries an App Attest assertion over the statement's SHA-256, which the core checks (`secureenclave.VerifyAppleAssertion`, through `trail.AssertionRoster`) for the program the owner names now. A plain signature is never read as an Apple key's. The assertion counter is returned and not judged: a statement is one-use and expires in minutes, which stops a replay. The test vector is made by Apple's published steps with a software key; no device has produced one.
+
+**A live grant is not replaced.** A sign-in naming a key that already holds a live grant for another person is refused (the grant does not lapse, so it would otherwise be lost to whoever started a sign-in naming it); the same person signing in again refreshes it.
+
+**What a grant is, and how it ends.** The record keeps the key, the person, and how the core proved the key (platform and hardware level). It has no lapse time; only an installed app's record may have none (a browser's record without one speaks for no one). Each use asks the owner's setting again, so a switched-off front end stops speaking at once. A grant ends when: the app's back end signs the person out; the person ends it, with their Identity Agent's signed answer to a one-use nonce that expires in five minutes (`POST /api/login/app-key/end/begin`, `POST /api/login/app-key/end`; the begin route is public, so nonces are capped per caller and per asset, and one caller filling its own cap does not stop another); the owner ends it (`DELETE /api/assets/{id}/app-key-grants/{key}`, read with `GET` on the same path); the owner switches the front end off; or the person is removed from the asset. A deleted asset speaks for no one. A grant ended is gone: switching a front end back on or adding the person again does not wake it.
+
+**Not settled here.** Revocation pushed to the app's back end (section 6) is still not built: the core refuses at each use and ends the record, but does not tell the back end. On Windows nothing can yet be proved: the TPM verifier needs the manufacturers' roots and the core's side of the credential exchange (`TPM2_MakeCredential`, with a secret key the core holds for each attestation and never gives the app: the verifier refuses any credential keyed by the challenge or by public facts, so pinning roots alone does not open it), and until they exist a Windows installed app signs in as `browser` (Amendment 2's accepted case). The Apple and TPM verifiers have never seen a real device's output; the Apple root was downloaded over TLS on 2026-11-13.
+
+**Accepted for now: an installed app on an unproved platform signs in as `browser`.** Where no proof exists yet the installed Flutter apps keep signing in with a browser key and the `browser` kind, so switching off "browser" still stops them there.
 
 ## Amendment 4 (2026-11-12): how front-end traffic is sealed, and what the relay still sees
 
@@ -227,7 +257,7 @@ Section 2 step 5 says traffic between a front end and the app's back end is seal
 
 **Not covered.** The page's own origin and the page code itself are as trusted as the host that serves them. A person's device that is compromised is not helped by this.
 
-**Installed front ends** use the same format with their own key in the proof (their hardware key is still not built, as above). `login-verify` carries no front-end traffic and has no sealing code.
+**Installed front ends** use the same format with their own key in the proof (their hardware key is now built, Amendment 3). `login-verify` carries no front-end traffic and has no sealing code.
 
 ## Amendment 5 (2026-11-12): a page reads the relay identifier's key log from its witnesses
 

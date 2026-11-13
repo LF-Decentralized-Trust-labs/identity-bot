@@ -31,11 +31,11 @@ import (
 // from any other page.
 //
 // frontEnd is the kind of front end the sign-in is for, which a utility app
-// admits only by the rules in refuseFrontEnd. installedAppKey is true when the
-// request proved it came from an installed app's own key. No route can prove
-// that yet (the installed front end's hardware key and app-key grant are not
-// built), so every caller passes false and an installed_app sign-in is refused:
-// without the key it is a bearer QR sign-in nothing tells from a browser's.
+// admits only by the rules in refuseFrontEnd. installedAppKey is true only
+// when the core has verified a hardware attestation of an installed app's own
+// key (startFrontEndKeySignIn). The public routes cannot prove that, so they
+// pass false and an installed_app sign-in there is refused: without the proof
+// it is a bearer QR sign-in nothing tells from a browser's.
 func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"

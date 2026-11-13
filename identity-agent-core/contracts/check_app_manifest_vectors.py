@@ -127,7 +127,8 @@ KEYS = {
     "host_control": "grants_required kill_switch".split(),
     "platform_binary": "os min_version arch binary hash".split(),
     "store": "format size_mb".split(),
-    "front_and_back_end": "static_front_end_url back_end_port device_front_ends".split(),
+    "front_and_back_end": "static_front_end_url back_end_port device_front_ends installed_app_identity".split(),
+    "installed_app_identity": "android_package android_signers apple_app_id tpm_keys".split(),
     "when_down": "person_sees queue_requests queue_max_seconds".split(),
     "backup": "what every_hours".split(),
 }
@@ -139,6 +140,7 @@ CHILD = {
     ("manifest", "host_control"): ("object", "host_control"),
     ("manifest", "supported_platforms"): ("list", "platform_binary"), ("manifest", "store"): ("object", "store"),
     ("manifest", "front_and_back_end"): ("object", "front_and_back_end"),
+    ("front_and_back_end", "installed_app_identity"): ("object", "installed_app_identity"),
     ("manifest", "when_down"): ("object", "when_down"), ("manifest", "backup"): ("object", "backup"),
 }
 # The only keys that may hold null; a key with no value is left out.
@@ -261,6 +263,18 @@ def check(m):
             or len(set(d)) != len(d)
             or ("static_front_end_url" in e and "browser" not in d)):
         return refuse("front_and_back_end.device_front_ends", "installed_app and/or browser, each once, browser for a static front end")
+    ia = e.get("installed_app_identity")
+    if ia is not None:
+        row = "front_and_back_end.installed_app_identity"
+        if "installed_app" not in d:
+            return refuse(row, "only where installed_app is listed")
+        pkg, signers = ia.get("android_package", ""), ia.get("android_signers", [])
+        if (pkg == "") != (len(signers) == 0):
+            return refuse(row, "an Android identity is a package and at least one signing certificate digest")
+        if any(not (isinstance(x, str) and len(x) == 64 and all(c in HEX for c in x)) for x in signers):
+            return refuse(row, "a signing certificate digest is 64 lower-case hex characters")
+        if "apple_app_id" in ia and "." not in ia["apple_app_id"]:
+            return refuse(row, "apple_app_id is <team id>.<bundle id>")
     sec = m.get("secrets")
     if (not isinstance(sec, list) or len(sec) > 64 or len(set(map(str, sec))) != len(sec)
             or not all(token(x, "_", 64) for x in sec)):
