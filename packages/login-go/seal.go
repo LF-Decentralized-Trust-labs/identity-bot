@@ -47,6 +47,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"time"
 )
 
 const (
@@ -59,9 +60,27 @@ const (
 	// SealMax is the most content one sealed message may carry.
 	SealMax = 16 << 20
 
+	// ClockAnswerStatus is the status of the answer a back end signs to a call that
+	// opened but was dated by a clock the back end does not share (ADR-072
+	// Amendment 4). Its body is {"error":"clock","server_time":"<UTC, to the second>"}.
+	ClockAnswerStatus = 409
+	// ClockAnswerError is that body's "error".
+	ClockAnswerError = "clock"
+
 	sealKeyLabel = "APP-SEAL-KEY-V1"
 	sealLabel    = "APP-SEAL-V1"
 )
+
+// ClockAnswer is the body of the clock answer (status ClockAnswerStatus) that
+// tells a front end the back end's time, so it can date its next call as the
+// back end counts. Sealed like any other answer.
+func ClockAnswer(now time.Time) []byte {
+	b, _ := json.Marshal(struct {
+		Error      string `json:"error"`
+		ServerTime string `json:"server_time"`
+	}{ClockAnswerError, now.UTC().Format("2006-01-02T15:04:05Z")})
+	return b
+}
 
 // ErrSealed is every refusal of a sealed message. It says nothing about why, so
 // what a relay tries tells it nothing.

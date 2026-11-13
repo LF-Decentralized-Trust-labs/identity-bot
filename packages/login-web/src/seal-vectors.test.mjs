@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { make } from "../test-vectors/make-seal-vectors.mjs";
-import { checkSealKey } from "../dist/app.js";
+import { checkSealKey, clockAnswerSkew } from "../dist/app.js";
 import { openRequest, sealRequest, sealPaddedRequestForVectors, SealError } from "../dist/seal.js";
 
 const v = JSON.parse(readFileSync(new URL("../test-vectors/seal.json", import.meta.url), "utf8"));
@@ -86,6 +86,13 @@ await assert.rejects(sealRequest(v.rid, new Uint8Array(65), enc.encode("x")), Se
   new DataView(padded.buffer).setUint32(0, n);
   const big = await sealPaddedRequestForVectors(v.rid, spk, padded, eph);
   await assert.rejects(openRequest(v.rid, server, big), SealError, "a message declaring more than the most");
+}
+
+{
+  const ca = v.clock_answer, now = Date.parse(ca.now);
+  const ans = (status, body) => ({ status, contentType: "application/json", bytes: enc.encode(body) });
+  assert.equal(clockAnswerSkew(ans(ca.status, ca.body), now), ca.skew_ms, "the shared clock answer gives its skew");
+  for (const c of ca.not_clock_answers) assert.equal(clockAnswerSkew(ans(c.status, c.body), now), null, "not a clock answer: " + c.name);
 }
 
 console.log("sealed traffic holds the shared cases: bytes equal, refusals refused, sizes in buckets");

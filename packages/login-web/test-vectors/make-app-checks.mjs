@@ -63,7 +63,7 @@ export async function make() {
   const keyLogs = [];
   const kl = (name, aid, encoded, refuse) => keyLogs.push({ name, aid, encoded, ...(refuse ? { refuse } : { expect_key_hex: hex(app.key) }) });
   kl("the app's own log", app.aid, app.log());
-  kl("another identifier's log", relay.aid, app.log(), "not the app's identifier");
+  kl("another identifier's log", relay.aid, app.log(), "not the utility app's identifier");
   kl("a wrong signature", app.aid, app.log({ cesr_signatures: [ed25519SigQb64(new Uint8Array(64))] }), "not signed by the key");
   kl("fields it should not have", app.aid, b64u(JSON.stringify({ raw_events_b64: [], cesr_signatures: [], extra: 1 })), "fields it should not");
   { const forged = identity("forged");
@@ -83,9 +83,9 @@ export async function make() {
   ch("a challenge naming the browser kind", { front_end: "browser" });
   ch("an installed-app challenge", { front_end: "installed_app" }, { refuse: "another kind of front end" });
   ch("another browser's key", { browser_key: "x".repeat(43) }, { refuse: "this page's own key" });
-  ch("another app's challenge", { site_aid: relay.aid }, { refuse: "another app" });
+  ch("another app's challenge", { site_aid: relay.aid }, { refuse: "another utility app" });
   ch("a lapsed challenge", { expiry: "2026-11-11T11:59:59Z" }, { refuse: "lapsed" });
-  ch("signed by another key", {}, { signer: other, refuse: "not signed by the app" });
+  ch("signed by another key", {}, { signer: other, refuse: "not signed by the utility app" });
   ch("another challenge's code", {}, { pointer: "https://ia.example/i/other", refuse: "not this challenge's" });
   ch("a code that is not https", {}, { pointer: "http://ia.example/i/tok", refuse: "not this challenge's" });
 

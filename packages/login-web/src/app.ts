@@ -78,10 +78,10 @@ export const LINK_MAX_AHEAD_SECONDS = 24 * 60 * 60;
 export function readAppLink(hash: string, now = Date.now()): AppLink {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
   const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, ""), seal: p.get("seal") ?? "", min: p.get("min") ?? "" };
-  if (!link.aid || !link.kel) throw new Error("the link names no app and key log");
-  if (!link.rid) throw new Error("the link names no relay identifier to check the app's answers against");
-  if (!link.seal) throw new Error("the link names no sealing key to seal calls to the app with");
-  if (!readMinimum(link.min)) throw new Error("the link names no latest key log event the app's relay identifier must have reached");
+  if (!link.aid || !link.kel) throw new Error("the link names no utility app and key log");
+  if (!link.rid) throw new Error("the link names no relay identifier to check the utility app's answers against");
+  if (!link.seal) throw new Error("the link names no sealing key to seal calls to the utility app with");
+  if (!readMinimum(link.min)) throw new Error("the link names no latest key log event the utility app's relay identifier must have reached");
   if (!/^https:\/\//.test(link.api) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(link.api)) {
     throw new Error("the link names no back end to sign in at");
   }
@@ -114,7 +114,7 @@ export async function checkAppKeyLog(aid: string, encoded: string): Promise<Uint
   const fail = (why: string): never => {
     throw new Error("the link's key log is refused: " + why);
   };
-  if (typeof aid !== "string" || !aid || typeof encoded !== "string" || !encoded) fail("the link names no app key log");
+  if (typeof aid !== "string" || !aid || typeof encoded !== "string" || !encoded) fail("the link names no utility app key log");
   const json = decodeBase64UrlStrict(encoded);
   if (!json) fail("it is not readable");
   let kl: { raw_events_b64?: string[]; cesr_signatures?: string[] };
@@ -143,7 +143,7 @@ export async function checkAppKeyLog(aid: string, encoded: string): Promise<Uint
     return fail("its event is not JSON");
   }
   if (ev.t !== "icp" && ev.t !== "dip") fail("it does not open with an inception");
-  if (ev.d !== aid || ev.i !== aid) fail("its inception is not the app's identifier");
+  if (ev.d !== aid || ev.i !== aid) fail("its inception is not the utility app's identifier");
   deriveIdentifier(text, aid, fail);
   if (ev.kt !== "1" || !Array.isArray(ev.k) || ev.k.length !== 1) fail("only a single-key identity is read");
   const key = decodeMatterRaw(ev.k![0], "D", 32);
@@ -185,7 +185,7 @@ export async function checkAppChallenge(c: ChallengeCheck): Promise<CheckedChall
   };
   const raw = decodeMatterRaw(c.sig, "0B", 64);
   if (typeof c.body !== "string" || !raw) fail("the challenge carries no signature it can read");
-  if (!(await verifyEd25519(raw!, utf8.encode(c.body), c.key))) fail("the challenge is not signed by the app");
+  if (!(await verifyEd25519(raw!, utf8.encode(c.body), c.key))) fail("the challenge is not signed by the utility app");
   let ch: Record<string, unknown>;
   try {
     ch = JSON.parse(c.body);
@@ -193,7 +193,7 @@ export async function checkAppChallenge(c: ChallengeCheck): Promise<CheckedChall
     return fail("the signed text is not a challenge");
   }
   if (ch.v !== "ASK1" || ch.t !== 1) fail("the signed text is not a login challenge");
-  if (ch.site_aid !== c.aid) fail("the challenge is signed for another app");
+  if (ch.site_aid !== c.aid) fail("the challenge is signed for another utility app");
   if (ch.browser_key !== c.ownThumbprint) fail("the challenge does not name this page's own key");
   // The kind is in the signed body when the Identity Agent names one (ADR-072
   // Amendment 2). A page is a browser; a challenge naming another is not its own.
@@ -401,9 +401,9 @@ async function holdLog(rid: string, got: CheckedLog, text: string, known: string
     // is held to that, and replaces it; with none, refusing is the only way not to take the
     // first log offered as if this page had never seen one.
     if (floored) return text;
-    return fail("what this page kept of the app's key log cannot be read, and the link gives nothing to hold the log to");
+    return fail("what this page kept of the utility app's key log cannot be read, and the link gives nothing to hold the log to");
   }
-  if (!logExtends(got.events, held.events)) fail("its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away");
+  if (!logExtends(got.events, held.events)) fail("its key log is behind or apart from the one this page already knows for the utility app: the key that signed it may have been rotated away");
   return held.events.length === got.events.length ? known : text;
 }
 
@@ -466,7 +466,7 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
   if (st.sn !== got.events.length - 1) fail("it is made at a sequence number other than its key log's last");
   const floor = min == null ? null : readMinimum(min);
   if (min != null && !floor) fail("the link's latest key log event is not spelled one way");
-  if (floor && got.events[floor.sn]?.said !== floor.said) fail("its key log does not reach the latest event your Identity Agent has seen for the app's relay identifier: it may be an earlier log, from before a key was rotated away");
+  if (floor && got.events[floor.sn]?.said !== floor.said) fail("its key log does not reach the latest event your Identity Agent has seen for the utility app's relay identifier: it may be an earlier log, from before a key was rotated away");
   const keep = await holdLog(rid, got, st.log as string, known, fail, !!floor);
   if (!(await verifyEd25519(sig!, sealKeyStatementText(rid, key!, st.sn as number), got.key))) fail("the relay identifier's current key did not sign this key");
   return { key: key!, log: keep };
@@ -484,13 +484,14 @@ async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min">, logs:
  *  refused: the call can be made again. Not a refusal to trust. */
 export class AppUnreachable extends Error {
   constructor(public readonly status: number) {
-    super(`The utility app could not be reached just now (the relay answered ${status}). Try again in a moment.`);
+    super(`The utility app could not be reached just now. Try again in a moment.`);
     this.name = "AppUnreachable";
   }
 }
 
 /** The answer the back end signs to a call that opened but was dated by a clock the
- *  back end does not share: 409, `{"error":"clock","server_time":…}` (appserve.ClockError).
+ *  back end does not share: 409, `{"error":"clock","server_time":…}` (ADR-072 Amendment 4; login-go's
+ *  `ClockAnswer`, the `clock_answer` case in seal.json).
  *  Gives the back end's clock less this device's, in ms, or null when the answer is
  *  not that. It is read only from an answer `sealedCall` has already shown to be the app's. */
 export function clockAnswerSkew(r: SealedAnswer, now = Date.now()): number | null {
@@ -644,7 +645,7 @@ export async function proofHeaders(
  *  answer gave; an Error if it gave none. */
 export function serverSkew(serverTime: unknown, now = Date.now()): number {
   const t = typeof serverTime === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(serverTime) ? Date.parse(serverTime) : NaN;
-  if (Number.isNaN(t)) throw new Error("the app gave no time to go by");
+  if (Number.isNaN(t)) throw new Error("the utility app gave no time to go by");
   return t - now;
 }
 
@@ -804,7 +805,7 @@ export function appSession(
     skewMs: () => skew,
     async whoami() {
       const r = await raw("GET", "/session/whoami", "");
-      if (r.status !== 200) throw new Error("The app would not say who is signed in.");
+      if (r.status !== 200) throw new Error("The utility app would not say who is signed in.");
       const w = r.json<{ pairwise_aid: string; browser_key: string; server_time: string }>();
       skew = serverSkew(w.server_time);
       synced = true;

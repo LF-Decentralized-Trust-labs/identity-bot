@@ -27,7 +27,7 @@ assert.doesNotThrow(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&ap
 
 // the key log
 assert.deepEqual(await checkAppKeyLog(app.aid, app.log()), app.key);
-await refuses(checkAppKeyLog(relay.aid, app.log()), /not the app's identifier/, "another identifier's log");
+await refuses(checkAppKeyLog(relay.aid, app.log()), /not the utility app's identifier/, "another identifier's log");
 await refuses(checkAppKeyLog(app.aid, app.log({ cesr_signatures: [ed25519SigQb64(new Uint8Array(64))] })), /not signed by the key/, "a wrong signature");
 await refuses(checkAppKeyLog(app.aid, b64u(JSON.stringify({ raw_events_b64: [], cesr_signatures: [], extra: 1 }))), /fields it should not/, "extra fields");
 { const forged = identity(); // an event naming the app's identifier but not derived from it
@@ -45,9 +45,9 @@ assert.equal((await checkAppChallenge(challenge())).session_token, "tok");
 assert.equal((await checkAppChallenge(challenge({ front_end: "browser" }))).front_end, "browser");
 await refuses(checkAppChallenge(challenge({ front_end: "installed_app" })), /another kind of front end/, "an installed-app challenge");
 await refuses(checkAppChallenge(challenge({ browser_key: "x".repeat(43) })), /this page's own key/, "another browser's key");
-await refuses(checkAppChallenge(challenge({ site_aid: relay.aid })), /another app/, "another app's challenge");
+await refuses(checkAppChallenge(challenge({ site_aid: relay.aid })), /another utility app/, "another app's challenge");
 await refuses(checkAppChallenge(challenge({ expiry: new Date(Date.now() - 1000).toISOString() })), /lapsed/, "a lapsed challenge");
-await refuses(checkAppChallenge(challenge({}, relay)), /not signed by the app/, "signed by another key");
+await refuses(checkAppChallenge(challenge({}, relay)), /not signed by the utility app/, "signed by another key");
 await refuses(checkAppChallenge({ ...challenge(), pointer: "https://ia.example/i/other" }), /not this challenge's/, "another challenge's code");
 await refuses(checkAppChallenge({ ...challenge(), pointer: "http://ia.example/i/tok" }), /not this challenge's/, "a code that is not https");
 
@@ -99,7 +99,7 @@ const polled = await (await a.fetchFn(`${a.sessionEndpoint}/sid1`, {})).json();
 assert.equal(polled.state, "connecting");
 assert.ok(calls[1].headers["X-Browser-Proof"] && calls[1].headers["X-Browser-Proof-Nonce"], "a poll carries a proof");
 const liar = await appFetch(L, { fetchFn: sl.wrap(backEnd({ lie: true })), browserKey: async () => mine, logs: logMemory() });
-await refuses(liar.fetchFn(liar.sessionEndpoint, { method: "POST", body: "{}" }), /another app/, "a back end that hands over another app's challenge");
+await refuses(liar.fetchFn(liar.sessionEndpoint, { method: "POST", body: "{}" }), /another utility app/, "a back end that hands over another app's challenge");
 const unsigned = await appFetch(L, { fetchFn: sl.wrap(async () => new Response("{}", { status: 200 })), browserKey: async () => mine, logs: logMemory() });
 await refuses(unsigned.fetchFn(unsigned.sessionEndpoint, { method: "POST", body: "{}" }), /not signed/, "an answer nobody signed");
 await refuses(appFetch({ ...L, kel: app.log({ cesr_signatures: [ed25519SigQb64(new Uint8Array(64))] }) }, { browserKey: async () => mine }), /key log is refused/, "a link whose key log is not the app's");

@@ -41,7 +41,7 @@ export function minimum(relay, n = relay.events.length) {
 }
 
 /** `clock` (`{ now: () => ms }`) makes the wrapped back end take only calls dated within two minutes of it, and
- *  answer another, as appserve does, with the signed, sealed 409 that tells the time. */
+ *  answer another with the signed, sealed 409 that tells the time (ADR-072 Amendment 4). */
 export async function sealing(relay, origin = "https://tasks.example") {
   const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
   const pub = new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey));

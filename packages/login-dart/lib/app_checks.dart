@@ -127,11 +127,11 @@ class AppLink {
     final rid = p['rid'] ?? '';
     if (p['aid'] == null || p['kel'] == null) {
       throw const TrustRefused(
-          'This is not the app\'s sign-in link: the link names no app and key log (the part after #).');
+          'This is not the utility app\'s sign-in link: the link names no utility app and key log (the part after #).');
     }
     if (rid.isEmpty) {
       throw const TrustRefused(
-          'the link names no relay identifier to check the app\'s answers against');
+          'the link names no relay identifier to check the utility app\'s answers against');
     }
     final seal = p['seal'] ?? '';
     if (seal.isEmpty) {
@@ -141,7 +141,7 @@ class AppLink {
     final min = p['min'] ?? '';
     if (readMinimum(min) == null) {
       throw const TrustRefused(
-          'the link names no latest key log event the app\'s relay identifier must have reached');
+          'the link names no latest key log event the utility app\'s relay identifier must have reached');
     }
     if (!RegExp(r'^https://').hasMatch(api) &&
         !RegExp(r'^http://(127\.0\.0\.1|localhost)[:/]').hasMatch(api)) {
@@ -173,7 +173,7 @@ class AppLink {
 /// The key the link's key log puts in force for [aid], or a [TrustRefused] saying why not.
 Uint8List checkKeyLog(String aid, String encoded) {
   Never fail(String why) => _fail('the link\'s key log is refused: ', why);
-  if (aid.isEmpty || encoded.isEmpty) fail('the link names no app key log');
+  if (aid.isEmpty || encoded.isEmpty) fail('the link names no utility app key log');
   final json = b64uDecode(encoded);
   if (json == null) fail('it is not readable');
   Object? kl;
@@ -213,7 +213,7 @@ Uint8List checkKeyLog(String aid, String encoded) {
     fail('it does not open with an inception');
   }
   if (ev['d'] != aid || ev['i'] != aid) {
-    fail('its inception is not the app\'s identifier');
+    fail('its inception is not the utility app\'s identifier');
   }
   deriveIdentifier(text, aid, fail);
   final k = ev['k'];
@@ -253,7 +253,7 @@ Map<String, dynamic> checkChallenge({
     fail('the challenge carries no signature it can read');
   }
   if (!ed25519Verify(key, utf8.encode(body), raw)) {
-    fail('the challenge is not signed by the app');
+    fail('the challenge is not signed by the utility app');
   }
   Object? c;
   try {
@@ -267,7 +267,7 @@ Map<String, dynamic> checkChallenge({
   if (c['v'] != 'ASK1' || c['t'] != 1) {
     fail('the signed text is not a login challenge');
   }
-  if (c['site_aid'] != aid) fail('the challenge is signed for another app');
+  if (c['site_aid'] != aid) fail('the challenge is signed for another utility app');
   if (c['browser_key'] != ownThumbprint) {
     fail('the challenge does not name this page\'s own key');
   }
@@ -298,7 +298,7 @@ String _sha256hex(List<int> b) => SHA256Digest()
     .map((v) => v.toRadixString(16).padLeft(2, '0'))
     .join();
 
-/// What the app signed an answer over (appserve.answerBytes).
+/// What the utility app signed an answer over (ADR-072 Amendment 4).
 String answerText(String rid, String nonce, int status, String contentType,
         List<int> body) =>
     [
@@ -537,12 +537,12 @@ String holdLog(String rid, CheckedLog got, String text, String? known,
     // not to take the first log offered as if this app had never seen one.
     if (floored) return text;
     fail(
-        'what this app kept of the app\'s key log cannot be read, and the link gives nothing to hold the log to');
+        'what this device kept of the utility app\'s key log cannot be read, and the link gives nothing to hold the log to');
     return text; // not reached: [fail] throws
   }
   if (!logExtends(got.events, held.events)) {
     fail(
-        'its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away');
+        'its key log is behind or apart from the one this page already knows for the utility app: the key that signed it may have been rotated away');
   }
   return held.events.length == got.events.length ? known : text;
 }
@@ -627,7 +627,7 @@ String sha256B64u(List<int> bytes) =>
 String sessionBinding(String token) => sha256B64u(utf8.encode(token));
 
 /// The string signed for a request to the app's own back end (`proofText` in
-/// the SDK, `appserve.Proof` in the add-ons, label IABK1, no host). While
+/// the SDK, label IABK1, no host; ADR-072 Amendment 4). While
 /// signing in the binding is the sign-in's id.
 String backEndProofString(String method, String target, String ts, String nonce,
         String binding, List<int> body) =>

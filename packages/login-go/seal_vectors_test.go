@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 )
 
 // The same file the TypeScript sealing is held to.
@@ -43,6 +44,11 @@ type sealVectors struct {
 		Request     string `json:"request"`
 		AnswerOuter string `json:"answer_outer"`
 	} `json:"answer_refusals"`
+	ClockAnswer struct {
+		Status     int    `json:"status"`
+		ServerTime string `json:"server_time"`
+		Body       string `json:"body"`
+	} `json:"clock_answer"`
 	Sizes []struct {
 		ContentLen int `json:"content_len"`
 		CtLen      int `json:"ct_len"`
@@ -163,3 +169,14 @@ func TestSealedCallsMatchTheSharedCases(t *testing.T) {
 }
 
 func sha256Sum(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
+
+func TestClockAnswerIsTheSharedOne(t *testing.T) {
+	v := loadSealVectors(t)
+	tm, err := time.Parse(time.RFC3339, v.ClockAnswer.ServerTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ClockAnswerStatus != v.ClockAnswer.Status || string(ClockAnswer(tm)) != v.ClockAnswer.Body {
+		t.Fatalf("clock answer: got %d %s want %d %s", ClockAnswerStatus, ClockAnswer(tm), v.ClockAnswer.Status, v.ClockAnswer.Body)
+	}
+}

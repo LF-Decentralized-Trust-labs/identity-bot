@@ -4,7 +4,7 @@
 // is "unreachable, try again", never a refusal to trust.
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
-import { answerText, appFetch, appSession, AppUnreachable, browserKeyThumbprint, readAppLink } from "../dist/app.js";
+import { answerText, appFetch, appSession, AppUnreachable, browserKeyThumbprint, readAppLink, signInProblem } from "../dist/app.js";
 import { b64u, enc, identity, logMemory, relayChain, sealing, nowSeconds } from "./app-test-support.mjs";
 
 const app = identity(), relay = relayChain("relay");
@@ -57,13 +57,23 @@ const carried = sl.wrap(backEnd, relay.aid, { now: backEndNow });
   // a back end whose own clock moves on by an hour with every call: the retry is wrong again
   let t = 0;
   const moving = sl.wrap(backEnd, relay.aid, { now: () => Date.now() + 3 * 60_000 + 3_600_000 * t++ });
-  const g = await appFetch(L, { fetchFn: moving, browserKey: async () => mine, logs: logMemory() });
+  // a guard that has gone fails here, not by hanging: more calls than a bounded retry makes is a loop
+  let calls = 0;
+  const counted = (...a) => { if (++calls > 6) throw new Error("looped: the clock was retried without end"); return moving(...a); };
+  const g = await appFetch(L, { fetchFn: counted, browserKey: async () => mine, logs: logMemory() });
   await assert.rejects(g.fetchFn(L.api + "/session/whoami", { method: "GET" }), /clock is too far/, "told twice: say so, and stop");
+  assert.ok(calls <= 4, "the clock is retried once, not on and on: " + calls + " calls");
 }
 // A relay that cannot carry the call (a restart): unreachable, with a retry sentence, and no trust alarm.
 {
   const down = async () => new Response("busy", { status: 503 });
   const f = await appFetch(L, { fetchFn: down, browserKey: async () => mine, logs: logMemory() });
-  await assert.rejects(f.fetchFn(L.api + "/session/whoami", { method: "GET" }), (e) => e instanceof AppUnreachable && e.status === 503 && /Try again/.test(e.message) && !/trust|not the utility app/.test(e.message), "a relay's 503");
+  await assert.rejects(f.fetchFn(L.api + "/session/whoami", { method: "GET" }), (e) => e instanceof AppUnreachable && e.status === 503 && /Try again/.test(e.message) && !/503/.test(e.message) && !/trust|not the utility app/.test(e.message), "a relay's 503");
+}
+// A relay that answers 401 or 403 is not the utility app refusing this browser's sign-in
+for (const status of [401, 403]) {
+  const refusing = async () => new Response("no", { status });
+  const f = await appFetch(L, { fetchFn: refusing, browserKey: async () => mine, logs: logMemory() });
+  await assert.rejects(f.fetchFn(L.api + "/session/whoami", { method: "GET" }), (e) => e instanceof AppUnreachable && e.status === status && !new RegExp(String(status)).test(signInProblem("error", e.message)) && !/did not accept this browser/.test(signInProblem("error", e.message)) && /could not be reached/.test(signInProblem("error", e.message)), "a relay's " + status);
 }
 console.log("ok");

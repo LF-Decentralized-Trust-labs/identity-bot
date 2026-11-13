@@ -333,7 +333,7 @@ List<int> sealKeyStatementText(String rid, Uint8List pub, int sn) =>
       (floor.sn >= got.events.length ||
           got.events[floor.sn].said != floor.said)) {
     fail(
-        'its key log does not reach the latest event your Identity Agent has seen for the app\'s relay identifier: it may be an earlier log, from before a key was rotated away');
+        'its key log does not reach the latest event your Identity Agent has seen for the utility app\'s relay identifier: it may be an earlier log, from before a key was rotated away');
   }
   final keep = holdLog(rid, got, text, known, fail, floored: floor != null);
   if (!ed25519Verify(got.key, sealKeyStatementText(rid, key, sn), sig)) {
@@ -358,7 +358,7 @@ class AppUnreachable implements Exception {
   final int status;
   const AppUnreachable(this.status);
   String get message =>
-      'The utility app could not be reached just now (the relay answered $status). Try again in a moment.';
+      'The utility app could not be reached just now. Try again in a moment.';
   @override
   String toString() => message;
 }
@@ -375,7 +375,8 @@ class ClockWrong implements Exception {
 
 /// The back end's clock less this device's, when [r] is the signed answer to a call
 /// that opened but was dated by a clock the back end does not share: 409,
-/// `{"error":"clock","server_time":…}` (appserve.ClockError). Null when it is not.
+/// `{"error":"clock","server_time":…}` (ADR-072 Amendment 4; login-go's
+/// `ClockAnswer`, the `clock_answer` case in seal.json). Null when it is not.
 /// [sealedCall] has already shown the answer to be the app's.
 Duration? clockAnswerSkew(SealedAnswer r, DateTime now) {
   if (r.status != 409) return null;

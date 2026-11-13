@@ -69,7 +69,7 @@ assert.ok(sizes.every((n) => n === 1024 + 16), "small calls are all one size: " 
 // A relay that alters, replays or swaps an answer is not believed.
 for (const [name, f, re] of [
   ["alters an answer", (r) => r.text().then((t) => { const o = JSON.parse(t); o.ct = (o.ct[0] === "A" ? "B" : "A") + o.ct.slice(1); return new Response(JSON.stringify(o), { status: 200 }); }), /does not open/],
-  ["answers with a refusal of its own", () => new Response("busy", { status: 503 }), /could not be reached just now \(the relay answered 503\)/],
+  ["answers with a refusal of its own", () => new Response("busy", { status: 503 }), /could not be reached just now\. Try again/],
   ["answers with its own words", () => new Response('{"v":1,"ct":"AAAA"}', { status: 200 }), /does not open/],
 ]) {
   tamper = (r) => f(r);

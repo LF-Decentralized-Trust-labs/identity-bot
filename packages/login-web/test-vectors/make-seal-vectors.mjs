@@ -167,15 +167,31 @@ export async function make() {
   // What the relay sees of size: the ciphertext's length is its bucket and the tag, nothing finer.
   const sizes = [0, 1, 1019, 1020, 1021, 2043, 2044, 5000].map((n) => ({ content_len: n, ct_len: Math.max(1024, 2 ** Math.ceil(Math.log2(n + 4))) + 16 }));
 
+  // The answer a back end signs to a call dated by a clock it does not share (ADR-072 Amendment 4).
+  // `skew_ms` is what a page whose clock reads `now` takes from it (the back end's clock less its own).
+  const clock_answer = {
+    status: 409,
+    now: "2030-01-01T00:00:00Z",
+    server_time: "2030-01-01T00:03:00Z",
+    body: '{"error":"clock","server_time":"2030-01-01T00:03:00Z"}',
+    skew_ms: 180000,
+    not_clock_answers: [
+      { name: "another status", status: 200, body: '{"error":"clock","server_time":"2030-01-01T00:03:00Z"}' },
+      { name: "another error", status: 409, body: '{"error":"other"}' },
+      { name: "a time that is not a time", status: 409, body: '{"error":"clock","server_time":"yesterday"}' },
+      { name: "not JSON", status: 409, body: "not json" },
+    ],
+  };
+
   return {
-    about: "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `seal_key.min` is the link's latest key log event the owner's Identity Agent has seen (`<sequence number>.<SAID>`), which the statement's log holds. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one, and the link's `min` when there is one) must be refused.",
+    about: "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `seal_key.min` is the link's latest key log event the owner's Identity Agent has seen (`<sequence number>.<SAID>`), which the statement's log holds. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one, and the link's `min` when there is one) must be refused. `clock_answer`: the answer a back end signs to a call dated by a clock it does not share is `status` with `body` (the back end's UTC time to the second), a page whose clock reads `now` takes `skew_ms` from it, and each of `not_clock_answers` carries no time.",
     rid: RID,
     relay_inception: inception,
     relay_log: chain.log(),
     relay_sn: SN,
     relay_seed_hex: hex(seed),
     seal_key: { private_hex: hex(sk.d), public_b64u: b64u(sk.pub), statement, min: MIN },
-    requests, refusals, answer_refusals, statement_refusals, sizes,
+    requests, refusals, answer_refusals, statement_refusals, sizes, clock_answer,
   };
 }
 

@@ -137,7 +137,7 @@
       "name": "another identifier's log",
       "aid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
       "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
-      "refuse": "not the app's identifier"
+      "refuse": "not the utility app's identifier"
     },
     {
       "name": "a wrong signature",
@@ -219,7 +219,7 @@
       "pointer": "https://ia.example/i/tok",
       "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
       "now_ms": 1794398400000,
-      "refuse": "another app"
+      "refuse": "another utility app"
     },
     {
       "name": "a lapsed challenge",
@@ -241,7 +241,7 @@
       "pointer": "https://ia.example/i/tok",
       "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
       "now_ms": 1794398400000,
-      "refuse": "not signed by the app"
+      "refuse": "not signed by the utility app"
     },
     {
       "name": "another challenge's code",

@@ -144,4 +144,18 @@ void main() {
     final padded = Uint8List(want)..buffer.asByteData().setUint32(0, n);
     expect(() => unpadForTest(padded), throwsA(isA<SealRefused>()));
   });
+
+  test('the clock answer is the shared one', () {
+    final ca = v['clock_answer'] as Map<String, dynamic>;
+    final now = DateTime.parse(ca['now'] as String);
+    SealedAnswer a(int status, String body) =>
+        (status: status, contentType: 'application/json', body: utf8.encode(body));
+    expect(clockAnswerSkew(a(ca['status'] as int, ca['body'] as String), now),
+        Duration(milliseconds: ca['skew_ms'] as int));
+    for (final c in (ca['not_clock_answers'] as List).cast<Map<String, dynamic>>()) {
+      expect(clockAnswerSkew(a(c['status'] as int, c['body'] as String), now),
+          isNull,
+          reason: c['name'] as String);
+    }
+  });
 }

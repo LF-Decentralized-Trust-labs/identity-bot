@@ -1,5 +1,5 @@
 {
-  "about": "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `seal_key.min` is the link's latest key log event the owner's Identity Agent has seen (`<sequence number>.<SAID>`), which the statement's log holds. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one, and the link's `min` when there is one) must be refused.",
+  "about": "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `seal_key.min` is the link's latest key log event the owner's Identity Agent has seen (`<sequence number>.<SAID>`), which the statement's log holds. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one, and the link's `min` when there is one) must be refused. `clock_answer`: the answer a back end signs to a call dated by a clock it does not share is `status` with `body` (the back end's UTC time to the second), a page whose clock reads `now` takes `skew_ms` from it, and each of `not_clock_answers` carries no time.",
   "rid": "EBnib8qENhCT-1KWXM0et7PSniSZmXcafGcaIe-i6UtW",
   "relay_inception": "{\"v\":\"KERI10JSON00012b_\",\"t\":\"icp\",\"d\":\"EBnib8qENhCT-1KWXM0et7PSniSZmXcafGcaIe-i6UtW\",\"i\":\"EBnib8qENhCT-1KWXM0et7PSniSZmXcafGcaIe-i6UtW\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DJ1DhHByBzMqEWTl9gv-xwU87lnF0cv9N9JxhW0qkXbq\"],\"nt\":\"1\",\"n\":[\"EIEHW6qrTaAM7xbgtPrOhnKWKH7gL9rtjyC0HpVuJEvd\"],\"bt\":\"0\",\"b\":[],\"c\":[],\"a\":[]}",
   "relay_log": "eyJ2IjoiS0VSSTEwSlNPTjAwMDEyYl8iLCJ0IjoiaWNwIiwiZCI6IkVCbmliOHFFTmhDVC0xS1dYTTBldDdQU25pU1ptWGNhZkdjYUllLWk2VXRXIiwiaSI6IkVCbmliOHFFTmhDVC0xS1dYTTBldDdQU25pU1ptWGNhZkdjYUllLWk2VXRXIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRKMURoSEJ5QnpNcUVXVGw5Z3YteHdVODdsbkYwY3Y5TjlKeGhXMHFrWGJxIl0sIm50IjoiMSIsIm4iOlsiRUlFSFc2cXJUYUFNN3hiZ3RQck9obktXS0g3Z0w5cnRqeUMwSHBWdUpFdmQiXSwiYnQiOiIwIiwiYiI6W10sImMiOltdLCJhIjpbXX0tQUFCQUFDbWVRdzdZTDdQOHB5R1dsM2hVQWtQTXo2WFROTTUxaFUxa1gwMjAxdEVsVnY5Sy1UVlI3WW04c1dwSXVIeU8ySzAwUmNJY0FXUVJOLWE1QUhzc3VVR3sidiI6IktFUkkxMEpTT04wMDAxNjBfIiwidCI6InJvdCIsImQiOiJFSFBUR2FoSkM2Njg0TC0takF6bndJc2xJcmV6dU9uRllnMDBKQWFwUDI2NyIsImkiOiJFQm5pYjhxRU5oQ1QtMUtXWE0wZXQ3UFNuaVNabVhjYWZHY2FJZS1pNlV0VyIsInMiOiIxIiwicCI6IkVCbmliOHFFTmhDVC0xS1dYTTBldDdQU25pU1ptWGNhZkdjYUllLWk2VXRXIiwia3QiOiIxIiwiayI6WyJERTFtakhlMElDanFmdzZTNld0azFELWRxaS1Yc2Y5YzlzMWVDalNYUFpHbCJdLCJudCI6IjEiLCJuIjpbIkVBZmMtcHE3MHFyUjlna3g5RHVtNnlxbFFLYTFmNGRVQXpDNXdQcmtxUnFoIl0sImJ0IjoiMCIsImJyIjpbXSwiYmEiOltdLCJhIjpbXX0tQUFCQUFBcjBaM3RFWThpanlqU0F0bDZ1ZW1kMEZFb0xGQ2NXdjNUNWJoMWtoWG91UzdaeTV5NGUtTFRtUUpLV2pJempHMEtWYW9haldId25qZVRVTUs2bHdnTw",
@@ -442,5 +442,34 @@
       "content_len": 5000,
       "ct_len": 8208
     }
-  ]
+  ],
+  "clock_answer": {
+    "status": 409,
+    "now": "2030-01-01T00:00:00Z",
+    "server_time": "2030-01-01T00:03:00Z",
+    "body": "{\"error\":\"clock\",\"server_time\":\"2030-01-01T00:03:00Z\"}",
+    "skew_ms": 180000,
+    "not_clock_answers": [
+      {
+        "name": "another status",
+        "status": 200,
+        "body": "{\"error\":\"clock\",\"server_time\":\"2030-01-01T00:03:00Z\"}"
+      },
+      {
+        "name": "another error",
+        "status": 409,
+        "body": "{\"error\":\"other\"}"
+      },
+      {
+        "name": "a time that is not a time",
+        "status": 409,
+        "body": "{\"error\":\"clock\",\"server_time\":\"yesterday\"}"
+      },
+      {
+        "name": "not JSON",
+        "status": 409,
+        "body": "not json"
+      }
+    ]
+  }
 }
