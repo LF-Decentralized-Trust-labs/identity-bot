@@ -38,6 +38,10 @@ func TestAPageReadsAWitnessedLogAcrossOrigins(t *testing.T) {
 	read := func(method, aid string, inception []byte) (*http.Response, []byte) {
 		req, _ := http.NewRequest(method, srv.URL+"/api/witness/kel/"+aid, nil)
 		req.Header.Set("Origin", "https://page.example")
+		if method == "OPTIONS" { // a browser's real preflight, which the server's cross-origin policy answers unless a route says it does
+			req.Header.Set("Access-Control-Request-Method", "GET")
+			req.Header.Set("Access-Control-Request-Headers", witness.HeaderInception)
+		}
 		if inception != nil {
 			req.Header.Set(witness.HeaderInception, base64.RawURLEncoding.EncodeToString(inception))
 		}

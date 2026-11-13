@@ -1088,7 +1088,20 @@ func corsPolicy() func(http.Handler) http.Handler {
 // headers beside their handlers (corsHeaders): the sign-in widget's session
 // routes and the page key route a page with only the SDK calls.
 func grantsCrossOriginItself(path string) bool {
-	return strings.HasPrefix(path, "/api/login/session/") || path == "/public/login/key"
+	return strings.HasPrefix(path, "/api/login/session/") || path == "/public/login/key" || grantsAPageAWitnessRead(path)
+}
+
+// grantsAPageAWitnessRead is a witness's key-log read and its tip, whose
+// preflight a page's browser sends before presenting a log's inception
+// (witness.HeaderInception): handleWitnessKelPreflight answers it, the same for
+// every identifier. The read of one event is not for a page.
+func grantsAPageAWitnessRead(path string) bool {
+	i := strings.Index(path, "/witness/kel/")
+	if i < 0 {
+		return false
+	}
+	rest := strings.Split(strings.TrimPrefix(path[i:], "/witness/kel/"), "/")
+	return len(rest) == 1 || len(rest) == 2 && rest[1] == "tip"
 }
 
 func (s *CoreServer) buildRouter() chi.Router {

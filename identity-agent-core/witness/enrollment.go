@@ -301,6 +301,8 @@ func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest)
 			reason = "enroll_failed"
 			detail = err.Error()
 		} else {
+			// Asking for itself, it is no longer held as somebody's declared identifier.
+			s.forgetDelegate(req.RequesterAID)
 			s.agreeToDelegates(req.RequesterAID, req.CoversDelegates)
 			taskStatus = "completed"
 			detail = fmt.Sprintf("Now witnessing key events for %s", req.RequesterAID[:12])

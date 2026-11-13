@@ -75,6 +75,10 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
 		return fmt.Errorf("not_covered: the declaration is not fresh")
 	}
+	// One declaration of an identifier at a time, and not while its events are being judged.
+	mu := s.receivingLock(req.AID)
+	mu.Lock()
+	defer mu.Unlock()
 	// The inception is the identifier's own: one event, which derives it.
 	ev, err := keri.ParseEvent(raw)
 	if err != nil || ev.Ilk != "icp" || ev.Identifier != req.AID {
@@ -93,7 +97,9 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	// declaration cannot take it from them, nor take a contact this witness
 	// already witnesses for (a root identifier's inception is public too), and it
 	// takes no more of the owner's allowance to say it again.
-	heldUnder := s.delegateOf(req.AID)
+	s.delegatesMu.Lock()
+	defer s.delegatesMu.Unlock()
+	heldUnder := s.delegateMap()[req.AID]
 	meta, _ := s.Store.GetContactMeta(req.AID)
 	if heldUnder != "" && heldUnder != req.Owner || heldUnder == "" && meta != nil && meta.WitnessingFor {
 		return fmt.Errorf("not_covered: this identifier is already witnessed for another")
@@ -113,7 +119,9 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 			return err
 		}
 	}
-	s.recordDelegate(req.AID, req.Owner)
+	m := s.delegateMap()
+	m[req.AID] = req.Owner
+	s.saveDelegateMap(m)
 	return nil
 }
 
@@ -142,4 +150,15 @@ func (s *Service) RequestCover(ctx context.Context, root, witnessKey, aid string
 	url := strings.TrimRight(root, "/") + "/witness/cover"
 	_, err = s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	return err
+}
+
+// forgetDelegate drops aid's entry in the held-under map, whoever it was held under.
+func (s *Service) forgetDelegate(aid string) {
+	s.delegatesMu.Lock()
+	defer s.delegatesMu.Unlock()
+	m := s.delegateMap()
+	if _, ok := m[aid]; ok {
+		delete(m, aid)
+		s.saveDelegateMap(m)
+	}
 }
