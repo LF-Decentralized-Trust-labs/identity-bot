@@ -100,6 +100,54 @@ void main() {
     }
   });
 
+  test(
+      'a sealing key is checked once, and a refused one is never taken as checked',
+      () async {
+    final w = v['witnessed'] as Map<String, dynamic>;
+    final cases = (w['page'] as List).cast<Map<String, dynamic>>();
+    final taken = cases.firstWhere(
+        (c) => c['expect'] == 'taken' && (c['held'] as Map)['w0'] != 'down');
+    final refused = cases.firstWhere((c) => c['expect'] == 'moved_on');
+    int asked = 0;
+    http.Client clientFor(Map<String, dynamic> c) {
+      final held = {
+        'https://w0.example/api': (c['held'] as Map)['w0'],
+        'https://w1.example/api': (c['held'] as Map)['w1'],
+      };
+      return MockClient((req) async {
+        asked++;
+        final a =
+            held[req.url.toString().replaceAll(RegExp(r'/witness/kel/.*'), '')];
+        return a == null
+            ? http.Response('no', 404)
+            : http.Response(jsonEncode(a), 200);
+      });
+    }
+
+    AppLink linkOf(Map<String, dynamic> c) => AppLink(
+        '',
+        '',
+        c['rid'] as String,
+        'https://tasks.example',
+        c['statement'] as String,
+        c['min'] as String,
+        (c['wit'] as List).cast<String>());
+    final once = CheckedSealKey(linkOf(taken), AnswerLogs(), clientFor(taken));
+    await once.get();
+    final after = asked;
+    expect(after, greaterThan(0));
+    await once.get();
+    expect(asked, after,
+        reason:
+            'a key already checked is not checked, or the witnesses asked, again');
+
+    // A refused link is refused every time it is tried, never taken as checked.
+    final again =
+        CheckedSealKey(linkOf(refused), AnswerLogs(), clientFor(refused));
+    await expectLater(again.get(), throwsA(isA<TrustRefused>()));
+    await expectLater(again.get(), throwsA(isA<TrustRefused>()));
+  });
+
   final rid = v['rid'] as String;
   final spk = unb64((v['seal_key'] as Map)['public_b64u'] as String);
   final serverD = big((v['seal_key'] as Map)['private_hex'] as String);

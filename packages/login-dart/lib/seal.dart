@@ -384,9 +384,9 @@ Future<Uint8List> checkedSealKeyWitnessed(
 
 /// The link's sealing key, checked once and then held: the first call checks it
 /// (and asks the relay identifier's witnesses, `checkedSealKeyWitnessed`), and
-/// the ones after use what was found. A check that fails is tried again by the
-/// next call, so a witness that was out of reach, or a link that was refused, is
-/// not remembered as the answer.
+/// the ones after use what was found. A check that fails is not remembered as the
+/// answer: the next call checks again (and a link a witness showed to be older
+/// than a rotation stays refused, by the log kept for it).
 class CheckedSealKey {
   final AppLink link;
   final AnswerLogs logs;
