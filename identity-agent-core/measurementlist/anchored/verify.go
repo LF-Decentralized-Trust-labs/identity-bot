@@ -1,0 +1,320 @@
+package anchored
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
+
+	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/measurementlist"
+)
+
+// Floors are what this device already holds, and never goes below: the highest
+// list sequence accepted and the hash (the credential's SAID) of the list
+// accepted at it, and the newest place of the publisher's history it has held.
+type Floors struct {
+	ListSequence int64
+	ListDigest   string
+	// HasKeyHistory says KeyHistorySN and KeyHistorySAID are set.
+	HasKeyHistory  bool
+	KeyHistorySN   int
+	KeyHistorySAID string
+}
+
+// Result is a verified list, and where the publisher's history stood when it
+// was verified (the new key-history floor).
+type Result struct {
+	List           *measurementlist.List
+	CredentialSAID string
+	Tip            Tip
+}
+
+// logEvent is one event of the publisher's history as Verify reads it.
+type logEvent struct {
+	msg   []byte
+	raw   []byte
+	ilk   string
+	sn    int
+	said  string
+	seals []seal
+}
+
+type seal struct{ i, s, d string }
+
+type sealWire struct {
+	I *string `json:"i"`
+	S *string `json:"s"`
+	D *string `json:"d"`
+}
+
+func hexSN(n int) string { return strconv.FormatInt(int64(n), 16) }
+
+// readLog splits the messages into events and reads each one's anchors by the
+// strict rule: an anchor is exactly {i, s, d}, three strings, and only an
+// interaction event carries any.
+func readLog(msgs [][]byte) ([]logEvent, error) {
+	out := make([]logEvent, 0, len(msgs))
+	for n, m := range msgs {
+		raw, err := keri.EventOfMessage(m)
+		if err != nil {
+			return nil, fmt.Errorf("%w: message %d: %v", ErrBadHistory, n, err)
+		}
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%w: message %d: %v", ErrBadHistory, n, err)
+		}
+		le := logEvent{msg: m, raw: raw, ilk: ev.Ilk, sn: int(ev.SN), said: ev.SAID}
+		if ev.SN != uint64(n) {
+			return nil, fmt.Errorf("%w: message %d is at sequence %d", ErrBadHistory, n, ev.SN)
+		}
+		switch ev.Ilk {
+		case "icp", "rot", "ixn":
+		default:
+			return nil, fmt.Errorf("%w: event %d is a %q, which a publisher's history does not hold", ErrBadHistory, n, ev.Ilk)
+		}
+		var body struct {
+			A []json.RawMessage `json:"a"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return nil, fmt.Errorf("%w: event %d: %v", ErrBadHistory, n, err)
+		}
+		if len(body.A) > 0 && ev.Ilk != "ixn" {
+			return nil, fmt.Errorf("%w: event %d (%s) carries anchors, and only an interaction may", ErrForeignSeal, n, ev.Ilk)
+		}
+		for _, a := range body.A {
+			var generic map[string]json.RawMessage
+			var w sealWire
+			if json.Unmarshal(a, &generic) != nil || len(generic) != 3 || json.Unmarshal(a, &w) != nil ||
+				w.I == nil || w.S == nil || w.D == nil || *w.I == "" || *w.D == "" || *w.S == "" {
+				return nil, fmt.Errorf("%w: event %d anchors something that is not an event seal", ErrForeignSeal, n)
+			}
+			le.seals = append(le.seals, seal{*w.I, *w.S, *w.D})
+		}
+		out = append(out, le)
+	}
+	return out, nil
+}
+
+// Verify accepts a list only if every requirement of the package holds. The
+// replies are the witnesses' answers to the question just asked (freshness is
+// a required input, so a caller cannot skip it), now is the time of this
+// decision, and floors are what the device already holds.
+func Verify(b *Bundle, pin Pin, replies []TipReply, floors Floors, now time.Time) (*Result, error) {
+	if err := pin.check(); err != nil {
+		return nil, err
+	}
+	if b == nil || b.Publisher != pin.Publisher || b.Registry != pin.Registry {
+		return nil, ErrWrongPublisher
+	}
+	if len(b.KEL) == 0 {
+		return nil, fmt.Errorf("%w: no key history", ErrMalformed)
+	}
+
+	// 2. The history is genuine.
+	if !bytes.HasPrefix(b.KEL[0], pin.InceptionEvent) {
+		return nil, fmt.Errorf("%w: its inception is not the pinned one", ErrWrongPublisher)
+	}
+	res, err := keri.ValidateSignedKEL(b.KEL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBadHistory, err)
+	}
+	if res.Identifier != pin.Publisher {
+		return nil, ErrWrongPublisher
+	}
+	log, err := readLog(b.KEL)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Witnessed: the identity has witnesses and every event has its threshold
+	// of them. An identity with none is "fully witnessed" to the library, and
+	// would then be vouched for by nobody.
+	for i, w := range res.Witnessing {
+		if len(w.Witnesses) == 0 || w.Threshold < 1 || !w.Met {
+			return nil, fmt.Errorf("%w: event %d", ErrNotWitnessed, i)
+		}
+	}
+
+	// 1. Fresh: where the witnesses say the history ends.
+	last := res.Witnessing[len(res.Witnessing)-1]
+	tip, err := AgreedTip(pin.Publisher, last.Witnesses, int(last.Threshold), replies)
+	if err != nil {
+		return nil, err
+	}
+	have := log[len(log)-1]
+	switch {
+	case have.sn < tip.SN:
+		return nil, fmt.Errorf("%w: it ends at %d and the witnesses hold %d", ErrBehind, have.sn, tip.SN)
+	case have.sn > tip.SN:
+		return nil, fmt.Errorf("%w: it ends at %d and the witnesses hold %d", ErrAhead, have.sn, tip.SN)
+	case have.said != tip.SAID:
+		return nil, &Duplicity{SN: tip.SN, Held: tip.SAID, Offered: have.said, Message: have.msg}
+	}
+
+	// ... and extends what this device already holds.
+	if floors.HasKeyHistory {
+		if floors.KeyHistorySN >= len(log) {
+			return nil, fmt.Errorf("%w: this device has seen it as far as %d", ErrBehind, floors.KeyHistorySN)
+		}
+		if log[floors.KeyHistorySN].said != floors.KeyHistorySAID {
+			return nil, &Duplicity{SN: floors.KeyHistorySN, Held: floors.KeyHistorySAID,
+				Offered: log[floors.KeyHistorySN].said, Message: log[floors.KeyHistorySN].msg}
+		}
+	}
+
+	// 3. The anchor: every TEL event, sealed; every seal, matched.
+	type placed struct {
+		ev  *keri.TELEvent
+		pos int // the KEL event that seals it
+	}
+	sealAt := map[seal]int{}
+	for _, le := range log {
+		for _, s := range le.seals {
+			if _, dup := sealAt[s]; dup {
+				return nil, fmt.Errorf("%w: a seal appears twice", ErrForeignSeal)
+			}
+			sealAt[s] = le.sn
+		}
+	}
+	var events []placed
+	matched := map[seal]bool{}
+	for i, raw := range b.TEL {
+		ev, err := keri.VerifyTELEvent(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%w: event %d: %v", ErrBadTEL, i, err)
+		}
+		s := seal{ev.Subject, hexSN(ev.SN), ev.SAID}
+		pos, ok := sealAt[s]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s event %d", ErrUnsealed, ev.Ilk, i)
+		}
+		if matched[s] {
+			return nil, fmt.Errorf("%w: an event appears twice", ErrBadTEL)
+		}
+		matched[s] = true
+		events = append(events, placed{ev, pos})
+	}
+	for s := range sealAt {
+		if !matched[s] {
+			return nil, fmt.Errorf("%w: a seal for %s at %s", ErrWithheld, s.i, s.s)
+		}
+	}
+
+	// the registry
+	var vcp *placed
+	for i := range events {
+		if events[i].ev.Ilk == "vcp" {
+			if vcp != nil {
+				return nil, fmt.Errorf("%w: more than one registry inception", ErrBadRegistry)
+			}
+			vcp = &events[i]
+		}
+	}
+	if vcp == nil {
+		return nil, fmt.Errorf("%w: no registry inception", ErrBadRegistry)
+	}
+	if vcp.ev.SAID != pin.Registry || vcp.ev.Issuer != pin.Publisher || vcp.ev.SN != 0 ||
+		len(vcp.ev.Traits) != 1 || vcp.ev.Traits[0] != "NB" || len(vcp.ev.Backers) != 0 || vcp.ev.BackerThreshold != "0" {
+		return nil, ErrBadRegistry
+	}
+
+	// each credential's own log, in the order the history sealed it
+	type chain struct{ iss, rev *placed }
+	chains := map[string]*chain{}
+	var order []string
+	for i := range events {
+		ev := &events[i]
+		if ev.ev.Ilk == "vcp" {
+			continue
+		}
+		if ev.ev.Registry != pin.Registry {
+			return nil, fmt.Errorf("%w: an event of another registry", ErrBadTEL)
+		}
+		if ev.pos <= vcp.pos {
+			return nil, fmt.Errorf("%w: an event is sealed before the registry exists", ErrBadTEL)
+		}
+		c := chains[ev.ev.Subject]
+		if c == nil {
+			c = &chain{}
+			chains[ev.ev.Subject] = c
+			order = append(order, ev.ev.Subject)
+		}
+		switch {
+		case ev.ev.Ilk == "iss" && ev.ev.SN == 0 && c.iss == nil:
+			c.iss = ev
+		case ev.ev.Ilk == "rev" && ev.ev.SN == 1 && c.rev == nil:
+			c.rev = ev
+		default:
+			return nil, fmt.Errorf("%w: a credential's log is out of shape", ErrBadTEL)
+		}
+	}
+	creds := map[string]*keri.Credential{}
+	for i, raw := range b.Credentials {
+		c, err := keri.VerifyCredential(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%w: credential %d: %v", ErrBadList, i, err)
+		}
+		if c.Issuer != pin.Publisher || c.SchemaSAID != pin.SchemaSAID || c.Registry != pin.Registry ||
+			c.Recipient != "" || c.Salt != "" || len(c.Edges) != 0 || len(c.Rules) != 0 {
+			return nil, fmt.Errorf("%w: credential %d", ErrBadList, i)
+		}
+		if _, dup := creds[c.SAID]; dup {
+			return nil, fmt.Errorf("%w: a credential appears twice", ErrBadList)
+		}
+		creds[c.SAID] = c
+	}
+
+	// 5, 6. Which list is the newest not withdrawn.
+	var newest *keri.Credential
+	newestPos := -1
+	for _, id := range order {
+		c := chains[id]
+		if c.iss == nil {
+			return nil, fmt.Errorf("%w: a withdrawal with no issuance", ErrBadTEL)
+		}
+		cred, ok := creds[id]
+		if !ok {
+			return nil, fmt.Errorf("%w: the credential for an issuance is not in the bundle", ErrWithheld)
+		}
+		telEvents := [][]byte{c.iss.ev.Raw}
+		if c.rev != nil {
+			if c.rev.pos <= c.iss.pos || c.rev.ev.Prior != c.iss.ev.SAID {
+				return nil, fmt.Errorf("%w: a withdrawal that does not follow its issuance", ErrBadTEL)
+			}
+			telEvents = append(telEvents, c.rev.ev.Raw)
+		}
+		status, err := keri.CredentialStatus(id, telEvents)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBadTEL, err)
+		}
+		if status == keri.StatusRevoked {
+			continue
+		}
+		if c.iss.pos > newestPos {
+			newest, newestPos = cred, c.iss.pos
+		}
+	}
+	for id := range creds {
+		if chains[id] == nil {
+			return nil, fmt.Errorf("%w: a credential no issuance covers", ErrUnsealed)
+		}
+	}
+	if newest == nil {
+		return nil, ErrNoList
+	}
+
+	// 7. The content, held to the rules of a signed list.
+	content, err := measurementlist.ContentOfAttributes(newest.Attributes)
+	if err != nil {
+		return nil, err
+	}
+	list, err := measurementlist.FromContent(content, newest.SAID, measurementlist.Rules{
+		MinSequence: floors.ListSequence, SeenDigest: floors.ListDigest, Now: now})
+	if err != nil {
+		return nil, err
+	}
+	return &Result{List: list, CredentialSAID: newest.SAID, Tip: tip}, nil
+}

@@ -283,42 +283,68 @@ func Verify(raw []byte, p Policy) (*List, error) {
 	}
 
 	// Signed, so now the content is the publisher's. Still held to the rules.
-	if w.Sequence < 1 {
-		return nil, fmt.Errorf("%w: sequence %d", ErrMalformed, w.Sequence)
-	}
-	if w.Sequence < p.MinSequence {
-		return nil, fmt.Errorf("%w: sequence %d, already accepted %d", ErrOldList, w.Sequence, p.MinSequence)
-	}
 	digest := sha256.Sum256(msg)
-	if w.Sequence == p.MinSequence && p.SeenDigest != "" && hex.EncodeToString(digest[:]) != p.SeenDigest {
-		return nil, fmt.Errorf("%w: sequence %d", ErrConflictingList, w.Sequence)
+	return FromContent(Content{Sequence: w.Sequence, PublishedAt: w.PublishedAt, ExpiresAt: w.ExpiresAt, Images: w.Images},
+		hex.EncodeToString(digest[:]), Rules{MinSequence: p.MinSequence, SeenDigest: p.SeenDigest, Now: p.Now})
+}
+
+// Content is what a list says, apart from who vouched for it: the same in a
+// list signed by a pinned key and in a credential anchored in a publisher's key
+// history, so the rules below are written once.
+type Content struct {
+	Sequence    int64                  `json:"sequence"`
+	PublishedAt string                 `json:"published_at"`
+	ExpiresAt   string                 `json:"expires_at"`
+	Images      map[string][]wireEntry `json:"images"`
+}
+
+// Rules are the rules a list's content is held to whoever vouched for it: the
+// highest sequence already accepted, the hash of the list accepted at it, and
+// the time.
+type Rules struct {
+	MinSequence int64
+	SeenDigest  string
+	Now         time.Time
+}
+
+// FromContent holds a list's content to the rules and returns the list only if
+// all of them pass. digest names this exact list for the same-sequence rule.
+func FromContent(c Content, digest string, r Rules) (*List, error) {
+	if c.Sequence < 1 {
+		return nil, fmt.Errorf("%w: sequence %d", ErrMalformed, c.Sequence)
 	}
-	published, err := time.Parse(time.RFC3339, w.PublishedAt)
+	if c.Sequence < r.MinSequence {
+		return nil, fmt.Errorf("%w: sequence %d, already accepted %d", ErrOldList, c.Sequence, r.MinSequence)
+	}
+	if c.Sequence == r.MinSequence && r.SeenDigest != "" && digest != r.SeenDigest {
+		return nil, fmt.Errorf("%w: sequence %d", ErrConflictingList, c.Sequence)
+	}
+	published, err := time.Parse(time.RFC3339, c.PublishedAt)
 	if err != nil {
 		return nil, fmt.Errorf("%w: published_at: %v", ErrMalformed, err)
 	}
-	expires, err := time.Parse(time.RFC3339, w.ExpiresAt)
+	expires, err := time.Parse(time.RFC3339, c.ExpiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("%w: expires_at: %v", ErrMalformed, err)
 	}
 	if !expires.After(published) {
 		return nil, fmt.Errorf("%w: expires_at is not after published_at", ErrMalformed)
 	}
-	if !p.Now.Before(expires) {
+	if !r.Now.Before(expires) {
 		return nil, ErrExpired
 	}
-	if published.After(p.Now) {
+	if published.After(r.Now) {
 		return nil, ErrNotYetPublished
 	}
-	if len(w.Images) == 0 {
+	if len(c.Images) == 0 {
 		return nil, fmt.Errorf("%w: no image kinds", ErrMalformed)
 	}
 
-	out := &List{Sequence: w.Sequence, PublishedAt: published, ExpiresAt: expires, At: p.Now,
-		Digest: hex.EncodeToString(digest[:]),
-		Images: make(map[string][]Entry, len(w.Images))}
+	out := &List{Sequence: c.Sequence, PublishedAt: published, ExpiresAt: expires, At: r.Now,
+		Digest: digest,
+		Images: make(map[string][]Entry, len(c.Images))}
 	seen := map[string]bool{}
-	for kind, entries := range w.Images {
+	for kind, entries := range c.Images {
 		if kind == "" {
 			return nil, fmt.Errorf("%w: an empty image kind", ErrMalformed)
 		}
@@ -402,4 +428,32 @@ func ParseKeyHex(id, h string) (PinnedKey, error) {
 // publishedTestKeys are keys whose private halves are printed in a standard.
 var publishedTestKeys = map[string]string{
 	"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a": "RFC 8032 §7.1 Test 1",
+}
+
+// attributes is a list credential's attribute block: the date the issuer gave
+// it and the content, and nothing else. There is no holder, because a list is a
+// public statement and not something issued to anybody.
+type attributes struct {
+	D           string                 `json:"d"`
+	DT          string                 `json:"dt"`
+	Sequence    int64                  `json:"sequence"`
+	PublishedAt string                 `json:"published_at"`
+	ExpiresAt   string                 `json:"expires_at"`
+	Images      map[string][]wireEntry `json:"images"`
+}
+
+// ContentOfAttributes reads the attribute block of a list credential, by the
+// same strict rules as a list: no unknown field, no repeated key.
+func ContentOfAttributes(raw []byte) (Content, error) {
+	if len(raw) == 0 || len(raw) > MaxListBytes {
+		return Content{}, fmt.Errorf("%w: %d bytes", ErrMalformed, len(raw))
+	}
+	var a attributes
+	if err := strictjson.Decode(raw, &a); err != nil {
+		return Content{}, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	if a.DT == "" {
+		return Content{}, fmt.Errorf("%w: the credential gives no date", ErrMalformed)
+	}
+	return Content{Sequence: a.Sequence, PublishedAt: a.PublishedAt, ExpiresAt: a.ExpiresAt, Images: a.Images}, nil
 }
