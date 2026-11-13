@@ -136,3 +136,15 @@ func (p Pin) check() error {
 	}
 	return nil
 }
+
+// NewBundle assembles a bundle from what a publisher's box holds: the key
+// history as the witnesses serve it (one CESR stream, every event with its
+// signatures and receipts), and the registry's events and the credentials as raw
+// bytes. It checks nothing; Verify does.
+func NewBundle(publisher, registry string, kelStream []byte, tel, credentials [][]byte) (*Bundle, error) {
+	msgs, err := keri.ParseKELStream(kelStream)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the key history: %v", ErrMalformed, err)
+	}
+	return &Bundle{Version: BundleVersion, Publisher: publisher, Registry: registry, KEL: msgs, TEL: tel, Credentials: credentials}, nil
+}

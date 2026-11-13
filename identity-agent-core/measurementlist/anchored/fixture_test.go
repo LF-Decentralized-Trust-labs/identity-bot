@@ -335,3 +335,5 @@ func tipAt(p *publisher, n int) Tip {
 	}
 	return Tip{SN: int(ev.SN), SAID: ev.SAID}
 }
+
+func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
