@@ -111,6 +111,22 @@ func readLog(msgs [][]byte, registry string) ([]logEvent, error) {
 // a required input, so a caller cannot skip it), now is the time of this
 // decision, and floors are what the device already holds.
 func Verify(b *Bundle, pin Pin, replies []TipReply, floors Floors, now time.Time) (*Result, error) {
+	return VerifyAsking(b, pin, func(string, []string, int) ([]TipReply, error) { return replies, nil }, floors, now)
+}
+
+// Asker asks the publisher's designated witnesses for their tip, now, and
+// returns what came back. It is told whom to ask by the key history Verify has
+// just validated, so the question cannot go to witnesses the history does not
+// name. Each question must carry a fresh random nonce (Resolver does).
+type Asker func(aid string, designated []string, threshold int) ([]TipReply, error)
+
+// VerifyAsking is Verify for a caller that has no answers yet: freshness is
+// still required, and the witnesses are asked only once the history has been
+// found genuine, with the witnesses that history designates.
+func VerifyAsking(b *Bundle, pin Pin, ask Asker, floors Floors, now time.Time) (*Result, error) {
+	if ask == nil {
+		return nil, fmt.Errorf("%w: nobody to ask", ErrNotFresh)
+	}
 	if err := pin.check(); err != nil {
 		return nil, err
 	}
@@ -148,6 +164,10 @@ func Verify(b *Bundle, pin Pin, replies []TipReply, floors Floors, now time.Time
 
 	// 1. Fresh: where the witnesses say the history ends.
 	last := res.Witnessing[len(res.Witnessing)-1]
+	replies, err := ask(pin.Publisher, last.Witnesses, int(last.Threshold))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNotFresh, err)
+	}
 	tip, err := AgreedTip(pin.Publisher, last.Witnesses, int(last.Threshold), replies)
 	if err != nil {
 		return nil, err

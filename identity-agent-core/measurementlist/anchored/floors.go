@@ -101,6 +101,12 @@ type Checker struct {
 
 // Check verifies b against the witnesses' answers and the kept floors.
 func (c *Checker) Check(b *Bundle, replies []TipReply, now time.Time) (*Result, error) {
+	return c.CheckAsking(b, func(string, []string, int) ([]TipReply, error) { return replies, nil }, now)
+}
+
+// CheckAsking is Check that asks the witnesses itself, once the history is
+// known to be genuine (VerifyAsking).
+func (c *Checker) CheckAsking(b *Bundle, ask Asker, now time.Time) (*Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	held, err := c.Store.Load()
@@ -111,7 +117,7 @@ func (c *Checker) Check(b *Bundle, replies []TipReply, now time.Time) (*Result, 
 	if err != nil {
 		return nil, err
 	}
-	res, err := Verify(b, c.Pin, replies, floors, now)
+	res, err := VerifyAsking(b, c.Pin, ask, floors, now)
 	if err != nil {
 		return nil, err
 	}

@@ -397,6 +397,52 @@ func (s *Service) askTip(ctx context.Context, w witnessTarget, key, aid string) 
 	return heldTipOf(aid, key, nonce, answer)
 }
 
+// AskedTip is a witness's signed answer with the nonce it was asked with.
+type AskedTip struct {
+	Nonce  string
+	Answer TipAnswer
+}
+
+// AskTips asks each designated witness this agent can reach for its signed tip
+// of aid's key log, each with a nonce of its own that is made here, from the
+// system's random source, for this one question and never kept or reused. It
+// returns what came back and checks nothing: whoever decides on the answers
+// (anchored.AgreedTip) checks the nonce, the witness's key and the signature.
+// A witness it cannot reach, or does not know, is left out.
+func (s *Service) AskTips(ctx context.Context, aid string, designated []string) []AskedTip {
+	known := s.designatedTargets(designated)
+	var out []AskedTip
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, key := range designated {
+		w, ok := known[key]
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(w witnessTarget) {
+			defer wg.Done()
+			b := make([]byte, 16)
+			if _, err := rand.Read(b); err != nil {
+				return
+			}
+			nonce := base64.RawURLEncoding.EncodeToString(b)
+			cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid + "/tip?nonce=" + nonce
+			answer, err := s.FetchTip(cctx, url)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			out = append(out, AskedTip{Nonce: nonce, Answer: answer})
+			mu.Unlock()
+		}(w)
+	}
+	wg.Wait()
+	return out
+}
+
 // heldTipOf checks a witness's answer: for this identity, with this nonce,
 // signed by the witness asked.
 func heldTipOf(aid, witnessKey, nonce string, a TipAnswer) (HeldTip, bool) {
