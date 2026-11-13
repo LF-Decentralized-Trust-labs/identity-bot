@@ -101,7 +101,7 @@ func Merge(a, b Floors) (Floors, error) {
 type Checker struct {
 	Pin      Pin
 	Store    FloorStore
-	Snapshot Floors // what the build was shipped with; the floors never fall below it
+	Snapshot Floors // optional floors a caller starts from; the floors never fall below it (the server gives none)
 	// Peers, if set, asks the person's peer watchers for the publisher's tip too.
 	Peers PeerAsker
 	mu    sync.Mutex
