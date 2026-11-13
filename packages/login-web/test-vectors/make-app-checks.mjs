@@ -36,12 +36,16 @@ export async function make() {
   const NOW = Date.parse("2026-11-11T12:00:00Z");
 
   const SEAL = "c2VhbA";
+  const MIN = "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl";
   const links = [
-    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL } },
-    { name: "no sealing key", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example`, refuse: "no sealing key" },
-    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example&seal=${SEAL}`, refuse: "no relay identifier" },
-    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=${SEAL}`, refuse: "no back end" },
-    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=${SEAL}`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9", seal: SEAL } },
+    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}&min=${MIN}`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL, min: MIN } },
+    { name: "no sealing key", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${MIN}`, refuse: "no sealing key" },
+    { name: "no latest key log event", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}`, refuse: "no latest key log event" },
+    { name: "a latest key log event with no sequence number", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=${MIN.slice(2)}`, refuse: "no latest key log event" },
+    { name: "a latest key log event with a sequence number that is not plain", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=01.${MIN.slice(2)}`, refuse: "no latest key log event" },
+    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example&seal=${SEAL}&min=${MIN}`, refuse: "no relay identifier" },
+    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=${SEAL}&min=${MIN}`, refuse: "no back end" },
+    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=${SEAL}&min=${MIN}`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9", seal: SEAL, min: MIN } },
   ];
 
   const keyLogs = [];

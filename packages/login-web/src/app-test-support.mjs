@@ -34,6 +34,12 @@ export function sealStatement(relay, pub, over = {}) {
   return b64u(JSON.stringify({ log: over.log ?? relay.log(), key: b64u(pub), sn, sig: b64u((over.signer ?? relay).sign(sealKeyStatementText(relay.aid, pub, sn))) }));
 }
 
+/** The link's `min` for a relay identifier: its latest event as `<sequence number>.<SAID>`
+ *  (the first `n` events when given), as the owner's Identity Agent writes it. */
+export function minimum(relay, n = relay.events.length) {
+  return `${n - 1}.${relay.events[n - 1].said}`;
+}
+
 export async function sealing(relay, origin = "https://tasks.example") {
   const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
   const pub = new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey));
@@ -52,7 +58,7 @@ export async function sealing(relay, origin = "https://tasks.example") {
       log: r.headers.get("x-keri-app-answer-log"), sig: r.headers.get("x-keri-app-answer-sig") });
     return new Response(await reply.seal(enc.encode(answer)), { status: 200, headers: { "content-type": "application/json" } });
   };
-  return { pair, statement, wrap, seen };
+  return { pair, statement, min: minimum(relay), wrap, seen };
 }
 
 // ---- a relay identifier's key log, made the way a core makes one ----------

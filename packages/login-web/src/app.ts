@@ -51,17 +51,29 @@ export interface AppLink {
   api: string;
   /** The back end's sealing key, vouched for by the relay identifier (`checkSealKey`). */
   seal: string;
+  /** The latest event of the relay identifier's key log the owner's Identity Agent has
+   *  seen, as `<sequence number>.<SAID>`: a log the page is shown must hold that event at
+   *  that number (`checkSealKey`), so a page that has seen nothing before is not handed an
+   *  earlier log. */
+  min: string;
 }
 
-/** Reads `#aid=…&kel=…&rid=…&api=…&seal=…`, the fragment a link to the page carries.
+/** `<sequence number>.<SAID>`, or null when `min` is not that. */
+export function readMinimum(min: unknown): { sn: number; said: string } | null {
+  const m = typeof min === "string" ? /^(0|[1-9][0-9]{0,2})\.([A-Za-z0-9_-]{20,100})$/.exec(min) : null;
+  return m ? { sn: Number(m[1]), said: m[2] } : null;
+}
+
+/** Reads `#aid=…&kel=…&rid=…&api=…&seal=…&min=…`, the fragment a link to the page carries.
  *  A fragment is sent to no server. Throws, saying why, when the link is not
  *  one a page can act on. */
 export function readAppLink(hash: string): AppLink {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
-  const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, ""), seal: p.get("seal") ?? "" };
+  const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, ""), seal: p.get("seal") ?? "", min: p.get("min") ?? "" };
   if (!link.aid || !link.kel) throw new Error("the link names no app and key log");
   if (!link.rid) throw new Error("the link names no relay identifier to check the app's answers against");
   if (!link.seal) throw new Error("the link names no sealing key to seal calls to the app with");
+  if (!readMinimum(link.min)) throw new Error("the link names no latest key log event the app's relay identifier must have reached");
   if (!/^https:\/\//.test(link.api) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(link.api)) {
     throw new Error("the link names no back end to sign in at");
   }
@@ -364,7 +376,7 @@ export interface AnswerCheck {
  *  `known`, the longest this page already holds for `rid`. Refuses (through `fail`) a log
  *  that does not carry on from the one held, which is how a key the log has since left is
  *  kept from being believed again. The one rule for an answer and a sealing key alike. */
-async function holdLog(rid: string, got: CheckedLog, text: string, known: string | null | undefined, fail: (why: string) => never): Promise<string> {
+async function holdLog(rid: string, got: CheckedLog, text: string, known: string | null | undefined, fail: (why: string) => never, floored = false): Promise<string> {
   if (!known) return text;
   let held: CheckedLog | undefined;
   try {
@@ -372,7 +384,11 @@ async function holdLog(rid: string, got: CheckedLog, text: string, known: string
       throw new Error(why);
     });
   } catch {
-    return text; // what was kept is unreadable: it is no memory, and not something an app can write
+    // What was kept is unreadable. Where the link gave a minimum (`floored`) the log shown
+    // is held to that, and replaces it; with none, refusing is the only way not to take the
+    // first log offered as if this page had never seen one.
+    if (floored) return text;
+    return fail("what this page kept of the app's key log cannot be read, and the link gives nothing to hold the log to");
   }
   if (!logExtends(got.events, held.events)) fail("its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away");
   return held.events.length === got.events.length ? known : text;
@@ -406,8 +422,10 @@ export async function checkAppAnswer(a: AnswerCheck): Promise<{ log: string }> {
  *  identifier `rid`'s own, from its inception, and carries on from the longest this page
  *  already holds (`known`); and the signature is the key that log names NOW, at its last
  *  event. So a key the identifier has rotated away from vouches for nothing, and a
- *  statement made at an earlier event is not taken for a later one. */
-export async function checkSealKey(rid: string, encoded: string, known?: string | null): Promise<{ key: Uint8Array; log: string }> {
+ *  statement made at an earlier event is not taken for a later one. `min` is the link's
+ *  latest event the Identity Agent has seen (`readMinimum`): the log must hold it, at that
+ *  sequence number, so a page with no memory still takes no log shorter than it. */
+export async function checkSealKey(rid: string, encoded: string, known?: string | null, min?: string | null): Promise<{ key: Uint8Array; log: string }> {
   const fail = (why: string): never => {
     throw new Error("the link's sealing key is refused: " + why);
   };
@@ -426,14 +444,17 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
   if (key!.length !== 65 || key![0] !== 4) fail("the key is not an uncompressed P-256 point");
   const got = await readAnswerLog(rid, st.log as string, (why): never => fail("its key log is refused: " + why));
   if (st.sn !== got.events.length - 1) fail("it is made at a sequence number other than its key log's last");
-  const keep = await holdLog(rid, got, st.log as string, known, fail);
+  const floor = min == null ? null : readMinimum(min);
+  if (min != null && !floor) fail("the link's latest key log event is not spelled one way");
+  if (floor && got.events[floor.sn]?.said !== floor.said) fail("its key log does not reach the latest event your Identity Agent has seen for the app's relay identifier: it may be an earlier log, from before a key was rotated away");
+  const keep = await holdLog(rid, got, st.log as string, known, fail, !!floor);
   if (!(await verifyEd25519(sig!, sealKeyStatementText(rid, key!, st.sn as number), got.key))) fail("the relay identifier's current key did not sign this key");
   return { key: key!, log: keep };
 }
 
 /** The link's sealing key, checked against the log this page holds, which is then the longer. */
-async function checkedSealKey(link: Pick<AppLink, "rid" | "seal">, logs: LogMemory): Promise<{ key: Uint8Array; log: string }> {
-  const r = await checkSealKey(link.rid, link.seal, logs.get(link.rid));
+async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min">, logs: LogMemory): Promise<{ key: Uint8Array; log: string }> {
+  const r = await checkSealKey(link.rid, link.seal, logs.get(link.rid), link.min);
   logs.set(link.rid, r.log);
   return r;
 }

@@ -8,7 +8,7 @@ import { b64u, enc, identity, logMemory, relayChain, sealing } from "./app-test-
 
 const app = identity(), relay = relayChain("relay");
 const sl = await sealing(relay);
-const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${sl.statement}`);
+const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${sl.statement}&min=${sl.min}`);
 const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
 const jwk = { kty: "EC", crv: "P-256", x: b64u(new Uint8Array(32).fill(1)), y: b64u(new Uint8Array(32).fill(2)) };
 const mine = { privateKey: pair.privateKey, jwk, thumbprint: browserKeyThumbprint(jwk) };
@@ -91,7 +91,7 @@ for (const [name, f, re] of [
   const other = relayChain("other");
   const o = await sealing(other);
   assert.throws(() => readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example`), /no sealing key/);
-  const crafted = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${o.statement}`);
+  const crafted = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${o.statement}&min=${o.min}`);
   const c = appSession(crafted, { storage: { getItem: () => "t", setItem() {}, removeItem() {} }, fetchFn: o.wrap(backEnd), browserKey: async () => mine, logs: logMemory() });
   await assert.rejects(c.call("GET", "/session/x"), /sealing key is refused/, "a sealing key from another identifier");
 }

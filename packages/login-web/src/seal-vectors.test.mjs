@@ -29,8 +29,12 @@ assert.deepEqual((await checkSealKey(v.rid, v.seal_key.statement)).key, spk);
 assert.equal((await checkSealKey(v.rid, v.seal_key.statement)).log, v.relay_log, "the log to remember is the statement's");
 // and the page keeps the longest log it has seen: a statement is read against it, and a longer one is taken
 assert.equal((await checkSealKey(v.rid, v.seal_key.statement, v.relay_log)).log, v.relay_log);
+// and one that holds the link's latest event is taken, with a page that has seen nothing, or with a corrupt memory
+assert.equal((await checkSealKey(v.rid, v.seal_key.statement, null, v.seal_key.min)).log, v.relay_log);
+assert.equal((await checkSealKey(v.rid, v.seal_key.statement, "!!", v.seal_key.min)).log, v.relay_log, "an unreadable memory is replaced where the link gives a minimum");
+await assert.rejects(checkSealKey(v.rid, v.seal_key.statement, "!!"), /cannot be read/, "an unreadable memory with no minimum is not taken for none");
 for (const c of v.statement_refusals) {
-  await assert.rejects(checkSealKey(c.rid, c.statement, c.known_log), (e) => /sealing key is refused/.test(e.message), "a statement: " + c.name);
+  await assert.rejects(checkSealKey(c.rid, c.statement, c.known_log, c.min), (e) => /sealing key is refused/.test(e.message), "a statement: " + c.name);
 }
 
 for (const c of v.requests) {
