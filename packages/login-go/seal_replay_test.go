@@ -89,3 +89,18 @@ func TestTwoAnswersToOneCallAreSealedUnderDifferentKeys(t *testing.T) {
 		t.Fatal("an answer with another answer's n opened")
 	}
 }
+
+// A padded message that declares more content than SealMax is refused even when
+// its size is exactly the bucket that content would need and the rest is zeros.
+func TestAMessageDeclaringMoreThanTheMostIsRefused(t *testing.T) {
+	n := SealMax + 1
+	want := SealBucket
+	for want < n+4 {
+		want *= 2
+	}
+	p := make([]byte, want)
+	p[0], p[1], p[2], p[3] = byte(n>>24), byte(n>>16), byte(n>>8), byte(n)
+	if _, err := unpad(p); err == nil {
+		t.Fatal("a message declaring more than SealMax was accepted")
+	}
+}
