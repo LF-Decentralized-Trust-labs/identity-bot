@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 )
@@ -39,6 +40,7 @@ func TestAnInstalledAppsKeyIsAttestedOnlyWhenTheHardwareGeneratedAndLimitsItToSi
 			s := chainSpec{level: attestStrongBox, challenge: ch, purposes: []int{kmPurposeSign}, noAuth: true,
 				created: now.Add(-time.Hour), leafKey: &ec.PublicKey, noOAEP: true, rootOfTrust: true}
 			c.mod(&s)
+			aProductionCoreOffline(t)
 			chain, root := builtChain(t, s)
 			f, err := verifyInstalledAppKeyAttestation(chain, []byte(ch), now, [][sha256.Size]byte{root})
 			if c.fail {
@@ -54,6 +56,69 @@ func TestAnInstalledAppsKeyIsAttestedOnlyWhenTheHardwareGeneratedAndLimitsItToSi
 				t.Fatal("not the attested key")
 			}
 		})
+	}
+}
+
+// aProductionCoreOffline is a production core with no network and the committed
+// copy of Google's list kept in its data directory, an hour old: what a phone
+// that fetched the list earlier holds. No test reaches Google's server.
+func aProductionCoreOffline(t *testing.T, extra ...string) {
+	t.Helper()
+	googleIsUnreachable(t)
+	aCopyKeptFor(t, time.Hour, statusListJSON(extra...))
+	prev := isDevBuild
+	isDevBuild = func() bool { return false }
+	t.Cleanup(func() { isDevBuild = prev })
+}
+
+func anInstalledAppsStrongBoxChain(t *testing.T) (chain []byte, root [sha256.Size]byte, now time.Time) {
+	t.Helper()
+	ec, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	now = time.Now()
+	chain, root = builtChain(t, chainSpec{level: attestStrongBox, challenge: "the core's challenge", purposes: []int{kmPurposeSign},
+		noAuth: true, created: now.Add(-time.Hour), leafKey: &ec.PublicKey, noOAEP: true, rootOfTrust: true})
+	return chain, root, now
+}
+
+// A certificate Google has listed refuses the installed app's key, whichever
+// certificate in the chain it is.
+func TestAnInstalledAppsKeyWithARevokedCertificateIsRefused(t *testing.T) {
+	for _, serial := range []string{serialRoot, serialIntermediate, serialLeaf} {
+		t.Run("serial "+serial, func(t *testing.T) {
+			aProductionCoreOffline(t, serial, "REVOKED")
+			chain, root, now := anInstalledAppsStrongBoxChain(t)
+			_, err := verifyInstalledAppKeyAttestation(chain, []byte("the core's challenge"), now, [][sha256.Size]byte{root})
+			if !errors.Is(err, ErrAttestationRevoked) {
+				t.Fatalf("not refused as revoked: %v", err)
+			}
+		})
+	}
+}
+
+// With no list to be had, a production build does not trust the key.
+func TestAnInstalledAppsKeyIsRefusedInProductionWhenNoListIsAvailable(t *testing.T) {
+	googleIsUnreachable(t) // nothing kept either
+	prev := isDevBuild
+	isDevBuild = func() bool { return false }
+	t.Cleanup(func() { isDevBuild = prev })
+	chain, root, now := anInstalledAppsStrongBoxChain(t)
+	_, err := verifyInstalledAppKeyAttestation(chain, []byte("the core's challenge"), now, [][sha256.Size]byte{root})
+	if !errors.Is(err, ErrNoStatusList) {
+		t.Fatalf("not refused for want of the list: %v", err)
+	}
+}
+
+// A kept copy older than seven days is no list at all.
+func TestAnInstalledAppsKeyIsRefusedInProductionWhenTheKeptListIsStale(t *testing.T) {
+	googleIsUnreachable(t)
+	aCopyKeptFor(t, 8*24*time.Hour, statusListJSON())
+	prev := isDevBuild
+	isDevBuild = func() bool { return false }
+	t.Cleanup(func() { isDevBuild = prev })
+	chain, root, now := anInstalledAppsStrongBoxChain(t)
+	_, err := verifyInstalledAppKeyAttestation(chain, []byte("the core's challenge"), now, [][sha256.Size]byte{root})
+	if !errors.Is(err, ErrNoStatusList) {
+		t.Fatalf("not refused for want of a young enough list: %v", err)
 	}
 }
 
