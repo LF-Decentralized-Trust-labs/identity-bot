@@ -6,9 +6,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+
 	"identity-agent-core/drivers"
+	"identity-agent-core/store"
 	"identity-agent-core/witness"
 )
 
@@ -71,6 +76,10 @@ func TestAPageReadsAWitnessedLogAcrossOrigins(t *testing.T) {
 	if res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatalf("a page was not given the log it presented the inception of: %d %v", res.StatusCode, res.Header)
 	}
+	// What it says depends on the proof presented, so no cache may keep it for another asker.
+	if res.Header.Get("Cache-Control") != "no-store" || !strings.Contains(strings.Join(res.Header.Values("Vary"), ","), witness.HeaderInception) {
+		t.Fatalf("a read that depends on the inception was not marked so: %v", res.Header)
+	}
 	var ans struct {
 		KEL []struct {
 			Raw      string `json:"raw_bytes_b64"`
@@ -99,5 +108,42 @@ func TestAPageReadsAWitnessedLogAcrossOrigins(t *testing.T) {
 			!bytes.Equal(b, unheld) {
 			t.Fatalf("a read with %s inception was told more than a read of a log not held: %d %s", name, res.StatusCode, b)
 		}
+	}
+}
+
+// Pages read through the URL relay, which reaches this agent from its own
+// address: each is counted as the visitor the relay names, so one page's reads
+// cannot use up the allowance of every page behind the relay.
+func TestPagesBehindTheRelayAreCountedApart(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(s.DataStore.(*store.SQLiteStore).DB()), s.DataStore, nil, witness.BackendDesktop)
+	from := func(visitor string) int {
+		r := httptest.NewRequest("GET", "/api/witness/kel/ENotHeldAtAllxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", nil)
+		r = r.WithContext(relayproto.ContextWithPreamble(r.Context(), relayproto.Preamble{Visitor: visitor}))
+		w := httptest.NewRecorder()
+		s.witnessReadAllowed(w, r, "ENotHeldAtAllxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		return w.Code
+	}
+	for i := 0; i < 120; i++ {
+		if code := from("203.0.113.7:4000"); code != http.StatusNotFound {
+			t.Fatalf("read %d of one visitor: %d", i, code)
+		}
+	}
+	if code := from("203.0.113.7:4001"); code != http.StatusTooManyRequests {
+		t.Fatalf("a visitor past its allowance was not limited: %d", code)
+	}
+	if code := from("198.51.100.9:5000"); code != http.StatusNotFound {
+		t.Fatalf("another visitor behind the same relay was limited by the first: %d", code)
+	}
+	// The tip is counted the same way.
+	tip := func(visitor string) int {
+		r := httptest.NewRequest("GET", "/api/witness/kel/EX/tip?nonce=n", nil)
+		r = r.WithContext(relayproto.ContextWithPreamble(r.Context(), relayproto.Preamble{Visitor: visitor}))
+		w := httptest.NewRecorder()
+		s.handleWitnessKelTip(w, r)
+		return w.Code
+	}
+	if code := tip("203.0.113.7:4002"); code != http.StatusTooManyRequests {
+		t.Fatalf("a tip from a visitor past its allowance was not limited: %d", code)
 	}
 }

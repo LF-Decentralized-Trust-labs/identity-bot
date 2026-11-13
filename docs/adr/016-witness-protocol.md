@@ -159,7 +159,7 @@ delegator approves exactly that inception, and only once the inception's own sig
 holds. It witnesses the delegate only while it still witnesses the delegator: when it
 stops, by withdrawal or otherwise, it stops witnessing the delegates too. The operator can
 switch delegate witnessing off (`witness.delegates` = `off`) or cap how many delegates one
-delegator may have witnessed (`witness.delegates_max`). A request that does not ask covers
+delegator may have witnessed (`witness.delegates_max`; 1024 when none is set). A request that does not ask covers
 no delegate.
 
 The request route is open, so the signature is the gate. The request carries a `request_id`, a `stamp`

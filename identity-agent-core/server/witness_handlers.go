@@ -144,6 +144,14 @@ func (s *CoreServer) handleWitnessCover(w http.ResponseWriter, r *http.Request) 
 // witnessed by the owner's contacts and is never published at /{aid}/kel
 // (errNotPublishable).
 
+// answerOnlyToThisAsker marks an answer that depends on who asked (a read that
+// presents the inception is answered to a page, and to nobody else) as not to be
+// kept by a cache and shared.
+func answerOnlyToThisAsker(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Add("Vary", witness.HeaderInception)
+}
+
 // notHeld is the one answer to a read of a log that is not held, or that the
 // asker may not see.
 func notHeld(w http.ResponseWriter) {
@@ -198,7 +206,8 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "a nonce is required", "")
 		return
 	}
-	if !s.witnessReadLimiter().allow(clientIP(r)) {
+	answerOnlyToThisAsker(w)
+	if !s.witnessReadLimiter().allow(callerKey(r)) {
 		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
 		return
 	}
@@ -623,8 +632,14 @@ func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Reques
 
 // witnessReadAllowed rate limits a read of a key log and answers an asker who
 // may not read it as for a log not held. It reports whether to go on.
+//
+// A read is counted by callerKey, not clientIP: a page reads through the URL
+// relay, which would make every page behind it one caller of 120 a minute. What
+// the answer is depends on a header (the inception that lets a page read it), so
+// it is never kept by a cache and says it varies on it.
 func (s *CoreServer) witnessReadAllowed(w http.ResponseWriter, r *http.Request, aid string) bool {
-	if !s.witnessReadLimiter().allow(clientIP(r)) {
+	answerOnlyToThisAsker(w)
+	if !s.witnessReadLimiter().allow(callerKey(r)) {
 		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
 		return false
 	}

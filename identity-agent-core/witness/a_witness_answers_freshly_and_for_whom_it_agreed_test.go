@@ -579,3 +579,22 @@ func TestAWitnessThatFellBehindIsBelieved(t *testing.T) {
 		t.Fatalf("a witness saying it holds less is taken to hold %d", got)
 	}
 }
+
+// With the operator's cap unset an owner still has a bound: DefaultDelegatesMax.
+func TestWithNoCapSetAnOwnerStillHasABound(t *testing.T) {
+	for _, c := range []struct {
+		held     int
+		accepted bool
+	}{{DefaultDelegatesMax - 1, true}, {DefaultDelegatesMax, false}} {
+		d := newDelegation(t)
+		d.approved(t)
+		held := map[string]string{}
+		for i := 0; i < c.held; i++ {
+			held[fmt.Sprintf("EHeldDelegate%d", i)] = d.org
+		}
+		d.w.saveDelegateMap(held)
+		if got := d.w.delegatesAccepted(d.org); got != c.accepted {
+			t.Fatalf("with %d held and no cap set: accepted=%v, want %v", c.held, got, c.accepted)
+		}
+	}
+}

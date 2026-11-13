@@ -2417,9 +2417,16 @@ func (s *Service) alreadyHeld(signerAID string, seq int, said string) (map[strin
 }
 
 // The operator's settings for witnessing the identities an identity this
-// agent witnesses for has delegated: on by default; "off" stops it, and a
-// number caps how many one delegator may have witnessed.
+// agent witnesses for has delegated (or declared its own, cover.go): on by
+// default; "off" stops it, and a number caps how many one delegator may have
+// witnessed, DefaultDelegatesMax when there is none set.
 const (
+	// DefaultDelegatesMax is how many identifiers one owner may have witnessed
+	// when the operator has set no number: an owner makes one per utility app
+	// and per machine of its own, so it is generous, and it is finite because an
+	// owner an unbounded number of logs are held for is a disk to fill.
+	DefaultDelegatesMax = 1024
+
 	ConfigDelegates    = "witness.delegates"
 	ConfigDelegatesMax = "witness.delegates_max"
 	configDelegateOf   = "witness.delegate_of"
@@ -2507,7 +2514,7 @@ func (s *Service) delegatesAccepted(delegator string) bool {
 	v, _ := s.Store.GetConfig(ConfigDelegatesMax)
 	max, err := strconv.Atoi(strings.TrimSpace(v))
 	if v == "" || err != nil || max < 0 {
-		return true
+		max = DefaultDelegatesMax
 	}
 	n := 0
 	for _, d := range s.delegateMap() {
