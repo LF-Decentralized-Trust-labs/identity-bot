@@ -194,9 +194,12 @@ export async function make() {
   const chainCutAdd = badRot("cut-add", { br: [W[0].aid], ba: [W[0].aid] });
   // a rotation (signed by the owner) that cuts every witness the identifier had
   const chainCutAll = relayChain("witnessed-cut-all", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { br: [W[0].aid, W[1].aid, W[2].aid], bt: "0" } } });
+  // the real log's answer with a rotation the controller did not sign, which cuts every witness
+  const forgedCutAll = () => { const a = ans(W[2], 2); const forged = JSON.stringify({ ...JSON.parse(Buffer.from(a.kel[1].raw_bytes_b64, "base64").toString()), br: [W[0].aid, W[1].aid, W[2].aid] }); return { ...a, kel: a.kel.map((e, i) => (i === 1 ? { ...e, raw_bytes_b64: Buffer.from(forged).toString("base64") } : e)) }; };
   const threeReceipts = (chain) => [ans(W[0], 0, 2, chain), ans(W[1], 1, 2, chain), ans(W[2], 2, 2, chain)];
   // an answer whose bytes for its first event are not base64 at all
   const unreadable = (a) => ({ ...a, kel: a.kel.map((e, i) => (i === 0 ? { ...e, raw_bytes_b64: "!!!!" } : e)) });
+  const newline = (a) => ({ ...a, kel: a.kel.map((e, i) => (i === 0 ? { ...e, raw_bytes_b64: e.raw_bytes_b64.slice(0, 8) + "\n" + e.raw_bytes_b64.slice(8) } : e)) });
   // the older receipts: a `0B` signature over each event's SAID
   const legacy = (w) => witnessAnswer(chainW, 2, (i, e) => [w.legacyReceipt(e.said)]);
   const witnessed = {
@@ -222,9 +225,11 @@ export async function make() {
       case_("a rotation that cuts a witness the identifier does not have", threeReceipts(chainCutStranger), null, { rid: chainCutStranger.aid }),
       case_("a rotation that adds a witness the identifier already has", threeReceipts(chainAddHeld), null, { rid: chainAddHeld.aid }),
       case_("a rotation that cuts and adds the same witness", threeReceipts(chainCutAdd), null, { rid: chainCutAdd.aid }),
+      case_("a rotation that cuts every witness, in an answer its controller did not sign, is skipped and not a refusal", [ans(W[0], 0), ans(W[1], 1), forgedCutAll()], 2),
       case_("a rotation that cuts every witness the identifier had", threeReceipts(chainCutAll), null, { rid: chainCutAll.aid, proven: true }),
       case_("receipts in the older form, over the digest, from a threshold of witnesses", [legacy(W[0]), legacy(W[1])], null),
       case_("an answer whose bytes are not base64 does not hold the others back", [ans(W[0], 0), ans(W[1], 1), unreadable(ans(W[2], 2))], 2),
+      case_("an answer whose base64 has a newline in it does not hold the others back", [ans(W[0], 0), ans(W[1], 1), newline(ans(W[2], 2))], 2),
       case_("the one answer there is has bytes that are not base64", [unreadable(ans(W[0], 0))], null),
       case_("an identifier whose inception names no witnesses", [witnessAnswer(plain, 2)], null, { rid: plain.aid }),
     ],

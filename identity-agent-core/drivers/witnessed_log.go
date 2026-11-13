@@ -3,6 +3,7 @@ package drivers
 import (
 	"encoding/base64"
 	"errors"
+	"strings"
 	"unicode/utf8"
 
 	keri "github.com/grapeid/keri-go"
@@ -92,7 +93,8 @@ func ReadWitnessedLog(rid string, answers []WitnessAnswer) (*WitnessedLog, error
 		readable := true
 		for _, e := range a.KEL {
 			raw, err := base64.StdEncoding.Strict().DecodeString(e.Raw)
-			if err != nil || len(e.Sig) != 88 || !utf8.Valid(raw) {
+			// Strict still skips a newline; the page readers refuse any byte outside the alphabet.
+			if err != nil || strings.ContainsAny(e.Raw, "\r\n") || len(e.Sig) != 88 || !utf8.Valid(raw) {
 				readable = false
 				break
 			}

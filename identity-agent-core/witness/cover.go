@@ -99,10 +99,6 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
 		return fmt.Errorf("not_covered: the declaration is not fresh")
 	}
-	// One declaration of an identifier at a time, and not while its events are being judged.
-	mu := s.receivingLock(req.AID)
-	mu.Lock()
-	defer mu.Unlock()
 	// The cheap checks first, so a stranger spends this witness's work on a
 	// signature and nothing more: the first event is the identifier's inception,
 	// and the owner, which this witness witnesses for, signed the declaration.
@@ -131,6 +127,11 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	if !signedByKey(keys[0], statement, req.AIDSignature) {
 		return fmt.Errorf("not_covered: the identifier did not sign the declaration")
 	}
+	// Taken only once the declaration has proved itself, so a stranger cannot stall the
+	// receiving of others' events on an identifier it chose: one declaration of an identifier at a time, and not while its events are being judged.
+	mu := s.receivingLock(req.AID)
+	mu.Lock()
+	defer mu.Unlock()
 	// An identifier already held is held under whoever it is held under: a
 	// declaration cannot take it from them, nor take a contact this witness
 	// already witnesses for (a root identifier's inception is public too), and it

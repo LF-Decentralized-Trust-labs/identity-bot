@@ -1824,6 +1824,88 @@
         "refuse": true
       },
       {
+        "name": "a rotation that cuts every witness, in an answer its controller did not sign, is skipped and not a refusal",
+        "rid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+        "answers": [
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+                    "cesr_signature": "AACCsulKBrfX3ipujUuYmrq62uT8Z3t-oH4buSfCPPlLKUKkNnOa12nEdBFLMIpG7VgiMCnfzpCkRZtu2fRyI14N"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+                    "cesr_signature": "AAB_MowYBRJJsd8weoUW75yXzvekGNDe-ST8xD-DM6E_FrDS80VRJ83jkcLA-C_qOJhswWXTDCQKCjijBiR5XzAI"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "ABD7aDiwCTuSypOQcejXt6SE8Sn5pzirsQkbjHgfE1W2BrRcHdoS6hchm1gRyBAp8vLvEoRpS3OdfprXIPmdoykO"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "ABB0IesIWXVZS7Ibfuxt4VEsa9dm8KTP8sjgZJnB5TlLp9yDLRGjbRO-TKEr1tQzK3GGk5RrNd1peB7lDu1fzlUJ"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BEQ85vX3B1XHWkofFQSkIjenHOb3x6MgqFXeBOfCSa_T",
+                    "cesr_signature": "ACCk1B7Jo73dA0j9RXdJJx_X_M-2Ni-2HuNUoukbdIKFz4KNL3-uBjjszpBNlWPuOLhH1j7MJ6BKX_qzcst6GMsJ"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOlsiQkVSZ0JYM1BLOE5nc3k0Nm9uZUJaOThPb2U1QTJib0pPOVZiN18zbi1GTW4iLCJCSjdKSlZkYld5Tm4zRE1kTnJGaENZeG9xMVMwaVFOd18xeVNaQVZxSElkeCIsIkJFUTg1dlgzQjFYSFdrb2ZGUVNrSWplbkhPYjN4Nk1ncUZYZUJPZkNTYV9UIl0sImJhIjpbXSwiYSI6W119",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BEQ85vX3B1XHWkofFQSkIjenHOb3x6MgqFXeBOfCSa_T",
+                    "cesr_signature": "ACCm_btA17KcjVNHdii75NmUyGMecmTwuqwo8lqa5TvYKhGCo1LwXsdWn-mhRC9FFXV9wfmX3CAAQNG_d9PEHKYE"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "events": 2
+      },
+      {
         "name": "a rotation that cuts every witness the identifier had",
         "rid": "EMsKLWlQtNFlBXhZqYsqYym7irextL37lrhAt2Bgtqhz",
         "answers": [
@@ -2022,6 +2104,88 @@
             "kel": [
               {
                 "raw_bytes_b64": "!!!!",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BEQ85vX3B1XHWkofFQSkIjenHOb3x6MgqFXeBOfCSa_T",
+                    "cesr_signature": "ACCk1B7Jo73dA0j9RXdJJx_X_M-2Ni-2HuNUoukbdIKFz4KNL3-uBjjszpBNlWPuOLhH1j7MJ6BKX_qzcst6GMsJ"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BEQ85vX3B1XHWkofFQSkIjenHOb3x6MgqFXeBOfCSa_T",
+                    "cesr_signature": "ACCm_btA17KcjVNHdii75NmUyGMecmTwuqwo8lqa5TvYKhGCo1LwXsdWn-mhRC9FFXV9wfmX3CAAQNG_d9PEHKYE"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "events": 2
+      },
+      {
+        "name": "an answer whose base64 has a newline in it does not hold the others back",
+        "rid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+        "answers": [
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+                    "cesr_signature": "AACCsulKBrfX3ipujUuYmrq62uT8Z3t-oH4buSfCPPlLKUKkNnOa12nEdBFLMIpG7VgiMCnfzpCkRZtu2fRyI14N"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+                    "cesr_signature": "AAB_MowYBRJJsd8weoUW75yXzvekGNDe-ST8xD-DM6E_FrDS80VRJ83jkcLA-C_qOJhswWXTDCQKCjijBiR5XzAI"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "ABD7aDiwCTuSypOQcejXt6SE8Sn5pzirsQkbjHgfE1W2BrRcHdoS6hchm1gRyBAp8vLvEoRpS3OdfprXIPmdoykO"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "ABB0IesIWXVZS7Ibfuxt4VEsa9dm8KTP8sjgZJnB5TlLp9yDLRGjbRO-TKEr1tQzK3GGk5RrNd1peB7lDu1fzlUJ"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2Ijoi\nS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
                 "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
                 "witness_receipts": [
                   {
