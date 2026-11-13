@@ -936,6 +936,13 @@ func (v *verifiedLogs) put(tip string, key ed25519.PublicKey) {
 }
 
 // GetKelReplica implements C4.
+//
+// Each event is answered as held: its fields, the exact bytes the controller
+// published (raw_bytes_b64, which its identifier is a digest over and so the
+// only part a reader can verify), the controller's signatures, and this
+// witness's own receipt of it, when it issued one. A reader that wants a
+// threshold of receipts asks each witness the identifier names and counts what
+// each signed: nothing here vouches for another witness.
 func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, error) {
 	kel, err := s.Store.GetKelEvents(signerAID)
 	if err != nil {
@@ -944,7 +951,27 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 	if len(kel) == 0 {
 		return nil, fmt.Errorf("not_found")
 	}
-	return eventsToMaps(kel), nil
+	out := make([]map[string]interface{}, 0, len(kel))
+	for _, e := range kel {
+		var m map[string]interface{}
+		if json.Unmarshal([]byte(e.EventJSON), &m) != nil {
+			continue
+		}
+		if e.RawBytesB64 != "" {
+			m["raw_bytes_b64"] = e.RawBytesB64
+		}
+		if sigs := e.ControllerSignatures(); len(sigs) > 0 {
+			m["cesr_signature"] = sigs[0]
+			m["cesr_signatures"] = sigs
+		}
+		if rct, _ := s.Store.GetIssuedReceipt(signerAID, e.EventSAID); rct != nil && rct.CesrSignature != "" {
+			m["witness_receipts"] = []map[string]interface{}{{
+				"witness": rct.WitnessAID, "cesr_signature": rct.CesrSignature,
+			}}
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // BroadcastEvent implements C1 — POST to all enrolled witnesses.

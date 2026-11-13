@@ -22,15 +22,18 @@ import (
 // was refused with 403 before its handler ran until these routes were
 // declared public, and the tests that mounted the witness routes on a bare
 // router could not see it.
-func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
+// aRoutedWitness is a witness behind the router an agent really serves, with a
+// signing key of its own.
+func aRoutedWitness(t *testing.T) (svc *witness.Service, key string, srv *httptest.Server, peer *peerAgent) {
+	t.Helper()
 	s := agentWithNoIdentity(t)
-	svc := witness.NewService(witness.NewSQLiteStore(s.DataStore.(*store.SQLiteStore).DB()), s.DataStore, nil, witness.BackendDesktop)
+	svc = witness.NewService(witness.NewSQLiteStore(s.DataStore.(*store.SQLiteStore).DB()), s.DataStore, nil, witness.BackendDesktop)
 	svc.OurEntityType = func() witness.EntityType { return witness.EntityIndividual }
 	signer, err := keri.GenerateSigner(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, _ := signer.PublicKey()
+	key, _ = signer.PublicKey()
 	svc.OurWitnessAID = func() (string, error) { return key, nil }
 	svc.SignEventReceipt = receiptSignerFor(signer, key)
 	svc.SignReceipt = func(msg string) (string, string, error) {
@@ -42,9 +45,15 @@ func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
 		return key, sig, err
 	}
 	s.WitnessService = svc
-	srv := httptest.NewServer(s.buildRouter())
+	srv = httptest.NewServer(s.buildRouter())
 	t.Cleanup(srv.Close)
-	peer := &peerAgent{svc: svc, witnessKey: key, base: srv.URL}
+	peer = &peerAgent{svc: svc, witnessKey: key, base: srv.URL}
+
+	return svc, key, srv, peer
+}
+
+func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
+	_, key, srv, peer := aRoutedWitness(t)
 
 	aid, said, raw, sig := signedInception(t, key)
 	peer.willWitnessFor(t, aid)

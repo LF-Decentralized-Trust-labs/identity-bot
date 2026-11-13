@@ -221,3 +221,12 @@ func (s *Service) mayReadByInception(aid string, req *http.Request) bool {
 	_ = json.Unmarshal([]byte(kel[0].EventJSON), &held)
 	return held != nil && reflect.DeepEqual(presented, held)
 }
+
+// MayReadFromAPage is whether req is a read that a browser page may be handed
+// the answer to: one that presents the log's inception (mayReadByInception).
+// A signed read is never a page's, so it is not widened. Only this decides
+// whether the answer carries the headers that let a page read it; a stranger's
+// read is answered exactly as before, and a page cannot see it.
+func (s *Service) MayReadFromAPage(aid string, req *http.Request) bool {
+	return s.mayReadByInception(aid, req)
+}

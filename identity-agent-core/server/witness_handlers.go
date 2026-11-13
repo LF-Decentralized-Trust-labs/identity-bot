@@ -28,6 +28,8 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	r.Post("/witness/event", s.handleWitnessEvent)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
 	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
+	r.Options("/witness/kel/{signer_aid}", handleWitnessKelPreflight)
+	r.Options("/witness/kel/{signer_aid}/tip", handleWitnessKelPreflight)
 	r.Get("/witness/kel/{signer_aid}/event/{sn}", s.handleWitnessKelEvent)
 	r.Get("/witness/status", s.handleWitnessStatus)
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
@@ -125,11 +127,35 @@ func notHeld(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "kel not found", "not_found")
 }
 
+// handleWitnessKelPreflight answers a browser's question whether a page may
+// send X-Inception-Event to this route. It is the same for every identifier,
+// held or not, so it tells nobody who this agent witnesses; the proof is judged
+// on the read itself.
+func handleWitnessKelPreflight(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	h.Set("Access-Control-Allow-Headers", witness.HeaderInception)
+	h.Set("Access-Control-Max-Age", "600")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// letAPageRead adds the headers a browser needs to hand the answer to a page,
+// to a read that presents the log's inception and to no other. A refused read
+// carries none, so a page cannot tell a log this agent does not hold from one
+// it will not show: it is the answer it always was.
+func (s *CoreServer) letAPageRead(w http.ResponseWriter, r *http.Request, aid string) {
+	if s.WitnessService.MayReadFromAPage(aid, r) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+}
+
 func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 	signerAID := chi.URLParam(r, "signer_aid")
 	if !s.witnessReadAllowed(w, r, signerAID) {
 		return
 	}
+	s.letAPageRead(w, r, signerAID)
 	kel, err := s.WitnessService.GetKelReplica(signerAID)
 	if err != nil {
 		notHeld(w)
@@ -154,6 +180,7 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	aid := chi.URLParam(r, "signer_aid")
+	s.letAPageRead(w, r, aid)
 	tip, err := s.WitnessService.KelTip(aid, nonce, s.WitnessService.MayRead(aid, r))
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
