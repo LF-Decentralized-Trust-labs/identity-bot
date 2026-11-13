@@ -14,6 +14,7 @@ import '../models/public_name_rule.dart';
 import '../models/what_the_watcher_found.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
+import '../config/the_publishers_list_verdict.dart';
 
 class HealthResponse {
   final String status;
@@ -909,6 +910,28 @@ class CoreService {
     } else {
       throw Exception('OOBI request failed: ${response.statusCode}');
     }
+  }
+
+  /// Hands the core a candidate bundle of the publisher's list of accepted
+  /// software. The core asks the publisher's witnesses for the publisher's
+  /// latest state itself, checks the bundle against it and against what this
+  /// core has already accepted, and only then uses the list (ADR-078). The app
+  /// that fetched the bundle decides nothing, so this may be called with any
+  /// bundle, as often as wanted.
+  Future<MeasurementListVerdict> submitMeasurementList(Uint8List bundle) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/measurement-list'),
+      headers: {'Content-Type': 'application/json'},
+      body: bundle,
+    );
+    RootSeedRefused.throwIfRefused(response);
+    Map<String, dynamic> body;
+    try {
+      body = jsonDecode(response.body) as Map<String, dynamic>;
+    } on FormatException {
+      body = const {};
+    }
+    return MeasurementListVerdict.fromResponse(response.statusCode, body);
   }
 
   /// Asks a machine this identity owns, through the local agent.
