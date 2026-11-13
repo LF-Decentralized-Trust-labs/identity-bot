@@ -380,6 +380,13 @@ func TestFreshness(t *testing.T) {
 		f := Floors{HasKeyHistory: true, KeyHistorySN: int(p.last.SN) + 3, KeyHistorySAID: "EBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}
 		refuse(t, "behind the floor", ErrBehind, p.bundle(), p.pin(), p.answers(p.tip(), 2), f)
 	})
+	t.Run("a floor that is not a place is refused and not indexed", func(t *testing.T) {
+		p := onekey(t)
+		published(p, 7)
+		for _, f := range []Floors{{HasKeyHistory: true, KeyHistorySN: -1, KeyHistorySAID: "E"}, {HasKeyHistory: true, KeyHistorySN: 1}} {
+			refuse(t, "a bad floor", ErrMalformed, p.bundle(), p.pin(), p.answers(p.tip(), 2), f)
+		}
+	})
 	t.Run("a history that extends the one held", func(t *testing.T) {
 		p := onekey(t)
 		published(p, 7)

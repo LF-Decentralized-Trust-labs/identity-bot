@@ -164,6 +164,9 @@ func Verify(b *Bundle, pin Pin, replies []TipReply, floors Floors, now time.Time
 
 	// ... and extends what this device already holds.
 	if floors.HasKeyHistory {
+		if floors.KeyHistorySN < 0 || floors.KeyHistorySAID == "" {
+			return nil, fmt.Errorf("%w: the key-history floor this device holds is not a place", ErrMalformed)
+		}
 		if floors.KeyHistorySN >= len(log) {
 			return nil, fmt.Errorf("%w: this device has seen it as far as %d", ErrBehind, floors.KeyHistorySN)
 		}
