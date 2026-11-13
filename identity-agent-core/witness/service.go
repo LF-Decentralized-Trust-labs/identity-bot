@@ -514,7 +514,7 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 		return nil, err
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("witness POST %d: %s", resp.StatusCode, string(raw))
+		return nil, &witnessRefusal{status: resp.StatusCode, body: string(raw)}
 	}
 	var out map[string]interface{}
 	_ = json.Unmarshal(raw, &out)
@@ -1185,13 +1185,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				if len(sigs) == 0 {
 					return
 				}
-				body := eventBody(signerAID, e.RawBytesB64, sigs)
 				said := eventSAID(ev)
-				resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, witnessEventURL(w)), witnessEventURL(w), body)
-				if err != nil {
-					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
-					return
-				}
 				// A witness that took an event the log gives no list for (it
 				// designates nobody, so this one is a bootstrap witness, or the
 				// log cannot be read) still holds it, so its tip is confirmed
@@ -1201,8 +1195,16 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				if len(at) == 0 {
 					at = nil
 				}
-				if sig, wit, verr := receiptFromResponse(resp, raw, said, at); verr == nil && wit == key {
-					_ = s.receive(said, key, sig, raw)
+				got, err := s.SendEventToWitness(ctx, witnessRoot(w), key, signerAID, e, at)
+				if errors.Is(err, ErrNoReceipt) {
+					continue // taken, and not a receipt to keep: the next event is still sent, as it always was
+				}
+				if err != nil {
+					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
+					return
+				}
+				if !got.Held {
+					_ = s.receive(said, key, got.Receipt, raw)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -1691,7 +1693,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	// A receipt that does not check out is worse than a witness being down,
 	// because being down is visible in the count and a bad receipt is not.
 	rawEvent := rawEventOf(body)
-	sig, wit, verr := receiptFromResponse(resp, rawEvent, eventSAID, designated)
+	sig, wit, verr := ReceiptFromResponse(resp, rawEvent, eventSAID, designated)
 	if verr != nil {
 		log.Printf("[witness] %s answered but its receipt does not check out: %v", witnessAID, verr)
 		return
@@ -1706,12 +1708,12 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	_ = s.receive(eventSAID, witnessAID, sig, rawEvent)
 }
 
-// receiptFromResponse pulls a verified receipt out of a witness's reply.
+// ReceiptFromResponse pulls a verified receipt out of a witness's reply.
 //
 // A witness is named by a non-transferable identifier, so the identifier IS the
 // key this checks against — there is nothing to fetch and nothing that could
 // answer the fetch wrongly.
-func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string, designated []string) (sig, witnessAID string, err error) {
+func ReceiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string, designated []string) (sig, witnessAID string, err error) {
 	if resp == nil {
 		return "", "", fmt.Errorf("the witness returned nothing to check")
 	}
