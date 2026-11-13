@@ -575,6 +575,12 @@ func New(cfg Config) (*CoreServer, error) {
 		}
 		return s.WitnessService
 	}
+	lists.peers = func() anchored.PeerTipAsker {
+		if s.WatcherService == nil {
+			return nil
+		}
+		return peerTipsOf{s.WatcherService}
+	}
 	s.inBackground(func(ctx context.Context) { witness.StartHeartbeatLoop(wsvc, ctx.Done()) })
 
 	// Start the KERI engine.

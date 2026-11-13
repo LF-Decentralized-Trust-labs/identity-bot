@@ -42,3 +42,18 @@ func (r Resolver) Asker(ctx context.Context) Asker {
 		return out, nil
 	}
 }
+
+// PeerTipAsker is what asks the person's peer watchers for the publisher's tip:
+// watcher.Service, through an adapter in the server.
+type PeerTipAsker interface {
+	AskPeerTips(ctx context.Context, aid string) []PeerTip
+}
+
+// PeersOf is the PeerAsker for Checker.Peers, bound to ctx. A nil asker asks
+// nobody.
+func PeersOf(ctx context.Context, a PeerTipAsker) PeerAsker {
+	if a == nil {
+		return nil
+	}
+	return func(aid string) []PeerTip { return a.AskPeerTips(ctx, aid) }
+}

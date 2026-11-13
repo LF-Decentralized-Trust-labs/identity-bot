@@ -22,6 +22,20 @@ type Floors struct {
 	HasKeyHistory  bool
 	KeyHistorySN   int
 	KeyHistorySAID string
+	// NewestPublishedAt is the newest published_at of any list accepted, in
+	// seconds since the epoch (0: none). "Now" for every date check is never
+	// earlier than it, so a host that sets its clock back cannot reopen an
+	// expired list or a closed window.
+	NewestPublishedAt int64
+}
+
+// NoEarlierThanTheFloor is now, or the newest published_at already accepted if
+// that is later.
+func (f Floors) NoEarlierThanTheFloor(now time.Time) time.Time {
+	if f.NewestPublishedAt > now.Unix() {
+		return time.Unix(f.NewestPublishedAt, 0).UTC()
+	}
+	return now
 }
 
 // Result is a verified list, and where the publisher's history stood when it
@@ -124,6 +138,13 @@ type Asker func(aid string, designated []string, threshold int) ([]TipReply, err
 // still required, and the witnesses are asked only once the history has been
 // found genuine, with the witnesses that history designates.
 func VerifyAsking(b *Bundle, pin Pin, ask Asker, floors Floors, now time.Time) (*Result, error) {
+	return VerifyAskingAlso(b, pin, ask, nil, floors, now)
+}
+
+// VerifyAskingAlso is VerifyAsking that also asks the person's peer watchers
+// (peers may be nil: nobody else is asked). A peer's answer can only refuse a
+// bundle, never vouch for one: see CheckPeers.
+func VerifyAskingAlso(b *Bundle, pin Pin, ask Asker, peers PeerAsker, floors Floors, now time.Time) (*Result, error) {
 	if ask == nil {
 		return nil, fmt.Errorf("%w: nobody to ask", ErrNotFresh)
 	}
@@ -180,6 +201,13 @@ func VerifyAsking(b *Bundle, pin Pin, ask Asker, floors Floors, now time.Time) (
 		return nil, fmt.Errorf("%w: it ends at %d and the witnesses hold %d", ErrAhead, have.sn, tip.SN)
 	case have.said != tip.SAID:
 		return nil, &Duplicity{SN: tip.SN, Held: tip.SAID, Offered: have.said, Message: have.msg}
+	}
+
+	// ... and no contact of the person's holds more of it, or other.
+	if peers != nil {
+		if err := checkPeers(log, peers(pin.Publisher)); err != nil {
+			return nil, err
+		}
 	}
 
 	// ... and extends what this device already holds.
@@ -343,9 +371,47 @@ func VerifyAsking(b *Bundle, pin Pin, ask Asker, floors Floors, now time.Time) (
 		return nil, err
 	}
 	list, err := measurementlist.FromContent(content, newest.SAID, measurementlist.Rules{
-		MinSequence: floors.ListSequence, SeenDigest: floors.ListDigest, Now: now})
+		MinSequence: floors.ListSequence, SeenDigest: floors.ListDigest, Now: floors.NoEarlierThanTheFloor(now)})
 	if err != nil {
 		return nil, err
 	}
 	return &Result{List: list, CredentialSAID: newest.SAID, Tip: tip}, nil
+}
+
+// PeerTip is what one of the person's peer watchers says it holds of the
+// publisher's key history: the newest place it has seen and that event's SAID
+// (SN -1 and empty: it holds nothing). It is a claim by a contact, not a
+// signed answer of the publisher's witnesses.
+type PeerTip struct {
+	Peer string
+	SN   int
+	SAID string
+}
+
+// PeerAsker asks the person's peer watchers for the publisher's tip.
+type PeerAsker func(publisher string) []PeerTip
+
+// checkPeers is the second source of "what is the latest state". The witnesses
+// the bundle's own history names are the only ones the checker can ask, so a
+// device whose floor predates a rotation that replaced every one of them can be
+// served a stale bundle, and answered by witnesses whose keys are retired: no
+// check of the bundle can see that (a limit of KERI, ADR-078). A peer that
+// holds more of the history, or another event at a place the bundle holds,
+// shows it. A peer that holds nothing, or less, says nothing and is ignored:
+// it may never have been asked to watch the publisher.
+//
+// A peer's word refuses and never accepts. A contact that lies can make a
+// device refuse a list (and is asked again later); it cannot make it take one.
+func checkPeers(log []logEvent, tips []PeerTip) error {
+	have := log[len(log)-1]
+	for _, t := range tips {
+		switch {
+		case t.SN < 0 || t.SAID == "":
+		case t.SN > have.sn:
+			return fmt.Errorf("%w: a contact of yours holds the publisher's history to place %d and the bundle ends at %d", ErrBehind, t.SN, have.sn)
+		case log[t.SN].said != t.SAID:
+			return &Duplicity{SN: t.SN, Held: t.SAID, Offered: log[t.SN].said, Message: log[t.SN].msg}
+		}
+	}
+	return nil
 }

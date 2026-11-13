@@ -49,9 +49,8 @@ func (s *CoreServer) handleMeasurementList(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	kinds := map[string]int{}
-	now := s.measurementLists.clock()
 	for kind := range res.List.Images {
-		kinds[kind] = len(res.List.MeasurementsAt(kind, now))
+		kinds[kind] = len(res.List.MeasurementsAt(kind, res.List.At))
 	}
 	writeJSON(w, map[string]any{
 		"sequence": res.List.Sequence, "credential": res.CredentialSAID,

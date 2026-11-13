@@ -18,6 +18,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/measurementlist"
 	"identity-agent-core/measurementlist/anchored"
+	"identity-agent-core/watcher"
 )
 
 // Which software an owner will adopt a sealed box for.
@@ -148,6 +149,9 @@ type measurementLists struct {
 	pin func() (anchored.Pin, error)
 	// asker is who asks the publisher's witnesses; nil means nobody can be asked.
 	asker func() anchored.TipAsker
+	// peers asks the person's peer watchers for the publisher's tip too; nil
+	// asks nobody.
+	peers func() anchored.PeerTipAsker
 	now   func() time.Time
 
 	mu       sync.Mutex
@@ -190,6 +194,12 @@ func (m *measurementLists) policy(entityType string, now time.Time) ([][]byte, s
 		return nil, why, nil
 	}
 	everAccepted := floors.ListSequence > 0
+	// For the dates a list holds (its expiry, an entry's window) "now" is never
+	// earlier than the newest list this core has accepted was published, so a
+	// host that sets the clock back cannot revive what the core has seen close.
+	// How long ago the list was checked is a question for the real clock.
+	checkedAt := now
+	now = floors.NoEarlierThanTheFloor(now)
 
 	m.mu.Lock()
 	list, at := m.staged, m.stagedAt
@@ -197,9 +207,9 @@ func (m *measurementLists) policy(entityType string, now time.Time) ([][]byte, s
 
 	var listErr error
 	switch {
-	case list != nil && now.Before(at):
+	case list != nil && checkedAt.Before(at):
 		listErr = errors.New("this computer's clock is earlier than when the list was last checked")
-	case list != nil && now.Sub(at) > listFreshFor:
+	case list != nil && checkedAt.Sub(at) > listFreshFor:
 		listErr = fmt.Errorf("the list was last checked with the publisher's witnesses at %s, which is too long ago to rely on: a withdrawal could have come since",
 			at.UTC().Format(time.RFC3339))
 	case list != nil && !now.Before(list.ExpiresAt):
@@ -256,7 +266,11 @@ func (m *measurementLists) check(ctx context.Context, raw []byte) (*anchored.Res
 	if m.asker != nil {
 		asker = m.asker()
 	}
-	checker := &anchored.Checker{Pin: pin, Store: m.floors()}
+	var peers anchored.PeerTipAsker
+	if m.peers != nil {
+		peers = m.peers()
+	}
+	checker := &anchored.Checker{Pin: pin, Store: m.floors(), Peers: anchored.PeersOf(ctx, peers)}
 	now := m.clock()
 	res, err := checker.CheckAsking(b, anchored.Resolver{Witnesses: asker}.Asker(ctx), now)
 	if err != nil {
@@ -317,4 +331,36 @@ func (s *CoreServer) acceptableOrOwnerNamed(named [][]byte) func([]byte) bool {
 		}
 		return false
 	}
+}
+
+// heldPublisherTip is what this core has itself checked of the publisher's key
+// history: the newest place it has held and that event's SAID. It is what a peer
+// is told when it asks (POST /public/kel-tip), and only for the publisher this
+// build pins: a core has nothing else to say about any other identity. Nothing
+// is held until a list has been accepted here.
+func (m *measurementLists) heldPublisherTip(aid string) (int, string, bool) {
+	pinFn := m.pin
+	if pinFn == nil {
+		pinFn = anchored.Pinned
+	}
+	pin, err := pinFn()
+	if err != nil || aid == "" || aid != pin.Publisher {
+		return 0, "", false
+	}
+	fl, err := m.floors().Load()
+	if err != nil || !fl.HasKeyHistory {
+		return 0, "", false
+	}
+	return fl.KeyHistorySN, fl.KeyHistorySAID, true
+}
+
+// peerTipsOf lets the checker ask the watcher's peers for the publisher's tip.
+type peerTipsOf struct{ w *watcher.Service }
+
+func (p peerTipsOf) AskPeerTips(ctx context.Context, aid string) []anchored.PeerTip {
+	var out []anchored.PeerTip
+	for _, a := range p.w.AskPeerTips(ctx, aid) {
+		out = append(out, anchored.PeerTip{Peer: a.Peer, SN: a.SN, SAID: a.SAID})
+	}
+	return out
 }

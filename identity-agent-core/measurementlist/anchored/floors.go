@@ -29,6 +29,9 @@ type floorRecord struct {
 	HasKeyHistory  bool   `json:"has_key_history"`
 	KeyHistorySN   int    `json:"key_history_sn"`
 	KeyHistorySAID string `json:"key_history_said"`
+	// NewestPublishedAt is absent in a file written before it existed, which
+	// reads as none.
+	NewestPublishedAt int64 `json:"newest_published_at,omitempty"`
 }
 
 // FileFloors keeps the floors in one file, written 0600.
@@ -49,17 +52,17 @@ func (f FileFloors) Load() (Floors, error) {
 	var r floorRecord
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
-	if dec.Decode(&r) != nil || dec.More() || r.ListSequence < 0 || r.KeyHistorySN < 0 ||
+	if dec.Decode(&r) != nil || dec.More() || r.ListSequence < 0 || r.KeyHistorySN < 0 || r.NewestPublishedAt < 0 ||
 		(r.HasKeyHistory && r.KeyHistorySAID == "") || (!r.HasKeyHistory && (r.KeyHistorySN != 0 || r.KeyHistorySAID != "")) {
 		return Floors{}, damaged
 	}
 	return Floors{ListSequence: r.ListSequence, ListDigest: r.ListDigest, HasKeyHistory: r.HasKeyHistory,
-		KeyHistorySN: r.KeyHistorySN, KeyHistorySAID: r.KeyHistorySAID}, nil
+		KeyHistorySN: r.KeyHistorySN, KeyHistorySAID: r.KeyHistorySAID, NewestPublishedAt: r.NewestPublishedAt}, nil
 }
 
 // Save writes the floors.
 func (f FileFloors) Save(fl Floors) error {
-	b, err := json.Marshal(floorRecord{fl.ListSequence, fl.ListDigest, fl.HasKeyHistory, fl.KeyHistorySN, fl.KeyHistorySAID})
+	b, err := json.Marshal(floorRecord{fl.ListSequence, fl.ListDigest, fl.HasKeyHistory, fl.KeyHistorySN, fl.KeyHistorySAID, fl.NewestPublishedAt})
 	if err != nil {
 		return err
 	}
@@ -70,6 +73,9 @@ func (f FileFloors) Save(fl Floors) error {
 // content at the same place are a conflict, not a choice.
 func Merge(a, b Floors) (Floors, error) {
 	out := a
+	if b.NewestPublishedAt > out.NewestPublishedAt {
+		out.NewestPublishedAt = b.NewestPublishedAt
+	}
 	switch {
 	case b.ListSequence > a.ListSequence:
 		out.ListSequence, out.ListDigest = b.ListSequence, b.ListDigest
@@ -96,7 +102,9 @@ type Checker struct {
 	Pin      Pin
 	Store    FloorStore
 	Snapshot Floors // what the build was shipped with; the floors never fall below it
-	mu       sync.Mutex
+	// Peers, if set, asks the person's peer watchers for the publisher's tip too.
+	Peers PeerAsker
+	mu    sync.Mutex
 }
 
 // Check verifies b against the witnesses' answers and the kept floors.
@@ -117,12 +125,13 @@ func (c *Checker) CheckAsking(b *Bundle, ask Asker, now time.Time) (*Result, err
 	if err != nil {
 		return nil, err
 	}
-	res, err := VerifyAsking(b, c.Pin, ask, floors, now)
+	res, err := VerifyAskingAlso(b, c.Pin, ask, c.Peers, floors, now)
 	if err != nil {
 		return nil, err
 	}
 	next, err := Merge(floors, Floors{ListSequence: res.List.Sequence, ListDigest: res.CredentialSAID,
-		HasKeyHistory: true, KeyHistorySN: res.Tip.SN, KeyHistorySAID: res.Tip.SAID})
+		HasKeyHistory: true, KeyHistorySN: res.Tip.SN, KeyHistorySAID: res.Tip.SAID,
+		NewestPublishedAt: res.List.PublishedAt.Unix()})
 	if err != nil {
 		return nil, err
 	}

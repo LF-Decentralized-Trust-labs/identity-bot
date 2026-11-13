@@ -275,6 +275,7 @@ var publicRoutes = map[string]string{
 	// The digest of a public key log is public and self-verifying.
 	"GET /public/kel-digest":                                "a peer watcher asks what digest we first saw for an identity at a sequence number",
 	"POST /public/kel-check":                                "a peer watcher compares its digest with ours (L3 cross-check)",
+	"POST /public/kel-tip":                                  "a peer watcher asks how much of the software publisher's key history we have checked, so a stale copy of it can be seen",
 	"POST /api/backup/receive":                              "a peer pushes an opaque, already-encrypted archive",
 	"GET /api/backup/receive/{identityAID}":                 "the owning agent lists its own archives during recovery",
 	"GET /api/backup/receive/{identityAID}/download/{name}": "the owning agent retrieves an opaque archive during recovery",

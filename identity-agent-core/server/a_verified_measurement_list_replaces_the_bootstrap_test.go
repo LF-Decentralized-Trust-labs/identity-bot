@@ -369,3 +369,31 @@ func TestAListIsNotUsedPastItsOwnExpiryEvenJustAfterItWasChecked(t *testing.T) {
 		t.Fatalf("an expired list was used: %v %q", m, why)
 	}
 }
+
+// The host controls this core's clock. A list that has expired, or an entry
+// whose window has closed, is not revived by setting it back: "now" is never
+// earlier than the newest list this core has accepted was published.
+func TestAClockSetBackDoesNotReviveAnExpiredList(t *testing.T) {
+	f := newListFixture(t)
+	expires := f.now.Add(-time.Hour).Add(60 * 24 * time.Hour) // what the vectors' lists say
+	if err := f.submit("seq7"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _, _ := f.lists.policy("individual", f.now); len(m) != 1 {
+		t.Fatal("the list was not used on an honest clock")
+	}
+	// this core has since accepted a list published after seq7 expired (the
+	// floors are what a later list leaves behind); then the clock is set back
+	fl := f.lists.floors()
+	held, err := fl.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	held.NewestPublishedAt = expires.Add(24 * time.Hour).Unix()
+	if err := fl.Save(held); err != nil {
+		t.Fatal(err)
+	}
+	if m, why, _ := f.lists.policy("individual", f.now); len(m) != 0 || why == "" {
+		t.Fatalf("an expired list was used on a clock set back: %v %q", m, why)
+	}
+}
