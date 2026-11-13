@@ -124,7 +124,7 @@ func (s *CoreServer) handleEndAppKeyGrant(w http.ResponseWriter, r *http.Request
 // nonce from the core, then an assertion naming it, for the grant's key and the
 // installed_app kind, from the person the grant is for.
 const (
-	endAppKeyAudience = "end-app-key"
+	endAppKeyAudience = login.EndAppKeyAudience
 	endAppKeyLife     = 5 * time.Minute
 )
 

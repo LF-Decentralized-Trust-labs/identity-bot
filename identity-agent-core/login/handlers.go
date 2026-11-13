@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -489,10 +490,21 @@ func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Ass
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body := boundedread.Snippet(resp.Body)
-		return fmt.Errorf("callback %d: %s", resp.StatusCode, string(body))
+		return &callbackRefusedError{status: resp.StatusCode, msg: fmt.Sprintf("callback %d: %s", resp.StatusCode, string(body))}
 	}
 	return nil
 }
+
+// callbackRefusedError is the host's own answer that it did not take the
+// sign-in. Only a 4xx is a definite refusal; a 5xx leaves it unknown.
+type callbackRefusedError struct {
+	status int
+	msg    string
+}
+
+func (e *callbackRefusedError) Error() string { return e.msg }
+
+func (e *callbackRefusedError) definite() bool { return e.status >= 400 && e.status < 500 }
 
 // ScoreAttestation returns the identity-level custom_data for an assertion
 // (exported for the OIDC adapter).
@@ -772,7 +784,15 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 		return nil, fmt.Errorf("could not keep a record of this sign-in, so it was not approved: %w", err)
 	}
 	if err := h.postAssertion(bundle.CallbackURL, bundle.SessionToken, assertion, creds); err != nil {
-		undo()
+		// Drop the record only when the host definitely refused (a 4xx). A
+		// timeout or a server error may have come after the host accepted, and a
+		// live grant with no record is one the person cannot end; a record for a
+		// grant that was never made is cleared by the host's 410 when they try
+		// to end it.
+		var refused *callbackRefusedError
+		if errors.As(err, &refused) && refused.definite() {
+			undo()
+		}
 		return nil, err
 	}
 

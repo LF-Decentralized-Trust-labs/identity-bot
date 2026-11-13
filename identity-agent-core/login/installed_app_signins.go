@@ -115,6 +115,10 @@ func (s *InstalledAppSignInStore) List() []InstalledAppSignIn {
 	return out
 }
 
+// EndAppKeyAudience is the only audience a signed end is made for. The host's
+// /app-key/end/begin names it and the person's Identity Agent insists on it.
+const EndAppKeyAudience = "end-app-key"
+
 const callbackSuffix = "/callback"
 
 // installedAppEndBase is where the app's host takes the signed end, taken from
@@ -234,17 +238,23 @@ func (h *Handler) EndInstalledAppSignIn(siteAID, key string) (alreadyEnded bool,
 	if json.Unmarshal(resp, &ask) != nil || ask["nonce"] == "" {
 		return false, http.StatusBadGateway, fmt.Errorf("the app's host answered something unreadable")
 	}
+	// The host names what is signed, so the host is not trusted with it: the
+	// audience is the fixed end-app-key one (a sign-in made here is valid nowhere
+	// else) and the site is the record's own. The relationship is the person's
+	// existing one, never made here.
+	if ask["audience"] != EndAppKeyAudience || ask["site_aid"] != rec.SiteAID ||
+		ask["browser_key"] != rec.Key || ask["front_end"] != FrontEndInstalledApp {
+		return false, http.StatusBadGateway, fmt.Errorf("the app's host asked for something other than ending this sign-in, so nothing was signed")
+	}
 	bundle := &ChallengeBundle{
-		SiteAID: ask["site_aid"], Audience: ask["audience"], Nonce: ask["nonce"],
-		BrowserKey: ask["browser_key"], FrontEnd: ask["front_end"],
+		SiteAID: rec.SiteAID, Audience: EndAppKeyAudience, Nonce: ask["nonce"],
+		BrowserKey: rec.Key, FrontEnd: FrontEndInstalledApp,
 	}
-	if bundle.BrowserKey != rec.Key || bundle.FrontEnd != FrontEndInstalledApp {
-		return false, http.StatusBadGateway, fmt.Errorf("the app's host named a different key, so nothing was signed")
+	relv, found := h.Store.Get(rec.RelationshipKey)
+	if !found {
+		return false, http.StatusConflict, fmt.Errorf("this Identity Agent has no relationship with that app any more, so nothing was signed")
 	}
-	rel, err := h.GetOrCreateRelationship(rec.RelationshipKey, bundle)
-	if err != nil {
-		return false, http.StatusInternalServerError, err
-	}
+	rel := &relv
 	as, err := h.BuildAssertion(rel, bundle, nil)
 	if err != nil {
 		return false, http.StatusInternalServerError, err
