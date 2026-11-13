@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -359,3 +360,39 @@ func TestPinningTPMRootsAloneDoesNotOpenTheCheck(t *testing.T) {
 }
 
 func sha256Of(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
+
+// The expected bytes below were computed outside this package (Python hashlib
+// and hmac over the documented layout), not with the helpers under test, so a
+// change to what the helpers hash, including dropping the challenge, fails here
+// even though every other test builds its expectation with the same helpers.
+// They also pin the wire strings "identity-agent-tpm-key-certify-v1" and
+// "identity-agent-tpm-credential-v1".
+
+func TestTPMCertifyExtraDataFixedVector(t *testing.T) {
+	got := tpmCertifyExtraData([]byte("fixed challenge 01"))
+	want := mustHexTPM(t, "943c8317e3fd5ae407b901d6a0438c71d4af426ea99a9d635adf414504b02182")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("tpmCertifyExtraData = %x, want %x", got, want)
+	}
+	if bytes.Equal(tpmCertifyExtraData([]byte("fixed challenge 02")), want) {
+		t.Fatal("a different challenge produced the same qualifying data")
+	}
+}
+
+func TestTPMCredentialSecretFixedVector(t *testing.T) {
+	akName := mustHexTPM(t, "000b11111111111111111111111111111111111111111111111111111111111111111111")
+	got := tpmCredentialSecret([]byte("fixed credential key 32 bytes!!!"), akName, []byte("fixed-ek-public-der"))
+	want := mustHexTPM(t, "36bb13ecc46cd6b794a8c26bd182ec40a70ee848d0b70688a7a064ac2e04a83d")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("tpmCredentialSecret = %x, want %x", got, want)
+	}
+}
+
+func mustHexTPM(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
