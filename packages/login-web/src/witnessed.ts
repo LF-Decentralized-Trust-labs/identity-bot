@@ -10,6 +10,9 @@
  * signature over the event's bytes verifies, against the threshold (`bt`) in force. A log is
  * taken as far as every event has its threshold, and no further.
  *
+ * A log is a witnessed one when the witnesses in force where its receipted run stops are named and asked for a receipt: the events
+ * before witnesses were named (an identifier made without them and given them by a rotation) need none.
+ *
  * The rules are the core's (`drivers.WitnessingByEvent`): the witness list is carried forward
  * through the log (an inception names it, a rotation cuts `br` then adds `ba`); a receipt's
  * index is the witness's place in that list; a witness counts once, by its key. They are held
@@ -78,7 +81,7 @@ function toadOf(ev: Ev): number | null {
 /** How many leading events of `texts` have their threshold of receipts (an unwitnessed event
  *  has threshold 0 and is always met). `receipts` are by event SAID. Fails closed: an event whose
  *  witnesses or threshold cannot be read ends the count. */
-async function receiptedThrough(texts: string[], receipts: Map<string, { witness: string; sig: string }[]>): Promise<number> {
+async function receiptedThrough(texts: string[], receipts: Map<string, { witness: string; sig: string }[]>): Promise<{ through: number; named: number; toad: number }> {
   let designated: string[] = [];
   let toad = 0;
   for (let i = 0; i < texts.length; i++) {
@@ -86,11 +89,11 @@ async function receiptedThrough(texts: string[], receipts: Map<string, { witness
     try {
       ev = JSON.parse(texts[i]);
     } catch {
-      return i;
+      return { through: i, named: designated.length, toad };
     }
     const after = witnessesAfter(designated, ev);
     const bt = toadOf(ev);
-    if (!after || bt === null) return i;
+    if (!after || bt === null) return { through: i, named: designated.length, toad };
     designated = after;
     toad = bt;
     const keys = new Set<string>();
@@ -104,9 +107,9 @@ async function receiptedThrough(texts: string[], receipts: Map<string, { witness
       if (!raw || !(await verifyEd25519(raw, utf8.encode(texts[i]), key))) continue;
       keys.add(r.witness);
     }
-    if (keys.size < toad) return i;
+    if (keys.size < toad) return { through: i, named: designated.length, toad };
   }
-  return texts.length;
+  return { through: texts.length, named: designated.length, toad };
 }
 
 /** Reads the answers of the witnesses a relay identifier names (each to GET /witness/kel/{rid})
@@ -152,14 +155,6 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
     } catch {
       continue;
     }
-    // Only an identifier whose inception names witnesses and asks for a receipt has a log they vouch for.
-    let icp: Ev = {};
-    try {
-      icp = JSON.parse(texts[0]);
-    } catch {
-      continue;
-    }
-    if (!strings(icp.b)?.length || !toadOf(icp)) continue;
     read.push({ texts, sigs, checked });
     (ans.kel as WitnessedEvent[]).forEach((e, i) => {
       const list = e.witness_receipts;
@@ -172,7 +167,13 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
     });
   }
   if (!read.length) refuse("no witness gave a key log of this identifier that can be read");
-  for (const r of read) candidates.push({ texts: r.texts, checked: r.checked, through: await receiptedThrough(r.texts, receipts) });
+  // A log is a witnessed one when the witnesses in force at its last event are named and asked for a receipt. The
+  // events before witnesses were named (an identifier made without them and given them by a rotation) need none.
+  for (const r of read) {
+    const t = await receiptedThrough(r.texts, receipts);
+    if (t.named > 0 && t.toad > 0) candidates.push({ texts: r.texts, checked: r.checked, through: t.through });
+  }
+  if (!candidates.length) refuse("no witness gave a log that names witnesses");
 
   // Two logs that both hold an event at a place must hold the same one, as far as either is receipted.
   for (const x of candidates) {
@@ -183,7 +184,7 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
   }
   const best = candidates.reduce((a, b) => (b.through > a.through ? b : a));
   if (best.through === 0) refuse("no event of it has its threshold of witness receipts");
-  const sigsOf = read[candidates.indexOf(best)].sigs;
+  const sigsOf = read.find((r) => r.texts === best.texts)!.sigs;
   const texts = best.texts.slice(0, best.through);
   const stream = texts.map((t, i) => t + "-AAB" + sigsOf[i]).join("");
   const log = b64u(utf8.encode(stream));

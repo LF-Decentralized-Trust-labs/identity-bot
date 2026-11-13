@@ -26,6 +26,7 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 		return
 	}
 	r.Post("/witness/event", s.handleWitnessEvent)
+	r.Post("/witness/cover", s.handleWitnessCover)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
 	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
 	r.Options("/witness/kel/{signer_aid}", handleWitnessKelPreflight)
@@ -111,6 +112,28 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, result)
+}
+
+// handleWitnessCover takes an owner's declaration that a plain identifier is its
+// own (witness.AcceptCover). The route is open to peers, so the owner's
+// signature is the gate; every refusal is the same answer, so a stranger learns
+// nothing of who this agent witnesses for.
+func (s *CoreServer) handleWitnessCover(w http.ResponseWriter, r *http.Request) {
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
+	var req witness.CoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
+		return
+	}
+	if err := s.WitnessService.AcceptCover(req); err != nil {
+		writeError(w, http.StatusForbidden, "not covered", "")
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "covered"})
 }
 
 // The three reads of a key log below answer from what this witness holds only

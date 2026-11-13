@@ -130,6 +130,7 @@ func TestEveryWatcherRouteHonoursAnOptOut(t *testing.T) {
 		"GET /api/witness/tel/{issuer_aid}/head":                witness,
 		"POST /api/witness/tel/{issuer_aid}":                    witness,
 		"POST /api/witness/accept":                              witness,
+		"POST /api/witness/cover":                               witness,
 		"POST /api/witness/event":                               witness,
 		"POST /api/witness/request":                             witness,
 		"POST /api/witness/withdraw":                            witness,

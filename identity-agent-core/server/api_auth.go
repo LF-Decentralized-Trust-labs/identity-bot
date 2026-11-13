@@ -245,6 +245,7 @@ var publicRoutes = map[string]string{
 	// the same data as GET /{aid}/kel: a root identity is held here and is never
 	// published there. All four share one bounded rate limiter.
 	"POST /api/witness/event":                      "witnessing protocol — a controller sends a signed event, verified before it is stored",
+	"POST /api/witness/cover":                      "an owner's signed declaration that a plain identifier is its own, so this witness holds its key log; every refusal is one answer",
 	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
 	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce — to anybody else, as for a log not held",
 	"GET /api/witness/tel/{issuer_aid}":            "the registry logs of an identity this witness witnesses, from a place in its key log, to the identity, its delegator or a verifier presenting its inception — anybody else is told it is not held; never by credential",

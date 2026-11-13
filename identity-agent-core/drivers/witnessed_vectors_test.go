@@ -75,10 +75,6 @@ func witnessedSAIDs(rid string, answers []witnessedAnswer) (int, []string, bool)
 		if err != nil || len(res.ValidationErrors) != 0 || !res.KelVerified {
 			continue
 		}
-		first, _ := keri.ParseEvent(in.RawEvents[0])
-		if len(first.Witnesses) == 0 || !first.HasTOAD || first.TOAD == 0 {
-			continue
-		}
 		l := readLog{raws: in.RawEvents}
 		for i, e := range a.KEL {
 			ev, _ := keri.ParseEvent(in.RawEvents[i])
@@ -92,16 +88,32 @@ func witnessedSAIDs(rid string, answers []witnessedAnswer) (int, []string, bool)
 	if len(logs) == 0 {
 		return 0, nil, false
 	}
-	through := make([]int, len(logs))
-	best := 0
-	for i, l := range logs {
+	// A log is a witnessed one when the witnesses in force where its receipted
+	// run stops are named and asked for a receipt; events before witnesses were
+	// named need none.
+	var kept []readLog
+	var through []int
+	for _, l := range logs {
 		rep := WitnessingByEvent(ValidateKELInput{AID: rid, RawEvents: l.raws, Receipts: receipts})
+		n, row := 0, EventWitnessing{}
 		for _, said := range l.said {
-			if !rep[said].Met {
+			row = rep[said]
+			if !row.Met {
 				break
 			}
-			through[i]++
+			n++
 		}
+		if len(row.Designated) > 0 && row.Threshold > 0 {
+			kept = append(kept, l)
+			through = append(through, n)
+		}
+	}
+	logs = kept
+	if len(logs) == 0 {
+		return 0, nil, false
+	}
+	best := 0
+	for i := range logs {
 		if through[i] > through[best] {
 			best = i
 		}

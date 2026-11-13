@@ -184,6 +184,8 @@ export async function make() {
   const rewrite = (a) => ({ ...a, kel: a.kel.map((e, j) => (j === 1 ? { ...e, raw_bytes_b64: Buffer.from(Buffer.from(e.raw_bytes_b64, "base64").toString().replace(/"k":\["D/, '"k":["E')).toString("base64") } : e)) });
   const chainRot = relayChain("witnessed-rot", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { br: [W[2].aid], ba: [W[3].aid], bt: "2" } } });
   const plain = relayChain("witnessed-none", 1);
+  // an identifier made without witnesses and given them by its first rotation (the owner's Identity Agent makes that rotation)
+  const chainLate = relayChain("witnessed-late", 2, { over: { 1: { ba: [W[0].aid, W[1].aid, W[2].aid], bt: "2" }, 2: { bt: "2" } } });
   const witnessed = {
     about: "A relay identifier's key log as its witnesses hold it (packages/login-web/src/witnessed.ts, packages/login-dart/lib/witnessed.dart, and in Go identity-agent-core/drivers through witnessed_vectors_test.go). Each case gives `answers` (what each witness the identifier names answered to GET /witness/kel/{rid}: every event with its bytes, the controller's signature and that witness's own receipt) and `rid`. A reader pools the receipts, reads each answer as a key log, counts for each event the distinct witnesses designated at that event whose indexed signature over the event's bytes verifies, and takes the longest log every event of which has its threshold: `events` is how many events that is. `refuse` means no log is taken. `page`: a link that names witnesses, taken or refused as `expect` says, by what each address (`w0`, `w1`: the first and second of `wit`) answers. `against_link`: a log a link carried (`link_log`) judged against those answers is `agrees`, `moved_on`, `apart` or `none`.",
     cases: [
@@ -202,6 +204,8 @@ export async function make() {
       case_("two histories, each receipted by a threshold, that disagree", [ans(W[0], 0), ans(W[1], 1), ans(W[1], 1, 2, forkChain), ans(W[2], 2, 2, forkChain)], null),
       case_("a witness list that a rotation changed: the witness it added counts, at its place", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[3], 2, 2, chainRot)], 2, { rid: chainRot.aid }),
       case_("a witness list that a rotation changed: the witness it cut does not count", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[2], 2, 2, chainRot)], 1, { rid: chainRot.aid }),
+      case_("witnesses named by a rotation: the events before it need no receipt", [witnessAnswer(chainLate, 3, (i, e) => (i === 0 ? [] : [W[0].receipt(e.text, 0)])), witnessAnswer(chainLate, 3, (i, e) => (i === 0 ? [] : [W[1].receipt(e.text, 1)]))], 3, { rid: chainLate.aid }),
+      case_("witnesses named by a rotation that has too few receipts", [witnessAnswer(chainLate, 3, (i, e) => (i === 0 ? [] : [W[0].receipt(e.text, 0)]))], 1, { rid: chainLate.aid }),
       case_("an identifier whose inception names no witnesses", [witnessAnswer(plain, 2)], null, { rid: plain.aid }),
     ],
     // What a page does with the log a link carried (`link_log`, already read) once it has asked the witnesses (src/witnessed.ts `judgeLinkLog`):

@@ -86,16 +86,20 @@ Map<String, dynamic>? _json(String text) {
 /// How many leading events of [texts] have their threshold of receipts, which
 /// are [receipts] by event SAID, as (witness, signature). Fails closed: an
 /// event whose witnesses or threshold cannot be read ends the count.
-int _receiptedThrough(List<String> texts, List<String> saids,
-    Map<String, List<(String, String)>> receipts) {
+({int through, int named, int toad}) _receiptedThrough(List<String> texts,
+    List<String> saids, Map<String, List<(String, String)>> receipts) {
   var designated = <String>[];
+  var toad = 0;
   for (var i = 0; i < texts.length; i++) {
     final ev = _json(texts[i]);
-    if (ev == null) return i;
+    if (ev == null) return (through: i, named: designated.length, toad: toad);
     final after = _witnessesAfter(designated, ev);
-    final toad = _toadOf(ev);
-    if (after == null || toad == null) return i;
+    final bt = _toadOf(ev);
+    if (after == null || bt == null) {
+      return (through: i, named: designated.length, toad: toad);
+    }
     designated = after;
+    toad = bt;
     final keys = <String>{};
     for (final (witness, sig)
         in receipts[saids[i]] ?? const <(String, String)>[]) {
@@ -109,9 +113,11 @@ int _receiptedThrough(List<String> texts, List<String> saids,
       }
       keys.add(witness);
     }
-    if (keys.length < toad) return i;
+    if (keys.length < toad) {
+      return (through: i, named: designated.length, toad: toad);
+    }
   }
-  return texts.length;
+  return (through: texts.length, named: designated.length, toad: toad);
 }
 
 class _Read {
@@ -162,13 +168,6 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
     } on TrustRefused {
       continue;
     }
-    // Only an identifier whose inception names witnesses and asks for a
-    // receipt has a log they vouch for.
-    final icp = _json(texts[0]);
-    if (icp == null) continue;
-    final named = _strings(icp['b']);
-    final toad = _toadOf(icp);
-    if (named == null || named.isEmpty || toad == null || toad == 0) continue;
     read.add(_Read(texts, sigs, checked));
     for (var i = 0; i < kel.length; i++) {
       final list = (kel[i] as Map)['witness_receipts'];
@@ -186,11 +185,23 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
   if (read.isEmpty) {
     _refuse('no witness gave a key log of this identifier that can be read');
   }
-  final through = [
-    for (final r in read)
-      _receiptedThrough(
-          r.texts, [for (final e in r.checked.events) e.said], receipts)
-  ];
+  // A log is a witnessed one when the witnesses in force at its last event are
+  // named and asked for a receipt. The events before witnesses were named (an
+  // identifier made without them and given them by a rotation) need none.
+  final witnessed = <_Read>[];
+  final through = <int>[];
+  for (final r in read) {
+    final t = _receiptedThrough(
+        r.texts, [for (final e in r.checked.events) e.said], receipts);
+    if (t.named > 0 && t.toad > 0) {
+      witnessed.add(r);
+      through.add(t.through);
+    }
+  }
+  if (witnessed.isEmpty) _refuse('no witness gave a log that names witnesses');
+  read
+    ..clear()
+    ..addAll(witnessed);
   for (var x = 0; x < read.length; x++) {
     for (var y = 0; y < read.length; y++) {
       final reach = through[x] < through[y] ? through[x] : through[y];

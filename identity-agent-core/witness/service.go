@@ -788,6 +788,15 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		designated = got.State.Witnesses()
 	}
 	witnessAID, sig, serr := s.SignEventReceipt(rawEvent, designated)
+	if errors.Is(serr, ErrNotDesignated) {
+		// An event from before this witness was named (an identifier made without
+		// witnesses and given them by a rotation) is held, because the log it
+		// witnesses from there on carries on from it, and is not receipted: this
+		// witness is not in its list, and a receipt from outside the list counts
+		// for nothing. Said so, rather than failed, so the controller seeding the
+		// log can tell it from a refusal.
+		return map[string]interface{}{"event_said": said, "sequence_number": seq, "held": true, "receipted": false}, nil
+	}
 	if serr != nil {
 		return nil, fmt.Errorf("could not sign a receipt: %w", serr)
 	}
@@ -934,6 +943,10 @@ func (v *verifiedLogs) put(tip string, key ed25519.PublicKey) {
 	}
 	v.m[tip] = key
 }
+
+// ErrNotDesignated is what SignEventReceipt returns for an event whose witness
+// list does not include this witness.
+var ErrNotDesignated = errors.New("this witness is not in the witness list of the event, so it cannot receipt it")
 
 // GetKelReplica implements C4.
 //

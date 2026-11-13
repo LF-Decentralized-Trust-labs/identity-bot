@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/witness"
 	"path/filepath"
 	"sync"
 
@@ -147,7 +148,7 @@ func (s *CoreServer) signWitnessEventReceipt(rawEvent []byte, designated []strin
 	}
 	at := drivers.WitnessPosition(designated, aid)
 	if at < 0 {
-		return "", "", fmt.Errorf("this witness is not in the witness list of the event, so it cannot receipt it")
+		return "", "", witness.ErrNotDesignated
 	}
 	sig, err := drivers.SignEventReceipt(rawEvent, seed, at)
 	if err != nil {
