@@ -6,7 +6,7 @@ import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { make } from "../test-vectors/make-seal-vectors.mjs";
 import { checkSealKey } from "../dist/app.js";
-import { openRequest, sealRequest, SealError } from "../dist/seal.js";
+import { openRequest, sealRequest, sealPaddedRequestForVectors, SealError } from "../dist/seal.js";
 
 const v = JSON.parse(readFileSync(new URL("../test-vectors/seal.json", import.meta.url), "utf8"));
 assert.deepEqual(await make(), v, "seal.json is not what make-seal-vectors.mjs makes; run it again");
@@ -68,5 +68,24 @@ for (const s of v.sizes) {
 }
 await assert.rejects(sealRequest(v.rid, spk, new Uint8Array((16 << 20) + 1)), SealError, "more than a message may carry");
 await assert.rejects(sealRequest(v.rid, new Uint8Array(65), enc.encode("x")), SealError, "a point that is not on the curve");
+
+{
+  // an answer's own value is 16 to 32 bytes when it is made, and its version is the one this page reads
+  const eph = await pair(Buffer.alloc(32, 7));
+  const { outer, reply } = await sealRequest(v.rid, spk, enc.encode("call"), eph);
+  const opened = await openRequest(v.rid, server, outer);
+  await assert.rejects(opened.reply.seal(enc.encode("a"), new Uint8Array(15)), SealError, "an answer value below the least");
+  await assert.rejects(opened.reply.seal(enc.encode("a"), new Uint8Array(33)), SealError, "an answer value above the most");
+  const answer = JSON.parse(await opened.reply.seal(enc.encode("a")));
+  assert.equal(dec.decode(await reply.open(JSON.stringify(answer))), "a");
+  await assert.rejects(reply.open(JSON.stringify({ ...answer, v: 2 })), SealError, "an answer of another version");
+  // a message that declares more than the most is refused though its size and zeros are the bucket's
+  const n = (16 << 20) + 1;
+  let want = 1024; while (want < n + 4) want *= 2;
+  const padded = new Uint8Array(want);
+  new DataView(padded.buffer).setUint32(0, n);
+  const big = await sealPaddedRequestForVectors(v.rid, spk, padded, eph);
+  await assert.rejects(openRequest(v.rid, server, big), SealError, "a message declaring more than the most");
+}
 
 console.log("sealed traffic holds the shared cases: bytes equal, refusals refused, sizes in buckets");
