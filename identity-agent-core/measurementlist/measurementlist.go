@@ -610,6 +610,16 @@ func ContentOfAttributes(raw []byte) (Content, error) {
 		if x.DT == "" {
 			return Content{}, fmt.Errorf("%w: the credential gives no date", ErrMalformed)
 		}
+		if err := secondsInUTC(x.PublishedAt, x.ExpiresAt); err != nil {
+			return Content{}, err
+		}
+		for _, es := range x.Images {
+			for _, e := range es {
+				if err := secondsInUTC(e.ValidFrom, deref(e.ValidUntil)); err != nil {
+					return Content{}, err
+				}
+			}
+		}
 		c := Content{Sequence: x.Sequence, PublishedAt: x.PublishedAt, ExpiresAt: x.ExpiresAt,
 			Images: map[string][]wireEntry{}, v2: x.Images}
 		for kind, es := range x.Images {
@@ -627,5 +637,38 @@ func ContentOfAttributes(raw []byte) (Content, error) {
 	if a.DT == "" {
 		return Content{}, fmt.Errorf("%w: the credential gives no date", ErrMalformed)
 	}
+	if err := secondsInUTC(a.PublishedAt, a.ExpiresAt); err != nil {
+		return Content{}, err
+	}
+	for _, es := range a.Images {
+		for _, e := range es {
+			if err := secondsInUTC(e.ValidFrom, deref(e.ValidUntil)); err != nil {
+				return Content{}, err
+			}
+		}
+	}
 	return Content{Sequence: a.Sequence, PublishedAt: a.PublishedAt, ExpiresAt: a.ExpiresAt, Images: a.Images}, nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// secondsInUTC holds the times of a list credential to the one form its schema
+// allows: RFC 3339, UTC, whole seconds ("2026-11-12T00:00:00Z"). An empty
+// value is not checked here (an absent end is null; a missing start is refused
+// where it is parsed).
+func secondsInUTC(values ...string) error {
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		if len(v) != len("2006-01-02T15:04:05Z") || v[len(v)-1] != 'Z' {
+			return fmt.Errorf("%w: %q is not a time in UTC to the second", ErrMalformed, v)
+		}
+	}
+	return nil
 }

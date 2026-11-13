@@ -38,7 +38,7 @@ func TestAListMadeByTheEngineIsCheckedByTheChecker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the registry: %v", err)
 	}
-	schema := "ECK0xZlkjmPoOv0NGGFy2-_j_e9zc0yxayHH0pNeox8w"
+	schema := realSchemaSAID(t)
 	var tel, creds [][]byte
 	vcp, _ := base64.StdEncoding.DecodeString(reg.VcpJsonB64)
 	tel = append(tel, vcp)

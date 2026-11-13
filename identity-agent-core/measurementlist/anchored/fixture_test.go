@@ -100,7 +100,7 @@ type found struct {
 
 func newPublisher(t testing.TB, f found) *publisher {
 	t.Helper()
-	p := &publisher{t: t, receipts: -1, schema: "ECK0xZlkjmPoOv0NGGFy2-_j_e9zc0yxayHH0pNeox8w", issued: map[string][]byte{},
+	p := &publisher{t: t, receipts: -1, schema: realSchemaSAID(t), issued: map[string][]byte{},
 		cur: f.keys, next: f.next, kt: f.kt, nt: f.nt, toad: f.toad}
 	for i := 0; i < f.witnesses; i++ {
 		p.witness = append(p.witness, newMember(t, false))
@@ -210,9 +210,11 @@ func (p *publisher) foundRegistry() {
 
 type listSpec struct {
 	sequence int
-	expires  time.Time
-	images   string // the images object, as JSON
-	extra    string // attribute fields to add before "sequence", as JSON members ending in a comma
+	// publishedAt is the list's published_at; zero is t0
+	publishedAt time.Time
+	expires     time.Time
+	images      string // the images object, as JSON
+	extra       string // attribute fields to add before "sequence", as JSON members ending in a comma
 }
 
 func defaultImages(measurementHex string) string {
@@ -225,8 +227,12 @@ func meas(b byte) string { return fmt.Sprintf("%096x", int(b)) }
 // issue makes the credential for spec, its issuance and the seal of it.
 func (p *publisher) issue(s listSpec) (credSAID string, issSealPos int) {
 	p.t.Helper()
+	pub := s.publishedAt
+	if pub.IsZero() {
+		pub = t0
+	}
 	data := fmt.Sprintf(`{"dt":"%s",%s"sequence":%d,"published_at":"%s","expires_at":"%s","images":%s}`,
-		t0.Format(time.RFC3339), s.extra, s.sequence, t0.Format(time.RFC3339), s.expires.Format(time.RFC3339), s.images)
+		t0.Format(time.RFC3339), s.extra, s.sequence, pub.Format(time.RFC3339), s.expires.Format(time.RFC3339), s.images)
 	raw, err := keri.BuildCredential(keri.CredentialInput{SchemaSAID: p.schema, Issuer: p.aid, Registry: p.registry, Data: json.RawMessage(data)})
 	if err != nil {
 		p.t.Fatal(err)
@@ -341,3 +347,14 @@ func tipAt(p *publisher, n int) Tip {
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
 func base64RawURL(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+// realSchemaSAID is the SAID of the schema committed in this package, which is
+// the one every build pins.
+func realSchemaSAID(t testing.TB) string {
+	t.Helper()
+	s, err := SchemaSAID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
