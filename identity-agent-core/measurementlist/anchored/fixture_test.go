@@ -23,6 +23,7 @@ const b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 var t0 = time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
 
 type member struct {
+	seed   []byte
 	signer keri.Signer
 	pub    string
 	digest string
@@ -46,7 +47,7 @@ func newMember(t testing.TB, transferable bool) member {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return member{s, pub, d}
+	return member{seed, s, pub, d}
 }
 
 func pubs(ms ...member) []string {

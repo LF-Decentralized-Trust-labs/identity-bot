@@ -68,26 +68,17 @@
 // published; a malformed measurement; a repeated measurement or image kind.
 // There is no partial acceptance: any fault refuses the whole list.
 //
-// # What guards what, and what is left
+// # What reads a list now
 //
-// The floor file (LoadFile) holds the highest sequence accepted and that
-// list's hash. It is what stops an older list being put back, and a different
-// list being served at the same sequence. Once it is above zero the agent
-// never falls back to its bootstrap policy: every list failure then means no
-// box is accepted (see measurementPolicy in package server).
-//
-// A clock set back is not guarded by the floor: it can make an expired list
-// look current. What limits it is that an old list cannot be used below the
-// floor whatever the time, and that entries carry their own windows, so only
-// a list at or above the floor can be extended by a wrong clock.
-//
-// The floor and the list sit together on the same machine. Deleting both
-// returns the agent to "nothing ever accepted", which is the one remaining
-// attack; it needs write access to the agent's data directory. The floor is
-// written 0600 there, apart from wherever the list file is delivered to, so
-// whoever only delivers lists cannot delete it. Where a platform offers a
-// store the list's writer cannot reach (a keychain item, a sealed counter),
-// the floor belongs there; that is not done yet.
+// The core accepts a list only as a credential issued under a pinned publisher
+// identity and anchored in its witnessed key history (package anchored, ADR
+// 078), and holds its content to the rules here through FromContent. The signed
+// document above (Verify, with a pinned key) is the form the apps' own
+// verifier, in Dart, still reads; no core code pins a key or calls Verify, and
+// it goes when that verifier does. The floors (highest sequence and the list
+// accepted at it, newest place of the publisher's history) are kept by
+// anchored.FileFloors, and once a list has been accepted here the bootstrap is
+// never used again (see measurementLists.policy in package server).
 package measurementlist
 
 import (

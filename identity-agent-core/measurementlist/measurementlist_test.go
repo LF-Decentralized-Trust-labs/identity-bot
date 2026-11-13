@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -219,9 +218,6 @@ func TestNoPinnedKeyVerifiesNothing(t *testing.T) {
 	if _, err := Verify(sign(t, priv, baseDoc()), Policy{Now: now}); !errors.Is(err, ErrNoKey) {
 		t.Fatalf("got %v, want ErrNoKey", err)
 	}
-	if _, err := Pinned(); !errors.Is(err, ErrNoKey) {
-		t.Fatalf("a build with no key: %v", err)
-	}
 }
 
 func TestAPublishedTestKeyCannotBePinned(t *testing.T) {
@@ -324,32 +320,6 @@ func TestTheSignatureIsBoundToThisKindOfDocument(t *testing.T) {
 	}
 }
 
-func TestTheFloorRefusesAnOldListAcrossRestarts(t *testing.T) {
-	priv, key := vectorKey("a")
-	dir := t.TempDir()
-	path, floor := filepath.Join(dir, "list.json"), filepath.Join(dir, "floor")
-	d7, d9, d8 := baseDoc(), baseDoc(), baseDoc()
-	d9["sequence"], d8["sequence"] = 9, 8
-	old := sign(t, priv, d7)
-	os.WriteFile(path, sign(t, priv, d9), 0o600)
-	if _, err := LoadFile(path, floor, key, now); err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(path, old, 0o600) // a stale copy put back
-	if _, err := LoadFile(path, floor, key, now); !errors.Is(err, ErrOldList) {
-		t.Fatalf("got %v, want ErrOldList", err)
-	}
-	os.WriteFile(path, sign(t, priv, d8), 0o600)
-	if _, err := LoadFile(path, floor, key, now); !errors.Is(err, ErrOldList) {
-		t.Fatalf("sequence 8 after 9: got %v", err)
-	}
-	os.WriteFile(floor, []byte("garbage"), 0o600) // damage is not "nothing seen"
-	os.WriteFile(path, sign(t, priv, d9), 0o600)
-	if _, err := LoadFile(path, floor, key, now); err == nil {
-		t.Fatal("a damaged floor was read as zero")
-	}
-}
-
 // The committed vectors are what other implementations check against. They are
 // reproduced byte for byte from the fixed key, so they cannot drift unseen.
 func TestTheCommittedVectorsVerifyAndAreReproducible(t *testing.T) {
@@ -375,36 +345,3 @@ func TestTheCommittedVectorsVerifyAndAreReproducible(t *testing.T) {
 	}
 }
 
-func TestADifferentListAtAnEqualSequenceIsRefusedAndTheSameListIsNot(t *testing.T) {
-	priv, key := vectorKey("a")
-	dir := t.TempDir()
-	path, floor := filepath.Join(dir, "list.json"), filepath.Join(dir, "floor")
-	a, b := baseDoc(), baseDoc()
-	b["expires_at"] = "2099-01-01T00:00:00Z" // same sequence, other content
-	rawA := sign(t, priv, a)
-	os.WriteFile(path, rawA, 0o600)
-	if _, err := LoadFile(path, floor, key, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadFile(path, floor, key, now); err != nil {
-		t.Fatalf("the same list again: %v", err)
-	}
-	os.WriteFile(path, sign(t, priv, b), 0o600)
-	if _, err := LoadFile(path, floor, key, now); !errors.Is(err, ErrConflictingList) {
-		t.Fatalf("got %v, want ErrConflictingList", err)
-	}
-}
-
-func TestAFloorWithOnlyASequenceStillReadsAndGetsItsHashRecorded(t *testing.T) {
-	priv, key := vectorKey("a")
-	dir := t.TempDir()
-	path, floor := filepath.Join(dir, "list.json"), filepath.Join(dir, "floor")
-	os.WriteFile(floor, []byte("7\n"), 0o600) // as an earlier version wrote it
-	os.WriteFile(path, sign(t, priv, baseDoc()), 0o600)
-	if _, err := LoadFile(path, floor, key, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, d, err := ReadFloor(floor); err != nil || d == "" {
-		t.Fatalf("hash not recorded: %q %v", d, err)
-	}
-}

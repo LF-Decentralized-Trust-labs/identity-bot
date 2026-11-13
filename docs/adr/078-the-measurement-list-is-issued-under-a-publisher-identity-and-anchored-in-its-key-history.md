@@ -24,14 +24,17 @@ ADR-076 takes the list of accepted launch measurements from a document signed wi
    - the credential is the pinned publisher's, under the pinned schema, in the pinned registry, and names no holder;
    - it is the newest issued and not withdrawn;
    - every rule ADR-076 states for a signed list holds (`measurementlist.FromContent`: sequence floor, same sequence with other content, expiry, entry windows and shape).
-5. **The check is pure.** The time and the witnesses' answers are inputs, and a caller cannot skip the freshness input.
+5. **The check is pure, and the question is asked inside it.** The time and the witnesses' answers are inputs, and a caller cannot skip the freshness input. `VerifyAsking` takes a function that asks the witnesses, and calls it only once the history is known to be genuine, with the witnesses that history designates, so a question cannot go to witnesses the history does not name. `anchored.Resolver` is that function over `witness.Service.AskTips`: a new random nonce for each witness for each question, kept nowhere and used once.
 6. **The bundle** is `{bundle_version: 1, publisher, registry, kel, tel, credentials}`, at most 4 MiB, with no signature of its own: every part is checked and nothing is trusted for being there.
 7. **Anchors other than registry event seals** (the owner named at founding, a handover's steps) are the identity's own and are not read.
+
+8. **The core takes the list on one route and decides from what it checked.** `POST /api/measurement-list` takes a candidate bundle, asks the witnesses, checks it against the pin and the floors, and only then stages it. A staged list is the policy for one hour after the witnesses were asked and while its own dates hold, is kept in memory only (after a restart it must be checked again), and once any list has been accepted the bootstrap is never used again. Nothing is read from a file or the environment, and a conflicting history is kept as evidence (`measurement_publisher_duplicity.json`).
 
 ## Consequences
 
 - The publisher can be a single key held by one box, and later several keys, with the same checker and the same pin.
-- `PinnedKeyID` and `PinnedKeyHex` are replaced by the pin of decision 3; a build without a pin accepts no list.
+- `PinnedKeyID` and `PinnedKeyHex` are gone, replaced by the pin of decision 3; a build without a pin accepts no list. The signed-document reader in `measurementlist` (`Verify`) has no caller in the core and goes with the Dart verifier.
+- An anchored list may say `list_version` 2 in its attribute block, and its entries then carry `environment`, `svn`, `smt` and `retired`, read by the same code as a signed list's.
 - ADR-076 decision 7 stands and applies to whatever issues a list: the issuing tool refuses an entry marked as development.
 - The floors (the highest list sequence and its hash, and the newest place of the publisher's history this device has held) never fall below the build's bundled snapshot.
 - Tests: `identity-agent-core/measurementlist/anchored` (`verify_test.go`, one negative case per refusal; `engine_test.go`, the engine's own output end to end).

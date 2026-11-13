@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html"
 	"identity-agent-core/limits"
+	"identity-agent-core/measurementlist/anchored"
 	"log"
 	"net"
 	"net/http"
@@ -224,7 +225,10 @@ type CoreServer struct {
 
 	// measurementPolicy, when set, decides the policy at the moment of each
 	// adoption (see currentMeasurements); AcceptedMeasurements is then unused.
-	measurementPolicy   func(now time.Time) ([][]byte, string)
+	measurementPolicy func(now time.Time) ([][]byte, string)
+	// measurementLists holds the publisher's list as this core last checked it
+	// (see measurement_policy.go); it is what measurementPolicy reads.
+	measurementLists    *measurementLists
 	measurementPolicyMu sync.Mutex
 
 	// snpChainVerifier replaces the AMD chain check. Unexported and never read
@@ -413,8 +417,9 @@ func New(cfg Config) (*CoreServer, error) {
 		dataStore.Close()
 		return nil, err
 	}
+	lists := &measurementLists{dataDir: cfg.DataDir}
 	policyAt := func(now time.Time) ([][]byte, string) {
-		accepted, why, err := measurementPolicy(cfg.DataDir, cfg.EntityType, now)
+		accepted, why, err := lists.policy(cfg.EntityType, now)
 		if err != nil {
 			return nil, err.Error()
 		}
@@ -447,6 +452,7 @@ func New(cfg Config) (*CoreServer, error) {
 
 	s := &CoreServer{
 		measurementPolicy: policyAt,
+		measurementLists:  lists,
 		DataStore:         dataStore,
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
@@ -563,6 +569,12 @@ func New(cfg Config) (*CoreServer, error) {
 		return aid, err
 	}
 	s.WitnessService = wsvc
+	lists.asker = func() anchored.TipAsker {
+		if s.WitnessService == nil {
+			return nil // a nil *Service inside the interface would not be nil
+		}
+		return s.WitnessService
+	}
 	s.inBackground(func(ctx context.Context) { witness.StartHeartbeatLoop(wsvc, ctx.Done()) })
 
 	// Start the KERI engine.
@@ -1290,6 +1302,10 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/pairing/complete", s.handlePairingComplete)
 		// The owner's side: adopt a box. Owner-only by default.
 		r.Post("/pairing/adopt", s.handlePairingAdopt)
+		// The list of software an owner will adopt a box for: an app hands the
+		// core a candidate bundle and the core checks it with the publisher's
+		// witnesses. See measurement_list_route.go.
+		r.Post("/measurement-list", s.handleMeasurementList)
 		// The identity a machine will answer to, minted before the machine is
 		// asked for. Owner-only: it is this device's own key material.
 		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
