@@ -9,6 +9,8 @@ import (
 	"time"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/login"
 )
 
 // A witness holds the key log of an identifier only for one it was asked to
@@ -27,24 +29,32 @@ import (
 // it makes the witness hold a log, and nothing else.
 const (
 	coverVersion = "witness-cover/v1"
-	// maxCoverInception bounds the inception event a declaration carries.
+	// maxCoverInception bounds each event of the key log a declaration carries,
+	// and maxCoverEvents how many.
 	maxCoverInception = 8 << 10
+	maxCoverEvents    = 16
 )
 
-// CoverStatement is what the owner signs: who it is, which witness (by the key
+// CoverStatement is what the owner signs, and what the identifier signs too, by
+// its own current key, to show the owner did not claim someone else's: who it is, which witness (by the key
 // its receipts are signed with, so a declaration for one cannot be replayed to
 // another), which identifier, the SAID of the inception that makes it, and when.
 func CoverStatement(owner, witnessKey, aid, inceptionSAID, stamp string) string {
 	return fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s", coverVersion, owner, witnessKey, aid, inceptionSAID, stamp)
 }
 
-// CoverRequest is a declaration that aid is the owner's, to be witnessed.
+// CoverRequest is a declaration that aid is the owner's, to be witnessed. Log is
+// the identifier's signed key log from its inception to now (a log is public, so
+// it proves nothing alone), and AIDSignature is the identifier's own signature,
+// by the key that log leaves in force, over the same statement the owner signs:
+// the proof that the one declaring controls it.
 type CoverRequest struct {
-	Owner        string `json:"owner_aid"`
-	AID          string `json:"aid"`
-	InceptionB64 string `json:"inception_b64"`
-	Stamp        string `json:"stamp"`
-	Signature    string `json:"signature"`
+	Owner        string        `json:"owner_aid"`
+	AID          string        `json:"aid"`
+	Log          []SignedEvent `json:"log"`
+	Stamp        string        `json:"stamp"`
+	Signature    string        `json:"signature"`
+	AIDSignature string        `json:"aid_signature"`
 }
 
 // AcceptCover is the witness's side: it holds the log of req.AID from now on,
@@ -57,12 +67,24 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	if req.Owner == "" || req.AID == "" || req.Owner == req.AID {
 		return fmt.Errorf("not_covered: the declaration names no owner and identifier")
 	}
-	if len(req.InceptionB64) > maxCoverInception*4/3+8 {
-		return fmt.Errorf("not_covered: the inception is too large")
+	if len(req.Log) == 0 || len(req.Log) > maxCoverEvents {
+		return fmt.Errorf("not_covered: the key log is not readable")
 	}
-	raw, err := base64.StdEncoding.DecodeString(req.InceptionB64)
-	if err != nil || len(raw) == 0 || len(raw) > maxCoverInception {
-		return fmt.Errorf("not_covered: the inception is not readable")
+	messages := make([][]byte, 0, len(req.Log))
+	for _, e := range req.Log {
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil || len(raw) == 0 || len(raw) > maxCoverInception {
+			return fmt.Errorf("not_covered: the key log is not readable")
+		}
+		sigs := e.Signatures
+		if len(sigs) == 0 && e.CesrSignature != "" {
+			sigs = []string{e.CesrSignature}
+		}
+		m, err := signedMessage(raw, sigs)
+		if err != nil {
+			return fmt.Errorf("not_covered: the key log is not readable")
+		}
+		messages = append(messages, m)
 	}
 	own := ""
 	if s.OurWitnessAID != nil {
@@ -79,16 +101,27 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	mu := s.receivingLock(req.AID)
 	mu.Lock()
 	defer mu.Unlock()
-	// The inception is the identifier's own: one event, which derives it.
-	ev, err := keri.ParseEvent(raw)
-	if err != nil || ev.Ilk != "icp" || ev.Identifier != req.AID {
-		return fmt.Errorf("not_covered: the inception is not this identifier's")
+	// The log is the identifier's own and correctly signed, from an inception
+	// that derives it, and the key it leaves in force is one key.
+	log, err := keri.ValidateSignedKEL(messages)
+	if err != nil {
+		return fmt.Errorf("not_covered: the key log does not verify")
 	}
-	if err := keri.ValidateKEL([][]byte{raw}); err != nil {
-		return fmt.Errorf("not_covered: the inception does not derive its identifier")
+	first, err := keri.ParseEvent(eventBytesOf(req.Log[0]))
+	if err != nil || first.Ilk != "icp" || first.Identifier != req.AID {
+		return fmt.Errorf("not_covered: the key log is not this identifier's")
 	}
-	if !s.signedBy(req.Owner, CoverStatement(req.Owner, own, req.AID, ev.SAID, req.Stamp), req.Signature) {
+	keys := log.State().Keys()
+	if len(keys) != 1 {
+		return fmt.Errorf("not_covered: the identifier's control cannot be shown by one key")
+	}
+	statement := CoverStatement(req.Owner, own, req.AID, first.SAID, req.Stamp)
+	// The owner's word, and the identifier's own.
+	if !s.signedBy(req.Owner, statement, req.Signature) {
 		return fmt.Errorf("not_covered: the declaration is not signed by the owner")
+	}
+	if !signedByKey(keys[0], statement, req.AIDSignature) {
+		return fmt.Errorf("not_covered: the identifier did not sign the declaration")
 	}
 	if meta, _ := s.Store.GetContactMeta(req.Owner); meta == nil || !meta.WitnessingFor {
 		return fmt.Errorf("not_covered: this witness does not witness for the owner")
@@ -127,29 +160,57 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 
 // RequestCover is the owner's side: declares to the witness at root (the base
 // its routes resolve against, ending in a slash, as ProposedWitness.Address) that
-// aid, whose inception is the event given, is this agent's own, signed with the
-// key this agent is witnessed under. witnessKey is the key the witness's
-// receipts are signed with (ProposedWitness.Key).
-func (s *Service) RequestCover(ctx context.Context, root, witnessKey, aid string, inception []byte) error {
-	if s.SignAsRequester == nil || s.ourAID() == "" {
+// aid, whose signed key log is log, is this agent's own, signed with the key this
+// agent is witnessed under, and by the identifier's own key in force
+// (signAsIdentifier). witnessKey is the key the witness's receipts are signed
+// with (ProposedWitness.Key).
+//
+// Nothing in this repository calls it: the caller is a program that makes the
+// identifier (an add-on), which holds the identifier's key and so can sign for it.
+func (s *Service) RequestCover(ctx context.Context, root, witnessKey, aid string, log []SignedEvent, signAsIdentifier func(statement string) (string, error)) error {
+	if s.SignAsRequester == nil || s.ourAID() == "" || signAsIdentifier == nil || len(log) == 0 {
 		return fmt.Errorf("this agent cannot sign a declaration")
 	}
-	ev, err := keri.ParseEvent(inception)
+	ev, err := keri.ParseEvent(eventBytesOf(log[0]))
 	if err != nil || ev.Identifier != aid {
-		return fmt.Errorf("the inception is not %s's", aid)
+		return fmt.Errorf("the key log is not %s's", aid)
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	sig, err := s.SignAsRequester(CoverStatement(s.ourAID(), witnessKey, aid, ev.SAID, stamp))
+	statement := CoverStatement(s.ourAID(), witnessKey, aid, ev.SAID, stamp)
+	sig, err := s.SignAsRequester(statement)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(CoverRequest{Owner: s.ourAID(), AID: aid, InceptionB64: base64.StdEncoding.EncodeToString(inception), Stamp: stamp, Signature: sig})
+	idSig, err := signAsIdentifier(statement)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(CoverRequest{Owner: s.ourAID(), AID: aid, Log: log, Stamp: stamp, Signature: sig, AIDSignature: idSig})
 	if err != nil {
 		return err
 	}
 	url := strings.TrimRight(root, "/") + "/witness/cover"
 	_, err = s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	return err
+}
+
+// eventBytesOf is the event a SignedEvent carries, nil when it does not decode.
+func eventBytesOf(e SignedEvent) []byte {
+	raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
+	return raw
+}
+
+// signedByKey reports whether signature is over statement by key (a qb64 public key).
+func signedByKey(key, statement, signature string) bool {
+	if signature == "" {
+		return false
+	}
+	raw, err := login.DecodeVerkey(key)
+	if err != nil {
+		return false
+	}
+	ok, err := login.VerifyString(statement, signature, raw)
+	return err == nil && ok
 }
 
 // forgetDelegate drops aid's entry in the held-under map, whoever it was held under.

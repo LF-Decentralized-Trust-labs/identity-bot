@@ -23,7 +23,18 @@ import (
 // witnesses for.
 func TestAPlainIdentifierIsWitnessedOnlyOnceItsOwnerSaysItIsItsOwn(t *testing.T) {
 	_, key, srv, peer := aRoutedWitness(t)
-	aid, said, raw, sig := signedInception(t, key)
+	aid, said, raw, sig, idSigner := signedInceptionBy(t, key)
+	logOf := func(raw []byte, sig string) []witness.SignedEvent {
+		return []witness.SignedEvent{{RawBytesB64: base64.StdEncoding.EncodeToString(raw), CesrSignature: sig}}
+	}
+	idSign := func(who, wit, id, d, stamp string, by keri.Signer) string {
+		b, err := by.Sign([]byte(witness.CoverStatement(who, wit, id, d, stamp)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, _ := keri.MatterQB64(keri.CodeEd25519Sig, b)
+		return s
+	}
 
 	owner, _ := keri.GenerateSigner(true)
 	ownerKey, _ := owner.PublicKey()
@@ -62,7 +73,7 @@ func TestAPlainIdentifierIsWitnessedOnlyOnceItsOwnerSaysItIsItsOwn(t *testing.T)
 	}
 	cover := func(over func(*witness.CoverRequest)) (int, string) {
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
-		req := witness.CoverRequest{Owner: ownerAID, AID: aid, InceptionB64: base64.StdEncoding.EncodeToString(raw), Stamp: stamp, Signature: sign(stamp)}
+		req := witness.CoverRequest{Owner: ownerAID, AID: aid, Log: logOf(raw, sig), Stamp: stamp, Signature: sign(stamp), AIDSignature: idSign(ownerAID, key, aid, said, stamp, idSigner)}
 		if over != nil {
 			over(&req)
 		}
@@ -98,13 +109,26 @@ func TestAPlainIdentifierIsWitnessedOnlyOnceItsOwnerSaysItIsItsOwn(t *testing.T)
 		},
 		"another identifier's": func(r *witness.CoverRequest) {
 			// The owner signed it, for this identifier and this inception's digest: what is wrong is only that the event is another's.
-			_, said2, r2, _ := signedInception(t, key)
-			r.InceptionB64 = base64.StdEncoding.EncodeToString(r2)
-			b, _ := owner.Sign([]byte(witness.CoverStatement(ownerAID, key, aid, said2, r.Stamp)))
-			r.Signature, _ = keri.MatterQB64(keri.CodeEd25519Sig, b)
+			_, said2, r2, sig2, by2 := signedInceptionBy(t, key)
+			r.Log = logOf(r2, sig2)
+			r.Signature = sign(r.Stamp)
+			r.AIDSignature = idSign(ownerAID, key, aid, said2, r.Stamp, by2)
 		},
 		"one whose inception does not derive its identifier": func(r *witness.CoverRequest) {
-			r.InceptionB64 = base64.StdEncoding.EncodeToString(bytes.Replace(raw, []byte(`"bt":"1"`), []byte(`"bt":"0"`), 1))
+			r.Log = logOf(bytes.Replace(raw, []byte(`"bt":"1"`), []byte(`"bt":"0"`), 1), sig)
+		},
+		// The inception is public, so a squatter has it whole and signs as the owner it is itself:
+		// what it cannot do is sign as the identifier.
+		"one the identifier's own key did not sign": func(r *witness.CoverRequest) {
+			squatter, _ := keri.GenerateSigner(true)
+			r.AIDSignature = idSign(ownerAID, key, aid, said, r.Stamp, squatter)
+		},
+		"one with no signature of the identifier's": func(r *witness.CoverRequest) { r.AIDSignature = "" },
+		"one whose log is not signed by the identifier": func(r *witness.CoverRequest) {
+			squatter, _ := keri.GenerateSigner(true)
+			rawSig, _ := squatter.Sign(raw)
+			bad, _ := keri.MatterQB64(keri.CodeEd25519Sig, rawSig)
+			r.Log = logOf(raw, bad)
 		},
 		"one whose owner this witness does not witness for": func(r *witness.CoverRequest) {
 			meta, _ := peer.svc.Store.GetContactMeta(ownerAID)
@@ -138,18 +162,19 @@ func TestAPlainIdentifierIsWitnessedOnlyOnceItsOwnerSaysItIsItsOwn(t *testing.T)
 	peer.willWitnessFor(t, owner2AID)
 	_ = peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner2AID, PublicKey: owner2Key, Status: "accepted", ContactCategory: "general"})
 	_ = peer.svc.Store.SetConfig("witness.delegators_covered", `{"`+ownerAID+`":true,"`+owner2AID+`":true}`)
-	declareBy := func(who string, signer keri.Signer, id string, inception []byte, said string) (int, string) {
+	declareBy := func(who string, signer keri.Signer, id string, inception []byte, isig, said string, by keri.Signer) (int, string) {
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
 		b, _ := signer.Sign([]byte(witness.CoverStatement(who, key, id, said, stamp)))
 		sg, _ := keri.MatterQB64(keri.CodeEd25519Sig, b)
-		return post("/api/witness/cover", witness.CoverRequest{Owner: who, AID: id, InceptionB64: base64.StdEncoding.EncodeToString(inception), Stamp: stamp, Signature: sg})
+		return post("/api/witness/cover", witness.CoverRequest{Owner: who, AID: id, Log: logOf(inception, isig), Stamp: stamp, Signature: sg, AIDSignature: idSign(who, key, id, said, stamp, by)})
 	}
-	if code, _ := declareBy(owner2AID, owner2, aid, raw, said); code != http.StatusForbidden {
+	// Even with the identifier's own key, another owner cannot take what is held under this one.
+	if code, _ := declareBy(owner2AID, owner2, aid, raw, sig, said, idSigner); code != http.StatusForbidden {
 		t.Fatalf("an identifier held under one owner was taken by another: %d", code)
 	}
-	contactAID, contactSaid, contactRaw, _ := signedInception(t, key)
+	contactAID, contactSaid, contactRaw, contactSig, contactBy := signedInceptionBy(t, key)
 	peer.willWitnessFor(t, contactAID)
-	if code, _ := declareBy(ownerAID, owner, contactAID, contactRaw, contactSaid); code != http.StatusForbidden {
+	if code, _ := declareBy(ownerAID, owner, contactAID, contactRaw, contactSig, contactSaid, contactBy); code != http.StatusForbidden {
 		t.Fatalf("a contact this witness already witnesses for was declared another's: %d", code)
 	}
 	// Said again by the owner it is held under, it is taken (and is not counted twice).
@@ -197,5 +222,56 @@ func TestAnEventFromBeforeThisWitnessWasNamedIsHeldNotReceipted(t *testing.T) {
 	held, err := svc.GetKelReplica(aid)
 	if err != nil || len(held) != 1 || held[0]["witness_receipts"] != nil {
 		t.Fatalf("the event is not held without a receipt: %v %v", err, held)
+	}
+}
+
+// An inception is public, so an owner that has it can say the identifier is its
+// own: only the identifier's key in force shows the declaration is its
+// controller's. A squatter that gets there first is refused, and the real
+// controller is then witnessed.
+func TestASquatterCannotClaimAnotherOwnersIdentifierAtASharedWitness(t *testing.T) {
+	_, key, srv, peer := aRoutedWitness(t)
+	aid, said, raw, sig, idSigner := signedInceptionBy(t, key)
+	type party struct {
+		aid    string
+		signer keri.Signer
+	}
+	mk := func(name string) party {
+		sg, _ := keri.GenerateSigner(true)
+		pk, _ := sg.PublicKey()
+		id := "E" + name + "OwnerIdentifierxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"[:43-len(name)]
+		peer.willWitnessFor(t, id)
+		if err := peer.svc.Contacts.SaveContact(store.ContactRecord{AID: id, PublicKey: pk, Status: "accepted", ContactCategory: "general"}); err != nil {
+			t.Fatal(err)
+		}
+		return party{id, sg}
+	}
+	squatter, real := mk("Squatter"), mk("Real")
+	_ = peer.svc.Store.SetConfig("witness.delegators_covered", `{"`+squatter.aid+`":true,"`+real.aid+`":true}`)
+	declare := func(by party, idKey keri.Signer) int {
+		stamp := time.Now().UTC().Format(time.RFC3339Nano)
+		st := []byte(witness.CoverStatement(by.aid, key, aid, said, stamp))
+		b, _ := by.signer.Sign(st)
+		sg, _ := keri.MatterQB64(keri.CodeEd25519Sig, b)
+		ib, _ := idKey.Sign(st)
+		isg, _ := keri.MatterQB64(keri.CodeEd25519Sig, ib)
+		body, _ := json.Marshal(witness.CoverRequest{Owner: by.aid, AID: aid, Stamp: stamp, Signature: sg, AIDSignature: isg,
+			Log: []witness.SignedEvent{{RawBytesB64: base64.StdEncoding.EncodeToString(raw), CesrSignature: sig}}})
+		res, err := http.Post(srv.URL+"/api/witness/cover", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	own, _ := keri.GenerateSigner(true)
+	if code := declare(squatter, own); code != http.StatusForbidden {
+		t.Fatalf("a squatter that is not the identifier's controller was taken: %d", code)
+	}
+	if code := declare(real, idSigner); code != http.StatusOK {
+		t.Fatalf("the identifier's controller was refused after a squatter was: %d", code)
+	}
+	if code := declare(squatter, own); code != http.StatusForbidden {
+		t.Fatalf("a squatter was taken after the real owner: %d", code)
 	}
 }

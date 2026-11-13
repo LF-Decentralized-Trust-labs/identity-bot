@@ -109,6 +109,13 @@ func (p *peerAgent) willWitnessFor(t *testing.T, aid string) {
 // signedInception founds an identity designating the given witness.
 func signedInception(t *testing.T, witnessKey string) (aid, said string, raw []byte, sig string) {
 	t.Helper()
+	aid, said, raw, sig, _ = signedInceptionBy(t, witnessKey)
+	return
+}
+
+// signedInceptionBy is signedInception and the signer whose key is the identifier's.
+func signedInceptionBy(t *testing.T, witnessKey string) (aid, said string, raw []byte, sig string, by keri.Signer) {
+	t.Helper()
 	e := keriengine.New()
 	a, err := keri.GenerateSigner(true)
 	if err != nil {
@@ -146,7 +153,7 @@ func signedInception(t *testing.T, witnessKey string) (aid, said string, raw []b
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ev.Identifier, ev.SAID, raw, sig
+	return ev.Identifier, ev.SAID, raw, sig, a
 }
 
 func TestTwoAgentsWitnessForEachOther(t *testing.T) {
