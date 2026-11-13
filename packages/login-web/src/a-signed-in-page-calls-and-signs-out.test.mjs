@@ -118,9 +118,9 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn: f
 }
 
 // what a person is told
-assert.match(signInProblem("declined"), /not accepted.*Ask the app's owner/s);
+assert.match(signInProblem("declined"), /not accepted.*Ask the utility app's owner/s);
 assert.match(signInProblem("expired"), /ran out of time.*Press the button/s);
-assert.match(signInProblem("error", "poll 502"), /cannot be reached/);
-assert.match(signInProblem("error", "poll 403"), /did not accept/);
+assert.match(signInProblem("error", "poll 502"), /utility app cannot be reached/);
+assert.match(signInProblem("error", "poll 403"), /utility app did not accept/);
 
 console.log("a signed-in page makes checked calls with proofs, ends in a sentence on a 401, and signs out");
