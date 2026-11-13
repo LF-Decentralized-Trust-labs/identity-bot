@@ -669,7 +669,7 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		if delegator := s.delegateOf(signerAID); delegator != "" {
 			if dm, _ := s.Store.GetContactMeta(delegator); dm == nil || !dm.WitnessingFor {
 				s.dropDelegatesOf(delegator)
-				return nil, fmt.Errorf("not_witnessing")
+				return nil, ErrNotWitnessing
 			}
 		}
 	} else {
@@ -680,7 +680,7 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		// operator can switch this off or cap it.
 		delegator, ok := s.delegatorApproves(event)
 		if !ok {
-			return nil, fmt.Errorf("not_witnessing")
+			return nil, ErrNotWitnessing
 		}
 		if !s.delegatesAccepted(delegator) {
 			return nil, fmt.Errorf("not_witnessing: the delegator's agreement does not cover its delegates, or this witness's operator does not accept them")
@@ -881,7 +881,7 @@ func nonEmpty(sigs []string) []string {
 func (s *Service) CurrentVerifiedKey(aid string) (ed25519.PublicKey, error) {
 	held, err := s.Store.GetKelEvents(aid)
 	if err != nil || len(held) == 0 {
-		return nil, fmt.Errorf("not_witnessing")
+		return nil, ErrNotWitnessing
 	}
 	raws := make([][]byte, 0, len(held))
 	sigs := make([]string, 0, len(held))

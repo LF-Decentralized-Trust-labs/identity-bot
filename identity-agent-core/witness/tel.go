@@ -262,7 +262,7 @@ func (s *Service) ReceiveTEL(issuerAID string, rawB64 []string) (int, error) {
 	}
 	kelRaw, err := s.heldKelRaw(issuerAID)
 	if err != nil {
-		if err.Error() == "not_witnessing" {
+		if errors.Is(err, ErrNotWitnessing) {
 			return 0, ErrTELNotAccepted
 		}
 		return 0, err
@@ -296,7 +296,7 @@ func (s *Service) heldKelRaw(aid string) ([][]byte, error) {
 		return nil, err
 	}
 	if len(kel) == 0 {
-		return nil, fmt.Errorf("not_witnessing")
+		return nil, ErrNotWitnessing
 	}
 	out := make([][]byte, 0, len(kel))
 	for _, e := range kel {
