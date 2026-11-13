@@ -403,6 +403,7 @@ export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min">
       throw new Error(why);
     });
     const j = await judgeLinkLog(link.rid, r.log, await askWitnesses(link.rid, mine.inception, link.wit, ask));
+    if (j.verdict === "refused") throw new Error("the link's sealing key is refused: the witnesses of the utility app's relay identifier hold a key log that cannot be right (two histories each receipted, or a rotation that cut every witness)");
     if (j.verdict === "moved_on" || j.verdict === "apart") {
       if (j.verdict === "moved_on") logs.set(link.rid, j.log as string);
       throw new Error(

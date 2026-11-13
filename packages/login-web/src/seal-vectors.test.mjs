@@ -6,7 +6,7 @@ import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { make } from "../test-vectors/make-seal-vectors.mjs";
 import { checkedSealKey, checkSealKey, clockAnswerSkew } from "../dist/app.js";
-import { judgeLinkLog, readWitnessedLog } from "../dist/witnessed.js";
+import { WitnessesRefuse, judgeLinkLog, readWitnessedLog } from "../dist/witnessed.js";
 import { isSealingKeyAnswer, openRequest, sealRequest, sealPaddedRequestForVectors, SealError, SEAL_STATEMENT_PATH } from "../dist/seal.js";
 
 const v = JSON.parse(readFileSync(new URL("../test-vectors/seal.json", import.meta.url), "utf8"));
@@ -40,7 +40,7 @@ for (const c of v.statement_refusals) {
 
 // the log a relay identifier's witnesses vouch for
 for (const c of v.witnessed.cases) {
-  if (c.refuse) await assert.rejects(readWitnessedLog(c.rid, c.answers), /witnesses' key log is refused/, "witnessed: " + c.name);
+  if (c.refuse) await assert.rejects(readWitnessedLog(c.rid, c.answers), (e) => /witnesses' key log is refused/.test(e.message) && (e instanceof WitnessesRefuse) === !!c.proven, "witnessed: " + c.name);
   else assert.equal((await readWitnessedLog(c.rid, c.answers)).events, c.events, "witnessed: " + c.name);
 }
 
@@ -59,6 +59,7 @@ for (const c of v.witnessed.page) {
   const link = { aid: "", kel: "", rid: c.rid, api: "https://tasks.example", seal: c.statement, min: c.min, wit: c.wit };
   const take = checkedSealKey(link, { get: () => null, set: () => {} }, fetchWit);
   if (c.expect === "taken") assert.deepEqual((await take).key, spk, "a page: " + c.name);
+  else if (c.expect === "refused") await assert.rejects(take, /cannot be right/, "a page: " + c.name);
   else await assert.rejects(take, /moved on since this link was made/, "a page: " + c.name);
 }
 

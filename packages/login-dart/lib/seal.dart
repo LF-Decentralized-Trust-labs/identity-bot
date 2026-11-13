@@ -382,6 +382,10 @@ Future<Uint8List> checkedSealKeyWitnessed(
         readAnswerLog(link.rid, r.log, (why) => throw TrustRefused(why));
     final j = judgeLinkLog(link.rid, r.log,
         await askWitnesses(link.rid, mine.inception, link.wit, client));
+    if (j.verdict == LinkVerdict.refused) {
+      throw const TrustRefused(
+          'the link\'s sealing key is refused: the witnesses of the utility app\'s relay identifier hold a key log that cannot be right (two histories each receipted, or a rotation that cut every witness)');
+    }
     if (j.verdict == LinkVerdict.moved_on || j.verdict == LinkVerdict.apart) {
       if (j.verdict == LinkVerdict.moved_on) logs.set(link.rid, j.log!);
       throw TrustRefused(j.verdict == LinkVerdict.moved_on

@@ -14,8 +14,9 @@
  * before witnesses were named (an identifier made without them and given them by a rotation) need none.
  *
  * The rules are the core's (`drivers.WitnessingByEvent`): the witness list is carried forward
- * through the log (an inception names it, a rotation cuts `br` then adds `ba`); a receipt's
- * index is the witness's place in that list; a witness counts once, by its key. They are held
+ * through the log (an inception names it, a rotation cuts `br` then adds `ba`, a cut must name a witness in the list and an
+ * add one that is not); a receipt's index is the witness's place in that list, and only an indexed receipt counts; a witness
+ * counts once, by its key. They are held
  * to the cases in `test-vectors/seal.json` (`witnessed`), which the core runs through its own
  * code, this module through its own, and login-dart through its.
  */
@@ -61,16 +62,61 @@ type Ev = { t?: string; d?: string; bt?: unknown; b?: unknown; br?: unknown; ba?
 
 const strings = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : null);
 
-/** The witnesses in force after `ev` (the core's `WitnessesAfter`), or null when `ev` does not say. */
+/** A witness as an event may name it: a non-transferable identifier in its one spelling (the key, code B). */
+const isWitness = (w: string): boolean => decodeMatterRaw(w, "B", 32) !== null;
+
+/** The witnesses in force after `ev` (the core's `WitnessesAfter`, held to keri-go's rules for what an event may
+ *  name), or null when `ev` does not say or says what a log may not: a list naming a witness twice or one that is not
+ *  a witness identifier, a rotation that cuts a witness that is not in the list, one that adds a witness already in
+ *  it, or one that both cuts and adds the same. A log with such an event is not read, as the core does not read it. */
 function witnessesAfter(current: string[], ev: Ev): string[] | null {
-  if (ev.t === "icp") return strings(ev.b);
+  const distinct = (l: string[]) => new Set(l).size === l.length && l.every(isWitness);
+  if (ev.t === "icp") {
+    const named = strings(ev.b);
+    return named && distinct(named) ? named : null;
+  }
   if (ev.t !== "rot") return current;
   const cut = strings(ev.br);
   const add = strings(ev.ba);
-  if (!cut || !add) return null;
+  if (!cut || !add || !distinct(cut) || !distinct(add)) return null;
+  if (cut.some((w) => !current.includes(w))) return null;
   const out = current.filter((w) => !cut.includes(w));
-  for (const w of add) if (!out.includes(w)) out.push(w);
-  return out;
+  if (add.some((w) => out.includes(w) || cut.includes(w))) return null;
+  return [...out, ...add];
+}
+
+/** Whether a log that is read says what a log may say of its witnesses: "ok", "unreadable" (an event that breaks the
+ *  rules above: the answer is not read), or "cut_all" (a rotation that leaves an identifier that had witnesses with
+ *  none, which the owner's own signature shows and nothing the witnesses did can explain). */
+function witnessListsOf(texts: string[]): "ok" | "unreadable" | "cut_all" {
+  let designated: string[] = [];
+  for (const t of texts) {
+    let ev: Ev;
+    try {
+      ev = JSON.parse(t);
+    } catch {
+      return "unreadable";
+    }
+    const after = witnessesAfter(designated, ev);
+    if (!after) return "unreadable";
+    if (designated.length > 0 && after.length === 0) return "cut_all";
+    designated = after;
+  }
+  return "ok";
+}
+
+/** What a witness's receipt is when a page counts it: an indexed Ed25519 signature (the one keripy makes) at the
+ *  witness's own place in the list, over the event's bytes. The earlier unindexed `0B` signature over the event's
+ *  SAID is not counted by a page: nobody outside the core can check what it was made over, and nothing issues it. */
+const isIndexedReceipt = (sig: string): boolean => sig.length === 88 && sig[0] === "A";
+
+/** The witnesses prove the identifier is not what its link says, or that its owner has made it unwitnessed (rather
+ *  than that they could not say): a link made for it is refused, not taken on its minimum. */
+export class WitnessesRefuse extends Error {
+  constructor(why: string) {
+    super("the witnesses' key log is refused: " + why);
+    this.name = "WitnessesRefuse";
+  }
 }
 
 /** The threshold an establishment event sets: `bt`, a number written in hex, as the core reads it. */
@@ -100,7 +146,7 @@ async function receiptedThrough(texts: string[], receipts: Map<string, { witness
     for (const r of receipts.get(ev.d as string) ?? []) {
       const at = designated.indexOf(r.witness);
       const key = decodeMatterRaw(r.witness, "B", 32);
-      if (at < 0 || !key || r.sig.length !== 88 || r.sig[0] !== "A") continue;
+      if (at < 0 || !key || !isIndexedReceipt(r.sig)) continue;
       const idx = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(r.sig[1]);
       if (idx !== at) continue;
       const raw = decodeMatterRaw(r.sig, r.sig.slice(0, 2), 64);
@@ -147,6 +193,8 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
       sigs.push(sig);
     }
     if (!ok) continue;
+    const lists = witnessListsOf(texts);
+    if (lists === "unreadable") continue;
     let checked: CheckedLog;
     try {
       checked = await readAnswerLog(rid, b64u(utf8.encode(texts.map((t, i) => t + "-AAB" + sigs[i]).join(""))), (why): never => {
@@ -155,6 +203,8 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
     } catch {
       continue;
     }
+    // Only a log its controller signed shows what its owner did: a witness cannot make one up.
+    if (lists === "cut_all") throw new WitnessesRefuse("a rotation of it cut every witness it had");
     read.push({ texts, sigs, checked });
     (ans.kel as WitnessedEvent[]).forEach((e, i) => {
       const list = e.witness_receipts;
@@ -179,7 +229,7 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
   for (const x of candidates) {
     for (const y of candidates) {
       const reach = Math.min(x.through, y.through);
-      for (let i = 0; i < reach; i++) if (x.checked.events[i].said !== y.checked.events[i].said) refuse("two logs, each receipted, disagree on an event");
+      for (let i = 0; i < reach; i++) if (x.checked.events[i].said !== y.checked.events[i].said) throw new WitnessesRefuse("two logs, each receipted, disagree on an event");
     }
   }
   const best = candidates.reduce((a, b) => (b.through > a.through ? b : a));
@@ -198,8 +248,10 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
  *  - `agrees`: the link's log holds every event they vouch for (and perhaps more, which they have not been told yet);
  *  - `moved_on`: they vouch for events after the link's last, so the key the link vouched a sealing key for is not current;
  *  - `apart`: the two have different events at one place;
- *  - `none`: the witnesses gave no log a page can take (none reached, none receipted, none readable). */
-export type LinkVerdict = "agrees" | "moved_on" | "apart" | "none";
+ *  - `none`: the witnesses gave no log a page can take (none reached, none receipted, none readable);
+ *  - `refused`: what the witnesses hold proves the identifier unfit for a link: two histories each receipted by a threshold
+ *    (duplicity), or a rotation of it that cut every witness. Not `none`: a page does not fall back to the link's minimum. */
+export type LinkVerdict = "agrees" | "moved_on" | "apart" | "none" | "refused";
 
 /** Judges `linkLog` (a log already read from the link, base64url) against the `answers` of the identifier's witnesses.
  *  `log` is the witnessed log to remember when there is one, which is what keeps a link made before a rotation
@@ -208,8 +260,8 @@ export async function judgeLinkLog(rid: string, linkLog: string, answers: unknow
   let w: WitnessedLog;
   try {
     w = await readWitnessedLog(rid, answers);
-  } catch {
-    return { verdict: "none" };
+  } catch (e) {
+    return { verdict: e instanceof WitnessesRefuse ? "refused" : "none" };
   }
   const mine = await readAnswerLog(rid, linkLog, (why): never => {
     throw new Error(why);

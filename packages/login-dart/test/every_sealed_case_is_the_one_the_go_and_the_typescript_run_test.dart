@@ -39,6 +39,13 @@ void main() {
         expect(
             () => readWitnessedLog(rid, answers), throwsA(isA<TrustRefused>()),
             reason: 'witnessed: ${c['name']}');
+        // A refusal that is the witnesses' proof is a different one from the want of a log.
+        expect(
+            () => readWitnessedLog(rid, answers),
+            throwsA(c['proven'] == true
+                ? isA<WitnessesRefuse>()
+                : isNot(isA<WitnessesRefuse>())),
+            reason: 'witnessed (proven or not): ${c['name']}');
       } else {
         expect(readWitnessedLog(rid, answers).events, c['events'],
             reason: 'witnessed: ${c['name']}');
@@ -93,8 +100,12 @@ void main() {
       } else {
         await expectLater(
             take,
-            throwsA(isA<TrustRefused>().having((e) => e.message, 'message',
-                contains('moved on since this link was made'))),
+            throwsA(isA<TrustRefused>().having(
+                (e) => e.message,
+                'message',
+                contains(c['expect'] == 'refused'
+                    ? 'cannot be right'
+                    : 'moved on since this link was made'))),
             reason: 'a page: ${c['name']}');
       }
     }

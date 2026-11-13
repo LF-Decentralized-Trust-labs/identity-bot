@@ -51,18 +51,58 @@ Uint8List? _strictBase64(Object? s) {
 List<String>? _strings(Object? v) =>
     v is List && v.every((x) => x is String) ? v.cast<String>() : null;
 
-/// The witnesses in force after [ev], or null when it does not say.
+bool _isWitness(String w) => decodeMatter(w, 'B', 32) != null;
+
+/// The witnesses in force after [ev] (the core's `WitnessesAfter`, held to
+/// keri-go's rules for what an event may name), or null when [ev] does not say
+/// or says what a log may not: a list naming a witness twice or one that is not
+/// a witness identifier, a rotation that cuts a witness that is not in the
+/// list, one that adds a witness already in it, or one that both cuts and adds
+/// the same. A log with such an event is not read, as the core does not read it.
 List<String>? _witnessesAfter(List<String> current, Map<String, dynamic> ev) {
-  if (ev['t'] == 'icp') return _strings(ev['b']);
+  bool distinct(List<String> l) =>
+      l.toSet().length == l.length && l.every(_isWitness);
+  if (ev['t'] == 'icp') {
+    final named = _strings(ev['b']);
+    return named != null && distinct(named) ? named : null;
+  }
   if (ev['t'] != 'rot') return current;
   final cut = _strings(ev['br']);
   final add = _strings(ev['ba']);
-  if (cut == null || add == null) return null;
-  final out = current.where((w) => !cut.contains(w)).toList();
-  for (final w in add) {
-    if (!out.contains(w)) out.add(w);
+  if (cut == null || add == null || !distinct(cut) || !distinct(add)) {
+    return null;
   }
-  return out;
+  if (cut.any((w) => !current.contains(w))) return null;
+  final out = current.where((w) => !cut.contains(w)).toList();
+  if (add.any((w) => out.contains(w) || cut.contains(w))) return null;
+  return [...out, ...add];
+}
+
+enum _Lists { ok, unreadable, cutAll }
+
+/// Whether a log that is read says what a log may say of its witnesses:
+/// unreadable (an event that breaks the rules above: the answer is not read),
+/// or cutAll (a rotation that leaves an identifier that had witnesses with
+/// none, which the owner's own signature shows).
+_Lists _witnessListsOf(List<String> texts) {
+  var designated = <String>[];
+  for (final t in texts) {
+    final ev = _json(t);
+    if (ev == null) return _Lists.unreadable;
+    final after = _witnessesAfter(designated, ev);
+    if (after == null) return _Lists.unreadable;
+    if (designated.isNotEmpty && after.isEmpty) return _Lists.cutAll;
+    designated = after;
+  }
+  return _Lists.ok;
+}
+
+/// The witnesses prove the identifier is not what its link says, or that its
+/// owner has made it unwitnessed: a link made for it is refused, not taken on
+/// its minimum.
+class WitnessesRefuse extends TrustRefused {
+  const WitnessesRefuse(String why)
+      : super("the witnesses' key log is refused: $why");
 }
 
 final _toadSpelling = RegExp(r'^(0|[1-9a-f][0-9a-f]{0,3})$');
@@ -105,7 +145,8 @@ Map<String, dynamic>? _json(String text) {
         in receipts[saids[i]] ?? const <(String, String)>[]) {
       final at = designated.indexOf(witness);
       final key = decodeMatter(witness, 'B', 32);
-      if (at < 0 || key == null || sig.length != 88 || sig[0] != 'A') continue;
+      if (at < 0 || key == null || sig.length != 88 || sig[0] != 'A')
+        continue; // only an indexed receipt counts, as login-web's isIndexedReceipt
       if (_alphabet.indexOf(sig[1]) != at) continue;
       final raw = decodeMatter(sig, sig.substring(0, 2), 64);
       if (raw == null || !ed25519Verify(key, utf8.encode(texts[i]), raw)) {
@@ -157,6 +198,8 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
       sigs.add(sig);
     }
     if (!ok) continue;
+    final lists = _witnessListsOf(texts);
+    if (lists == _Lists.unreadable) continue;
     CheckedLog checked;
     try {
       checked = readAnswerLog(
@@ -167,6 +210,10 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
           (why) => throw TrustRefused(why));
     } on TrustRefused {
       continue;
+    }
+    // Only a log its controller signed shows what its owner did.
+    if (lists == _Lists.cutAll) {
+      throw const WitnessesRefuse('a rotation of it cut every witness it had');
     }
     read.add(_Read(texts, sigs, checked));
     for (var i = 0; i < kel.length; i++) {
@@ -207,7 +254,8 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
       final reach = through[x] < through[y] ? through[x] : through[y];
       for (var i = 0; i < reach; i++) {
         if (read[x].checked.events[i].said != read[y].checked.events[i].said) {
-          _refuse('two logs, each receipted, disagree on an event');
+          throw const WitnessesRefuse(
+              'two logs, each receipted, disagree on an event');
         }
       }
     }
@@ -244,6 +292,11 @@ enum LinkVerdict {
 
   /// The witnesses gave no log a page can take.
   none,
+
+  /// What the witnesses hold proves the identifier unfit for a link: two
+  /// histories each receipted by a threshold, or a rotation that cut every
+  /// witness. Not [none]: a page does not fall back to the link's minimum.
+  refused,
 }
 
 /// Judges [linkLog] (already read from the link, base64url) against the
@@ -255,6 +308,8 @@ enum LinkVerdict {
   final WitnessedLog w;
   try {
     w = readWitnessedLog(rid, answers);
+  } on WitnessesRefuse {
+    return (verdict: LinkVerdict.refused, log: null);
   } on TrustRefused {
     return (verdict: LinkVerdict.none, log: null);
   }

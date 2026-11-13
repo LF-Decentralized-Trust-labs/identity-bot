@@ -145,7 +145,9 @@ export function witnessFor(label) {
   const aid = "B" + k.key.slice(1);
   /** The witness's receipt of an event's text, indexed at its place in the list. */
   const receipt = (text, index) => ({ witness: aid, cesr_signature: "A" + B64[index] + indexedSigQb64(k.sign(enc.encode(text))).slice(2) });
-  return { aid, receipt, sign: k.sign };
+  /** The earlier form of a receipt: an unindexed `0B` signature over the event's SAID string, which no page counts. */
+  const legacyReceipt = (said) => ({ witness: aid, cesr_signature: "0B" + indexedSigQb64(k.sign(enc.encode(said))).slice(2) });
+  return { aid, receipt, legacyReceipt, sign: k.sign };
 }
 
 /** What a witness answers to GET /witness/kel/{rid}: the events of `chain` it holds (its first `n`),

@@ -179,15 +179,28 @@ export async function make() {
     const fork = rotation(chainW.aid, 1, chainW.events[0].said, chainW.keys[1], keyFor("witnessed:fork-next"), { bt: "2" });
     return { aid: chainW.aid, events: [chainW.events[0], { ...fork, signer: chainW.keys[1] }] };
   })();
-  const case_ = (name, answers, expect, over = {}) => ({ name, rid: over.rid ?? chainW.aid, answers, ...(expect === null ? { refuse: true } : { events: expect }) });
+  const case_ = (name, answers, expect, over = {}) => ({ name, rid: over.rid ?? chainW.aid, answers, ...(expect === null ? { refuse: true, ...(over.proven ? { proven: true } : {}) } : { events: expect }) });
   const swapReceipt = (a, i, r) => ({ ...a, kel: a.kel.map((e, j) => (j === i ? { ...e, witness_receipts: [r] } : e)) });
   const rewrite = (a) => ({ ...a, kel: a.kel.map((e, j) => (j === 1 ? { ...e, raw_bytes_b64: Buffer.from(Buffer.from(e.raw_bytes_b64, "base64").toString().replace(/"k":\["D/, '"k":["E')).toString("base64") } : e)) });
   const chainRot = relayChain("witnessed-rot", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { br: [W[2].aid], ba: [W[3].aid], bt: "2" } } });
   const plain = relayChain("witnessed-none", 1);
   // an identifier made without witnesses and given them by its first rotation (the owner's Identity Agent makes that rotation)
   const chainLate = relayChain("witnessed-late", 2, { over: { 1: { ba: [W[0].aid, W[1].aid, W[2].aid], bt: "2" }, 2: { bt: "2" } } });
+  // a rotation that cuts a witness the identifier does not have, one that adds a witness it already has, and one that
+  // cuts and adds the same: the core does not read such a log, so no reader does
+  const badRot = (label, over) => relayChain("witnessed-" + label, 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { bt: "2", ...over } } });
+  const chainCutStranger = badRot("cut-stranger", { br: [W[3].aid] });
+  const chainAddHeld = badRot("add-held", { ba: [W[0].aid] });
+  const chainCutAdd = badRot("cut-add", { br: [W[0].aid], ba: [W[0].aid] });
+  // a rotation (signed by the owner) that cuts every witness the identifier had
+  const chainCutAll = relayChain("witnessed-cut-all", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { br: [W[0].aid, W[1].aid, W[2].aid], bt: "0" } } });
+  const threeReceipts = (chain) => [ans(W[0], 0, 2, chain), ans(W[1], 1, 2, chain), ans(W[2], 2, 2, chain)];
+  // an answer whose bytes for its first event are not base64 at all
+  const unreadable = (a) => ({ ...a, kel: a.kel.map((e, i) => (i === 0 ? { ...e, raw_bytes_b64: "!!!!" } : e)) });
+  // the older receipts: a `0B` signature over each event's SAID
+  const legacy = (w) => witnessAnswer(chainW, 2, (i, e) => [w.legacyReceipt(e.said)]);
   const witnessed = {
-    about: "A relay identifier's key log as its witnesses hold it (packages/login-web/src/witnessed.ts, packages/login-dart/lib/witnessed.dart, and in Go identity-agent-core/drivers through witnessed_vectors_test.go). Each case gives `answers` (what each witness the identifier names answered to GET /witness/kel/{rid}: every event with its bytes, the controller's signature and that witness's own receipt) and `rid`. A reader pools the receipts, reads each answer as a key log, counts for each event the distinct witnesses designated at that event whose indexed signature over the event's bytes verifies, and takes the longest log every event of which has its threshold: `events` is how many events that is. `refuse` means no log is taken. `page`: a link that names witnesses, taken or refused as `expect` says, by what each address (`w0`, `w1`: the first and second of `wit`) answers. `against_link`: a log a link carried (`link_log`) judged against those answers is `agrees`, `moved_on`, `apart` or `none`.",
+    about: "A relay identifier's key log as its witnesses hold it (packages/login-web/src/witnessed.ts, packages/login-dart/lib/witnessed.dart, and in Go identity-agent-core/drivers through witnessed_vectors_test.go). Each case gives `answers` (what each witness the identifier names answered to GET /witness/kel/{rid}: every event with its bytes, the controller's signature and that witness's own receipt) and `rid`. A reader pools the receipts, reads each answer as a key log, counts for each event the distinct witnesses designated at that event whose indexed signature over the event's bytes verifies, and takes the longest log every event of which has its threshold: `events` is how many events that is. `refuse` means no log is taken, and `proven` that the refusal is the witnesses' proof about the identifier (two histories each receipted by a threshold, or a rotation by the owner that cut every witness it had) rather than the want of a log. A log is not read when an event of it names a witness twice or one that is not a witness identifier, a rotation cuts a witness that is not in the list, adds one already in it, or cuts and adds the same: the core refuses it, so every reader does, and only that answer is lost. An answer whose bytes are not base64 (in its one spelling), not UTF-8 or whose signature is not 88 characters is likewise skipped, never an error for the others. A receipt counts only as an indexed signature over the event's bytes at the witness's place; the older unindexed `0B` signature over the SAID is not counted by a page. `page`: a link that names witnesses, taken or refused as `expect` says, by what each address (`w0`, `w1`: the first and second of `wit`) answers. `against_link`: a log a link carried (`link_log`) judged against those answers is `agrees`, `moved_on`, `apart`, `none`, or `refused` (the witnesses prove the identifier unfit: a page then refuses the link rather than going by its minimum).",
     cases: [
       case_("every witness gives the whole log, with its receipt", [ans(W[0], 0), ans(W[1], 1), ans(W[2], 2)], 2),
       case_("exactly a threshold of witnesses answers", [ans(W[0], 0), ans(W[1], 1)], 2),
@@ -201,16 +214,23 @@ export async function make() {
       case_("a receipt that is not an indexed signature", [ans(W[0], 0), swapReceipt(ans(W[1], 1), 0, { witness: W[1].aid, cesr_signature: "0B" + W[1].receipt(chainW.events[0].text, 1).cesr_signature.slice(2) })], null),
       case_("a rewritten history: the rotation's bytes changed, the receipt over the original kept", [ans(W[0], 0), rewrite(ans(W[1], 1))], null),
       case_("an answer for another identifier", [ans(W[0], 0), ans(W[1], 1)], null, { rid: chainRot.aid }),
-      case_("two histories, each receipted by a threshold, that disagree", [ans(W[0], 0), ans(W[1], 1), ans(W[1], 1, 2, forkChain), ans(W[2], 2, 2, forkChain)], null),
+      case_("two histories, each receipted by a threshold, that disagree", [ans(W[0], 0), ans(W[1], 1), ans(W[1], 1, 2, forkChain), ans(W[2], 2, 2, forkChain)], null, { proven: true }),
       case_("a witness list that a rotation changed: the witness it added counts, at its place", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[3], 2, 2, chainRot)], 2, { rid: chainRot.aid }),
       case_("a witness list that a rotation changed: the witness it cut does not count", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[2], 2, 2, chainRot)], 1, { rid: chainRot.aid }),
       case_("witnesses named by a rotation: the events before it need no receipt", [witnessAnswer(chainLate, 3, (i, e) => (i === 0 ? [] : [W[0].receipt(e.text, 0)])), witnessAnswer(chainLate, 3, (i, e) => (i === 0 ? [] : [W[1].receipt(e.text, 1)]))], 3, { rid: chainLate.aid }),
       case_("witnesses named by a rotation that has too few receipts", [witnessAnswer(chainLate, 3, (i, e) => (i === 0 ? [] : [W[0].receipt(e.text, 0)]))], 1, { rid: chainLate.aid }),
+      case_("a rotation that cuts a witness the identifier does not have", threeReceipts(chainCutStranger), null, { rid: chainCutStranger.aid }),
+      case_("a rotation that adds a witness the identifier already has", threeReceipts(chainAddHeld), null, { rid: chainAddHeld.aid }),
+      case_("a rotation that cuts and adds the same witness", threeReceipts(chainCutAdd), null, { rid: chainCutAdd.aid }),
+      case_("a rotation that cuts every witness the identifier had", threeReceipts(chainCutAll), null, { rid: chainCutAll.aid, proven: true }),
+      case_("receipts in the older form, over the digest, from a threshold of witnesses", [legacy(W[0]), legacy(W[1])], null),
+      case_("an answer whose bytes are not base64 does not hold the others back", [ans(W[0], 0), ans(W[1], 1), unreadable(ans(W[2], 2))], 2),
+      case_("the one answer there is has bytes that are not base64", [unreadable(ans(W[0], 0))], null),
       case_("an identifier whose inception names no witnesses", [witnessAnswer(plain, 2)], null, { rid: plain.aid }),
     ],
     // What a page does with the log a link carried (`link_log`, already read) once it has asked the witnesses (src/witnessed.ts `judgeLinkLog`):
     // the link's log holds what they vouch for (`agrees`), they vouch for more (`moved_on`: the key the link vouched a sealing key for is
-    // not current), the two disagree on an event (`apart`), or they gave no log to take (`none`).
+    // not current), the two disagree on an event (`apart`), they gave no log to take (`none`), or what they hold proves the identifier unfit (`refused`: two histories each receipted, or a rotation that cut every witness).
     against_link: [
       { name: "the link holds what the witnesses vouch for", link_log: chainW.log(), answers: [ans(W[0], 0), ans(W[1], 1)], verdict: "agrees" },
       { name: "the link is ahead of witnesses that have not been told yet", link_log: chainW.log(), answers: [ans(W[0], 0, 1), ans(W[1], 1, 1)], verdict: "agrees" },
@@ -218,7 +238,9 @@ export async function make() {
       { name: "the link and the witnesses hold different events at one place", link_log: logHeader(forkChain.events), answers: [ans(W[0], 0), ans(W[1], 1)], verdict: "apart" },
       { name: "the witnesses have receipted nothing", link_log: chainW.log(), answers: [ans(W[0], 0)], verdict: "none" },
       { name: "no witness answered", link_log: chainW.log(), answers: [], verdict: "none" },
-    ].map((c) => ({ ...c, rid: chainW.aid })),
+      { name: "witnesses that receipted two histories", link_log: chainW.log(), answers: [ans(W[0], 0), ans(W[1], 1), ans(W[1], 1, 2, forkChain), ans(W[2], 2, 2, forkChain)], verdict: "refused" },
+      { name: "a rotation that cut every witness", link_log: chainCutAll.log(), answers: threeReceipts(chainCutAll), verdict: "refused", rid: chainCutAll.aid },
+    ].map((c) => ({ rid: chainW.aid, ...c })),
     // A page given a link that names witnesses (`wit`, by address) asks each for the log (GET <address>/witness/kel/<rid>) and goes by it:
     // `held` is what each address answers (`down` is a witness that cannot be reached). `taken` gives the sealing key; `moved_on` is refused
     // with "moved on since this link was made". `statement` is the link's sealing key statement, `min` its latest event.
@@ -227,7 +249,8 @@ export async function make() {
       { name: "a link made before the rotation the witnesses vouch for", statement: sealStatement(chainW, sk.pub, { log: chainW.log(1), sn: 0, signer: chainW.key(0) }), min: minimum(chainW, 1), held: { w0: ans(W[0], 0), w1: ans(W[1], 1) }, expect: "moved_on" },
       { name: "witnesses that cannot be reached", statement: sealStatement(chainW, sk.pub, { log: chainW.log(1), sn: 0, signer: chainW.key(0) }), min: minimum(chainW, 1), held: { w0: "down", w1: "down" }, expect: "taken" },
       { name: "witnesses that have receipted too little", statement: sealStatement(chainW, sk.pub, { log: chainW.log(1), sn: 0, signer: chainW.key(0) }), min: minimum(chainW, 1), held: { w0: ans(W[0], 0) }, expect: "taken" },
-    ].map((c) => ({ ...c, rid: chainW.aid, wit: ["https://w0.example/api", "https://w1.example/api"] })),
+      { name: "witnesses that hold a rotation that cut every witness", rid: chainCutAll.aid, statement: sealStatement(chainCutAll, sk.pub), min: minimum(chainCutAll), held: { w0: ans(W[0], 0, 2, chainCutAll), w1: ans(W[1], 1, 2, chainCutAll) }, expect: "refused" },
+    ].map((c) => ({ rid: chainW.aid, ...c, wit: ["https://w0.example/api", "https://w1.example/api"] })),
   };
 
   // What the relay sees of size: the ciphertext's length is its bucket and the tag, nothing finer.
