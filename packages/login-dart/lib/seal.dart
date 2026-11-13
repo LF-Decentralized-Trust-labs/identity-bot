@@ -305,6 +305,17 @@ List<int> sealKeyStatementText(String rid, Uint8List pub, int sn) =>
   if (text is! String || key == null || sig == null) {
     fail('a part of it is not spelled one way');
   }
+  // The text must be the one the SDK writes: the four fields in this order, with no
+  // space and no escape, and the sequence number a whole number written as one. A
+  // reader that takes 1.0 for 1 (dart2js does), or an escaped field name for its plain
+  // one, or the first of two, must not take another's statement for this one.
+  final sn0 = st['sn'];
+  if (sn0 is! int ||
+      utf8.decode(json) !=
+          jsonEncode(
+              {'log': text, 'key': st['key'], 'sn': sn0, 'sig': st['sig']})) {
+    fail('it is not written the one way a statement is');
+  }
   if (key.length != 65 || key[0] != 4) {
     fail('the key is not an uncompressed P-256 point');
   }

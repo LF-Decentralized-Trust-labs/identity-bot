@@ -123,6 +123,10 @@ export async function make() {
   const without = (k) => { const o = JSON.parse(Buffer.from(statement, "base64url")); delete o[k]; return b64u(JSON.stringify(o)); };
   // The same statement, with only the spelling of its sequence number changed (the value, and so the signature, is the same).
   const respellSn = (spell) => { const t = Buffer.from(statement, "base64url").toString(); return b64u(t.replace(/"sn":(\d+)/, (_, n) => `"sn":${spell(n)}`)); };
+  // The same statement written another way that a lax reader would take for it: the sequence number
+  // spelled as a float, under an escaped field name, or twice (a reader taking the first and one taking the last differ).
+  const text = Buffer.from(statement, "base64url").toString();
+  const asText = (t) => b64u(t);
   const shorter = chain.log(1); // the log as it stood before the rotation
   const flipSig = (t) => t.slice(0, 5) + (t[5] === "A" ? "B" : "A") + t.slice(6);
   const otherRid = "E" + RID.slice(1).split("").reverse().join("");
@@ -146,6 +150,11 @@ export async function make() {
     { name: "a sequence number that is text", rid: RID, statement: stmt({ sn: "1" }) },
     { name: "a sequence number spelled with a fraction", rid: RID, statement: respellSn((n) => `${n}.0`) },
     { name: "a sequence number spelled with an exponent", rid: RID, statement: respellSn((n) => `${n}e0`) },
+    { name: "a sequence number spelled as a float under an escaped field name", rid: RID, statement: asText(text.replace(/"sn":(\d+)/, (_, n) => `"\\u0073n":${n}.0`)) },
+    { name: "a sequence number given twice, the first whole and the last a float", rid: RID, statement: asText(text.replace(/"sn":(\d+)/, (_, n) => `"sn":${n},"sn":${n}.0`)) },
+    { name: "a statement with a space in it", rid: RID, statement: asText(text.replace('"log":', '"log": ')) },
+    { name: "a statement with its fields in another order", rid: RID, statement: (() => { const o = JSON.parse(text); return asText(JSON.stringify({ sig: o.sig, sn: o.sn, key: o.key, log: o.log })); })() },
+    { name: "a 65-byte key the identifier signed whose first byte is not 4", rid: RID, statement: sealStatement(chain, new Uint8Array([6, ...sk.pub.slice(1)])) },
     { name: "a sequence number spelled with a leading zero", rid: RID, statement: respellSn((n) => `0${n}`) },
     { name: "a true, shorter log that holds the key the removed first machine had, when the link's minimum is the later event", rid: RID, statement: sealStatement(chain, sk.pub, { log: shorter, sn: 0, signer: chain.key(0) }), min: MIN },
     { name: "a log whose event at the minimum's sequence number is another event", rid: RID, statement, min: `${SN}.${chain.events[SN].said.slice(0, -1)}${chain.events[SN].said.endsWith("A") ? "B" : "A"}` },

@@ -439,14 +439,15 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
   } catch {
     return fail("it is not JSON");
   }
-  // JSON.parse reads 0.0 and 1e0 as the integers 0 and 1; the Go and Dart checks refuse them, so refuse them here
-  // from the text itself. Every other value is base64url, so the only `"sn":` in the text is the number.
-  const spelled = /"sn"\s*:\s*([^,}\s]*)/.exec(text);
-  if (spelled && !/^(0|[1-9][0-9]*)$/.test(spelled[1])) fail("its sequence number is not spelled as a whole number");
   if (Object.keys(st ?? {}).sort().join(",") !== "key,log,sig,sn") fail("it has fields it should not, or lacks some");
   const key = unb64u(st.key);
   const sig = unb64u(st.sig);
   if (typeof st.log !== "string" || !key || !sig) fail("a part of it is not spelled one way");
+  // The text must be the one the SDK writes: the four fields in this order, with no space and no
+  // escape, and the sequence number a whole number written as one. JSON.parse reads 0.0 and 1e0 as
+  // the integers 0 and 1, an escaped field name as its plain one, and the last of two of one name,
+  // so the text itself is held to the one spelling, as Go and Dart do.
+  if (typeof st.sn !== "number" || text !== JSON.stringify({ log: st.log, key: st.key, sn: st.sn, sig: st.sig })) fail("it is not written the one way a statement is");
   if (key!.length !== 65 || key![0] !== 4) fail("the key is not an uncompressed P-256 point");
   const got = await readAnswerLog(rid, st.log as string, (why): never => fail("its key log is refused: " + why));
   if (st.sn !== got.events.length - 1) fail("it is made at a sequence number other than its key log's last");
