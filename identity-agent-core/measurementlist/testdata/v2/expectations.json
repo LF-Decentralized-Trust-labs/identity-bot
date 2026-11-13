@@ -1,0 +1,154 @@
+[
+  {
+    "file": "valid.json",
+    "refusal": "",
+    "entries": [
+      {
+        "measurement": "121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212",
+        "environment": "production",
+        "svn": 6,
+        "smt": true,
+        "retired": ""
+      },
+      {
+        "measurement": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+        "environment": "production",
+        "svn": 5,
+        "smt": true,
+        "retired": "update",
+        "source_until": "2026-11-20T00:00:00Z"
+      },
+      {
+        "measurement": "212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121",
+        "environment": "development",
+        "svn": 1,
+        "smt": false,
+        "retired": ""
+      }
+    ],
+    "note": "a live image, one retired for update with an end to its use as a source, and a development image"
+  },
+  {
+    "file": "unreadable_retired.json",
+    "refusal": "",
+    "entries": [
+      {
+        "measurement": "313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": "revoked"
+      },
+      {
+        "measurement": "383838383838383838383838383838383838383838383838383838383838383838383838383838383838383838383838",
+        "environment": "production",
+        "svn": 1,
+        "smt": true,
+        "retired": ""
+      }
+    ],
+    "note": "each unreadable retired revokes its own entry and no other: an unknown kind, update with no source_until, not an object, a key in another case, an unknown field, no at; a written revoked stays revoked; the last entry is untouched"
+  },
+  {
+    "file": "tampered_svn.json",
+    "refusal": "ErrBadSignature",
+    "note": "the security version changed after signing"
+  },
+  {
+    "file": "no_svn.json",
+    "refusal": "ErrBadEntry",
+    "note": "an entry that gives no svn"
+  },
+  {
+    "file": "null_smt.json",
+    "refusal": "ErrBadEntry",
+    "note": "an entry whose smt is null"
+  },
+  {
+    "file": "no_environment.json",
+    "refusal": "ErrBadEntry",
+    "note": "an entry that gives no environment"
+  },
+  {
+    "file": "environment_staging.json",
+    "refusal": "ErrBadEntry",
+    "note": "an environment that is neither production nor development"
+  },
+  {
+    "file": "svn_negative.json",
+    "refusal": "ErrMalformed",
+    "note": "svn below zero"
+  },
+  {
+    "file": "svn_too_large.json",
+    "refusal": "ErrMalformed",
+    "note": "svn above 4294967295"
+  },
+  {
+    "file": "svn_a_string.json",
+    "refusal": "ErrMalformed",
+    "note": "svn written as text"
+  },
+  {
+    "file": "v1_carrying_v2_fields.json",
+    "refusal": "ErrMalformed",
+    "note": "list_version 1 whose entry carries version 2 fields"
+  },
+  {
+    "file": "unknown_entry_field.json",
+    "refusal": "ErrMalformed",
+    "note": "a version 2 entry with a field no version knows"
+  },
+  {
+    "file": "duplicate_measurement.json",
+    "refusal": "ErrDuplicateEntries",
+    "note": "one measurement listed twice"
+  },
+  {
+    "file": "version_3.json",
+    "refusal": "ErrUnknownVersion",
+    "note": "a list version nobody reads yet"
+  }
+]

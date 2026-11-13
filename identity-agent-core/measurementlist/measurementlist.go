@@ -91,9 +91,11 @@
 package measurementlist
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -104,8 +106,17 @@ import (
 )
 
 const (
-	// Version is the only list_version this package reads.
+	// Version is the list_version of a list that says only which measurements
+	// are accepted. Every verifier reads it.
 	Version = 1
+
+	// VersionHandover is the list_version of a list whose entries also carry
+	// what a sealed handover needs of the image behind a measurement: the
+	// environment, the security version, whether SMT is allowed, and whether the
+	// entry is retired. A verifier that does not read it refuses the list
+	// (ErrUnknownVersion), so a publisher moves to it only once the apps that
+	// check the list read it too.
+	VersionHandover = 2
 
 	// MeasurementSize is the length of a SEV-SNP launch measurement.
 	MeasurementSize = 48
@@ -175,6 +186,64 @@ type Entry struct {
 	ValidFrom    time.Time
 	// ValidUntil is the zero time for an entry with no end of its own.
 	ValidUntil time.Time
+
+	// The rest is read from a VersionHandover list and is zero in a Version 1
+	// list, which a handover therefore refuses (HasSVN is false).
+	//
+	// Environment is "production" or "development".
+	Environment string
+	// SVN is the image's security version; HasSVN says the list gave one.
+	SVN    uint32
+	HasSVN bool
+	// SMT is whether the measurement is computed with SMT allowed.
+	SMT bool
+	// Retired is nil for an entry that is not retired.
+	Retired *Retirement
+}
+
+// Retirement is an entry's "retired" field. An entry with none is not retired.
+type Retirement struct {
+	Kind        string    `json:"kind"`
+	At          time.Time `json:"at"`
+	SourceUntil time.Time `json:"source_until,omitempty"`
+}
+
+const (
+	// RetiredForUpdate is an image that is no longer accepted as a new box but
+	// may still be handed over FROM until SourceUntil, so an organisation on it
+	// can update.
+	RetiredForUpdate = "update"
+	// Revoked is an image withdrawn as compromised: not a source either.
+	Revoked = "revoked"
+)
+
+// ParseRetirement reads the field and fails closed: null or absent is not
+// retired, and anything a verifier cannot read, or a kind it does not know, is
+// revoked. A retirement "for update" with no source_until is unreadable too:
+// the design requires it.
+func ParseRetirement(raw json.RawMessage) *Retirement {
+	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+		return nil
+	}
+	revoked := &Retirement{Kind: Revoked}
+	// Read as strictly as the list itself: an object another reader would read
+	// differently (a key in another case, a repeated key, a field it does not
+	// know) is unreadable, so it revokes. "at" must be given.
+	var r Retirement
+	if err := strictjson.Decode(raw, &r); err != nil || r.At.IsZero() {
+		return revoked
+	}
+	switch r.Kind {
+	case RetiredForUpdate:
+		if r.SourceUntil.IsZero() {
+			return revoked
+		}
+		return &r
+	case Revoked:
+		return &r
+	default:
+		return revoked
+	}
 }
 
 // ValidAt reports whether the entry is in its window at t.
@@ -229,6 +298,31 @@ type wireEntry struct {
 	ValidUntil   *string      `json:"valid_until"`
 }
 
+// wireEntryV2 is wireEntry with what VersionHandover adds. Its own type, so a
+// Version 1 list that carries any of these is refused as an unknown field
+// rather than read as something it never said.
+type wireEntryV2 struct {
+	Image        string          `json:"image"`
+	Measurement  string          `json:"measurement"`
+	ComputedFrom ComputedFrom    `json:"computed_from"`
+	ValidFrom    string          `json:"valid_from"`
+	ValidUntil   *string         `json:"valid_until"`
+	Environment  string          `json:"environment"`
+	SVN          *uint32         `json:"svn"`
+	SMT          *bool           `json:"smt"`
+	Retired      json.RawMessage `json:"retired"`
+}
+
+type wireListV2 struct {
+	ListVersion  int                      `json:"list_version"`
+	Sequence     int64                    `json:"sequence"`
+	PublishedAt  string                   `json:"published_at"`
+	ExpiresAt    string                   `json:"expires_at"`
+	SigningKeyID string                   `json:"signing_key_id"`
+	Images       map[string][]wireEntryV2 `json:"images"`
+	Signature    string                   `json:"signature"`
+}
+
 type wireList struct {
 	ListVersion  int                    `json:"list_version"`
 	Sequence     int64                  `json:"sequence"`
@@ -261,10 +355,29 @@ func Verify(raw []byte, p Policy) (*List, error) {
 		return nil, fmt.Errorf("%w: %d bytes", ErrMalformed, len(raw))
 	}
 	var w wireList
-	if err := strictjson.Decode(raw, &w); err != nil {
+	var v2 map[string][]wireEntryV2
+	var peek struct {
+		ListVersion int `json:"list_version"`
+	}
+	_ = json.Unmarshal(raw, &peek) // only to choose the shape to read strictly
+	if peek.ListVersion == VersionHandover {
+		var x wireListV2
+		if err := strictjson.Decode(raw, &x); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		}
+		v2 = x.Images
+		w = wireList{ListVersion: x.ListVersion, Sequence: x.Sequence, PublishedAt: x.PublishedAt, ExpiresAt: x.ExpiresAt,
+			SigningKeyID: x.SigningKeyID, Signature: x.Signature, Images: map[string][]wireEntry{}}
+		for kind, es := range x.Images {
+			for _, e := range es {
+				w.Images[kind] = append(w.Images[kind], wireEntry{Image: e.Image, Measurement: e.Measurement,
+					ComputedFrom: e.ComputedFrom, ValidFrom: e.ValidFrom, ValidUntil: e.ValidUntil})
+			}
+		}
+	} else if err := strictjson.Decode(raw, &w); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
-	if w.ListVersion != Version {
+	if w.ListVersion != Version && w.ListVersion != VersionHandover {
 		return nil, fmt.Errorf("%w: %d", ErrUnknownVersion, w.ListVersion)
 	}
 	if w.SigningKeyID != p.Key.ID {
@@ -284,7 +397,7 @@ func Verify(raw []byte, p Policy) (*List, error) {
 
 	// Signed, so now the content is the publisher's. Still held to the rules.
 	digest := sha256.Sum256(msg)
-	return FromContent(Content{Sequence: w.Sequence, PublishedAt: w.PublishedAt, ExpiresAt: w.ExpiresAt, Images: w.Images},
+	return FromContent(Content{Sequence: w.Sequence, PublishedAt: w.PublishedAt, ExpiresAt: w.ExpiresAt, Images: w.Images, v2: v2},
 		hex.EncodeToString(digest[:]), Rules{MinSequence: p.MinSequence, SeenDigest: p.SeenDigest, Now: p.Now})
 }
 
@@ -296,6 +409,9 @@ type Content struct {
 	PublishedAt string                 `json:"published_at"`
 	ExpiresAt   string                 `json:"expires_at"`
 	Images      map[string][]wireEntry `json:"images"`
+	// v2 holds what VersionHandover entries add, by image kind and in the order
+	// of Images; nil for a Version 1 list.
+	v2 map[string][]wireEntryV2
 }
 
 // Rules are the rules a list's content is held to whoever vouched for it: the
@@ -351,10 +467,15 @@ func FromContent(c Content, digest string, r Rules) (*List, error) {
 		if len(entries) == 0 {
 			return nil, fmt.Errorf("%w: image kind %q has no measurements", ErrMalformed, kind)
 		}
-		for _, we := range entries {
+		for i, we := range entries {
 			e, err := parseEntry(we)
 			if err != nil {
 				return nil, fmt.Errorf("%w: in %q", err, kind)
+			}
+			if c.v2 != nil {
+				if err := addHandoverFields(&e, c.v2[kind][i]); err != nil {
+					return nil, fmt.Errorf("%w: in %q", err, kind)
+				}
 			}
 			// A measurement listed twice, or under two kinds, is a publishing
 			// mistake that would let one image stand as another.
@@ -366,6 +487,26 @@ func FromContent(c Content, digest string, r Rules) (*List, error) {
 		}
 	}
 	return out, nil
+}
+
+// addHandoverFields reads what a VersionHandover entry adds. The environment,
+// the security version and SMT must all be stated: an entry that leaves one out
+// is a publishing mistake, and a list is not read on a guess. An unreadable
+// "retired" is not a refusal of the list but a revoked entry, so one bad entry
+// withdraws itself and nothing else.
+func addHandoverFields(e *Entry, w wireEntryV2) error {
+	if w.Environment != "production" && w.Environment != "development" {
+		return fmt.Errorf("%w: environment %q", ErrBadEntry, w.Environment)
+	}
+	if w.SVN == nil {
+		return fmt.Errorf("%w: svn", ErrBadEntry)
+	}
+	if w.SMT == nil {
+		return fmt.Errorf("%w: smt", ErrBadEntry)
+	}
+	e.Environment, e.SVN, e.HasSVN, e.SMT = w.Environment, *w.SVN, true, *w.SMT
+	e.Retired = ParseRetirement(w.Retired)
+	return nil
 }
 
 func isHex(s string, n int) bool {
@@ -442,11 +583,51 @@ type attributes struct {
 	Images      map[string][]wireEntry `json:"images"`
 }
 
+// attributesV2 is the block of a list whose entries also carry what a handover
+// needs (environment, security version, SMT, retirement). It says so with
+// "list_version": 2, which a plain block does not have: a block that carries
+// those fields without saying so is refused as an unknown field, as in a signed
+// list.
+type attributesV2 struct {
+	D           string                   `json:"d"`
+	DT          string                   `json:"dt"`
+	ListVersion int                      `json:"list_version"`
+	Sequence    int64                    `json:"sequence"`
+	PublishedAt string                   `json:"published_at"`
+	ExpiresAt   string                   `json:"expires_at"`
+	Images      map[string][]wireEntryV2 `json:"images"`
+}
+
 // ContentOfAttributes reads the attribute block of a list credential, by the
 // same strict rules as a list: no unknown field, no repeated key.
 func ContentOfAttributes(raw []byte) (Content, error) {
 	if len(raw) == 0 || len(raw) > MaxListBytes {
 		return Content{}, fmt.Errorf("%w: %d bytes", ErrMalformed, len(raw))
+	}
+	var peek struct {
+		ListVersion int `json:"list_version"`
+	}
+	_ = json.Unmarshal(raw, &peek) // only to choose the shape to read strictly
+	if peek.ListVersion != 0 {
+		if peek.ListVersion != VersionHandover {
+			return Content{}, fmt.Errorf("%w: %d", ErrUnknownVersion, peek.ListVersion)
+		}
+		var x attributesV2
+		if err := strictjson.Decode(raw, &x); err != nil {
+			return Content{}, fmt.Errorf("%w: %v", ErrMalformed, err)
+		}
+		if x.DT == "" {
+			return Content{}, fmt.Errorf("%w: the credential gives no date", ErrMalformed)
+		}
+		c := Content{Sequence: x.Sequence, PublishedAt: x.PublishedAt, ExpiresAt: x.ExpiresAt,
+			Images: map[string][]wireEntry{}, v2: x.Images}
+		for kind, es := range x.Images {
+			for _, e := range es {
+				c.Images[kind] = append(c.Images[kind], wireEntry{Image: e.Image, Measurement: e.Measurement,
+					ComputedFrom: e.ComputedFrom, ValidFrom: e.ValidFrom, ValidUntil: e.ValidUntil})
+			}
+		}
+		return c, nil
 	}
 	var a attributes
 	if err := strictjson.Decode(raw, &a); err != nil {

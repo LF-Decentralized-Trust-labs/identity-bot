@@ -211,6 +211,7 @@ type listSpec struct {
 	sequence int
 	expires  time.Time
 	images   string // the images object, as JSON
+	extra    string // attribute fields to add before "sequence", as JSON members ending in a comma
 }
 
 func defaultImages(measurementHex string) string {
@@ -223,8 +224,8 @@ func meas(b byte) string { return fmt.Sprintf("%096x", int(b)) }
 // issue makes the credential for spec, its issuance and the seal of it.
 func (p *publisher) issue(s listSpec) (credSAID string, issSealPos int) {
 	p.t.Helper()
-	data := fmt.Sprintf(`{"dt":"%s","sequence":%d,"published_at":"%s","expires_at":"%s","images":%s}`,
-		t0.Format(time.RFC3339), s.sequence, t0.Format(time.RFC3339), s.expires.Format(time.RFC3339), s.images)
+	data := fmt.Sprintf(`{"dt":"%s",%s"sequence":%d,"published_at":"%s","expires_at":"%s","images":%s}`,
+		t0.Format(time.RFC3339), s.extra, s.sequence, t0.Format(time.RFC3339), s.expires.Format(time.RFC3339), s.images)
 	raw, err := keri.BuildCredential(keri.CredentialInput{SchemaSAID: p.schema, Issuer: p.aid, Registry: p.registry, Data: json.RawMessage(data)})
 	if err != nil {
 		p.t.Fatal(err)

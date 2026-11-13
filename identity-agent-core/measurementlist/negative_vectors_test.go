@@ -34,10 +34,14 @@ type negativeVector struct {
 }
 
 var refusals = map[string]error{
-	"ErrBadSignature":    ErrBadSignature,
-	"ErrOldList":         ErrOldList,
-	"ErrConflictingList": ErrConflictingList,
-	"ErrExpired":         ErrExpired,
+	"ErrBadSignature":     ErrBadSignature,
+	"ErrOldList":          ErrOldList,
+	"ErrConflictingList":  ErrConflictingList,
+	"ErrExpired":          ErrExpired,
+	"ErrMalformed":        ErrMalformed,
+	"ErrBadEntry":         ErrBadEntry,
+	"ErrDuplicateEntries": ErrDuplicateEntries,
+	"ErrUnknownVersion":   ErrUnknownVersion,
 }
 
 func TestTheNegativeVectorsAreRefusedAsTheirFilesSay(t *testing.T) {
