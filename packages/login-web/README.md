@@ -96,7 +96,7 @@ this module:
 import { SignInButton } from "@identity-agent/login-web";
 import { appFetch, readAppLink } from "@identity-agent/login-web/app";
 
-// The link the person opened carries #aid=…&kel=…&rid=…&api=…&seal=… (a fragment, sent to no server).
+// The link the person opened carries #aid=…&kel=…&rid=…&api=…&seal=…&min=…&iat=… (a fragment, sent to no server).
 const app = await appFetch(readAppLink(location.hash));
 <SignInButton sessionEndpoint={app.sessionEndpoint} fetchFn={app.fetchFn}
   browserKey={app.browserKey} frontEnd="browser" requestDisclosures={[]}
