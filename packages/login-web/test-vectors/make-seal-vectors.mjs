@@ -6,7 +6,7 @@
 import { createECDH, createHash, hkdfSync, webcrypto } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { minimum, relayChain, sealStatement } from "../src/app-test-support.mjs";
-import { sealPaddedRequestForVectors, sealRequest } from "../dist/seal.js";
+import { sealAnswerWithAnyNForVectors, sealPaddedRequestForVectors, sealRequest } from "../dist/seal.js";
 
 const enc = new TextEncoder();
 const b64u = (b) => Buffer.from(b).toString("base64url");
@@ -100,6 +100,9 @@ export async function make() {
     { name: "a length longer than the plaintext", rid: RID, outer: await raw("long", padded(1024, 5000)) },
     { name: "a plaintext too short to hold its length", rid: RID, outer: await raw("short", new Uint8Array(3)) },
   ];
+  // Sealed in full under an n of the wrong length: the only thing wrong with each is the length.
+  const ANSWERS_WITH_N = {};
+  for (const len of [15, 33, 64]) ANSWERS_WITH_N[len] = await sealAnswerWithAnyNForVectors(RID, sk.pub, await jwkPair(ephD(first.name)), new Uint8Array(len).fill(len), enc.encode(first.answer_content));
     const answer_refusals = [
     { name: "a changed ciphertext", request: first.name, answer_outer: tamper(first.answer_outer, (o) => { o.ct = flip(o.ct); }) },
     { name: "another call's answer", request: first.name, answer_outer: requests[2].answer_outer },
@@ -111,6 +114,7 @@ export async function make() {
     { name: "a changed value of the back end's own", request: first.name, answer_outer: tamper(first.answer_outer, (o) => { o.n = flip(o.n); }) },
     { name: "a value of the back end's own that is too short", request: first.name, answer_outer: tamper(first.answer_outer, (o) => { o.n = o.n.slice(0, 20); }) },
     { name: "a value of the back end's own that is too long", request: first.name, answer_outer: tamper(first.answer_outer, (o) => { o.n = o.n + "AAAAAAAA"; }) },
+    ...[15, 33, 64].map((len) => ({ name: `a correctly sealed answer whose own value is ${len} bytes, outside 16 to 32`, request: first.name, answer_outer: ANSWERS_WITH_N[len] })),
     { name: "a ciphertext respelled in its unused bits", request: first.name, answer_outer: tamper(first.answer_outer, (o) => { o.ct = respell(o.ct); }) },
     { name: "the field names in upper case", request: first.name, answer_outer: JSON.stringify({ V: 1, N: JSON.parse(first.answer_outer).n, CT: JSON.parse(first.answer_outer).ct }) },
   ];

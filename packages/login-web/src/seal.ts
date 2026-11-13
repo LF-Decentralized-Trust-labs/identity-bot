@@ -177,6 +177,17 @@ export async function sealPaddedRequestForVectors(rid: string, spk: Uint8Array, 
   return JSON.stringify({ v: SEAL_VERSION, epk: b64u(epk), ct: b64u(ct) });
 }
 
+/** For the vectors only: a correctly sealed answer (the one real key and nonce, authenticated
+ *  and all) whose `n` is of any length, so a reader can be shown refusing one that is out of
+ *  bounds for that alone. `Reply.seal` refuses such an `n`, as no honest back end makes one. */
+export async function sealAnswerWithAnyNForVectors(rid: string, spk: Uint8Array, eph: CryptoKeyPair, n: Uint8Array, content: Uint8Array): Promise<string> {
+  const pub = await crypto.subtle.importKey("raw", spk as BufferSource, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const secret = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: pub }, eph.privateKey, 256));
+  const epk = new Uint8Array(await crypto.subtle.exportKey("raw", eph.publicKey));
+  const d = await direction(secret, epk, spk, rid, "answer", n);
+  return JSON.stringify({ v: SEAL_VERSION, n: b64u(n), ct: b64u(await sealWith(d, content)) });
+}
+
 /** The back end's side, for tests and vectors: opens a sealed call with the
  *  sealing key's private half and returns the content and the Reply that seals
  *  its answer. A real back end is `login-go`'s `SealKey.OpenRequest`. */
