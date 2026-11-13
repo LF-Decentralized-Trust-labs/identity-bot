@@ -176,28 +176,33 @@ func (h *Handler) HandleEndInstalledAppSignIn(w http.ResponseWriter, r *http.Req
 		jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": "say which app and which key"})
 		return
 	}
-	status, err := h.EndInstalledAppSignIn(body.SiteAID, body.Key)
+	already, status, err := h.EndInstalledAppSignIn(body.SiteAID, body.Key)
 	if err != nil {
 		jsonreply.Write(w, status, map[string]string{"error": err.Error()})
 		return
 	}
-	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"ok": true, "ended": true})
+	reply := map[string]interface{}{"ok": true, "ended": true, "already_ended": already}
+	if already {
+		reply["message"] = AlreadyEndedMessage
+	}
+	jsonreply.Write(w, http.StatusOK, reply)
 }
 
 // EndInstalledAppSignIn ends the person's own grant with the existing signed
 // end: a nonce from the app's host, then an assertion for the grant's key from
-// the person. It forgets the record only when the host says it is ended, and
-// answers the status a caller should relay.
-func (h *Handler) EndInstalledAppSignIn(siteAID, key string) (int, error) {
+// the person. It forgets the record only when the host says it is ended or says
+// it is no longer live (the owner already ended it: alreadyEnded is true then,
+// and it is not an error), and answers the status a caller should relay.
+func (h *Handler) EndInstalledAppSignIn(siteAID, key string) (alreadyEnded bool, status int, err error) {
 	if h.InstalledApps == nil {
-		return http.StatusNotFound, fmt.Errorf("no installed-app sign-ins are kept here")
+		return false, http.StatusNotFound, fmt.Errorf("no installed-app sign-ins are kept here")
 	}
 	rec, ok := h.InstalledApps.Get(siteAID, key)
 	if !ok {
-		return http.StatusNotFound, fmt.Errorf("you have no approved sign-in for that key")
+		return false, http.StatusNotFound, fmt.Errorf("you have no approved sign-in for that key")
 	}
 	if rec.EndBase == "" {
-		return http.StatusConflict, fmt.Errorf("this sign-in did not say where it is ended; ask the app's owner to end it")
+		return false, http.StatusConflict, fmt.Errorf("this sign-in did not say where it is ended; ask the app's owner to end it")
 	}
 	post := func(path string, payload []byte) (int, []byte, error) {
 		url := rec.EndBase + path
@@ -217,41 +222,58 @@ func (h *Handler) EndInstalledAppSignIn(siteAID, key string) (int, error) {
 	begin, _ := json.Marshal(map[string]string{"site_aid": rec.SiteAID, "key": rec.Key})
 	code, resp, err := post("/app-key/end/begin", begin)
 	if err != nil {
-		return http.StatusBadGateway, fmt.Errorf("the app's host could not be reached, so nothing was ended: %w", err)
+		return false, http.StatusBadGateway, fmt.Errorf("the app's host could not be reached, so nothing was ended: %w", err)
+	}
+	if code == http.StatusGone {
+		return h.forgetAlreadyEnded(rec), http.StatusOK, nil
 	}
 	if code != http.StatusOK {
-		return http.StatusBadGateway, fmt.Errorf("the app's host would not start ending it (%d)", code)
+		return false, http.StatusBadGateway, fmt.Errorf("the app's host would not start ending it (%d)", code)
 	}
 	var ask map[string]string
 	if json.Unmarshal(resp, &ask) != nil || ask["nonce"] == "" {
-		return http.StatusBadGateway, fmt.Errorf("the app's host answered something unreadable")
+		return false, http.StatusBadGateway, fmt.Errorf("the app's host answered something unreadable")
 	}
 	bundle := &ChallengeBundle{
 		SiteAID: ask["site_aid"], Audience: ask["audience"], Nonce: ask["nonce"],
 		BrowserKey: ask["browser_key"], FrontEnd: ask["front_end"],
 	}
 	if bundle.BrowserKey != rec.Key || bundle.FrontEnd != FrontEndInstalledApp {
-		return http.StatusBadGateway, fmt.Errorf("the app's host named a different key, so nothing was signed")
+		return false, http.StatusBadGateway, fmt.Errorf("the app's host named a different key, so nothing was signed")
 	}
 	rel, err := h.GetOrCreateRelationship(rec.RelationshipKey, bundle)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return false, http.StatusInternalServerError, err
 	}
 	as, err := h.BuildAssertion(rel, bundle, nil)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return false, http.StatusInternalServerError, err
 	}
 	signed, err := json.Marshal(as)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return false, http.StatusInternalServerError, err
 	}
 	code, _, err = post("/app-key/end", signed)
 	if err != nil {
-		return http.StatusBadGateway, fmt.Errorf("the app's host could not be reached, so nothing was ended: %w", err)
+		return false, http.StatusBadGateway, fmt.Errorf("the app's host could not be reached, so nothing was ended: %w", err)
+	}
+	if code == http.StatusGone {
+		return h.forgetAlreadyEnded(rec), http.StatusOK, nil
 	}
 	if code != http.StatusOK {
-		return http.StatusConflict, fmt.Errorf("the app's host did not end it (%d); it may already have been ended there", code)
+		return false, http.StatusConflict, fmt.Errorf("the app's host did not end it (%d)", code)
 	}
 	_ = h.InstalledApps.Delete(rec.SiteAID, rec.Key)
-	return http.StatusOK, nil
+	return false, http.StatusOK, nil
+}
+
+// AlreadyEndedMessage is what the person is told when the host says the sign-in
+// is no longer live.
+const AlreadyEndedMessage = "It had already been ended"
+
+// forgetAlreadyEnded drops the person's record of a sign-in the host says is no
+// longer live, so the list never shows it as live. It answers true.
+func (h *Handler) forgetAlreadyEnded(rec InstalledAppSignIn) bool {
+	_ = h.InstalledApps.Delete(rec.SiteAID, rec.Key)
+	return true
 }
