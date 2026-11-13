@@ -142,6 +142,7 @@ export async function make() {
     { name: "the key the log has left, vouching at its own, earlier sequence number, in the whole log", rid: RID, statement: sealStatement(chain, sk.pub, { signer: chain.key(0), sn: 0 }) },
     { name: "a statement made at the first event, with the log as it stood then, once a longer log is known", rid: RID, statement: sealStatement(chain, sk.pub, { log: shorter, sn: 0, signer: chain.key(0) }), known_log: chain.log() },
     { name: "a statement whose sequence number is not its log's last", rid: RID, statement: stmt({ sn: 0 }) },
+    { name: "a statement the current key signed at an earlier sequence number than its log's last", rid: RID, statement: sealStatement(chain, sk.pub, { sn: 0 }) },
     { name: "a sequence number that is text", rid: RID, statement: stmt({ sn: "1" }) },
     { name: "a sequence number spelled with a fraction", rid: RID, statement: respellSn((n) => `${n}.0`) },
     { name: "a sequence number spelled with an exponent", rid: RID, statement: respellSn((n) => `${n}e0`) },
