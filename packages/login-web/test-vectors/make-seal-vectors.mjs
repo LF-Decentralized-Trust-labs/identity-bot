@@ -117,6 +117,8 @@ export async function make() {
   const otherKey = createECDH("prime256v1"); otherKey.generateKeys();
   const stmt = (o) => b64u(JSON.stringify({ ...JSON.parse(Buffer.from(statement, "base64url")), ...o }));
   const without = (k) => { const o = JSON.parse(Buffer.from(statement, "base64url")); delete o[k]; return b64u(JSON.stringify(o)); };
+  // The same statement, with only the spelling of its sequence number changed (the value, and so the signature, is the same).
+  const respellSn = (spell) => { const t = Buffer.from(statement, "base64url").toString(); return b64u(t.replace(/"sn":(\d+)/, (_, n) => `"sn":${spell(n)}`)); };
   const shorter = chain.log(1); // the log as it stood before the rotation
   const flipSig = (t) => t.slice(0, 5) + (t[5] === "A" ? "B" : "A") + t.slice(6);
   const otherRid = "E" + RID.slice(1).split("").reverse().join("");
@@ -137,6 +139,9 @@ export async function make() {
     { name: "a statement made at the first event, with the log as it stood then, once a longer log is known", rid: RID, statement: sealStatement(chain, sk.pub, { log: shorter, sn: 0, signer: chain.key(0) }), known_log: chain.log() },
     { name: "a statement whose sequence number is not its log's last", rid: RID, statement: stmt({ sn: 0 }) },
     { name: "a sequence number that is text", rid: RID, statement: stmt({ sn: "1" }) },
+    { name: "a sequence number spelled with a fraction", rid: RID, statement: respellSn((n) => `${n}.0`) },
+    { name: "a sequence number spelled with an exponent", rid: RID, statement: respellSn((n) => `${n}e0`) },
+    { name: "a sequence number spelled with a leading zero", rid: RID, statement: respellSn((n) => `0${n}`) },
     { name: "a true, shorter log that holds the key the removed first machine had, when the link's minimum is the later event", rid: RID, statement: sealStatement(chain, sk.pub, { log: shorter, sn: 0, signer: chain.key(0) }), min: MIN },
     { name: "a log whose event at the minimum's sequence number is another event", rid: RID, statement, min: `${SN}.${chain.events[SN].said.slice(0, -1)}${chain.events[SN].said.endsWith("A") ? "B" : "A"}` },
     { name: "a log that stops short of the minimum's sequence number", rid: RID, statement, min: `${SN + 1}.${chain.events[SN].said}` },

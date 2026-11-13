@@ -432,11 +432,17 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
   const json = decodeBase64UrlStrict(typeof encoded === "string" ? encoded : "");
   if (!json) fail("it is not readable");
   let st: { log?: unknown; key?: unknown; sn?: unknown; sig?: unknown };
+  let text: string;
   try {
-    st = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(json!));
+    text = new TextDecoder("utf-8", { fatal: true }).decode(json!);
+    st = JSON.parse(text);
   } catch {
     return fail("it is not JSON");
   }
+  // JSON.parse reads 0.0 and 1e0 as the integers 0 and 1; the Go and Dart checks refuse them, so refuse them here
+  // from the text itself. Every other value is base64url, so the only `"sn":` in the text is the number.
+  const spelled = /"sn"\s*:\s*([^,}\s]*)/.exec(text);
+  if (spelled && !/^(0|[1-9][0-9]*)$/.test(spelled[1])) fail("its sequence number is not spelled as a whole number");
   if (Object.keys(st ?? {}).sort().join(",") !== "key,log,sig,sn") fail("it has fields it should not, or lacks some");
   const key = unb64u(st.key);
   const sig = unb64u(st.sig);
