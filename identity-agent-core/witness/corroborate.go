@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/drivers"
 	"identity-agent-core/internal/boundedread"
 )
@@ -26,7 +28,7 @@ import (
 // the witnesses the log itself designates in its inception.
 //
 // WHY THE CLAIMANT'S OWN ADDRESS IS NOT ENOUGH. The OOBI in a claim names the
-// claimant's own agent, so somebody withholding a rotation from the presented
+// claimant's own Identity Agent, so somebody withholding a rotation from the presented
 // copy would withhold it from the served copy too.
 //
 // WHY A WITNESS IS NOT FOUND BY WHAT IT SAYS ABOUT ITSELF. An event designates
@@ -61,7 +63,8 @@ type Corroboration struct {
 	Designated int
 	// Contradicted means a witness holds a longer history than the one
 	// presented (the withheld-rotation case), a different event where one was
-	// presented (a fork), or evidence of duplicity (see Conflicting).
+	// presented (a fork), or a validly signed second event at a place of the
+	// presented log (duplicity, see SignedRivals).
 	Contradicted bool
 	// Why explains a contradiction, for the refusal message.
 	Why string
@@ -80,9 +83,14 @@ type WitnessAnswer struct {
 	// Replica is the log the witness holds for the identifier.
 	Replica []map[string]interface{}
 	// Conflicting is what the witness kept as evidence that the identity
-	// signed two different events at one place (duplicity). Non-empty is a
-	// contradiction: witnesses exist to detect exactly this.
+	// signed two different events at one place (duplicity), as the witness
+	// served it. It is not believed as served: a validly signed rival among
+	// it is a contradiction, and the rest is reported in Ignored.
 	Conflicting []map[string]interface{}
+	// Ignored is how many of the entries in Conflicting were not a validly
+	// signed second event at a place of the presented log (see
+	// SignedRivals), and so counted for nothing.
+	Ignored int
 }
 
 // Corroborated is the question a caller actually wants answered.
@@ -163,16 +171,23 @@ func CorroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 			continue
 		}
 		out.Asked++
-		out.Answers = append(out.Answers, WitnessAnswer{Key: key, URL: base, Replica: replica, Conflicting: conflicting})
+		rivals, ignored := SignedRivals(presented, conflicting)
+		out.Answers = append(out.Answers, WitnessAnswer{Key: key, URL: base, Replica: replica,
+			Conflicting: conflicting, Ignored: ignored})
 
 		// DUPLICITY. A witness that kept a second, different event at a place
 		// the identity had already used is holding proof the identity signed two
-		// histories. That is the one thing a witness is for (ADR-031).
-		if len(conflicting) > 0 {
+		// histories. That is the one thing a witness is for (ADR-031). It is
+		// proof only when the second event is validly signed: anything else a
+		// witness hands back (garbage, the held event itself, an event signed
+		// by a key already rotated away from) proves nothing, and a witness
+		// that is broken or hostile must not be able to refuse an honest claim
+		// by sending it.
+		if rivals > 0 {
 			out.Contradicted = true
 			out.Why = fmt.Sprintf(
-				"a witness holds %d conflicting event(s) for %s: evidence that identity signed two different histories",
-				len(conflicting), ownerAID)
+				"a witness holds %d validly signed conflicting event(s) for %s: evidence that identity signed two different histories",
+				rivals, ownerAID)
 			return out
 		}
 		// A witness holding MORE of this identity's history than was presented
@@ -206,6 +221,56 @@ func CorroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 		}
 	}
 	return out
+}
+
+// SignedRivals counts, in what a witness handed back as conflicting, the
+// entries that prove duplicity of the presented log, and those that do not.
+//
+// An entry proves it only when it is an event of the log's identifier, is a
+// DIFFERENT event from the one the log holds at its place, and verifies
+// (keri.VerifyEvent) against the key state the presented log has before that
+// place: the test the witness itself applies before it keeps a conflict
+// (signedRival, shared). Anything else is ignored: an event that cannot be
+// read, the held event itself, an event of another identifier, one at a place
+// the log does not reach, and one signed by a key the log had already rotated
+// away from at that place. presented is the log as rebuilt from its verified
+// bytes; if it cannot be judged as a signed log nothing can be shown against
+// it and every entry is ignored.
+func SignedRivals(presented, conflicting []map[string]interface{}) (valid, ignored int) {
+	if len(conflicting) == 0 {
+		return 0, 0
+	}
+	var log *keri.SignedKELResult
+	if msgs, err := drivers.SignedMessagesFromRecords(presented); err == nil {
+		if l, err := keri.ValidateSignedKEL(msgs); err == nil {
+			log = l
+		}
+	}
+	for _, rec := range conflicting {
+		if log != nil && isSignedRival(log, rec) {
+			valid++
+		} else {
+			ignored++
+		}
+	}
+	return valid, ignored
+}
+
+func isSignedRival(log *keri.SignedKELResult, rec map[string]interface{}) bool {
+	if rec == nil {
+		return false
+	}
+	msgs, err := drivers.SignedMessagesFromRecords([]map[string]interface{}{rec})
+	if err != nil || len(msgs) != 1 {
+		return false
+	}
+	rawB64, _ := rec["raw_bytes_b64"].(string)
+	raw, err := drivers.DecodeRawBytes(rawB64)
+	if err != nil {
+		return false
+	}
+	ev, _, held, ok := signedRival(log, raw, msgs[0])
+	return ok && ev.SAID != held.Digest()
 }
 
 // eventDigestOf is the event identifier of one record on either side. From the
@@ -257,7 +322,7 @@ func holdsDigests(presented, replica []map[string]interface{}) bool {
 // had to present and which this witness can compare with its own. That is the
 // sanctioned path for a verifier that is neither the identity nor its delegator.
 func FetchReplica(client *http.Client, base, aid string, presented []map[string]interface{}) (kel, conflicting []map[string]interface{}, err error) {
-	// Commercial witnesses serve at the root; an agent acting as a witness
+	// Commercial witnesses serve at the root; an Identity Agent acting as a witness
 	// serves the same route under /api. Try both rather than guess, because
 	// guessing wrong reads as "witness unreachable" and silently weakens the
 	// check.
