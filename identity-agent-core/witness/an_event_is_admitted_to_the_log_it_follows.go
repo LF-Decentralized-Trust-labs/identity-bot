@@ -110,25 +110,43 @@ func (s *Service) admit(signerAID string, raw []byte, sigs []string) (*admitted,
 	return out, nil
 }
 
-// signedConflict is the conflict a refused event is evidence of, when its
-// controller signatures verify against the state before its place; nil when
-// they do not, since an unverified event is evidence of nothing.
-func signedConflict(log *keri.SignedKELResult, signerAID string, raw, message []byte,
-	sigs []string) *KelConflict {
+// signedRival is the event at message's place when it is a validly signed
+// event of this log's identifier: it parses, verifies against the log's key
+// state before that place, and the log holds a state at that place. held is
+// what the log holds there; whether it is a different event is the caller's
+// question (a refused event is one by construction). ok is false for anything
+// else, since an event that does not verify is evidence of nothing.
+//
+// This is the one test of "is this a signed conflict": the witness applies it
+// to an event it refuses, and CorroborateThrough applies it to what a witness
+// hands back.
+func signedRival(log *keri.SignedKELResult, raw, message []byte) (ev *keri.Event, v *keri.Verified, held *keri.KeyState, ok bool) {
 	ev, err := keri.ParseEvent(raw)
-	if err != nil {
-		return nil
+	if err != nil || ev.Identifier != log.Identifier {
+		return nil, nil, nil, false
 	}
 	var before *keri.KeyState
 	if ev.SN > 0 {
 		before = log.StateAt(ev.SN - 1)
 	}
-	v, err := keri.VerifyEvent(before, message)
+	v, err = keri.VerifyEvent(before, message)
 	if err != nil {
-		return nil
+		return nil, nil, nil, false
 	}
-	held := log.StateAt(ev.SN)
+	held = log.StateAt(ev.SN)
 	if held == nil {
+		return nil, nil, nil, false
+	}
+	return ev, v, held, true
+}
+
+// signedConflict is the conflict a refused event is evidence of, when its
+// controller signatures verify against the state before its place; nil when
+// they do not, since an unverified event is evidence of nothing.
+func signedConflict(log *keri.SignedKELResult, signerAID string, raw, message []byte,
+	sigs []string) *KelConflict {
+	ev, v, held, ok := signedRival(log, raw, message)
+	if !ok {
 		return nil
 	}
 	return &KelConflict{
