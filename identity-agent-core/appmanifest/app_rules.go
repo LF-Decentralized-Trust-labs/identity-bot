@@ -2,6 +2,7 @@ package appmanifest
 
 import (
 	"fmt"
+	"identity-agent-core/asset"
 	"strings"
 	"unicode"
 )
@@ -215,6 +216,11 @@ func (m *AppManifest) validateEnds() error {
 			return fmt.Errorf("front_and_back_end.device_front_ends: '%s' is listed twice", d)
 		}
 		seen[d] = true
+	}
+	if e.InstalledApp != nil {
+		if err := asset.CheckInstalledAppIdentity("app", e.DeviceFrontEnds, *e.InstalledApp); err != nil {
+			return fmt.Errorf("front_and_back_end.%v", err)
+		}
 	}
 	if e.StaticFrontEndURL != nil && !seen["browser"] {
 		return fmt.Errorf("front_and_back_end.device_front_ends: a static front end is loaded by a browser, so 'browser' must be listed")

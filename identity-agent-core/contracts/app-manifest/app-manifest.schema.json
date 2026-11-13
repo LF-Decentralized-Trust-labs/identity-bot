@@ -826,6 +826,27 @@
             ]
           },
           "description": "The front ends a person uses on their devices: 'installed_app' and/or 'browser'. May be empty when the app has no front end for a person. A static front end is loaded by a browser, so 'browser' must be listed whenever static_front_end_url is."
+        },
+        "installed_app_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "allOf": [
+            { "if": { "required": ["android_package"] }, "then": { "required": ["android_signers"] } },
+            { "if": { "required": ["android_signers"] }, "then": { "required": ["android_package"] } }
+          ],
+          "description": "Who the installed front end is, when 'installed_app' is offered (ADR-072 section 4). The owner passes it to the Identity Agent at enrolment; the Identity Agent holds a hardware attestation of the app's key to it. A platform left out is one the app cannot hold a key on.",
+          "properties": {
+            "android_package": { "type": "string", "minLength": 1 },
+            "android_signers": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "description": "SHA-256 digests of the app's signing certificates, lower-case hex."
+            },
+            "apple_app_id": { "type": "string", "pattern": "^[A-Za-z0-9]+\\.[A-Za-z0-9.-]+$", "description": "The App Attest application identifier, '<team id>.<bundle id>'." },
+            "tpm_keys": { "type": "boolean", "description": "The owner accepts that a TPM proves a key is in the computer's TPM and not which program holds it." }
+          }
         }
       },
       "anyOf": [

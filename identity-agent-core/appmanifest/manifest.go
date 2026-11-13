@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/vault"
 )
 
@@ -104,6 +105,8 @@ type FrontAndBackEnd struct {
 	StaticFrontEndURL *string  `json:"static_front_end_url,omitempty"` // https address the static front end is served from
 	BackEndPort       *int     `json:"back_end_port,omitempty"`        // TCP port the back end listens on, on the app machine; reached only through the relay, no inbound port is open on that machine
 	DeviceFrontEnds   []string `json:"device_front_ends"`              // "installed_app" and/or "browser"
+	// InstalledApp names the installed front end's program when "installed_app" is offered (ADR-072 section 4); the owner passes it to the Identity Agent at enrolment.
+	InstalledApp *asset.InstalledAppIdentity `json:"installed_app_identity,omitempty"`
 }
 
 // WhenDown is the row "when_down".

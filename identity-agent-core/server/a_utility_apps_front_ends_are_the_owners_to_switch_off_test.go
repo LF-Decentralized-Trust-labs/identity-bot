@@ -110,7 +110,8 @@ func TestAnAssetThatIsNotAnAppIsNotAskedForAFrontEnd(t *testing.T) {
 // another kind must not get round a switched-off browser front end.
 func TestABrowserKeyCannotSignInAsAnotherFrontEnd(t *testing.T) {
 	w := anAppOffering(t, []string{"browser", "installed_app"}, []string{"browser"})
-	if code, _ := theChallengeFor(w, aBrowserKey, "installed_app"); code != http.StatusForbidden {
+	// A public route proves nothing, so it passes no proof: the kind is refused.
+	if _, _, code, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, aBrowserKey, "installed_app", w.srv.URL, false); code != http.StatusForbidden {
 		t.Fatalf("a browser key signed in as an installed app: %d", code)
 	}
 	if code, _ := theChallengeFor(w, aBrowserKey, "browser"); code != http.StatusForbidden {

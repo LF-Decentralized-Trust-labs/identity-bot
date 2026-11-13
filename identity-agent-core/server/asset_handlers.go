@@ -25,7 +25,7 @@ func (s *CoreServer) initAssetHandler() error {
 	}
 	s.assetStoreErr = nil
 	h.VaultHas = s.isVaultEntry
-	// The delegator for per-asset delegated inception is the agent's root identity AID.
+	s.wireAssetHandlerHooks(h)
 	h.RootAID = func() string {
 		if id, _ := s.DataStore.GetIdentity(); id != nil {
 			return id.AID
@@ -104,6 +104,8 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Get("/{id}/front-ends", s.assetHandler.HandleGetFrontEnds)
 		r.Put("/{id}/front-ends", s.assetHandler.HandlePutFrontEnds)
 		r.Put("/{id}/front-ends/offered", s.assetHandler.HandleSetOfferedFrontEnds)
+		r.Get("/{id}/app-key-grants", s.handleListAppKeyGrants)
+		r.Delete("/{id}/app-key-grants/{key}", s.handleEndAppKeyGrant)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
 		r.Post("/{id}/invites", s.assetHandler.HandleCreateInvite)
 		r.Delete("/{id}/invites/{invite}", s.assetHandler.HandleRevokeInvite)
@@ -165,4 +167,22 @@ func (s *CoreServer) findAgentAssetByAID(aid string) *coretypes.AgentRef {
 		return nil
 	}
 	return ref
+}
+
+// wireAssetHandlerHooks tells the core when the owner's decisions about an app
+// must end what was granted under them.
+func (s *CoreServer) wireAssetHandlerHooks(h *asset.Handler) {
+	h.OnFrontEndsSwitchedOff = func(assetID string, kinds []string) {
+		for _, k := range kinds {
+			if _, err := s.browserKeys().EndKind(assetID, k); err != nil {
+				log.Printf("[identity-agent-core] the %s keys of %s could not be ended when the owner switched them off: %v", k, assetID, err)
+			}
+		}
+	}
+	h.OnMemberRemoved = func(assetID, aid string) {
+		if _, err := s.browserKeys().End(assetID, "", aid); err != nil {
+			log.Printf("[identity-agent-core] the keys of a removed member of %s could not be ended: %v", assetID, err)
+		}
+	}
+	// The delegator for per-asset delegated inception is the agent's root identity AID.
 }

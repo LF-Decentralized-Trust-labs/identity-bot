@@ -43,13 +43,24 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 // as before; an empty non-nil list is a declaration that it offers none, and
 // every sign-in is then refused (ADR-072 section 3).
 func (h *Handler) ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time, constraints map[string]interface{}, frontEnds []string) (*Asset, error) {
+	return h.ProvisionAppAssetNamingItsProgram(displayName, capabilities, validUntil, constraints, frontEnds, InstalledAppIdentity{})
+}
+
+// ProvisionAppAssetNamingItsProgram is ProvisionAppAsset for an app whose owner
+// also names which installed program is its own (the manifest's
+// installed_app_identity, ADR-072 Amendment 3), so an installed app's hardware
+// attestation can be held to it. Named only with an installed_app front end.
+func (h *Handler) ProvisionAppAssetNamingItsProgram(displayName string, capabilities []string, validUntil *time.Time, constraints map[string]interface{}, frontEnds []string, installedApp InstalledAppIdentity) (*Asset, error) {
 	if err := CheckOfferedFrontEnds("app", frontEnds); err != nil {
+		return nil, err
+	}
+	if err := CheckInstalledAppIdentity("app", frontEnds, installedApp); err != nil {
 		return nil, err
 	}
 	return h.provisionDelegated(delegatedAsset{
 		assetType: "app", noun: "app", originScheme: "app", errTaken: ErrAppNameTaken,
 		displayName: displayName, capabilities: capabilities, validUntil: validUntil, constraints: constraints,
-		frontEnds: frontEnds,
+		frontEnds: frontEnds, installedApp: installedApp,
 	})
 }
 
@@ -67,6 +78,7 @@ type delegatedAsset struct {
 	validUntil   *time.Time
 	constraints  map[string]interface{}
 	frontEnds    []string // an app's offered front ends; nil: not declared
+	installedApp InstalledAppIdentity
 }
 
 func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
@@ -142,6 +154,7 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 		GrantValidUntil:   d.validUntil,
 		GrantConstraints:  d.constraints,
 		DeviceFrontEnds:   d.frontEnds,
+		InstalledApp:      d.installedApp,
 		FrontEndsDeclared: DeclaresFrontEnds(d.assetType, d.frontEnds),
 		CreatedAt:         now,
 		UpdatedAt:         now,

@@ -112,6 +112,9 @@ type Asset struct {
 	// was made before it could say, which is not the same as offering none
 	// (ADR-072 §3, older apps): such an app signs people in as it always did.
 	FrontEndsDeclared bool `json:"front_ends_declared,omitempty"`
+	// InstalledApp is who the owner says the installed front end is, which the
+	// Identity Agent holds a hardware attestation to (ADR-072 section 4).
+	InstalledApp InstalledAppIdentity `json:"installed_app_identity,omitempty"`
 	// FrontEndsOff are the offered front ends the owner has switched off. Always
 	// a subset of DeviceFrontEnds.
 	FrontEndsOff []string `json:"front_ends_off,omitempty"`

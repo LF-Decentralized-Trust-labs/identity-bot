@@ -157,6 +157,8 @@ func TestEveryWatcherRouteHonoursAnOptOut(t *testing.T) {
 		"GET /public/credential/{said}":                         publication,
 		"GET /public/schemas/{said}":                            publication,
 		"GET /debug/watcher/coverage":                           watcherOther,
+		"POST /api/login/app-key/end/begin":                     computation,
+		"POST /api/login/app-key/end":                           computation,
 	}
 
 	walked := map[string]bool{}

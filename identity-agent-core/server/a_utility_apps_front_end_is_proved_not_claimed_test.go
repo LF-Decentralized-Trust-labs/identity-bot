@@ -222,6 +222,23 @@ func TestProvisionAppAssetTakesAFrontEndList(t *testing.T) {
 	}
 }
 
+// The owner names the installed program when the app is provisioned, and only
+// for an app that offers an installed front end.
+func TestProvisionAppAssetKeepsTheProgramItsOwnerNamed(t *testing.T) {
+	s := appWorld(t)
+	id := asset.InstalledAppIdentity{AppleAppID: "TEAM123456.org.example.portal"}
+	a, err := s.assetHandler.ProvisionAppAssetNamingItsProgram("Named", []string{"system.info.read"}, nil, nil, []string{"installed_app"}, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := s.assetHandler.Store.GetAsset(a.ID); got.InstalledApp.AppleAppID != id.AppleAppID {
+		t.Fatalf("the program the owner named was not kept: %+v", got.InstalledApp)
+	}
+	if _, err := s.assetHandler.ProvisionAppAssetNamingItsProgram("Browser only", []string{"system.info.read"}, nil, nil, []string{"browser"}, id); err == nil {
+		t.Fatal("an installed program was named for an app with no installed front end")
+	}
+}
+
 // A paired controller reads the setting and cannot change it.
 func TestAControllerMayReadFrontEndsButNotChangeThem(t *testing.T) {
 	for _, route := range []string{"PUT /api/assets/{id}/front-ends", "PUT /api/assets/{id}/front-ends/offered"} {

@@ -127,6 +127,19 @@ type Host interface {
 	// releases its result. The person's Identity Agent answers it at the
 	// core's own routes.
 	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (server.BrowserKeySignIn, error)
+	// StartFrontEndKeySignIn is StartBrowserKeySignIn for the kind of front end
+	// that holds the key: "browser", or "installed_app" for a key held in the
+	// device's secure hardware, whose sign-in is an app-key grant that lasts
+	// until it is ended instead of a session that lapses (ADR-072 section 4).
+	// callerAsset is the app the add-on found asking from its own verified
+	// binding (never from the request body); when the core itself verified r as
+	// signed by an app, that app is the one asking and callerAsset must agree
+	// or be "". r must not come from a web page, and assetID must be the asking
+	// app's own. An installed_app
+	// sign-in must carry proof, a hardware attestation of the key that the core
+	// verifies against the program the app's owner named; naming the kind is
+	// not proof.
+	StartFrontEndKeySignIn(r *http.Request, callerAsset, assetID, audience, key, frontEnd, publicURL string, proof *server.InstalledAppKeyProof) (server.BrowserKeySignIn, error)
 	// AssetStillAdmits is whether the asset's enrolment policy lets in the
 	// person known to it as pairwiseAID now, by MEMBERSHIP only: the
 	// membership check the sign-in made, asked again, so a person removed

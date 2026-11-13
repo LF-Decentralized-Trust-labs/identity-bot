@@ -27,6 +27,8 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		Replaces string `json:"replaces"`
 		// DeviceFrontEnds: for an app, the front ends its manifest offers.
 		DeviceFrontEnds []string `json:"device_front_ends"`
+		// InstalledApp: who the app's installed front end is (ADR-072 section 4).
+		InstalledApp InstalledAppIdentity `json:"installed_app_identity"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeJSON(w, map[string]string{"error": "bad request"}, http.StatusBadRequest)
@@ -43,7 +45,12 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
 		return
 	}
+	if err := CheckInstalledAppIdentity(e.AssetType, body.DeviceFrontEnds, body.InstalledApp); err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
 	e.DeviceFrontEnds = body.DeviceFrontEnds
+	e.InstalledApp = body.InstalledApp
 	e.FrontEndsDeclared = DeclaresFrontEnds(e.AssetType, body.DeviceFrontEnds)
 	if body.ExpiresInS > 0 {
 		e.ExpiresAt = time.Now().UTC().Add(time.Duration(body.ExpiresInS) * time.Second)
@@ -202,6 +209,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 		PairwiseAID: resp.AID,
 		// Also the owner's, from the token.
 		DeviceFrontEnds:   enrolment.DeviceFrontEnds,
+		InstalledApp:      enrolment.InstalledApp,
 		FrontEndsDeclared: enrolment.FrontEndsDeclared,
 		// Recorded so this machine's later requests can be verified. Without it
 		// the enrolment produces an identity nothing can check a signature

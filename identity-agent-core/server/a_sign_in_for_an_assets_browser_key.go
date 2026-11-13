@@ -59,7 +59,8 @@ type BrowserKeySignInResult struct {
 }
 
 // startBrowserKeySignIn is the core's signed challenge for the asset, naming
-// browserKey, with a collector secret minted for it.
+// browserKey, with a collector secret minted for it. It is a browser's: the
+// kind is never the caller's to name (see startFrontEndKeySignIn).
 func (s *CoreServer) startBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error) {
 	if browserKey == "" {
 		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in for a browser's key names the key"}
@@ -68,6 +69,77 @@ func (s *CoreServer) startBrowserKeySignIn(assetID, audience, browserKey, public
 	if code != 0 {
 		return BrowserKeySignIn{}, &SignInRefused{code, msg}
 	}
+	return s.finishStartingKeySignIn(token, qr)
+}
+
+// startFrontEndKeySignIn starts a sign-in for the key of an installed app (or a
+// browser) on behalf of the add-on whose back end signed r. The installed_app
+// kind is the core's to establish, not the caller's to name (ADR-072 section 4):
+//
+//   - the caller is an app's back end (signed as the app, or found to be the
+//     app by the add-on that authenticated it), and r is not one a web page
+//     made (a browser Origin or Fetch-Metadata header), however it reached the
+//     add-on's route;
+//   - the asset is the calling app's own, never another's;
+//   - the key must be proved by a hardware attestation that the core verifies
+//     itself, held to the program the OWNER named for the asset
+//     (verifyInstalledAppKey). The app's say-so is not read as proof.
+func (s *CoreServer) startFrontEndKeySignIn(r *http.Request, callerAsset, assetID, audience, key, frontEnd, publicURL string, proof *InstalledAppKeyProof) (BrowserKeySignIn, error) {
+	if key == "" {
+		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in for a front end's key names the key"}
+	}
+	if frontEnd != asset.FrontEndBrowser && frontEnd != asset.FrontEndInstalledApp {
+		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in names its front end, 'browser' or 'installed_app'"}
+	}
+	// The app asking is the one the core's own check of the request says (it
+	// signed as the app), or, for a route an add-on authenticates itself (an
+	// app's machine, sealed to this Identity Agent), the app that add-on found
+	// the caller to be: callerAsset, which an add-on takes from its own verified
+	// binding and never from the request body.
+	askingApp := callerAsset
+	if app, ok := TheAppThatAsked(r); ok {
+		if callerAsset != "" && callerAsset != app.Asset {
+			return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "the app that signed this request is not the one the add-on found asking"}
+		}
+		askingApp = app.Asset
+	}
+	if askingApp == "" {
+		return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "only an app's back end starts a sign-in for its front end"}
+	}
+	if askingApp != assetID {
+		return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "an app starts sign-ins for its own asset only"}
+	}
+	var fact *installedAppFact
+	if frontEnd == asset.FrontEndInstalledApp {
+		if aPageAsked(r) {
+			return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "a request that came from a web page cannot start an installed-app sign-in"}
+		}
+		f, err := s.verifyInstalledAppKey(assetID, key, proof, time.Now())
+		if err != nil {
+			return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, err.Error()}
+		}
+		fact = &f
+	}
+	token, qr, code, msg := s.createSignedAssetChallenge(assetID, audience, "", nil, key, frontEnd, publicURL, fact != nil)
+	if code != 0 {
+		return BrowserKeySignIn{}, &SignInRefused{code, msg}
+	}
+	if fact != nil {
+		s.holdInstalledAppFact(token, *fact)
+	}
+	return s.finishStartingKeySignIn(token, qr)
+}
+
+// aPageAsked is whether a web page's browser made this request, to whatever
+// route: a browser sends Origin on any cross-origin or non-GET request, and
+// Sec-Fetch-Mode or Sec-Fetch-Site on all of them, and a page cannot remove
+// them. An installed app or a server sends none of these.
+func aPageAsked(r *http.Request) bool {
+	h := r.Header
+	return h.Get("Origin") != "" || h.Get("Sec-Fetch-Mode") != "" || h.Get("Sec-Fetch-Site") != "" || h.Get("Sec-Fetch-Dest") != ""
+}
+
+func (s *CoreServer) finishStartingKeySignIn(token, qr string) (BrowserKeySignIn, error) {
 	secret, err := s.mintCollectorSecret(token)
 	if err != nil {
 		return BrowserKeySignIn{}, &SignInRefused{http.StatusInternalServerError, "could not start a login"}

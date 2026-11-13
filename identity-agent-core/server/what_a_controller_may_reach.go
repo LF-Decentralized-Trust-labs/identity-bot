@@ -250,6 +250,8 @@ var controllerOwnerOnly = map[string]string{
 	// is the same kind of choice, and may be made once.
 	"PUT /api/assets/{id}/front-ends":         "this decides which front ends of a utility app people may sign in through",
 	"PUT /api/assets/{id}/front-ends/offered": "this declares, once, which front ends a utility app made before it could say offers",
+	// A grant that never lapses is the owner's to end, from the device holding the key.
+	"DELETE /api/assets/{id}/app-key-grants/{key}": "ending a person's installed-app grant takes away what the owner allowed",
 
 	// --- who else may act for this identity ---
 	//
