@@ -26,8 +26,11 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 		return
 	}
 	r.Post("/witness/event", s.handleWitnessEvent)
+	r.Post("/witness/cover", s.handleWitnessCover)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
 	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
+	r.Options("/witness/kel/{signer_aid}", handleWitnessKelPreflight)
+	r.Options("/witness/kel/{signer_aid}/tip", handleWitnessKelPreflight)
 	r.Get("/witness/kel/{signer_aid}/event/{sn}", s.handleWitnessKelEvent)
 	r.Get("/witness/status", s.handleWitnessStatus)
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
@@ -111,6 +114,28 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 	jsonreply.Write(w, http.StatusOK, result)
 }
 
+// handleWitnessCover takes an owner's declaration that a plain identifier is its
+// own (witness.AcceptCover). The route is open to peers, so the owner's
+// signature is the gate; every refusal is the same answer, so a stranger learns
+// nothing of who this agent witnesses for.
+func (s *CoreServer) handleWitnessCover(w http.ResponseWriter, r *http.Request) {
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
+	var req witness.CoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
+		return
+	}
+	if err := s.WitnessService.AcceptCover(req); err != nil {
+		writeError(w, http.StatusForbidden, "not covered", "")
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "covered"})
+}
+
 // The three reads of a key log below answer from what this witness holds only
 // to the identity itself or the one it is delegated from (witness.MayRead).
 // Anybody else gets exactly the answer for a log not held: these routes are
@@ -119,10 +144,41 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 // witnessed by the owner's contacts and is never published at /{aid}/kel
 // (errNotPublishable).
 
+// answerOnlyToThisAsker marks an answer that depends on who asked (a read that
+// presents the inception is answered to a page, and to nobody else) as not to be
+// kept by a cache and shared.
+func answerOnlyToThisAsker(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Add("Vary", witness.HeaderInception)
+}
+
 // notHeld is the one answer to a read of a log that is not held, or that the
 // asker may not see.
 func notHeld(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "kel not found", "not_found")
+}
+
+// handleWitnessKelPreflight answers a browser's question whether a page may
+// send X-Inception-Event to this route. It is the same for every identifier,
+// held or not, so it tells nobody who this agent witnesses; the proof is judged
+// on the read itself.
+func handleWitnessKelPreflight(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	h.Set("Access-Control-Allow-Headers", witness.HeaderInception)
+	h.Set("Access-Control-Max-Age", "600")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// letAPageRead adds the headers a browser needs to hand the answer to a page,
+// to a read that presents the log's inception and to no other. A refused read
+// carries none, so a page cannot tell a log this agent does not hold from one
+// it will not show: it is the answer it always was.
+func (s *CoreServer) letAPageRead(w http.ResponseWriter, r *http.Request, aid string) {
+	if s.WitnessService.MayReadFromAPage(aid, r) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
 }
 
 func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +186,7 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 	if !s.witnessReadAllowed(w, r, signerAID) {
 		return
 	}
+	s.letAPageRead(w, r, signerAID)
 	kel, err := s.WitnessService.GetKelReplica(signerAID)
 	if err != nil {
 		notHeld(w)
@@ -149,11 +206,13 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "a nonce is required", "")
 		return
 	}
-	if !s.witnessReadLimiter().allow(clientIP(r)) {
+	answerOnlyToThisAsker(w)
+	if !s.witnessReadLimiter().allow(callerKey(r)) {
 		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
 		return
 	}
 	aid := chi.URLParam(r, "signer_aid")
+	s.letAPageRead(w, r, aid)
 	tip, err := s.WitnessService.KelTip(aid, nonce, s.WitnessService.MayRead(aid, r))
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
@@ -573,8 +632,14 @@ func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Reques
 
 // witnessReadAllowed rate limits a read of a key log and answers an asker who
 // may not read it as for a log not held. It reports whether to go on.
+//
+// A read is counted by callerKey, not clientIP: a page reads through the URL
+// relay, which would make every page behind it one caller of 120 a minute. What
+// the answer is depends on a header (the inception that lets a page read it), so
+// it is never kept by a cache and says it varies on it.
 func (s *CoreServer) witnessReadAllowed(w http.ResponseWriter, r *http.Request, aid string) bool {
-	if !s.witnessReadLimiter().allow(clientIP(r)) {
+	answerOnlyToThisAsker(w)
+	if !s.witnessReadLimiter().allow(callerKey(r)) {
 		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
 		return false
 	}

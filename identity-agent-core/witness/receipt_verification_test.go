@@ -256,7 +256,7 @@ func TestTheIssuedReceiptIsSignedOverTheEventBytes(t *testing.T) {
 }
 
 func receiptCheck(resp map[string]interface{}, raw []byte, said string) error {
-	_, _, err := receiptFromResponse(resp, raw, said, nil)
+	_, _, err := ReceiptFromResponse(resp, raw, said, nil)
 	return err
 }
 
@@ -281,11 +281,11 @@ func TestAReceiptIsHeldToTheWitnessListItIsCheckedAgainst(t *testing.T) {
 		right[i] = other
 	}
 	right[at] = wit
-	if _, _, err := receiptFromResponse(out, raw, said, right); err != nil {
+	if _, _, err := ReceiptFromResponse(out, raw, said, right); err != nil {
 		t.Fatalf("a receipt at its place in the list was refused: %v", err)
 	}
 	wrong := append([]string{other, other}, right...)
-	if _, _, err := receiptFromResponse(out, raw, said, wrong); err == nil {
+	if _, _, err := ReceiptFromResponse(out, raw, said, wrong); err == nil {
 		t.Fatal("a receipt was accepted at an index that is not the witness's place in the list")
 	}
 }

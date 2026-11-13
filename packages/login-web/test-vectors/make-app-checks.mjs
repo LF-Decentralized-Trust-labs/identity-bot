@@ -35,17 +35,44 @@ export async function make() {
   const thumb = browserKeyThumbprint({ x, y });
   const NOW = Date.parse("2026-11-11T12:00:00Z");
 
+  const SEAL = "c2VhbA";
+  const MIN = "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl";
+  const IAT = NOW / 1000 - 3600; // made an hour ago
   const links = [
-    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example" } },
-    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example`, refuse: "no relay identifier" },
-    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example`, refuse: "no back end" },
-    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9" } },
-  ];
+    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}&min=${MIN}&iat=${IAT}`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL, min: MIN, wit: [] } },
+    ...[
+      ["no time it was made", "", "no time it was made"],
+      ["a time it was made that is not whole seconds", `&iat=${IAT}.5`, "no time it was made"],
+      ["a time it was made written with a leading zero", `&iat=0${IAT}`, "no time it was made"],
+      ["a time it was made in milliseconds", `&iat=${IAT * 1000}`, "no time it was made"],
+      ["a link made 7 days ago to the second", `&iat=${NOW / 1000 - 7 * 86400}`, null],
+      ["a link made a second more than 7 days ago", `&iat=${NOW / 1000 - 7 * 86400 - 1}`, "more than 7 days ago"],
+      ["a link made a day ahead of this device's clock to the second", `&iat=${NOW / 1000 + 86400}`, null],
+      ["a link made more than a day ahead of this device's clock", `&iat=${NOW / 1000 + 86400 + 1}`, "later than this device's clock"],
+    ].map(([name, iat, refuse]) => ({ name, now_ms: NOW, hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}&min=${MIN}${iat}`,
+      ...(refuse ? { refuse } : { expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL, min: MIN, wit: [] } }) })),
+    { name: "no sealing key", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${MIN}&iat=${IAT}`, refuse: "no sealing key" },
+    { name: "no latest key log event", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&iat=${IAT}`, refuse: "no latest key log event" },
+    { name: "a latest key log event with no sequence number", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=${MIN.slice(2)}&iat=${IAT}`, refuse: "no latest key log event" },
+    { name: "a latest key log event with a sequence number that is not plain", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=01.${MIN.slice(2)}&iat=${IAT}`, refuse: "no latest key log event" },
+    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example&seal=${SEAL}&min=${MIN}&iat=${IAT}`, refuse: "no relay identifier" },
+    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=${SEAL}&min=${MIN}&iat=${IAT}`, refuse: "no back end" },
+    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=${SEAL}&min=${MIN}&iat=${IAT}`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9", seal: SEAL, min: MIN, wit: [] } },
+    ...[
+      ["a link naming the witnesses to ask for the key log", "https://w1.example/api,https://w2.example/", null, ["https://w1.example/api", "https://w2.example"]],
+      ["a link naming a local witness", "http://127.0.0.1:9", null, ["http://127.0.0.1:9"]],
+      ["a witness that is not https or local", "https://w1.example,http://evil.example", "witness", null],
+      ["an empty witness in the list", "https://w1.example,,https://w2.example", "witness", null],
+      ["more witnesses than a relay identifier names", Array.from({ length: 9 }, (_, i) => `https://w${i}.example`).join(","), "witness", null],
+      ["a witness named twice", "https://w1.example,https://w1.example/", "witness", null],
+    ].map(([name, wit, refuse, list]) => ({ name, hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=${MIN}&wit=${wit}&iat=${IAT}`,
+      ...(refuse ? { refuse } : { expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "https://a.example", seal: SEAL, min: MIN, wit: list } }) })),
+  ].map((l) => ({ name: l.name, now_ms: NOW, hash: l.hash, ...(l.refuse ? { refuse: l.refuse } : { expect: l.expect }) }));
 
   const keyLogs = [];
   const kl = (name, aid, encoded, refuse) => keyLogs.push({ name, aid, encoded, ...(refuse ? { refuse } : { expect_key_hex: hex(app.key) }) });
   kl("the app's own log", app.aid, app.log());
-  kl("another identifier's log", relay.aid, app.log(), "not the app's identifier");
+  kl("another identifier's log", relay.aid, app.log(), "not the utility app's identifier");
   kl("a wrong signature", app.aid, app.log({ cesr_signatures: [ed25519SigQb64(new Uint8Array(64))] }), "not signed by the key");
   kl("fields it should not have", app.aid, b64u(JSON.stringify({ raw_events_b64: [], cesr_signatures: [], extra: 1 })), "fields it should not");
   { const forged = identity("forged");
@@ -65,9 +92,9 @@ export async function make() {
   ch("a challenge naming the browser kind", { front_end: "browser" });
   ch("an installed-app challenge", { front_end: "installed_app" }, { refuse: "another kind of front end" });
   ch("another browser's key", { browser_key: "x".repeat(43) }, { refuse: "this page's own key" });
-  ch("another app's challenge", { site_aid: relay.aid }, { refuse: "another app" });
+  ch("another app's challenge", { site_aid: relay.aid }, { refuse: "another utility app" });
   ch("a lapsed challenge", { expiry: "2026-11-11T11:59:59Z" }, { refuse: "lapsed" });
-  ch("signed by another key", {}, { signer: other, refuse: "not signed by the app" });
+  ch("signed by another key", {}, { signer: other, refuse: "not signed by the utility app" });
   ch("another challenge's code", {}, { pointer: "https://ia.example/i/other", refuse: "not this challenge's" });
   ch("a code that is not https", {}, { pointer: "http://ia.example/i/tok", refuse: "not this challenge's" });
 

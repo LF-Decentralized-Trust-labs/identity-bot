@@ -3,33 +3,188 @@
   "links": [
     {
       "name": "a complete link",
-      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
       "expect": {
         "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
         "kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
         "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
-        "api": "https://tasks.example"
+        "api": "https://tasks.example",
+        "seal": "c2VhbA",
+        "min": "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+        "wit": []
       }
     },
     {
+      "name": "no time it was made",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+      "refuse": "no time it was made"
+    },
+    {
+      "name": "a time it was made that is not whole seconds",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800.5",
+      "refuse": "no time it was made"
+    },
+    {
+      "name": "a time it was made written with a leading zero",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=01794394800",
+      "refuse": "no time it was made"
+    },
+    {
+      "name": "a time it was made in milliseconds",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800000",
+      "refuse": "no time it was made"
+    },
+    {
+      "name": "a link made 7 days ago to the second",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1793793600",
+      "expect": {
+        "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+        "kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
+        "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+        "api": "https://tasks.example",
+        "seal": "c2VhbA",
+        "min": "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+        "wit": []
+      }
+    },
+    {
+      "name": "a link made a second more than 7 days ago",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1793793599",
+      "refuse": "more than 7 days ago"
+    },
+    {
+      "name": "a link made a day ahead of this device's clock to the second",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794484800",
+      "expect": {
+        "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+        "kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
+        "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+        "api": "https://tasks.example",
+        "seal": "c2VhbA",
+        "min": "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+        "wit": []
+      }
+    },
+    {
+      "name": "a link made more than a day ahead of this device's clock",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://tasks.example/&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794484801",
+      "refuse": "later than this device's clock"
+    },
+    {
+      "name": "no sealing key",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
+      "refuse": "no sealing key"
+    },
+    {
+      "name": "no latest key log event",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&iat=1794394800",
+      "refuse": "no latest key log event"
+    },
+    {
+      "name": "a latest key log event with no sequence number",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
+      "refuse": "no latest key log event"
+    },
+    {
+      "name": "a latest key log event with a sequence number that is not plain",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=01.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
+      "refuse": "no latest key log event"
+    },
+    {
       "name": "no relay identifier",
-      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&api=https://a.example",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
       "refuse": "no relay identifier"
     },
     {
       "name": "a back end that is not https or local",
-      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=http://evil.example",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=http://evil.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
       "refuse": "no back end"
     },
     {
       "name": "a local back end",
-      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=http://127.0.0.1:9",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=http://127.0.0.1:9&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&iat=1794394800",
       "expect": {
         "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
         "kel": "x",
         "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
-        "api": "http://127.0.0.1:9"
+        "api": "http://127.0.0.1:9",
+        "seal": "c2VhbA",
+        "min": "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+        "wit": []
       }
+    },
+    {
+      "name": "a link naming the witnesses to ask for the key log",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&wit=https://w1.example/api,https://w2.example/&iat=1794394800",
+      "expect": {
+        "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+        "kel": "x",
+        "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+        "api": "https://a.example",
+        "seal": "c2VhbA",
+        "min": "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+        "wit": [
+          "https://w1.example/api",
+          "https://w2.example"
+        ]
+      }
+    },
+    {
+      "name": "a link naming a local witness",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&wit=http://127.0.0.1:9&iat=1794394800",
+      "expect": {
+        "aid": "EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd",
+        "kel": "x",
+        "rid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
+        "api": "https://a.example",
+        "seal": "c2VhbA",
+        "min": "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl",
+        "wit": [
+          "http://127.0.0.1:9"
+        ]
+      }
+    },
+    {
+      "name": "a witness that is not https or local",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&wit=https://w1.example,http://evil.example&iat=1794394800",
+      "refuse": "witness"
+    },
+    {
+      "name": "an empty witness in the list",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&wit=https://w1.example,,https://w2.example&iat=1794394800",
+      "refuse": "witness"
+    },
+    {
+      "name": "more witnesses than a relay identifier names",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&wit=https://w0.example,https://w1.example,https://w2.example,https://w3.example,https://w4.example,https://w5.example,https://w6.example,https://w7.example,https://w8.example&iat=1794394800",
+      "refuse": "witness"
+    },
+    {
+      "name": "a witness named twice",
+      "now_ms": 1794398400000,
+      "hash": "#aid=EJ98-TTmVfw4F48GDTpuGiMURdXozyH4B3toCBSuofBd&kel=x&rid=EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI&api=https://a.example&seal=c2VhbA&min=1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl&wit=https://w1.example,https://w1.example/&iat=1794394800",
+      "refuse": "witness"
     }
   ],
   "key_logs": [
@@ -43,7 +198,7 @@
       "name": "another identifier's log",
       "aid": "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI",
       "encoded": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREF3TUY4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWS09UZ3RWRlJ0Vm1aM05FWTBPRWRFVkhCMVIybE5WVkprV0c5NmVVZzBRak4wYjBOQ1UzVnZaa0prSWl3aWFTSTZJa1ZLT1RndFZGUnRWbVozTkVZME9FZEVWSEIxUjJsTlZWSmtXRzk2ZVVnMFFqTjBiME5DVTNWdlprSmtJaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5TRkJpWTE5elRucEZiVXhVZEVkbk1uSm9NRzl3VVdKdVVqRldWUzA0YUdSNGVHTjJhRlV4WDFkc0lsMHNJbTUwSWpvaU1TSXNJbTRpT2x0ZExDSmlkQ0k2SWpBaUxDSmlJanBiWFN3aVl5STZXMTBzSW1FaU9sdGRmUT09Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkRkcHRWQ3pkZHNqY3EzZU1Rd2xONDRDTHdjNFpoRmtIeTVndGdqV3ZzenRiVmJ1UE9EMkJnUU5DWXRnX1FzV2dxRFBwNXNfTVZXTmhhMkVPQ2JQN1lNIl19",
-      "refuse": "not the app's identifier"
+      "refuse": "not the utility app's identifier"
     },
     {
       "name": "a wrong signature",
@@ -125,7 +280,7 @@
       "pointer": "https://ia.example/i/tok",
       "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
       "now_ms": 1794398400000,
-      "refuse": "another app"
+      "refuse": "another utility app"
     },
     {
       "name": "a lapsed challenge",
@@ -147,7 +302,7 @@
       "pointer": "https://ia.example/i/tok",
       "own_thumbprint": "kOFKxjJdOqJD5G4Yuw-cxHe64VGyxKEO_hoV83QfGj0",
       "now_ms": 1794398400000,
-      "refuse": "not signed by the app"
+      "refuse": "not signed by the utility app"
     },
     {
       "name": "another challenge's code",

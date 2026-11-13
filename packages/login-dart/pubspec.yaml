@@ -1,0 +1,17 @@
+name: login_dart
+description: "The Dart port of the login SDK's checks of a utility app and its sealed front-end traffic, for every installed front end of a utility app."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  http: ^1.6.0
+  meta: ^1.15.0
+  pointycastle: ^4.0.0
+  ed25519_edwards: ^0.3.1
+  blake3_dart: ^1.0.0
+
+dev_dependencies:
+  test: ^1.26.3

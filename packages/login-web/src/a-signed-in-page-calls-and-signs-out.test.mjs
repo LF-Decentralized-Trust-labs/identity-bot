@@ -4,12 +4,13 @@
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
 import { ANSWER_LOG, ANSWER_SIG, SessionEnded, answerText, appSession, browserKeyThumbprint, readAppLink, signInProblem } from "../dist/app.js";
-import { b64u, enc, identity, logMemory, relayChain } from "./app-test-support.mjs";
+import { b64u, enc, identity, logMemory, relayChain, sealing, nowSeconds } from "./app-test-support.mjs";
 
 const app = identity();
 const relay = relayChain("relay");
 const other = identity();
-const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example`);
+const sl = await sealing(relay);
+const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${sl.statement}&min=${sl.min}&iat=${nowSeconds()}`);
 const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
 const jwk = { kty: "EC", crv: "P-256", x: b64u(new Uint8Array(32).fill(1)), y: b64u(new Uint8Array(32).fill(2)) };
 const mine = { privateKey: pair.privateKey, jwk, thumbprint: browserKeyThumbprint(jwk) };
@@ -29,7 +30,7 @@ function backEnd({ signer = relay, status = () => 200 } = {}) {
     return new Response(body, { status: code, headers: { "content-type": "application/json", [ANSWER_LOG]: relay.log(), [ANSWER_SIG]: sig } });
   };
 }
-const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, browserKey: async () => mine, logs: logMemory() });
+const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn: fetchFn.sealed ? fetchFn : sl.wrap(fetchFn), browserKey: async () => mine, logs: logMemory() });
 
 // no session yet
 {
@@ -58,7 +59,7 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, b
 {
   const s = open(backEnd({ signer: other }));
   s.keep("tok1");
-  await assert.rejects(s.call("GET", "/session/x"), /not the app's/);
+  await assert.rejects(s.call("GET", "/session/x"), /not the utility app's/);
 }
 
 // a 401 ends the session in a sentence and forgets it
@@ -75,7 +76,7 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, b
   const st = store();
   const s = open(backEnd({ signer: (p) => (p === "/session/whoami" ? relay : other), status: (p) => (p === "/session/whoami" ? 200 : 401) }), st);
   s.keep("tok1");
-  await assert.rejects(s.call("GET", "/session/x"), /not the app's/);
+  await assert.rejects(s.call("GET", "/session/x"), /not the utility app's/);
   assert.equal(s.held(), "tok1", "anyone on the way can forge a 401, so it ends nothing");
 }
 
@@ -84,12 +85,12 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, b
 {
   const st = store();
   const keys = [];
-  const asking = (link) => appSession(link, { storage: st, fetchFn: backEnd(), browserKey: async (slot) => (keys.push(slot), mine), logs: logMemory() });
+  const asking = (link) => appSession(link, { storage: st, fetchFn: sl.wrap(backEnd()), browserKey: async (slot) => (keys.push(slot), mine), logs: logMemory() });
   const real = asking(L);
   real.keep("tok-real");
   const crafted = [
-    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${other.aid}&api=https://tasks.example`),
-    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://evil.example`),
+    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${other.aid}&api=https://tasks.example&seal=${sl.statement}&min=${sl.min}&iat=${nowSeconds()}`),
+    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://evil.example&seal=${sl.statement}&min=${sl.min}&iat=${nowSeconds()}`),
   ];
   for (const link of crafted) {
     const s = asking(link);
@@ -117,9 +118,9 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, b
 }
 
 // what a person is told
-assert.match(signInProblem("declined"), /not accepted.*Ask the app's owner/s);
+assert.match(signInProblem("declined"), /not accepted.*Ask the utility app's owner/s);
 assert.match(signInProblem("expired"), /ran out of time.*Press the button/s);
-assert.match(signInProblem("error", "poll 502"), /cannot be reached/);
-assert.match(signInProblem("error", "poll 403"), /did not accept/);
+assert.match(signInProblem("error", "poll 502"), /utility app cannot be reached/);
+assert.match(signInProblem("error", "poll 403"), /utility app did not accept/);
 
 console.log("a signed-in page makes checked calls with proofs, ends in a sentence on a 401, and signs out");

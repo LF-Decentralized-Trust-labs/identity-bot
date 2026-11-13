@@ -514,7 +514,7 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 		return nil, err
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("witness POST %d: %s", resp.StatusCode, string(raw))
+		return nil, &witnessRefusal{status: resp.StatusCode, body: string(raw)}
 	}
 	var out map[string]interface{}
 	_ = json.Unmarshal(raw, &out)
@@ -669,7 +669,7 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		if delegator := s.delegateOf(signerAID); delegator != "" {
 			if dm, _ := s.Store.GetContactMeta(delegator); dm == nil || !dm.WitnessingFor {
 				s.dropDelegatesOf(delegator)
-				return nil, fmt.Errorf("not_witnessing")
+				return nil, ErrNotWitnessing
 			}
 		}
 	} else {
@@ -680,7 +680,7 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		// operator can switch this off or cap it.
 		delegator, ok := s.delegatorApproves(event)
 		if !ok {
-			return nil, fmt.Errorf("not_witnessing")
+			return nil, ErrNotWitnessing
 		}
 		if !s.delegatesAccepted(delegator) {
 			return nil, fmt.Errorf("not_witnessing: the delegator's agreement does not cover its delegates, or this witness's operator does not accept them")
@@ -788,6 +788,15 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		designated = got.State.Witnesses()
 	}
 	witnessAID, sig, serr := s.SignEventReceipt(rawEvent, designated)
+	if errors.Is(serr, ErrNotDesignated) {
+		// An event from before this witness was named (an identifier made without
+		// witnesses and given them by a rotation) is held, because the log it
+		// witnesses from there on carries on from it, and is not receipted: this
+		// witness is not in its list, and a receipt from outside the list counts
+		// for nothing. Said so, rather than failed, so the controller seeding the
+		// log can tell it from a refusal.
+		return map[string]interface{}{"event_said": said, "sequence_number": seq, "held": true, "receipted": false}, nil
+	}
 	if serr != nil {
 		return nil, fmt.Errorf("could not sign a receipt: %w", serr)
 	}
@@ -872,7 +881,7 @@ func nonEmpty(sigs []string) []string {
 func (s *Service) CurrentVerifiedKey(aid string) (ed25519.PublicKey, error) {
 	held, err := s.Store.GetKelEvents(aid)
 	if err != nil || len(held) == 0 {
-		return nil, fmt.Errorf("not_witnessing")
+		return nil, ErrNotWitnessing
 	}
 	raws := make([][]byte, 0, len(held))
 	sigs := make([]string, 0, len(held))
@@ -935,7 +944,18 @@ func (v *verifiedLogs) put(tip string, key ed25519.PublicKey) {
 	v.m[tip] = key
 }
 
+// ErrNotDesignated is what SignEventReceipt returns for an event whose witness
+// list does not include this witness.
+var ErrNotDesignated = errors.New("this witness is not in the witness list of the event, so it cannot receipt it")
+
 // GetKelReplica implements C4.
+//
+// Each event is answered as held: its fields, the exact bytes the controller
+// published (raw_bytes_b64, which its identifier is a digest over and so the
+// only part a reader can verify), the controller's signatures, and this
+// witness's own receipt of it, when it issued one. A reader that wants a
+// threshold of receipts asks each witness the identifier names and counts what
+// each signed: nothing here vouches for another witness.
 func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, error) {
 	kel, err := s.Store.GetKelEvents(signerAID)
 	if err != nil {
@@ -944,7 +964,27 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 	if len(kel) == 0 {
 		return nil, fmt.Errorf("not_found")
 	}
-	return eventsToMaps(kel), nil
+	out := make([]map[string]interface{}, 0, len(kel))
+	for _, e := range kel {
+		var m map[string]interface{}
+		if json.Unmarshal([]byte(e.EventJSON), &m) != nil {
+			continue
+		}
+		if e.RawBytesB64 != "" {
+			m["raw_bytes_b64"] = e.RawBytesB64
+		}
+		if sigs := e.ControllerSignatures(); len(sigs) > 0 {
+			m["cesr_signature"] = sigs[0]
+			m["cesr_signatures"] = sigs
+		}
+		if rct, _ := s.Store.GetIssuedReceipt(signerAID, e.EventSAID); rct != nil && rct.CesrSignature != "" {
+			m["witness_receipts"] = []map[string]interface{}{{
+				"witness": rct.WitnessAID, "cesr_signature": rct.CesrSignature,
+			}}
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // BroadcastEvent implements C1 — POST to all enrolled witnesses.
@@ -1145,13 +1185,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				if len(sigs) == 0 {
 					return
 				}
-				body := eventBody(signerAID, e.RawBytesB64, sigs)
 				said := eventSAID(ev)
-				resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, witnessEventURL(w)), witnessEventURL(w), body)
-				if err != nil {
-					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
-					return
-				}
 				// A witness that took an event the log gives no list for (it
 				// designates nobody, so this one is a bootstrap witness, or the
 				// log cannot be read) still holds it, so its tip is confirmed
@@ -1161,8 +1195,16 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				if len(at) == 0 {
 					at = nil
 				}
-				if sig, wit, verr := receiptFromResponse(resp, raw, said, at); verr == nil && wit == key {
-					_ = s.receive(said, key, sig, raw)
+				got, err := s.SendEventToWitness(ctx, witnessRoot(w), key, signerAID, e, at)
+				if errors.Is(err, ErrNoReceipt) {
+					continue // taken, and not a receipt to keep: the next event is still sent, as it always was
+				}
+				if err != nil {
+					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
+					return
+				}
+				if !got.Held {
+					_ = s.receive(said, key, got.Receipt, raw)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -1651,7 +1693,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	// A receipt that does not check out is worse than a witness being down,
 	// because being down is visible in the count and a bad receipt is not.
 	rawEvent := rawEventOf(body)
-	sig, wit, verr := receiptFromResponse(resp, rawEvent, eventSAID, designated)
+	sig, wit, verr := ReceiptFromResponse(resp, rawEvent, eventSAID, designated)
 	if verr != nil {
 		log.Printf("[witness] %s answered but its receipt does not check out: %v", witnessAID, verr)
 		return
@@ -1666,12 +1708,12 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	_ = s.receive(eventSAID, witnessAID, sig, rawEvent)
 }
 
-// receiptFromResponse pulls a verified receipt out of a witness's reply.
+// ReceiptFromResponse pulls a verified receipt out of a witness's reply.
 //
 // A witness is named by a non-transferable identifier, so the identifier IS the
 // key this checks against — there is nothing to fetch and nothing that could
 // answer the fetch wrongly.
-func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string, designated []string) (sig, witnessAID string, err error) {
+func ReceiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string, designated []string) (sig, witnessAID string, err error) {
 	if resp == nil {
 		return "", "", fmt.Errorf("the witness returned nothing to check")
 	}
@@ -2377,9 +2419,16 @@ func (s *Service) alreadyHeld(signerAID string, seq int, said string) (map[strin
 }
 
 // The operator's settings for witnessing the identities an identity this
-// agent witnesses for has delegated: on by default; "off" stops it, and a
-// number caps how many one delegator may have witnessed.
+// agent witnesses for has delegated (or declared its own, cover.go): on by
+// default; "off" stops it, and a number caps how many one delegator may have
+// witnessed, DefaultDelegatesMax when there is none set.
 const (
+	// DefaultDelegatesMax is how many identifiers one owner may have witnessed
+	// when the operator has set no number: an owner makes one per utility app
+	// and per machine of its own, so it is generous, and it is finite because an
+	// owner an unbounded number of logs are held for is a disk to fill.
+	DefaultDelegatesMax = 1024
+
 	ConfigDelegates    = "witness.delegates"
 	ConfigDelegatesMax = "witness.delegates_max"
 	configDelegateOf   = "witness.delegate_of"
@@ -2467,7 +2516,7 @@ func (s *Service) delegatesAccepted(delegator string) bool {
 	v, _ := s.Store.GetConfig(ConfigDelegatesMax)
 	max, err := strconv.Atoi(strings.TrimSpace(v))
 	if v == "" || err != nil || max < 0 {
-		return true
+		max = DefaultDelegatesMax
 	}
 	n := 0
 	for _, d := range s.delegateMap() {

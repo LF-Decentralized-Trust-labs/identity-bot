@@ -40,3 +40,10 @@ The request each call makes and what it does with each answer are the cases in
 `packages/login-web/test-vectors/start-and-confirm.json`. The TypeScript package
 and this one both read that file, so they cannot drift apart: change a case
 there, and both tests say which side disagrees.
+
+## Sealed front-end traffic
+
+`seal.go` is what a utility app's back end uses to open the calls its page seals and to
+seal its answers (ADR-072 Amendment 4): `SealKeyFromSeed`, `SealKey.OpenRequest`,
+`Reply.Seal`, and `SealKeyStatement` for the `seal` part of the sign-in link. It is held
+to `packages/login-web/test-vectors/seal.json`, the same file the page's TypeScript is.

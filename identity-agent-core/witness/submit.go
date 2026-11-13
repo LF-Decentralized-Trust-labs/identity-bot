@@ -39,7 +39,7 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	// from a witness the log does not designate there is refused as that, before
 	// its receipt's index is looked at: it has no place in the list to have.
 	row, lerr := s.witnessing(signerAID, said, rawEvent)
-	sig, wit, err := receiptFromResponse(resp, rawEvent, said, nil)
+	sig, wit, err := ReceiptFromResponse(resp, rawEvent, said, nil)
 	if err != nil {
 		return nil, err
 	}
