@@ -32,7 +32,7 @@ const (
 	// maxCoverInception bounds each event of the key log a declaration carries,
 	// and maxCoverEvents how many.
 	maxCoverInception = 8 << 10
-	maxCoverEvents    = 16
+	maxCoverEvents    = 256 // what a relay takes of one log (relayproto.MaxKELEvents)
 )
 
 // CoverStatement is what the owner signs, and what the identifier signs too, by
