@@ -134,7 +134,7 @@ export async function make() {
     { name: "no key log", rid: RID, statement: without("log") },
     { name: "no sequence number", rid: RID, statement: without("sn") },
     { name: "an inception alone, as the first version of this carried", rid: RID, statement: b64u(JSON.stringify({ inception: b64u(enc.encode(inception)), key: JSON.parse(Buffer.from(statement, "base64url")).key, sig: JSON.parse(Buffer.from(statement, "base64url")).sig })) },
-    { name: "a compressed point", rid: RID, statement: stmt({ key: b64u(new Uint8Array([2, ...new Uint8Array(32)])) }) },
+    { name: "a compressed point", rid: RID, statement: sealStatement(chain, new Uint8Array([2, ...new Uint8Array(32)])) },
     { name: "a signature respelled in its unused bits", rid: RID, statement: stmt({ sig: JSON.parse(Buffer.from(statement, "base64url")).sig.slice(0, -1) + "B" }) },
     { name: "a changed signature", rid: RID, statement: stmt({ sig: flipSig(JSON.parse(Buffer.from(statement, "base64url")).sig) }) },
     { name: "a statement text that is not readable", rid: RID, statement: "!!" },
