@@ -11,5 +11,7 @@ Windows). A browser does not use it: its page is `login-web`.
   (`login-web/src/seal.ts`, `login-go/seal.go`), held to
   `../login-web/test-vectors/seal.json`, byte for byte.
 
-Run the vectors with `dart test` in this folder. A rule changes in the
+Run the vectors with `dart test` in this folder. `tool/statements_under_dart2js.sh`
+runs the sealing key's statement cases again as JavaScript (dart2js, then node),
+where `1.0 is int` is true; run it when `checkSealKey` changes. A rule changes in the
 vectors and in the Go and TypeScript together, never here alone.
