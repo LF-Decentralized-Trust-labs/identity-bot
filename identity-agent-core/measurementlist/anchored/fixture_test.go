@@ -337,3 +337,5 @@ func tipAt(p *publisher, n int) Tip {
 }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+func base64RawURL(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
