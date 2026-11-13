@@ -18,10 +18,11 @@ const identity = "EBoxIdentifierForTheMachineUseVectors0000000"
 var t0 = time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 
 func cache(n uint64) *uint64 { return &n }
+func f(x float64) *float64   { return &x }
 
 func reading(min int, programs, peak uint64) Reading {
 	return Reading{At: t0.Add(time.Duration(min) * time.Minute), MemoryTotalBytes: 1 << 30, MemoryProgramsBytes: programs,
-		MemoryCacheBytes: cache(1 << 28), MemoryProgramsPeakBytes: peak, Load1: 0.5, Load5: 0.4, Load15: 0.3,
+		MemoryCacheBytes: cache(1 << 28), MemoryProgramsPeakBytes: peak, Load1: f(0.5), Load5: f(0.4), Load15: f(0.3),
 		DiskUsedBytes: 5 << 30, DiskTotalBytes: 20 << 30, CPUCores: 2}
 }
 
@@ -136,5 +137,18 @@ func TestVectorFileIsReproducibleAndHolds(t *testing.T) {
 	}
 	if len(got.Refused) < 12 {
 		t.Fatal("a refusal case was removed")
+	}
+}
+
+func TestAMissingLoadIsAbsentNotZero(t *testing.T) {
+	rd := reading(0, 1, 1)
+	rd.Load1, rd.Load5, rd.Load15 = nil, nil, nil
+	b, _ := json.Marshal(rd)
+	if strings.Contains(string(b), "load_") {
+		t.Fatalf("an unknown load was written out: %s", b)
+	}
+	var back Reading
+	if err := json.Unmarshal(b, &back); err != nil || back.Load1 != nil {
+		t.Fatalf("an absent load came back as a figure: %v %v", err, back.Load1)
 	}
 }

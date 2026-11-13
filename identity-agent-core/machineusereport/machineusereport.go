@@ -24,17 +24,17 @@ const Kind = "machine-usage/1"
 // FutureSlack is how far past the report's signing time a reading may claim to be.
 const FutureSlack = 5 * time.Minute
 
-// Reading is one look at the machine. MemoryCacheBytes is absent where the system does not
-// say, so "unknown" is never read as "none".
+// Reading is one look at the machine. MemoryCacheBytes and the load figures are absent where
+// the system does not say (Windows has no load average), so "unknown" is never read as "none".
 type Reading struct {
 	At                      time.Time `json:"at"`
 	MemoryTotalBytes        uint64    `json:"memory_total_bytes"`
 	MemoryProgramsBytes     uint64    `json:"memory_programs_bytes"`
 	MemoryCacheBytes        *uint64   `json:"memory_cache_bytes,omitempty"`
 	MemoryProgramsPeakBytes uint64    `json:"memory_programs_peak_bytes"`
-	Load1                   float64   `json:"load_1"`
-	Load5                   float64   `json:"load_5"`
-	Load15                  float64   `json:"load_15"`
+	Load1                   *float64  `json:"load_1,omitempty"`
+	Load5                   *float64  `json:"load_5,omitempty"`
+	Load15                  *float64  `json:"load_15,omitempty"`
 	DiskUsedBytes           uint64    `json:"disk_used_bytes"`
 	DiskTotalBytes          uint64    `json:"disk_total_bytes"`
 	CPUCores                int       `json:"cpu_cores"`
