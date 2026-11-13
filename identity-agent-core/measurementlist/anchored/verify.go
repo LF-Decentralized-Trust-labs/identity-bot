@@ -52,10 +52,13 @@ type sealWire struct {
 
 func hexSN(n int) string { return strconv.FormatInt(int64(n), 16) }
 
-// readLog splits the messages into events and reads each one's anchors by the
-// strict rule: an anchor is exactly {i, s, d}, three strings, and only an
-// interaction event carries any.
-func readLog(msgs [][]byte) ([]logEvent, error) {
+// readLog splits the messages into events and reads each one's event seals: an
+// anchor that is exactly {i, s, d}, three strings (but see below). Any other anchor is data the
+// identity keeps for its own purposes (who owns it, a handover's steps, the keys
+// it is messaged at): it names no event of the registry, so it can neither
+// withhold one nor vouch for one, and is not read. Every event seal, wherever
+// it sits, must be matched by an event of the registry.
+func readLog(msgs [][]byte, registry string) ([]logEvent, error) {
 	out := make([]logEvent, 0, len(msgs))
 	for n, m := range msgs {
 		raw, err := keri.EventOfMessage(m)
@@ -81,15 +84,20 @@ func readLog(msgs [][]byte) ([]logEvent, error) {
 		if err := json.Unmarshal(raw, &body); err != nil {
 			return nil, fmt.Errorf("%w: event %d: %v", ErrBadHistory, n, err)
 		}
-		if len(body.A) > 0 && ev.Ilk != "ixn" {
-			return nil, fmt.Errorf("%w: event %d (%s) carries anchors, and only an interaction may", ErrForeignSeal, n, ev.Ilk)
-		}
 		for _, a := range body.A {
 			var generic map[string]json.RawMessage
 			var w sealWire
 			if json.Unmarshal(a, &generic) != nil || len(generic) != 3 || json.Unmarshal(a, &w) != nil ||
-				w.I == nil || w.S == nil || w.D == nil || *w.I == "" || *w.D == "" || *w.S == "" {
-				return nil, fmt.Errorf("%w: event %d anchors something that is not an event seal", ErrForeignSeal, n)
+				w.I == nil || w.S == nil || w.D == nil {
+				continue
+			}
+			// A seal of an identifier by itself at sequence 0 (the owner named at
+			// founding, a credential issued outside any registry) seals no event of
+			// the registry: an issuance's and a revocation's seals never have i
+			// equal to d. The registry's own inception does, which is why the
+			// registry is excepted.
+			if *w.S == "0" && *w.I == *w.D && *w.I != registry {
+				continue
 			}
 			le.seals = append(le.seals, seal{*w.I, *w.S, *w.D})
 		}
@@ -124,7 +132,7 @@ func Verify(b *Bundle, pin Pin, replies []TipReply, floors Floors, now time.Time
 	if res.Identifier != pin.Publisher {
 		return nil, ErrWrongPublisher
 	}
-	log, err := readLog(b.KEL)
+	log, err := readLog(b.KEL, pin.Registry)
 	if err != nil {
 		return nil, err
 	}

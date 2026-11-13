@@ -123,11 +123,34 @@ func TestAnAnchorThatIsNotThereOrNotWhole(t *testing.T) {
 		b.Credentials = append(b.Credentials, q.creds[0])
 		refuse(t, "a credential with no issuance in the history", nil, b, p.pin(), p.answers(p.tip(), 2), Floors{})
 	})
-	t.Run("a seal that is not an event seal", func(t *testing.T) {
+	t.Run("anchors that are not seals of the registry's events are the identity's own business", func(t *testing.T) {
 		p := onekey(t)
 		published(p, 7)
-		p.seal([]byte(`{"d":"EBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}`))
-		refuse(t, "the identity sealed something else", ErrForeignSeal, p.bundle(), p.pin(), p.answers(p.tip(), 2), Floors{})
+		p.seal([]byte(`{"handover":"owners/v1","d":"` + strings.Repeat("a", 64) + `"}`))
+		owner := "E" + strings.Repeat("O", 43)
+		p.seal(sealOf(owner, 0, owner)) // the owner seal of a box-founded identity
+		accept(t, p, Floors{})
+	})
+	t.Run("a seal of an event the bundle does not hold, in the shape of an issuance", func(t *testing.T) {
+		p := onekey(t)
+		published(p, 7)
+		p.seal(sealOf("E"+strings.Repeat("C", 43), 0, "E"+strings.Repeat("D", 43)))
+		refuse(t, "a hidden issuance", ErrWithheld, p.bundle(), p.pin(), p.answers(p.tip(), 2), Floors{})
+	})
+	t.Run("a seal of a revocation of a credential, hidden", func(t *testing.T) {
+		p := onekey(t)
+		published(p, 7)
+		c, _ := keri.VerifyCredential(p.creds[0])
+		p.seal(sealOf(c.SAID, 1, "E"+strings.Repeat("D", 43)))
+		refuse(t, "a hidden revocation", ErrWithheld, p.bundle(), p.pin(), p.answers(p.tip(), 2), Floors{})
+	})
+	t.Run("the same seal twice", func(t *testing.T) {
+		p := onekey(t)
+		published(p, 7)
+		c, _ := keri.VerifyCredential(p.creds[0])
+		ie, _ := keri.VerifyTELEvent(p.tel[1])
+		p.seal(sealOf(c.SAID, 0, ie.SAID))
+		refuse(t, "a seal repeated", ErrForeignSeal, p.bundle(), p.pin(), p.answers(p.tip(), 2), Floors{})
 	})
 }
 
@@ -242,7 +265,7 @@ func TestTheListIsTheOnePinned(t *testing.T) {
 		pin.Registry = "EBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 		b := p.bundle()
 		b.Registry = pin.Registry
-		refuse(t, "another registry", ErrBadRegistry, b, pin, p.answers(p.tip(), 2), Floors{})
+		refuse(t, "another registry", nil, b, pin, p.answers(p.tip(), 2), Floors{})
 	})
 	t.Run("a registry that may have backers", func(t *testing.T) {
 		p := onekey(t)

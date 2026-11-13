@@ -31,7 +31,7 @@ var (
 	ErrBadHistory     = errors.New("the publisher's key history does not hold up")
 	ErrNotWitnessed   = errors.New("an event of the publisher's key history is not witnessed enough")
 
-	ErrForeignSeal = errors.New("the publisher's key history seals something other than its registry's events")
+	ErrForeignSeal = errors.New("the publisher's key history seals the same event twice")
 	ErrWithheld    = errors.New("the publisher's key history seals an event the bundle does not hold")
 	ErrUnsealed    = errors.New("the bundle holds an event the publisher's key history does not seal")
 	ErrBadRegistry = errors.New("the registry is not the pinned backerless registry of the publisher")

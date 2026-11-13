@@ -20,10 +20,12 @@
 // identifier (the registry's, for its inception), s the transaction event's
 // sequence number in lowercase hex, d its SAID.
 //
-// The publisher identity is single purpose. The only seals in its history are
-// those of this registry's events, and Verify refuses a bundle in which any
-// seal is not matched by a transaction event it holds (so a withheld "rev" is
-// seen from its seal alone), or any transaction event is not sealed.
+// Every event seal {i, s, d} in the publisher's history must be matched by a
+// transaction event of the bundle (so a withheld "rev" is seen from its seal
+// alone), and every transaction event must be sealed; Verify refuses the whole
+// bundle otherwise. Other anchors in the history (the owner named at founding,
+// the owners' record, a handover's steps) are not event seals and are not read:
+// the publisher is a black box's identity and keeps them.
 //
 // # The bundle
 //
