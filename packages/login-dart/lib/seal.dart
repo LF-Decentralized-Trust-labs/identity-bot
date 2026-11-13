@@ -27,6 +27,17 @@ import 'witnessed.dart';
 /// plaintext is its length (4 bytes), the content, then zeros to a bucket of
 /// 1024 bytes, doubling.
 const sealPath = '/sealed';
+
+/// Where the sealing key statement now in force is fetched (login-go's
+/// `SealStatementPath`): the one a new link would carry.
+const sealStatementPath = '/sealing-key';
+
+/// True for the outer answer a back end gives a call it could not open: 400 and
+/// exactly `{"error":"sealing key"}` (login-go's `SealingKeyStatus` and
+/// `SealingKeyAnswer`; the `sealing_key_answer` case in seal.json). Unsigned: it is
+/// taken only as a reason to fetch the statement and check it.
+bool isSealingKeyAnswer(int status, String body) =>
+    status == 400 && body == '{"error":"sealing key"}';
 const sealVersion = 1;
 const sealBucket = 1024;
 const sealMax = 16 << 20;
@@ -396,6 +407,73 @@ class CheckedSealKey {
 
   Future<Uint8List> get() async =>
       _key ??= await checkedSealKeyWitnessed(link, logs, client);
+
+  /// The key now in force, got after a call sealed to [held] did not open (a
+  /// rotation moved the sealing key), and held from then on. See [renewedSealKey].
+  Future<Uint8List> renew(Uint8List held) async =>
+      _key = await renewedSealKey(link, logs, client, held);
+}
+
+/// A call was sealed to a sealing key that is not the one in force, and the back
+/// end said so ([isSealingKeyAnswer]). Nothing was believed or refused yet:
+/// [renewedSealKey] fetches the statement now in force and the call is sealed again.
+class SealingKeyMoved implements Exception {
+  const SealingKeyMoved();
+  String get message => 'The utility app\'s sealing key has moved on.';
+  @override
+  String toString() => message;
+}
+
+/// The link this app was opened with names a sealing key that is out of date, and
+/// the key now in force could not be got: the person is to open the utility app
+/// again.
+class LinkOutOfDate implements Exception {
+  const LinkOutOfDate();
+  String get message =>
+      'This link is out of date. Open this utility app again from your Identity Agent.';
+  @override
+  String toString() => message;
+}
+
+/// The sealing key now in force, got after a call did not open (a rotation moved
+/// it) as `renewedSealKey` in `login-web/src/app.ts` does: the statement is fetched
+/// from the back end's own address ([sealStatementPath], the one a new link would
+/// carry) and checked as a link's is, held to the link's `min` and to the longest
+/// log this app already knows, so it must carry on from both and be signed by the
+/// relay identifier's current key; the witnesses a link names are asked as for a
+/// link. [held] is the key the failed call was sealed to. A statement that fails a
+/// check is a [LinkOutOfDate]; one that cannot be fetched is the relay failing
+/// ([AppUnreachable]); one that names the key already held is not a rotation, so it
+/// is an [AppUnreachable] too (trying again can still work).
+Future<Uint8List> renewedSealKey(
+    AppLink link, AnswerLogs logs, http.Client client, Uint8List held) async {
+  http.Response r;
+  try {
+    r = await client.get(Uri.parse('${link.api}$sealStatementPath'));
+  } catch (_) {
+    throw const AppUnreachable(0);
+  }
+  if (r.statusCode != 200) throw AppUnreachable(r.statusCode);
+  final Uint8List key;
+  try {
+    key = await checkedSealKeyWitnessed(
+        AppLink(
+            link.aid, link.kel, link.rid, link.api, r.body, link.min, link.wit),
+        logs,
+        client);
+  } catch (_) {
+    throw const LinkOutOfDate();
+  }
+  if (_sameBytes(key, held)) throw AppUnreachable(r.statusCode);
+  return key;
+}
+
+bool _sameBytes(Uint8List a, Uint8List b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 /// The relay that carries a call to the utility app's back end did not carry it (it
@@ -452,7 +530,7 @@ typedef SealedCallParts = ({
 Future<({SealedAnswer answer, Duration skew})> sealedCallDated(
   http.Client client,
   AppLink link,
-  Uint8List sealKey, {
+  CheckedSealKey sealKey, {
   required Future<SealedCallParts> Function(Duration skew) make,
   required AnswerLogs logs,
   required DateTime Function() now,
@@ -460,7 +538,7 @@ Future<({SealedAnswer answer, Duration skew})> sealedCallDated(
 }) async {
   for (var again = false;; again = true) {
     final p = await make(skew);
-    final r = await sealedCall(client, link, sealKey,
+    final r = await sealedCallRenewing(client, link, sealKey,
         method: p.method,
         target: p.target,
         headers: p.headers,
@@ -472,6 +550,44 @@ Future<({SealedAnswer answer, Duration skew})> sealedCallDated(
     if (off == null) return (answer: r, skew: skew);
     if (again) throw const ClockWrong();
     skew = off;
+  }
+}
+
+/// [sealedCall], and when the back end says the key it was sealed to has moved on
+/// ([SealingKeyMoved]), the key now in force ([CheckedSealKey.renew]) and the same
+/// call sealed to that, once; a second such answer is a [LinkOutOfDate]. The call is
+/// not touched, so what a person was sending is sent.
+Future<SealedAnswer> sealedCallRenewing(
+  http.Client client,
+  AppLink link,
+  CheckedSealKey sealKey, {
+  required String method,
+  required String target,
+  required Map<String, String> headers,
+  required List<int> body,
+  required String nonce,
+  required AnswerLogs logs,
+  required DateTime now,
+}) async {
+  Future<SealedAnswer> send(Uint8List key) => sealedCall(client, link, key,
+      method: method,
+      target: target,
+      headers: headers,
+      body: body,
+      nonce: nonce,
+      logs: logs,
+      now: now);
+  final held = await sealKey.get();
+  try {
+    return await send(held);
+  } on SealingKeyMoved {
+    // fall through: renew once
+  }
+  final fresh = await sealKey.renew(held);
+  try {
+    return await send(fresh);
+  } on SealingKeyMoved {
+    throw const LinkOutOfDate();
   }
 }
 
@@ -522,6 +638,7 @@ Future<SealedAnswer> sealedCall(
       headers: {'content-type': 'application/json'}, body: sealed.outer);
   // The relay is only the road: it failing (a restart, a busy moment) is not the
   // answer being wrong, so the person is told to try again, not warned off.
+  if (isSealingKeyAnswer(r.statusCode, r.body)) throw const SealingKeyMoved();
   if (r.statusCode != 200) throw AppUnreachable(r.statusCode);
   Object? a;
   try {

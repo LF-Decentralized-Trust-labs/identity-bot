@@ -53,6 +53,18 @@ import (
 const (
 	// SealPath is the one path a sealed call is POSTed to.
 	SealPath = "/sealed"
+	// SealStatementPath is where a front end GETs the sealing key statement now in force
+	// (SealKeyStatement), the same one a new sign-in link would carry. It is public and
+	// signed, so it needs no seal: a front end checks it as it checks a link's.
+	SealStatementPath = "/sealing-key"
+	// SealingKeyStatus is the status of the outer answer a back end gives a call it could
+	// not open, which says the front end sealed to a sealing key that is not the one in
+	// force (a rotation moved it). Its body is SealingKeyAnswer, unsigned and unsealed: a
+	// relay can already refuse to carry a call, so believing it costs a front end only a
+	// fetch of SealStatementPath, whose answer it checks.
+	SealingKeyStatus = 400
+	// SealingKeyAnswer is that body.
+	SealingKeyAnswer = `{"error":"sealing key"}`
 	// SealVersion is the envelope's version.
 	SealVersion = 1
 	// SealBucket is the smallest a sealed plaintext is; larger ones double.

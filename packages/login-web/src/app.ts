@@ -22,7 +22,7 @@ export { logExtends };
 import type { CheckedLog, LogEvent } from "./keylog.js";
 export type { CheckedLog, LogEvent };
 import { askWitnesses, judgeLinkLog } from "./witnessed.js";
-import { SEAL_PATH, SealError, sealKeyStatementText, sealRequest, unb64u } from "./seal.js";
+import { isSealingKeyAnswer, SEAL_PATH, SEAL_STATEMENT_PATH, SealError, sealKeyStatementText, sealRequest, unb64u } from "./seal.js";
 import {
   blake3Qb64,
   decodeBase64UrlStrict,
@@ -396,8 +396,8 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
  *  refused, with the witnessed log kept so that a stale link stays refused. A log that carries on from what the
  *  witnesses vouch for (they may not have been told yet, a removal does not wait for them) is taken as before,
  *  held to the link's minimum. Witnesses that cannot be reached, or have receipted nothing, change nothing. */
-export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch): Promise<{ key: Uint8Array; log: string }> {
-  const r = await checkSealKey(link.rid, link.seal, logs.get(link.rid), link.min);
+export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch, statement: string = link.seal): Promise<{ key: Uint8Array; log: string }> {
+  const r = await checkSealKey(link.rid, statement, logs.get(link.rid), link.min);
   if (link.wit?.length) {
     const mine = await readAnswerLog(link.rid, r.log, (why): never => {
       throw new Error(why);
@@ -414,6 +414,79 @@ export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min">
   }
   logs.set(link.rid, r.log);
   return r;
+}
+
+/** A call was sealed to a sealing key that is not the one in force, and the back end said so
+ *  (`isSealingKeyAnswer`). Nothing was believed or refused yet: `renewedSealKey` fetches the statement now in
+ *  force and the call is sealed again. */
+export class SealingKeyMoved extends Error {
+  constructor() {
+    super("The utility app's sealing key has moved on.");
+    this.name = "SealingKeyMoved";
+  }
+}
+
+/** The link this page was opened with names a sealing key that is out of date and the page could not get the
+ *  one now in force: the person is to open the utility app again. */
+export class LinkOutOfDate extends Error {
+  constructor() {
+    super("This link is out of date. Open this utility app again from your Identity Agent.");
+    this.name = "LinkOutOfDate";
+  }
+}
+
+/** The sealing key now in force, got after a call did not open (a rotation moved it): the statement
+ *  is fetched from the back end's own address (`SEAL_STATEMENT_PATH`, the one a new link would carry) and checked
+ *  as a link's is, held to the link's `min` and to the longest log this page already knows, so it must carry on
+ *  from both and be signed by the relay identifier's current key; the witnesses a link names are asked as
+ *  for a link. `held` is the key the failed call was sealed to. A statement that fails a check is `LinkOutOfDate`; a
+ *  statement that cannot be fetched is the relay failing (`AppUnreachable`); one that names the key already held
+ *  is not a rotation, so it is `AppUnreachable` too (trying again can still work). */
+export async function renewedSealKey(link: Pick<AppLink, "rid" | "api" | "min"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch, held: Uint8Array): Promise<{ key: Uint8Array; log: string }> {
+  let r: Response;
+  let text: string;
+  try {
+    r = await ask(link.api + SEAL_STATEMENT_PATH, { method: "GET", cache: "no-store" });
+    text = await r.text();
+  } catch {
+    throw new AppUnreachable(0);
+  }
+  if (r.status !== 200) throw new AppUnreachable(r.status);
+  let now: { key: Uint8Array; log: string };
+  try {
+    now = await checkedSealKey({ ...link, seal: text }, logs, ask, text);
+  } catch {
+    throw new LinkOutOfDate();
+  }
+  if (now.key.length === held.length && now.key.every((b, i) => b === held[i])) throw new AppUnreachable(r.status);
+  return now;
+}
+
+/** `sealedCall`, and when the back end says the key it was sealed to has moved on, once the key now in force
+ *  (`renewedSealKey`) and the same call sealed to that; a second such answer is `LinkOutOfDate`. The call's text is
+ *  not touched, so what a person was sending is sent. `renew` is given the key that failed and keeps what it returns. */
+async function sealedCallRenewing(
+  link: Pick<AppLink, "rid" | "api">,
+  key: () => Promise<Uint8Array>,
+  renew: (held: Uint8Array) => Promise<Uint8Array>,
+  call: SealedCall,
+  nonce: string,
+  underlying: typeof fetch,
+  logs: LogMemory,
+  now: number,
+): Promise<SealedAnswer> {
+  const held = await key();
+  try {
+    return await sealedCall(link, held, call, nonce, underlying, logs, now);
+  } catch (e) {
+    if (!(e instanceof SealingKeyMoved)) throw e;
+  }
+  const fresh = await renew(held);
+  try {
+    return await sealedCall(link, fresh, call, nonce, underlying, logs, now);
+  } catch (e) {
+    throw e instanceof SealingKeyMoved ? new LinkOutOfDate() : e;
+  }
 }
 
 /** The relay that carries a call to the app's back end did not carry it (it answered with
@@ -481,6 +554,7 @@ export async function sealedCall(
   const text = await r.text();
   // The relay is only the road: it failing (a restart, a busy moment) is not the
   // answer being wrong, so the person is told to try again, not warned off.
+  if (isSealingKeyAnswer(r.status, text)) throw new SealingKeyMoved();
   if (r.status !== 200) throw new AppUnreachable(r.status);
   let inner: { status?: unknown; content_type?: unknown; body?: unknown; log?: unknown; sig?: unknown };
   try {
@@ -610,7 +684,7 @@ export async function appFetch(
   const logs = opts.logs ?? browserLogMemory();
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const appKey = await checkAppKeyLog(link.aid, link.kel);
-  const sealKey = (await checkedSealKey(link, logs, opts.witnessFetch ?? underlying)).key;
+  let sealKey = (await checkedSealKey(link, logs, opts.witnessFetch ?? underlying)).key;
   const mine = await (opts.browserKey ?? appBrowserKey)(linkSlot(link));
   const sessionEndpoint = `${link.api}/signin/session`;
   let skew = 0;
@@ -633,7 +707,8 @@ export async function appFetch(
         Object.assign(headers, await proofHeaders(mine.privateKey, method, new URL(url).pathname + new URL(url).search, started.token, body ?? "", skew));
       }
       const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
-      r = await sealedCall(link, sealKey, { method, target: u.pathname + u.search, headers: lowerCase(headers), body: body ?? "" }, nonce, underlying, logs, Date.now() + skew);
+      r = await sealedCallRenewing(link, async () => sealKey, async (held) => (sealKey = (await renewedSealKey(link, logs, opts.witnessFetch ?? underlying, held)).key),
+        { method, target: u.pathname + u.search, headers: lowerCase(headers), body: body ?? "" }, nonce, underlying, logs, Date.now() + skew);
       const off = clockAnswerSkew(r);
       if (off === null) break;
       if (again) throw new Error("This device's clock is too far from the utility app's to sign in. Set the date and time on this device, then try again.");
@@ -720,7 +795,13 @@ export function appSession(
       const proof = await proofHeaders(k.privateKey, method, path, await sha256b64u(token), body, skew);
       const headers: Record<string, string> = lowerCase({ Authorization: "Bearer " + token, ...proof });
       if (method !== "GET") headers["content-type"] = "application/json";
-      r = await sealedCall(link, (await (sealKey ??= checkedSealKey(link, logs, opts.witnessFetch ?? underlying))).key, { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
+      r = await sealedCallRenewing(link, async () => (await (sealKey ??= checkedSealKey(link, logs, opts.witnessFetch ?? underlying))).key,
+        async (held) => {
+          const fresh = await renewedSealKey(link, logs, opts.witnessFetch ?? underlying, held);
+          sealKey = Promise.resolve(fresh);
+          return fresh.key;
+        },
+        { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
       const off = clockAnswerSkew(r);
       if (off === null) break;
       if (again) throw new Error("This device's clock is too far from the utility app's. Set the date and time on this device, then try again.");

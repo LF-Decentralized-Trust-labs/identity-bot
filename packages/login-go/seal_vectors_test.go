@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -44,6 +45,23 @@ type sealVectors struct {
 		Request     string `json:"request"`
 		AnswerOuter string `json:"answer_outer"`
 	} `json:"answer_refusals"`
+	SealingKeyAnswer struct {
+		Status        int    `json:"status"`
+		Body          string `json:"body"`
+		StatementPath string `json:"statement_path"`
+	} `json:"sealing_key_answer"`
+	Rotation struct {
+		Old struct {
+			PublicB64u string `json:"public_b64u"`
+		} `json:"old"`
+		New struct {
+			PrivateHex string `json:"private_hex"`
+			PublicB64u string `json:"public_b64u"`
+		} `json:"new"`
+		Content  string `json:"content"`
+		OldOuter string `json:"old_outer"`
+		NewOuter string `json:"new_outer"`
+	} `json:"rotation"`
 	ClockAnswer struct {
 		Status     int    `json:"status"`
 		ServerTime string `json:"server_time"`
@@ -179,4 +197,47 @@ func TestClockAnswerIsTheSharedOne(t *testing.T) {
 	if ClockAnswerStatus != v.ClockAnswer.Status || string(ClockAnswer(tm)) != v.ClockAnswer.Body {
 		t.Fatalf("clock answer: got %d %s want %d %s", ClockAnswerStatus, ClockAnswer(tm), v.ClockAnswer.Status, v.ClockAnswer.Body)
 	}
+}
+
+func TestSealingKeyAnswerIsTheSharedOne(t *testing.T) {
+	v := loadSealVectors(t)
+	a := v.SealingKeyAnswer
+	if SealingKeyStatus != a.Status || SealingKeyAnswer != a.Body || SealStatementPath != a.StatementPath {
+		t.Fatalf("sealing key answer: got %d %s %s want %d %s %s", SealingKeyStatus, SealingKeyAnswer, SealStatementPath, a.Status, a.Body, a.StatementPath)
+	}
+}
+
+// A call sealed before a rotation does not open after it (the back end then answers
+// SealingKeyAnswer), and one sealed to the key now in force does.
+func TestACallSealedBeforeARotationDoesNotOpenAfterIt(t *testing.T) {
+	v := loadSealVectors(t)
+	r := v.Rotation
+	fresh := sealKeyFromScalar(t, r.New.PrivateHex)
+	if got := base64.RawURLEncoding.EncodeToString(fresh.Public()); got != r.New.PublicB64u {
+		t.Fatalf("the new sealing key is %s, the vector says %s", got, r.New.PublicB64u)
+	}
+	if _, _, err := fresh.OpenRequest(v.RID, []byte(r.OldOuter)); err != ErrSealed {
+		t.Fatalf("a call sealed to the key before the rotation opened: %v", err)
+	}
+	content, _, err := fresh.OpenRequest(v.RID, []byte(r.NewOuter))
+	if err != nil || string(content) != r.Content {
+		t.Fatalf("a call sealed to the new key did not open to its content: %v", err)
+	}
+	old := sealKeyFromScalar(t, v.SealKey.PrivateHex)
+	if _, _, err := old.OpenRequest(v.RID, []byte(r.NewOuter)); err != ErrSealed {
+		t.Fatal("the old back end opened a call sealed to the new key")
+	}
+}
+
+func sealKeyFromScalar(t *testing.T, privHex string) *SealKey {
+	t.Helper()
+	d, err := hex.DecodeString(privHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, err := ecdh.P256().NewPrivateKey(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &SealKey{priv: priv}
 }

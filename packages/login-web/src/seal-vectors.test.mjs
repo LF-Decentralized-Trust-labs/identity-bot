@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { make } from "../test-vectors/make-seal-vectors.mjs";
 import { checkedSealKey, checkSealKey, clockAnswerSkew } from "../dist/app.js";
 import { judgeLinkLog, readWitnessedLog } from "../dist/witnessed.js";
-import { openRequest, sealRequest, sealPaddedRequestForVectors, SealError } from "../dist/seal.js";
+import { isSealingKeyAnswer, openRequest, sealRequest, sealPaddedRequestForVectors, SealError, SEAL_STATEMENT_PATH } from "../dist/seal.js";
 
 const v = JSON.parse(readFileSync(new URL("../test-vectors/seal.json", import.meta.url), "utf8"));
 assert.deepEqual(await make(), v, "seal.json is not what make-seal-vectors.mjs makes; run it again");
@@ -118,6 +118,26 @@ await assert.rejects(sealRequest(v.rid, new Uint8Array(65), enc.encode("x")), Se
   const ans = (status, body) => ({ status, contentType: "application/json", bytes: enc.encode(body) });
   assert.equal(clockAnswerSkew(ans(ca.status, ca.body), now), ca.skew_ms, "the shared clock answer gives its skew");
   for (const c of ca.not_clock_answers) assert.equal(clockAnswerSkew(ans(c.status, c.body), now), null, "not a clock answer: " + c.name);
+}
+
+{
+  const sk = v.sealing_key_answer;
+  assert.ok(isSealingKeyAnswer(sk.status, sk.body), "the shared sealing key answer is one");
+  assert.equal(SEAL_STATEMENT_PATH, sk.statement_path);
+  for (const c of sk.not_sealing_key_answers) assert.ok(!isSealingKeyAnswer(c.status, c.body), "not a sealing key answer: " + c.name);
+}
+
+{
+  // a call sealed before a rotation does not open after it; the statement now in force is the page's to take
+  const r = v.rotation, fresh = await pair(unhex(r.new.private_hex));
+  await assert.rejects(openRequest(v.rid, fresh, r.old_outer), SealError, "a call sealed to the key before the rotation");
+  await assert.rejects(openRequest(v.rid, server, r.new_outer), SealError, "a call sealed to the new key, at the old back end");
+  assert.equal(dec.decode((await openRequest(v.rid, fresh, r.new_outer)).content), r.content, "a call sealed to the new key opens");
+  const got = await checkSealKey(v.rid, r.new.statement, v.relay_log, r.old.min);
+  assert.deepEqual(got.key, Uint8Array.from(Buffer.from(r.new.public_b64u, "base64url")), "the statement now in force gives the new key");
+  assert.equal(got.log, r.new.log);
+  assert.equal((await checkSealKey(v.rid, r.new.statement, null, r.old.min)).log, r.new.log, "a page with no memory takes it, held to the link's minimum");
+  await assert.rejects(checkSealKey(v.rid, r.old.statement, r.new.log, r.old.min), /sealing key is refused/, "the statement made earlier is not taken once the newer log is known");
 }
 
 console.log("sealed traffic holds the shared cases: bytes equal, refusals refused, sizes in buckets");

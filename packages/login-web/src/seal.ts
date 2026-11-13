@@ -22,6 +22,14 @@
  */
 
 export const SEAL_PATH = "/sealed";
+/** Where the sealing key statement now in force is fetched (login-go's `SealStatementPath`). */
+export const SEAL_STATEMENT_PATH = "/sealing-key";
+/** True for the outer answer a back end gives a call it could not open: 400 and exactly
+ *  `{"error":"sealing key"}` (login-go's `SealingKeyStatus`, `SealingKeyAnswer`; the `sealing_key_answer`
+ *  case in seal.json). It is unsigned, and is taken only as a reason to fetch the statement and check it. */
+export function isSealingKeyAnswer(status: number, body: string): boolean {
+  return status === 400 && body === '{"error":"sealing key"}';
+}
 export const SEAL_VERSION = 1;
 export const SEAL_BUCKET = 1024;
 export const SEAL_MAX = 16 << 20;

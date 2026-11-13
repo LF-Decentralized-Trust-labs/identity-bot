@@ -249,15 +249,51 @@ export async function make() {
     ],
   };
 
+  // The outer answer a back end gives a call it could not open: the sealing key it was sealed to has moved on
+  // (a rotation). Unsigned. The front end then GETs `statement_path` and checks the statement as a link's.
+  const sealing_key_answer = {
+    status: 400,
+    body: '{"error":"sealing key"}',
+    statement_path: "/sealing-key",
+    not_sealing_key_answers: [
+      { name: "another status", status: 200, body: '{"error":"sealing key"}' },
+      { name: "another error", status: 400, body: '{"error":"not accepted"}' },
+      { name: "a space in the body", status: 400, body: '{"error": "sealing key"}' },
+      { name: "more in the body", status: 400, body: '{"error":"sealing key","server_time":"2030-01-01T00:00:00Z"}' },
+      { name: "not JSON", status: 400, body: "sealing key" },
+      { name: "an empty body", status: 400, body: "" },
+    ],
+  };
+
+  // A routine rotation moves the sealing key. `rotation`: a page whose link carries `old` (the sealing key
+  // and statement above, at `old.min`) seals a call to a back end that has since rotated the relay identifier
+  // once more (`new`): `old_outer` does not open there and the back end answers `sealing_key_answer`, the
+  // statement now in force (`new.statement`, the identifier's log with one more rotation, signed by the key that
+  // rotation put in force) is the page's to take, held to `old.min` and to the log it already knows, and a call
+  // sealed to its key opens. The statement made earlier is not taken once the newer log is known.
+  const after = relayChain("seal-vectors:relay", 2);
+  if (after.events[1].said !== chain.events[1].said) throw new Error("the rotated log must carry on from the earlier one");
+  const sk2 = sealKeyFromSeed(createHash("sha256").update("seal-vectors:relay:after-rotation").digest());
+  const rotationCall = JSON.stringify({ method: "POST", target: "/api/mcp/agents/a/conversations", headers: { authorization: "Bearer tok" }, body: JSON.stringify({ text: "the message being sent" }), ts: "2026-11-12T12:00:00Z" });
+  const rotated = {
+    old: { public_b64u: b64u(sk.pub), statement, min: MIN },
+    new: { private_hex: hex(sk2.d), public_b64u: b64u(sk2.pub), statement: sealStatement(after, sk2.pub), log: after.log(), sn: after.events.length - 1 },
+    content: rotationCall,
+    old_eph_d_hex: hex(ephD("rotation:old")),
+    old_outer: (await sealRequest(RID, sk.pub, enc.encode(rotationCall), await jwkPair(ephD("rotation:old")))).outer,
+    new_eph_d_hex: hex(ephD("rotation:new")),
+    new_outer: (await sealRequest(RID, sk2.pub, enc.encode(rotationCall), await jwkPair(ephD("rotation:new")))).outer,
+  };
+
   return {
-    about: "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `seal_key.min` is the link's latest key log event the owner's Identity Agent has seen (`<sequence number>.<SAID>`), which the statement's log holds. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one, and the link's `min` when there is one) must be refused. `clock_answer`: the answer a back end signs to a call dated by a clock it does not share is `status` with `body` (the back end's UTC time to the second), a page whose clock reads `now` takes `skew_ms` from it, and each of `not_clock_answers` carries no time.",
+    about: "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `seal_key.min` is the link's latest key log event the owner's Identity Agent has seen (`<sequence number>.<SAID>`), which the statement's log holds. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one, and the link's `min` when there is one) must be refused. `clock_answer`: the answer a back end signs to a call dated by a clock it does not share is `status` with `body` (the back end's UTC time to the second), a page whose clock reads `now` takes `skew_ms` from it, and each of `not_clock_answers` carries no time. `sealing_key_answer`: the outer answer a back end gives a call it could not open (the sealing key it was sealed to has moved on) is `status` with exactly `body`, unsigned, and a front end that reads it fetches `statement_path` and checks the statement as it checks a link's; none of `not_sealing_key_answers` is that answer. `rotation`: a call sealed to the `old` sealing key does not open at a back end whose key is `new.private_hex` (`old_outer`), and one sealed to `new` does (`new_outer`, content `content`); the page then takes `new.statement`, checked against `old.min` and the log it already holds (`relay_log`), as the sealing key now in force, and does not take `old.statement` once it holds `new.log`.",
     rid: RID,
     relay_inception: inception,
     relay_log: chain.log(),
     relay_sn: SN,
     relay_seed_hex: hex(seed),
     seal_key: { private_hex: hex(sk.d), public_b64u: b64u(sk.pub), statement, min: MIN },
-    requests, refusals, answer_refusals, statement_refusals, sizes, clock_answer, witnessed,
+    requests, refusals, answer_refusals, statement_refusals, sizes, clock_answer, sealing_key_answer, rotation: rotated, witnessed,
   };
 }
 
