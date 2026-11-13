@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/ecdsa"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -43,22 +42,21 @@ import (
 type InstalledAppKeyProof struct {
 	Platform string `json:"platform"` // "android", "apple" or "tpm"
 	Evidence []byte `json:"evidence"`
-}
-
-// InstalledAppKeyChallenge is the challenge the installed app asks its
-// hardware to attest its key with, for the asset: so an attestation made for
-// one app's asset is not another's.
-func InstalledAppKeyChallenge(assetID string) []byte {
-	sum := sha256.Sum256([]byte("grape installed-app key v1\n" + assetID))
-	return sum[:]
+	// Ask names the ask (beginInstalledAppKey) the evidence was made for, and
+	// KeySignature is the key's own signature over InstalledAppSignInStatement
+	// for that ask: ECDSA (ASN.1) for Android and a TPM, an App Attest assertion
+	// for Apple.
+	Ask          string `json:"ask"`
+	KeySignature []byte `json:"key_signature"`
 }
 
 // The verifiers, as variables only so a test can stand in for the hardware
 // vendors' signatures; the verifiers themselves are tested in secureenclave.
 var (
-	verifyAndroidInstalledKey = secureenclave.VerifyInstalledAppKeyAttestation
-	verifyAppleInstalledKey   = secureenclave.VerifyAppleAppAttest
-	verifyTPMInstalledKey     = secureenclave.VerifyTPMKeyCertify
+	verifyAndroidInstalledKey     = secureenclave.VerifyInstalledAppKeyAttestation
+	verifyAppleInstalledKey       = secureenclave.VerifyAppleAppAttest
+	verifyTPMInstalledKey         = secureenclave.VerifyTPMKeyCertify
+	verifyAppleInstalledAssertion = secureenclave.VerifyAppleAssertion
 )
 
 // installedAppFact is what the core established about an installed app's key,
@@ -109,7 +107,13 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 	if a.InstalledApp.IsEmpty() {
 		return installedAppFact{}, errors.New("the owner of this app has not said which installed program is its own, so no installed-app key can be accepted")
 	}
-	challenge := InstalledAppKeyChallenge(a.ID)
+	// The ask is spent here, before anything is checked: a proof made for it
+	// gets one try. Its challenge is the core's own, for this one attestation.
+	ask, err := s.takeInstalledAppAsk(proof.Ask, a.ID, now)
+	if err != nil {
+		return installedAppFact{}, err
+	}
+	challenge := ask.challenge
 	var facts *secureenclave.InstalledAppKeyFacts
 	switch proof.Platform {
 	case "android":
@@ -129,7 +133,7 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 		if !a.InstalledApp.TPMKeys {
 			return installedAppFact{}, errors.New("the owner has not accepted a TPM key for this app: a TPM proves the key is in the computer, not which program holds it")
 		}
-		facts, err = verifyTPMInstalledKey(proof.Evidence, challenge, now)
+		facts, err = verifyTPMInstalledKey(proof.Evidence, challenge, ask.credentialKey, now)
 	default:
 		return installedAppFact{}, fmt.Errorf("a key is proved on 'android', 'apple' or 'tpm', not '%s'", proof.Platform)
 	}
@@ -142,6 +146,11 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 	tp, err := thumbprintOfECKey(facts.Public)
 	if err != nil || tp != key {
 		return installedAppFact{}, errors.New("the attested key is not the key this sign-in names")
+	}
+	// The key itself signs this sign-in for this ask: a leaked attestation holds
+	// only public facts, and cannot.
+	if err := verifyKeyPossession(facts.Platform, facts.Public, proof.KeySignature, a.ID, ask, key, a.InstalledApp.AppleAppID); err != nil {
+		return installedAppFact{}, err
 	}
 	return installedAppFact{Platform: facts.Platform, Level: facts.Level, Proved: now.UTC()}, nil
 }

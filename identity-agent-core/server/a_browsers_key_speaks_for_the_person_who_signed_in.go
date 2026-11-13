@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"identity-agent-core/atomicfile"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/trail"
 )
@@ -113,6 +118,9 @@ func (b *browserKeys) record(asset, person, thumbprint, frontEnd string, until, 
 	return b.recordWith(asset, person, thumbprint, frontEnd, until, now, presented, nil)
 }
 
+// errGrantHeld is a live app-key grant for another person at the key.
+var errGrantHeld = errors.New("this key already speaks for another person: that grant must end first")
+
 func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}, proof *installedAppFact) error {
 	if asset == "" || person == "" {
 		return errors.New("a browser key speaks for a person at an asset")
@@ -125,6 +133,14 @@ func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, unt
 	all, err := b.load()
 	if err != nil {
 		return err
+	}
+	// A live app-key grant is never replaced by a different person's: it does
+	// not lapse, so whoever it was made for would lose it to a sign-in anyone
+	// could start naming their key. The grant ends first (the person, the owner,
+	// the app), then the key can speak for someone else.
+	if held, live := all[browserKeyEntry(asset, thumbprint)]; live && held.FrontEnd == login.FrontEndInstalledApp &&
+		held.liveAt(now) && held.Person != person {
+		return errGrantHeld
 	}
 	for k, r := range all {
 		if !r.liveAt(now) {
@@ -224,7 +240,60 @@ type keysSpeakingAt struct {
 	asset string
 }
 
-var _ trail.KeyRoster = keysSpeakingAt{}
+var _ trail.AssertionRoster = keysSpeakingAt{}
+
+// VerifyAssertion: an installed app's key on Apple signs only App Attest
+// assertions, so a statement it signed is checked as one, for the program the
+// owner names now (the owner's setting, asked on every use). Every other key
+// signs a plain statement (handled is false).
+func (k keysSpeakingAt) VerifyAssertion(person, signer, verkey string, clientDataHash [32]byte, signature string) (bool, error) {
+	tp, err := login.BrowserKeyThumbprintOfMachineKey(verkey)
+	if err != nil {
+		return false, nil
+	}
+	rec, ok := k.s.browserKeys().Get(k.asset, tp, time.Now())
+	if !ok || rec.FrontEnd != login.FrontEndInstalledApp || rec.Proof == nil || rec.Proof.Platform != "apple" {
+		return false, nil
+	}
+	if k.s.assetHandler == nil {
+		return true, errors.New("the assets are not open")
+	}
+	a, found, err := k.s.assetHandler.Store.GetAsset(k.asset)
+	if err != nil || !found || a.InstalledApp.AppleAppID == "" {
+		return true, errors.New("the owner names no Apple program for this app")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(signature)
+	if err != nil {
+		return true, errors.New("an App Attest assertion is base64url")
+	}
+	pub, err := p256FromMachineVerkey(verkey)
+	if err != nil {
+		return true, err
+	}
+	if _, err := verifyAppleInstalledAssertion(raw, clientDataHash[:], pub, a.InstalledApp.AppleAppID); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// p256FromMachineVerkey is the P-256 public key a machine verkey stands for.
+func p256FromMachineVerkey(verkey string) (*ecdsa.PublicKey, error) {
+	raw, err := iacrypto.KeyFromMachineVerkey(verkey)
+	if err != nil {
+		return nil, err
+	}
+	var x, y *big.Int
+	switch len(raw) {
+	case 33:
+		x, y = elliptic.UnmarshalCompressed(elliptic.P256(), raw)
+	case 65:
+		x, y = elliptic.Unmarshal(elliptic.P256(), raw)
+	}
+	if x == nil {
+		return nil, errors.New("the key is not a P-256 point")
+	}
+	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+}
 
 func (k keysSpeakingAt) KeySpeaksFor(person, signer, verkey string) bool {
 	tp, err := login.BrowserKeyThumbprintOfMachineKey(verkey)

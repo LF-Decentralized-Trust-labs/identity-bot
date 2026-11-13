@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"identity-agent-core/schemas"
 	"log"
 	"net/http"
@@ -345,6 +346,11 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 			err = s.browserKeys().RecordAppKey(assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
 		} else {
 			err = s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(browserKeyLife), now, presented)
+		}
+		if errors.Is(err, errGrantHeld) {
+			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "this key already speaks for another person"})
+			http.Error(w, "not authorized", http.StatusForbidden)
+			return
 		}
 		if err != nil {
 			log.Printf("[identity-agent-core] a browser key's sign-in could not be kept: %v", err)

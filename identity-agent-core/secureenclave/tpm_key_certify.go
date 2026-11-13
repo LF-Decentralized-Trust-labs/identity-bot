@@ -26,17 +26,32 @@ package secureenclave
 //	  "credential_secret":  the secret the TPM released by TPM2_ActivateCredential
 //	}
 //
-// CHALLENGE DERIVATION. The core picks one random challenge and gives it to the
-// app (and to whatever issues the credential). Two values derive from it:
+// CHALLENGE AND CREDENTIAL KEY. For each attestation the core picks two random
+// values and no other party may choose or know the second:
+//
+//	challenge     given to the app; it is not a secret.
+//	credentialKey kept by the core, NEVER given to the app, the app's back end
+//	              or anyone else, and used once.
+//
+// The credential is what proves the AK shares a TPM with the EK, and that holds
+// only while the app cannot compute it. Were it keyed by the challenge (which
+// the app holds), or by anything derived from public facts, software could
+// make a credential for a genuine EK certificate and an AK of its own, and the
+// check would pass the moment a root is pinned. So the credential's key is the
+// core's alone and the app learns the credential only from the TPM, by
+// TPM2_ActivateCredential on a blob the core made with TPM2_MakeCredential
+// (the core's side of that exchange is not built yet, and until it is no
+// TPM key can be proved). verifyTPMKeyCertify refuses, in code, a
+// credentialKey that is short or is the challenge. Two values derive:
 //
 //	extraData  = SHA-256("grape-tpm-key-certify-v1" 0x00 || challenge)
 //	             the qualifying data the app passes to TPM2_Certify.
-//	credential = HMAC-SHA-256(key = challenge,
+//	credential = HMAC-SHA-256(key = credentialKey,
 //	                          "grape-tpm-credential-v1" 0x00 ||
 //	                          uint16(len(akName)) || akName || ekPublicDER)
 //	             where akName is the AK's TPM name (nameAlg || H(TPMT_PUBLIC))
 //	             and ekPublicDER is the PKIX encoding of the EK certificate's
-//	             public key. The party holding the challenge runs
+//	             public key. The core runs
 //	             TPM2_MakeCredential(EK public, akName, credential); the TPM can
 //	             only return it from TPM2_ActivateCredential if the AK named is
 //	             loaded in the same TPM as the EK. The app puts the result in
@@ -139,8 +154,8 @@ func tpmCertifyExtraData(challenge []byte) []byte {
 // tpmCredentialSecret is what the verifier seals to the EK with
 // TPM2_MakeCredential; only the TPM holding both EK and the named AK can
 // return it.
-func tpmCredentialSecret(challenge, akName, ekPublicDER []byte) []byte {
-	m := hmac.New(sha256.New, challenge)
+func tpmCredentialSecret(credentialKey, akName, ekPublicDER []byte) []byte {
+	m := hmac.New(sha256.New, credentialKey)
 	m.Write([]byte("grape-tpm-credential-v1\x00"))
 	m.Write([]byte{byte(len(akName) >> 8), byte(len(akName))})
 	m.Write(akName)
@@ -152,16 +167,26 @@ func tpmCredentialSecret(challenge, akName, ekPublicDER []byte) []byte {
 // app key asked for with challenge, against the pinned manufacturer roots.
 // It proves the key is a non-exportable signing key generated inside a genuine
 // TPM. It does NOT prove which app holds it: AppIDPresent is always false.
-func VerifyTPMKeyCertify(evidence, challenge []byte, now time.Time) (*InstalledAppKeyFacts, error) {
-	return verifyTPMKeyCertify(evidence, challenge, now, tpmManufacturerRoots)
+func VerifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time) (*InstalledAppKeyFacts, error) {
+	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, tpmManufacturerRoots)
 }
 
-func verifyTPMKeyCertify(evidence, challenge []byte, now time.Time, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
+// TPMCredentialKeyLen is the least length of the secret the core keeps for one attestation.
+const TPMCredentialKeyLen = 32
+
+func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
 	if len(roots) == 0 {
 		return nil, notAttested("no TPM manufacturer roots are pinned in this build, so no TPM can be trusted")
 	}
 	if len(challenge) == 0 {
 		return nil, notAttested("no challenge to bind the attestation to")
+	}
+	// The credential's key is the core's secret for this one attestation. A key
+	// the app could know (the challenge, or anything derived from public facts)
+	// would let software make the credential, so it is refused here, whatever
+	// roots are pinned.
+	if len(credentialKey) < TPMCredentialKeyLen || bytes.Equal(credentialKey, challenge) {
+		return nil, notAttested("the attestation was not issued a secret credential key by the core")
 	}
 	if len(evidence) == 0 || len(evidence) > tpmMaxEvidence {
 		return nil, notAttested("the TPM evidence is empty or too large")
@@ -250,7 +275,7 @@ func verifyTPMKeyCertify(evidence, challenge []byte, now time.Time, roots []*x50
 	if err != nil {
 		return nil, notAttested("the EK certificate's key: %v", err)
 	}
-	want := tpmCredentialSecret(challenge, akName, ekDER)
+	want := tpmCredentialSecret(credentialKey, akName, ekDER)
 	if subtle.ConstantTimeCompare(ev.CredentialSecret, want) != 1 {
 		return nil, notAttested("the attestation key is not shown to share a TPM with the endorsement key")
 	}

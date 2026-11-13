@@ -29,10 +29,15 @@ func TestAnInstalledAppsKeyIsAttestedOnlyWhenTheHardwareGeneratedAndLimitsItToSi
 		"another challenge":        {mod: func(s *chainSpec) { s.challenge = "not mine" }, fail: true},
 		"a P-384 key":              {mod: func(s *chainSpec) { s.leafKey = &other.PublicKey }, fail: true},
 		"an RSA key":               {mod: func(s *chainSpec) { s.leafKey = &rsaKey.PublicKey }, fail: true},
+		"an unlocked bootloader":   {mod: func(s *chainSpec) { s.bootUnlocked = true }, fail: true},
+		"a self-signed boot":       {mod: func(s *chainSpec) { s.bootState = 1 }, fail: true},
+		"an unverified boot":       {mod: func(s *chainSpec) { s.bootState = 2 }, fail: true},
+		"a failed boot":            {mod: func(s *chainSpec) { s.bootState = 3 }, fail: true},
+		"no root of trust at all":  {mod: func(s *chainSpec) { s.rootOfTrust = false }, fail: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := chainSpec{level: attestStrongBox, challenge: ch, purposes: []int{kmPurposeSign}, noAuth: true,
-				created: now.Add(-time.Hour), leafKey: &ec.PublicKey, noOAEP: true}
+				created: now.Add(-time.Hour), leafKey: &ec.PublicKey, noOAEP: true, rootOfTrust: true}
 			c.mod(&s)
 			chain, root := builtChain(t, s)
 			f, err := verifyInstalledAppKeyAttestation(chain, []byte(ch), now, [][sha256.Size]byte{root})

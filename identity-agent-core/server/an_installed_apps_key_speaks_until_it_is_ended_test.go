@@ -6,6 +6,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,10 +18,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/agentmessage"
 	"identity-agent-core/asset"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
+	"identity-agent-core/trail"
 )
 
 // An installed app holds its key in its device's secure hardware, and the
@@ -36,7 +40,11 @@ type anInstalledAppWorld struct {
 	*aWebsiteWorld
 	key  string
 	pub  *ecdsa.PublicKey
-	said *secureenclave.InstalledAppKeyFacts // what the stand-in hardware says
+	priv *ecdsa.PrivateKey
+	// asked is the challenge of the latest ask the core issued: what the
+	// stand-in hardware checks it was asked to attest with.
+	asked []byte
+	said  *secureenclave.InstalledAppKeyFacts // what the stand-in hardware says
 }
 
 func anInstalledAppsWorld(t *testing.T, offered, off []string) *anInstalledAppWorld {
@@ -52,14 +60,14 @@ func anInstalledAppsWorld(t *testing.T, offered, off []string) *anInstalledAppWo
 	if err != nil {
 		t.Fatal(err)
 	}
-	iw := &anInstalledAppWorld{aWebsiteWorld: w, key: tp, pub: &k.PublicKey}
+	iw := &anInstalledAppWorld{aWebsiteWorld: w, key: tp, pub: &k.PublicKey, priv: k}
 	signer := bytes.Repeat([]byte{0xab}, 32)
 	iw.said = &secureenclave.InstalledAppKeyFacts{Public: &k.PublicKey, Platform: "android", Level: "strongbox",
 		AppPackages: []string{theAndroidPackage}, AppSigners: [][]byte{signer}, AppIDPresent: true}
 	stand := func(wantPlatform string) {
 		fake := func(ev, ch []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
-			if !bytes.Equal(ch, InstalledAppKeyChallenge("the-website")) {
-				return nil, errors.New("not the challenge of this asset")
+			if !bytes.Equal(ch, iw.asked) {
+				return nil, errors.New("not the challenge the core issued")
 			}
 			return iw.said, nil
 		}
@@ -70,7 +78,12 @@ func anInstalledAppsWorld(t *testing.T, offered, off []string) *anInstalledAppWo
 			}
 			return fake(ev, ch, now)
 		}
-		verifyTPMInstalledKey = fake
+		verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
+			if len(credKey) < secureenclave.TPMCredentialKeyLen || bytes.Equal(credKey, ch) {
+				return nil, errors.New("no secret credential key from the core")
+			}
+			return fake(ev, ch, now)
+		}
 	}
 	oa, oap, ot := verifyAndroidInstalledKey, verifyAppleInstalledKey, verifyTPMInstalledKey
 	t.Cleanup(func() { verifyAndroidInstalledKey, verifyAppleInstalledKey, verifyTPMInstalledKey = oa, oap, ot })
@@ -78,8 +91,59 @@ func anInstalledAppsWorld(t *testing.T, offered, off []string) *anInstalledAppWo
 	return iw
 }
 
+// proof is what the app's back end carries from its installed front end: the
+// ask the core issued, the stand-in hardware's evidence, and the key's own
+// signature over the sign-in statement for that ask.
 func (iw *anInstalledAppWorld) proof() *InstalledAppKeyProof {
-	return &InstalledAppKeyProof{Platform: iw.said.Platform, Evidence: []byte("evidence")}
+	return iw.proofFor("the-website", iw.priv)
+}
+
+func (iw *anInstalledAppWorld) proofFor(assetID string, signer *ecdsa.PrivateKey) *InstalledAppKeyProof {
+	ask, err := iw.org.beginInstalledAppKey(anAppsRequest(assetID, nil), "", assetID)
+	if err != nil {
+		panic(err)
+	}
+	iw.asked = ask.Challenge
+	return &InstalledAppKeyProof{Platform: iw.said.Platform, Evidence: []byte("evidence"), Ask: ask.ID,
+		KeySignature: iw.signs(signer, assetID, ask.Challenge, iw.key)}
+}
+
+// signs is the key's signature over the statement: ECDSA, or on Apple the
+// App Attest assertion, made the way Apple's steps say.
+func (iw *anInstalledAppWorld) signs(k *ecdsa.PrivateKey, assetID string, challenge []byte, thumbprint string) []byte {
+	digest := sha256.Sum256(InstalledAppSignInStatement(assetID, challenge, thumbprint))
+	if iw.said.Platform == "apple" {
+		return anAppAttestAssertion(k, "TEAM123456.org.example.portal", 3, digest[:])
+	}
+	sig, _ := ecdsa.SignASN1(rand.Reader, k, digest[:])
+	return sig
+}
+
+// anAppAttestAssertion is an assertion over clientDataHash by a software key
+// standing in for the Secure Enclave's: CBOR {signature, authenticatorData}.
+func anAppAttestAssertion(k *ecdsa.PrivateKey, appID string, counter uint32, clientDataHash []byte) []byte {
+	rp := sha256.Sum256([]byte(appID))
+	authData := append(append([]byte{}, rp[:]...), 0, byte(counter>>24), byte(counter>>16), byte(counter>>8), byte(counter))
+	nonce := sha256.Sum256(append(append([]byte{}, authData...), clientDataHash...))
+	digest := sha256.Sum256(nonce[:])
+	sig, _ := ecdsa.SignASN1(rand.Reader, k, digest[:])
+	head := func(major byte, n int) []byte {
+		if n < 24 {
+			return []byte{major<<5 | byte(n)}
+		}
+		return []byte{major<<5 | 24, byte(n)}
+	}
+	out := head(5, 2)
+	for _, kv := range []struct {
+		k string
+		v []byte
+	}{{"signature", sig}, {"authenticatorData", authData}} {
+		out = append(out, head(3, len(kv.k))...)
+		out = append(out, kv.k...)
+		out = append(out, head(2, len(kv.v))...) // a byte string over 255 would need the long form: neither is
+		out = append(out, kv.v...)
+	}
+	return out
 }
 
 // anAppsRequest is a request an app's back end signed, as the core sees it.
@@ -392,5 +456,282 @@ func TestAnAddonsFoundCallerIsHeldToItsOwnAsset(t *testing.T) {
 	}
 	if err := start(anAppsRequest("some-other-app", nil), "the-website"); err == nil {
 		t.Fatal("the core's own check of who signed was overridden by the add-on's word")
+	}
+}
+
+// An attestation is fresh: the core asks for it once, and the key itself signs
+// each sign-in. A leaked attestation holds only public facts.
+func TestAnInstalledAppsAttestationIsFreshAndItsKeySignsEachSignIn(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	startWith := func(p *InstalledAppKeyProof) error {
+		_, err := iw.start(anAppsRequest("the-website", nil), "the-website", p)
+		return err
+	}
+
+	// The same proof is not accepted twice: the ask is spent when it is read.
+	p := iw.proof()
+	if err := startWith(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := startWith(p); err == nil {
+		t.Fatal("a proof was accepted a second time, so a leaked attestation could be shown again")
+	}
+
+	// Evidence anyone could hold is not enough: the key must sign this sign-in.
+	forged := iw.proofFor("the-website", other) // someone else's key signs
+	if err := startWith(forged); err == nil {
+		t.Fatal("a sign-in naming the key was started by someone who does not hold it")
+	}
+	unsigned := iw.proof()
+	unsigned.KeySignature = nil
+	if err := startWith(unsigned); err == nil {
+		t.Fatal("a sign-in the key did not sign was started")
+	}
+	first := iw.proof()
+	firstAsked := iw.asked
+	second := iw.proof()
+	first.KeySignature = second.KeySignature // the signature of another ask
+	iw.asked = firstAsked
+	if err := startWith(first); err == nil {
+		t.Fatal("a signature made for another ask opened this one")
+	}
+	named := iw.proof()
+	named.KeySignature = iw.signs(iw.priv, "the-website", iw.asked, "another-key-thumbprint")
+	if err := startWith(named); err == nil {
+		t.Fatal("a signature over another key's name opened this one")
+	}
+
+	// An ask the core did not issue, or that has expired, is refused.
+	bad := iw.proof()
+	bad.Ask = "not-an-ask"
+	if err := startWith(bad); err == nil {
+		t.Fatal("an ask the core never issued was accepted")
+	}
+	old := iw.proof()
+	iw.org.installedAppAskMu.Lock()
+	a := iw.org.installedAppAsks[old.Ask]
+	a.until = time.Now().Add(-time.Second)
+	iw.org.installedAppAsks[old.Ask] = a
+	iw.org.installedAppAskMu.Unlock()
+	if err := startWith(old); err == nil {
+		t.Fatal("an expired ask was accepted")
+	}
+
+	// An ask another app was issued is not this app's.
+	theirs, err := iw.org.beginInstalledAppKey(anAppsRequest("some-other-app", nil), "", "some-other-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	borrowed := iw.proof()
+	borrowed.Ask = theirs.ID
+	borrowed.KeySignature = iw.signs(iw.priv, "the-website", theirs.Challenge, iw.key) // everything else is right
+	iw.asked = theirs.Challenge
+	if err := startWith(borrowed); err == nil {
+		t.Fatal("another app's ask was used for this asset")
+	}
+
+	// A page cannot ask, and an app cannot hold unbounded asks open.
+	if _, err := iw.org.beginInstalledAppKey(anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"}), "", "the-website"); err == nil {
+		t.Fatal("a web page was given an ask")
+	}
+	if _, err := iw.org.beginInstalledAppKey(anAppsRequest("some-other-app", nil), "", "the-website"); err == nil {
+		t.Fatal("another app was given an ask for this asset")
+	}
+	var last error
+	for i := 0; i < installedAppAsksPerAsset+1; i++ {
+		_, last = iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	}
+	if last == nil {
+		t.Fatal("an app held more asks open than the cap")
+	}
+}
+
+// A TPM's credential is keyed by a secret only the core holds: what the
+// verifier is given is not the challenge the app holds.
+func TestATPMSignInIsGivenTheCoresSecretCredentialKey(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	iw.said.Platform = "tpm"
+	var gotChallenge, gotKey []byte
+	inner := verifyTPMInstalledKey
+	verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
+		gotChallenge, gotKey = ch, credKey
+		return inner(ev, ch, credKey, now)
+	}
+	p := iw.proof()
+	if _, err := iw.start(anAppsRequest("the-website", nil), "the-website", p); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotKey) < secureenclave.TPMCredentialKeyLen || bytes.Equal(gotKey, gotChallenge) || bytes.Equal(gotKey, iw.asked) {
+		t.Fatal("the TPM check was not given a secret key of the core's own")
+	}
+	// What the app was told is the challenge and the ask's name, nothing else.
+	ask, _ := iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	raw, _ := json.Marshal(ask)
+	if bytes.Contains(raw, []byte("credential")) {
+		t.Fatalf("the ask hands the app something about the credential key: %s", raw)
+	}
+}
+
+// A live app-key grant is never replaced by a different person's sign-in.
+func TestALiveAppKeyGrantIsNotReplacedByAnotherPerson(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.signedIn(t)
+	owner, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now())
+	fact := installedAppFact{Platform: "android", Level: "tee", Proved: time.Now()}
+
+	if err := iw.org.browserKeys().RecordAppKey("the-website", "Esomeone-else", iw.key, time.Now(), nil, fact); !errors.Is(err, errGrantHeld) {
+		t.Fatalf("another person replaced a live grant: %v", err)
+	}
+	if now, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); now != owner {
+		t.Fatalf("the grant now speaks for %q, not %q", now, owner)
+	}
+	// The same person signing in again refreshes it, and once it ends the key may speak for someone else.
+	if err := iw.org.browserKeys().RecordAppKey("the-website", owner, iw.key, time.Now(), nil, fact); err != nil {
+		t.Fatalf("the person could not sign in again: %v", err)
+	}
+	if _, err := iw.org.browserKeys().End("the-website", iw.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := iw.org.browserKeys().RecordAppKey("the-website", "Esomeone-else", iw.key, time.Now(), nil, fact); err != nil {
+		t.Fatalf("an ended grant still held the key: %v", err)
+	}
+}
+
+// An Apple App Attest key signs only assertions, so a statement it signs is
+// read as one: an assertion over the statement's hash is the person's, a plain
+// signature and an assertion over other words are not.
+func TestAnAppleAppAttestKeySpeaksForThePersonByAnAssertion(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.said.Platform = "apple"
+	iw.signedIn(t)
+	person, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now())
+	roster := keysSpeakingAt{s: iw.org, asset: "the-website"}
+	id, err := iacrypto.MachineAIDForKey(elliptic.Marshal(elliptic.P256(), iw.pub.X, iw.pub.Y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verkey := aMachineVerkeyOf(t, iw.pub)
+	st := agentmessage.PersonStatement{
+		Agent: iw.org.thisIdentityAgentsIdentifier(), Conversation: "c1", MessageID: "m1",
+		Kind: agentmessage.PersonKindMessage, From: person, Signer: id, To: "Eagent1",
+		Nonce: "nonce-0123456789abcdefm1", Time: time.Now().UTC().Format(time.RFC3339),
+		FingerprintVersion: agentmessage.FingerprintV1, Fingerprint: "AAAA",
+	}
+	hash := sha256.Sum256(st.Bytes())
+	assert := func(h [32]byte) string {
+		return base64.RawURLEncoding.EncodeToString(anAppAttestAssertion(iw.priv, "TEAM123456.org.example.portal", 9, h[:]))
+	}
+	check := func(sig string, mutate func(*agentmessage.PersonStatement)) error {
+		s := st
+		if mutate != nil {
+			mutate(&s)
+		}
+		return trail.CheckAuthor(trail.Write{Statement: s, Verkey: verkey, Signature: sig}, st.Agent, roster)
+	}
+	if err := check(assert(hash), nil); err != nil {
+		t.Fatalf("an App Attest assertion over the statement was refused: %v", err)
+	}
+	plain, _ := ecdsa.SignASN1(rand.Reader, iw.priv, hash[:])
+	if err := check(base64.RawURLEncoding.EncodeToString(plain), nil); err == nil {
+		t.Fatal("a plain signature was read as an Apple key's statement")
+	}
+	other := sha256.Sum256([]byte("other words"))
+	if err := check(assert(other), nil); err == nil {
+		t.Fatal("an assertion over other words was accepted")
+	}
+	if err := check(assert(hash), func(s *agentmessage.PersonStatement) { s.MessageID = "m2" }); err == nil {
+		t.Fatal("an assertion was accepted for a statement it did not sign")
+	}
+	// The owner's program is the one asked on every use.
+	as, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	as.InstalledApp.AppleAppID = "TEAM123456.org.evil"
+	_ = iw.org.assetHandler.Store.UpsertAsset(as)
+	if err := check(assert(hash), nil); err == nil {
+		t.Fatal("an assertion for a program the owner no longer names was accepted")
+	}
+}
+
+// The public begin route is capped by caller, so one caller cannot stop the others ending grants.
+func TestOneCallerCannotFillTheNoncesThatEndGrants(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	endAppKeyMu.Lock()
+	endAppKeyAsked = map[string]endAppKeyAsk{}
+	endAppKeyMu.Unlock()
+	t.Cleanup(func() { endAppKeyMu.Lock(); endAppKeyAsked = map[string]endAppKeyAsk{}; endAppKeyMu.Unlock() })
+	begin := func(from string) int {
+		bb, _ := json.Marshal(map[string]string{"site_aid": a.PairwiseAID, "key": iw.key})
+		r := httptest.NewRequest("POST", "/x", bytes.NewReader(bb))
+		r.RemoteAddr = from + ":4000"
+		rec := httptest.NewRecorder()
+		iw.org.handleBeginEndAppKey(rec, r)
+		return rec.Code
+	}
+	for i := 0; i < endAppKeyPerCaller; i++ {
+		if code := begin("192.0.2.1"); code != 200 {
+			t.Fatalf("nonce %d: %d", i, code)
+		}
+	}
+	if code := begin("192.0.2.1"); code != http.StatusTooManyRequests {
+		t.Fatalf("a caller was not capped: %d", code)
+	}
+	if code := begin("192.0.2.2"); code != 200 {
+		t.Fatalf("another caller was stopped by the first: %d", code)
+	}
+	// Nonces expire: once they have, the first caller may ask again.
+	endAppKeyMu.Lock()
+	for n, k := range endAppKeyAsked {
+		k.until = time.Now().Add(-time.Second)
+		endAppKeyAsked[n] = k
+	}
+	endAppKeyMu.Unlock()
+	if code := begin("192.0.2.1"); code != 200 {
+		t.Fatalf("expired nonces still counted against the caller: %d", code)
+	}
+}
+
+// The callback keeps an installed app's grant only for a sign-in the core
+// itself proved the key for. One the core holds no proof for (the process
+// restarted since it started) is refused and nothing is kept.
+func TestACallbackWithNoProofHeldKeepsNoAppKeyGrant(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, held := iw.org.takeInstalledAppFact(in.Session); !held {
+		t.Fatal("the core held no proof for a sign-in it started")
+	}
+	if _, err := aPersonsIdentityAgent(t).Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL}); err == nil {
+		t.Fatal("an installed-app sign-in with no proof held was approved")
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok {
+		t.Fatal("a grant was kept for a key the core held no proof for")
+	}
+	if grants := iw.org.browserKeys().AppKeyGrants("the-website", time.Now()); len(grants) != 0 {
+		t.Fatalf("grants held: %+v", grants)
+	}
+}
+
+// Removing a member through the route the owner uses ends their grant: the
+// handler itself is called, not the hook it calls.
+func TestRemovingAMemberThroughTheRouteEndsTheirGrant(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.signedIn(t)
+	person, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now())
+	iw.org.wireAssetHandlerHooks(iw.org.assetHandler)
+	router := chi.NewRouter()
+	router.Delete("/assets/{id}/members/{aid}", iw.org.assetHandler.HandleRemoveMember)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest("DELETE", "/assets/the-website/members/"+person, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok {
+		t.Fatal("a removed member's grant is still held after the owner removed them")
 	}
 }

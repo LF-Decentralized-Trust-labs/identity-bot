@@ -131,6 +131,9 @@ type AndroidKeyFacts struct {
 	// the chain carried no root of trust. DeviceLocked is the bootloader state.
 	BootState    string
 	DeviceLocked bool
+	// VerifiedBootKey is the root of trust's key: the key the phone's verified
+	// boot was anchored to. A caller that pins the keys it accepts reads it here.
+	VerifiedBootKey []byte
 	// Serials are the serial numbers of every certificate in the chain, leaf
 	// first, as Google's status list spells them: lower-case hex, no leading zeros.
 	Serials []string
@@ -412,7 +415,7 @@ func readKeyDescription(leaf *x509.Certificate) (*AndroidKeyFacts, error) {
 		}
 	}
 	if v, ok := hw[kmTagRootOfTrust]; ok {
-		f.BootState, f.DeviceLocked = readRootOfTrust(v)
+		f.BootState, f.DeviceLocked, f.VerifiedBootKey = readRootOfTrust(v)
 	}
 	// The application id is stated by the Keystore service, so it sits in the
 	// software-enforced list; an attestation made by the TEE signs over it all the same.
@@ -480,10 +483,10 @@ func intSet(b []byte) ([]int, error) {
 
 // readRootOfTrust: RootOfTrust is SEQUENCE { verifiedBootKey OCTET STRING,
 // deviceLocked BOOLEAN, verifiedBootState ENUMERATED, ... }.
-func readRootOfTrust(b []byte) (state string, locked bool) {
+func readRootOfTrust(b []byte) (state string, locked bool, bootKey []byte) {
 	var seq asn1.RawValue
 	if _, err := asn1.Unmarshal(b, &seq); err != nil || seq.Tag != asn1.TagSequence {
-		return "", false
+		return "", false, nil
 	}
 	var key asn1.RawValue
 	var st asn1.Enumerated
@@ -495,7 +498,7 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 		_, err = asn1.Unmarshal(rest, &st)
 	}
 	if err != nil {
-		return "", false
+		return "", false, nil
 	}
 	switch int(st) {
 	case 0:
@@ -507,7 +510,7 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 	case 3:
 		state = "failed"
 	}
-	return state, locked
+	return state, locked, key.Bytes
 }
 
 // seedWrapKeyPolicy is what a key must be, beyond being in hardware, to be the
@@ -640,11 +643,15 @@ type InstalledAppKeyFacts struct {
 	AppSigners   [][]byte
 	AppleAppID   string
 	AppIDPresent bool
+	// VerifiedBootKey is the key the phone's verified boot is anchored to (an
+	// Android attestation's root of trust), for a caller that pins it.
+	VerifiedBootKey []byte
 }
 
 // VerifyInstalledAppKeyAttestation checks that blob is an Android key
 // attestation chain, to a pinned Google root, for a P-256 key the hardware
-// generated, limited in hardware to signing, asked for with wantChallenge. The
+// generated, limited in hardware to signing, asked for with wantChallenge, on a phone whose
+// bootloader is locked and whose boot verified. The
 // caller then compares Public with the key the sign-in names and the package
 // with the app it is for.
 func VerifyInstalledAppKeyAttestation(blob, wantChallenge []byte, now time.Time) (*InstalledAppKeyFacts, error) {
@@ -665,9 +672,21 @@ func verifyInstalledAppKeyAttestation(blob, wantChallenge []byte, now time.Time,
 	if !onlyInt(f.Purposes, kmPurposeSign) {
 		return nil, notAttested("the key is not limited to signing in the hardware")
 	}
+	// Unlike the seed key above, this key's whole worth is that no one but the
+	// installed app can sign with it, and on a phone with an unlocked bootloader
+	// or a boot that did not verify, anyone with root can ask the hardware to
+	// sign. The hardware still attests honestly, so the state is read here and
+	// refused. A chain that states no root of trust is refused too: it proves
+	// nothing about the boot.
+	if f.BootState != "verified" {
+		return nil, notAttested("the phone's boot is not verified (state %q), so its software cannot be trusted to be the app's", f.BootState)
+	}
+	if !f.DeviceLocked {
+		return nil, notAttested("the phone's bootloader is unlocked, so its software cannot be trusted to be the app's")
+	}
 	if err := checkRevocation(f, now); err != nil {
 		return nil, err
 	}
 	return &InstalledAppKeyFacts{Public: f.ECPublicKey, Platform: "android", Level: f.LevelName(),
-		AppPackages: f.AppPackages, AppSigners: f.AppSignerDigests, AppIDPresent: f.AppIDPresent}, nil
+		AppPackages: f.AppPackages, AppSigners: f.AppSignerDigests, AppIDPresent: f.AppIDPresent, VerifiedBootKey: f.VerifiedBootKey}, nil
 }

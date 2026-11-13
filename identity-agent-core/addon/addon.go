@@ -140,6 +140,13 @@ type Host interface {
 	// verifies against the program the app's owner named; naming the kind is
 	// not proof.
 	StartFrontEndKeySignIn(r *http.Request, callerAsset, assetID, audience, key, frontEnd, publicURL string, proof *server.InstalledAppKeyProof) (server.BrowserKeySignIn, error)
+	// BeginInstalledAppKey is the first step of an installed_app sign-in: the
+	// core issues the challenge the installed app's hardware attests its key
+	// with, for one attestation, one use, expiring in minutes (the same caller
+	// rules as StartFrontEndKeySignIn). The proof passed to StartFrontEndKeySignIn
+	// names the ask and carries the key's signature over
+	// server.InstalledAppSignInStatement for it.
+	BeginInstalledAppKey(r *http.Request, callerAsset, assetID string) (server.InstalledAppKeyAsk, error)
 	// AssetStillAdmits is whether the asset's enrolment policy lets in the
 	// person known to it as pairwiseAID now, by MEMBERSHIP only: the
 	// membership check the sign-in made, asked again, so a person removed

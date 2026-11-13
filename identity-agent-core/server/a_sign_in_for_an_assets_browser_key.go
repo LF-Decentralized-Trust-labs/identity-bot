@@ -91,23 +91,8 @@ func (s *CoreServer) startFrontEndKeySignIn(r *http.Request, callerAsset, assetI
 	if frontEnd != asset.FrontEndBrowser && frontEnd != asset.FrontEndInstalledApp {
 		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in names its front end, 'browser' or 'installed_app'"}
 	}
-	// The app asking is the one the core's own check of the request says (it
-	// signed as the app), or, for a route an add-on authenticates itself (an
-	// app's machine, sealed to this Identity Agent), the app that add-on found
-	// the caller to be: callerAsset, which an add-on takes from its own verified
-	// binding and never from the request body.
-	askingApp := callerAsset
-	if app, ok := TheAppThatAsked(r); ok {
-		if callerAsset != "" && callerAsset != app.Asset {
-			return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "the app that signed this request is not the one the add-on found asking"}
-		}
-		askingApp = app.Asset
-	}
-	if askingApp == "" {
-		return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "only an app's back end starts a sign-in for its front end"}
-	}
-	if askingApp != assetID {
-		return BrowserKeySignIn{}, &SignInRefused{http.StatusForbidden, "an app starts sign-ins for its own asset only"}
+	if err := s.theAppAsking(r, callerAsset, assetID); err != nil {
+		return BrowserKeySignIn{}, err
 	}
 	var fact *installedAppFact
 	if frontEnd == asset.FrontEndInstalledApp {

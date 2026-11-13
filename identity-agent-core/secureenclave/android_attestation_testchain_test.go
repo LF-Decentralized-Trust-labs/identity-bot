@@ -35,6 +35,9 @@ type chainSpec struct {
 	extraPadding int       // a second hardware-enforced padding beside OAEP; 0 none
 	appPackage   string    // attestationApplicationId: the package; "" states none
 	appDigests   [][]byte  // ... and the signing certificate digests
+	rootOfTrust  bool      // state a RootOfTrust: the bootloader and boot state below
+	bootUnlocked bool      // ... the bootloader is unlocked
+	bootState    int       // ... verifiedBootState: 0 verified, 1 self signed, 2 unverified, 3 failed
 	caValidFrom  time.Time // the CA certificates' first valid moment; zero: a day before created
 }
 
@@ -114,6 +117,13 @@ func keyDescription(s chainSpec) []byte {
 		origin = 2
 	}
 	hw = append(hw, explicit(kmTagOrigin, mustDER(origin)))
+	if s.rootOfTrust {
+		hw = append(hw, explicit(kmTagRootOfTrust, mustDER(struct {
+			Key    []byte
+			Locked bool
+			State  asn1.Enumerated
+		}{[]byte("a verified boot key, 32 bytes long."), !s.bootUnlocked, asn1.Enumerated(s.bootState)})))
+	}
 	sw := []asn1.RawValue{explicit(kmTagCreationTime, mustDER(s.created.UnixMilli()))}
 	if s.appPackage != "" {
 		sw = append(sw, explicit(kmTagAppID, appIDDER(s.appPackage, s.appDigests)))

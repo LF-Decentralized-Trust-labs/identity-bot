@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -130,7 +131,28 @@ const (
 
 type endAppKeyAsk struct {
 	assetID, key string
+	caller       string // who asked for the nonce: its address, as the core sees it
 	until        time.Time
+}
+
+// /begin is public (the person's Identity Agent has no credential yet), so its
+// nonces are capped by who asked and by app, never by one count for everyone: a
+// single caller filling a shared cap would stop every other person ending a
+// grant. A caller is refused at endAppKeyPerCaller, an app's nonces stop at
+// endAppKeyPerAsset (so one app cannot be used to fill the whole table), the
+// table at endAppKeyTotal, and every nonce expires in endAppKeyLife.
+const (
+	endAppKeyPerCaller = 20
+	endAppKeyPerAsset  = 200
+	endAppKeyTotal     = 5000
+)
+
+// theCallerOf is the address a request came from, without the port.
+func theCallerOf(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 var (
@@ -168,12 +190,21 @@ func (s *CoreServer) handleBeginEndAppKey(w http.ResponseWriter, r *http.Request
 			delete(endAppKeyAsked, n)
 		}
 	}
-	if len(endAppKeyAsked) >= 1000 {
+	caller, perCaller, perAsset := theCallerOf(r), 0, 0
+	for _, a := range endAppKeyAsked {
+		if a.caller == caller {
+			perCaller++
+		}
+		if a.assetID == assetID {
+			perAsset++
+		}
+	}
+	if perCaller >= endAppKeyPerCaller || perAsset >= endAppKeyPerAsset || len(endAppKeyAsked) >= endAppKeyTotal {
 		endAppKeyMu.Unlock()
 		writeError(w, http.StatusTooManyRequests, "too many open", "")
 		return
 	}
-	endAppKeyAsked[nonce] = endAppKeyAsk{assetID: assetID, key: body.Key, until: now.Add(endAppKeyLife)}
+	endAppKeyAsked[nonce] = endAppKeyAsk{assetID: assetID, key: body.Key, caller: caller, until: now.Add(endAppKeyLife)}
 	endAppKeyMu.Unlock()
 	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"nonce": nonce, "audience": endAppKeyAudience, "site_aid": body.SiteAID,

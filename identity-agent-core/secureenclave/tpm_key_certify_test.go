@@ -6,6 +6,7 @@ package secureenclave
 // output parses. See the file header of tpm_key_certify.go.
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -70,16 +71,16 @@ func certifyInfo(extra, name []byte) []byte {
 }
 
 type tpmFixture struct {
-	root   *x509.Certificate
-	rootK  *ecdsa.PrivateKey
-	key    *ecdsa.PrivateKey
-	ak     *ecdsa.PrivateKey
-	ek     *ecdsa.PrivateKey
-	chal   []byte
-	keyPub []byte
-	akPub  []byte
-	ekCert []byte
-	now    time.Time
+	root          *x509.Certificate
+	rootK         *ecdsa.PrivateKey
+	key           *ecdsa.PrivateKey
+	ak            *ecdsa.PrivateKey
+	ek            *ecdsa.PrivateKey
+	chal, credKey []byte
+	keyPub        []byte
+	akPub         []byte
+	ekCert        []byte
+	now           time.Time
 	// tweaks
 	info, sig, cred []byte
 }
@@ -109,7 +110,7 @@ func ekCertFor(t *testing.T, ek *ecdsa.PublicKey, ca *x509.Certificate, caKey *e
 }
 
 func newFixture(t *testing.T, keyAttrs, akAttrs uint32) *tpmFixture {
-	f := &tpmFixture{now: time.Now(), chal: []byte("core-chosen-challenge")}
+	f := &tpmFixture{now: time.Now(), chal: []byte("core-chosen-challenge"), credKey: bytes.Repeat([]byte{0x5c}, TPMCredentialKeyLen)}
 	f.root, f.rootK = newCA(t, "Test TPM Root")
 	f.key, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	f.ak, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -141,7 +142,7 @@ func (f *tpmFixture) evidence(t *testing.T) []byte {
 	cred := f.cred
 	if cred == nil {
 		ekDER, _ := x509.MarshalPKIXPublicKey(&f.ek.PublicKey)
-		cred = tpmCredentialSecret(f.chal, nameOf(t, f.akPub), ekDER)
+		cred = tpmCredentialSecret(f.credKey, nameOf(t, f.akPub), ekDER)
 	}
 	b, err := json.Marshal(tpmKeyCertifyEvidence{KeyPublic: f.keyPub, CertifyInfo: info, CertifySignature: sig,
 		AKPublic: f.akPub, EKCert: f.ekCert, CredentialSecret: cred})
@@ -152,7 +153,7 @@ func (f *tpmFixture) evidence(t *testing.T) []byte {
 }
 
 func (f *tpmFixture) verify(t *testing.T, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
-	return verifyTPMKeyCertify(f.evidence(t), f.chal, f.now, roots)
+	return verifyTPMKeyCertify(f.evidence(t), f.chal, f.credKey, f.now, roots)
 }
 
 func wantRefused(t *testing.T, f *InstalledAppKeyFacts, err error) {
@@ -201,7 +202,7 @@ func TestTPMKeyCertifyFailsClosedWithNoRoots(t *testing.T) {
 	got, err := f.verify(t, nil)
 	wantRefused(t, got, err)
 	// The shipped variable is empty, so the public entry point refuses too.
-	got, err = VerifyTPMKeyCertify(f.evidence(t), f.chal, f.now)
+	got, err = VerifyTPMKeyCertify(f.evidence(t), f.chal, f.credKey, f.now)
 	wantRefused(t, got, err)
 }
 
@@ -314,11 +315,47 @@ func TestTPMKeyCertifyRefusesMalformedDocuments(t *testing.T) {
 		"missing parts": []byte(`{}`),
 		"trailing":      append(f.evidence(t), []byte(`{}`)...),
 	} {
-		got, err := verifyTPMKeyCertify(ev, f.chal, f.now, roots)
+		got, err := verifyTPMKeyCertify(ev, f.chal, f.credKey, f.now, roots)
 		if err == nil || got != nil || !errors.Is(err, ErrNotAttested) {
 			t.Errorf("%s: got %v, %v", name, got, err)
 		}
 	}
-	got, err := verifyTPMKeyCertify(f.evidence(t), nil, f.now, roots)
+	got, err := verifyTPMKeyCertify(f.evidence(t), nil, f.credKey, f.now, roots)
 	wantRefused(t, got, err)
 }
+
+// With roots pinned, software that holds only what is public cannot open it:
+// a genuine EK certificate, an AK of its own, and a credential made from the
+// challenge (which the app holds) or from the AK and EK alone (public) is
+// refused, and so is a core that issued no secret key.
+func TestPinningTPMRootsAloneDoesNotOpenTheCheck(t *testing.T) {
+	f := newFixture(t, attrKeyGood, attrAKGood)
+	roots := []*x509.Certificate{f.root}
+	ekDER, _ := x509.MarshalPKIXPublicKey(&f.ek.PublicKey)
+	akName := nameOf(t, f.akPub)
+	for name, cred := range map[string][]byte{
+		"made with the challenge the app holds": tpmCredentialSecret(f.chal, akName, ekDER),
+		"made with a public hash":               tpmCredentialSecret(sha256Of(f.chal), akName, ekDER),
+		"made with no key":                      tpmCredentialSecret(nil, akName, ekDER),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f.cred = cred
+			got, err := f.verify(t, roots)
+			wantRefused(t, got, err)
+		})
+	}
+	f.cred = nil
+	if _, err := f.verify(t, roots); err != nil {
+		t.Fatalf("the credential made with the core's key was refused: %v", err)
+	}
+	for name, key := range map[string][]byte{"no key": nil, "a short key": []byte("short"), "the challenge itself": f.chal} {
+		t.Run("issued "+name, func(t *testing.T) {
+			f.credKey = key
+			f.cred = tpmCredentialSecret(key, akName, ekDER)
+			got, err := f.verify(t, roots)
+			wantRefused(t, got, err)
+		})
+	}
+}
+
+func sha256Of(b []byte) []byte { h := sha256.Sum256(b); return h[:] }

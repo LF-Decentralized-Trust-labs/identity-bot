@@ -85,6 +85,9 @@ func (h hostWrapper) StartBrowserKeySignIn(assetID, audience, browserKey, public
 func (h hostWrapper) StartFrontEndKeySignIn(r *http.Request, callerAsset, assetID, audience, key, frontEnd, publicURL string, proof *InstalledAppKeyProof) (BrowserKeySignIn, error) {
 	return h.s.startFrontEndKeySignIn(r, callerAsset, assetID, audience, key, frontEnd, publicURL, proof)
 }
+func (h hostWrapper) BeginInstalledAppKey(r *http.Request, callerAsset, assetID string) (InstalledAppKeyAsk, error) {
+	return h.s.beginInstalledAppKey(r, callerAsset, assetID)
+}
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
 }
