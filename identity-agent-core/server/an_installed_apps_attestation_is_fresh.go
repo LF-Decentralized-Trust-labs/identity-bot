@@ -60,7 +60,7 @@ type InstalledAppKeyAsk struct {
 // Android and a TPM it is the ECDSA (ASN.1) signature of its SHA-256; for an
 // Apple App Attest key it is an assertion whose clientDataHash is that SHA-256.
 func InstalledAppSignInStatement(assetID string, challenge []byte, keyThumbprint string) []byte {
-	return []byte("grape installed-app sign-in v1\n" + assetID + "\n" +
+	return []byte("identity-agent installed-app sign-in v1\n" + assetID + "\n" +
 		base64.RawURLEncoding.EncodeToString(challenge) + "\n" + keyThumbprint)
 }
 

@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -147,14 +146,6 @@ const (
 	endAppKeyTotal     = 5000
 )
 
-// theCallerOf is the address a request came from, without the port.
-func theCallerOf(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
-
 var (
 	endAppKeyMu    sync.Mutex
 	endAppKeyAsked = map[string]endAppKeyAsk{} // nonce -> ask
@@ -190,7 +181,7 @@ func (s *CoreServer) handleBeginEndAppKey(w http.ResponseWriter, r *http.Request
 			delete(endAppKeyAsked, n)
 		}
 	}
-	caller, perCaller, perAsset := theCallerOf(r), 0, 0
+	caller, perCaller, perAsset := callerKey(r), 0, 0
 	for _, a := range endAppKeyAsked {
 		if a.caller == caller {
 			perCaller++

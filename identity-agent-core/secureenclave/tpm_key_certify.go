@@ -44,10 +44,10 @@ package secureenclave
 // TPM key can be proved). verifyTPMKeyCertify refuses, in code, a
 // credentialKey that is short or is the challenge. Two values derive:
 //
-//	extraData  = SHA-256("grape-tpm-key-certify-v1" 0x00 || challenge)
+//	extraData  = SHA-256("identity-agent-tpm-key-certify-v1" 0x00 || challenge)
 //	             the qualifying data the app passes to TPM2_Certify.
 //	credential = HMAC-SHA-256(key = credentialKey,
-//	                          "grape-tpm-credential-v1" 0x00 ||
+//	                          "identity-agent-tpm-credential-v1" 0x00 ||
 //	                          uint16(len(akName)) || akName || ekPublicDER)
 //	             where akName is the AK's TPM name (nameAlg || H(TPMT_PUBLIC))
 //	             and ekPublicDER is the PKIX encoding of the EK certificate's
@@ -146,7 +146,7 @@ type tpmKeyCertifyEvidence struct {
 // tpmCertifyExtraData is the qualifying data TPM2_Certify must have been given.
 func tpmCertifyExtraData(challenge []byte) []byte {
 	h := sha256.New()
-	h.Write([]byte("grape-tpm-key-certify-v1\x00"))
+	h.Write([]byte("identity-agent-tpm-key-certify-v1\x00"))
 	h.Write(challenge)
 	return h.Sum(nil)
 }
@@ -156,7 +156,7 @@ func tpmCertifyExtraData(challenge []byte) []byte {
 // return it.
 func tpmCredentialSecret(credentialKey, akName, ekPublicDER []byte) []byte {
 	m := hmac.New(sha256.New, credentialKey)
-	m.Write([]byte("grape-tpm-credential-v1\x00"))
+	m.Write([]byte("identity-agent-tpm-credential-v1\x00"))
 	m.Write([]byte{byte(len(akName) >> 8), byte(len(akName))})
 	m.Write(akName)
 	m.Write(ekPublicDER)

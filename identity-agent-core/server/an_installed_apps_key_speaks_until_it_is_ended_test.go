@@ -199,29 +199,62 @@ func TestAProvedInstalledAppsSignInSpeaksUntilItIsEndedAndABrowsersLapses(t *tes
 }
 
 // Naming the kind is not proof: each of these is refused, and the refusal is
-// the core's own, made before any sign-in exists.
+// the core's own, made before any sign-in exists. Each proof is built inside
+// its subtest, after mod() has said what the stand-in hardware attests, so the
+// one thing wrong in a case is the only thing wrong with it, and each case is
+// held to its own reason: a guard removed turns its case into a different
+// refusal, or a sign-in, and fails.
 func TestAnInstalledAppSignInRestsOnProofAndNotOnTheCallersWord(t *testing.T) {
 	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	app := func() *http.Request { return anAppsRequest("the-website", nil) }
+	good := func() *InstalledAppKeyProof { return iw.proof() }
 	for name, c := range map[string]struct {
-		req   *http.Request
+		req   func() *http.Request
 		asset string
-		proof *InstalledAppKeyProof
+		proof func() *InstalledAppKeyProof
 		mod   func()
+		why   string // what the refusal says
 	}{
-		"no proof":                           {req: anAppsRequest("the-website", nil), asset: "the-website"},
-		"empty evidence":                     {req: anAppsRequest("the-website", nil), asset: "the-website", proof: &InstalledAppKeyProof{Platform: "android"}},
-		"a request no app signed":            {req: httptest.NewRequest("POST", "/x", nil), asset: "the-website", proof: iw.proof()},
-		"another app's asset":                {req: anAppsRequest("some-other-app", nil), asset: "the-website", proof: iw.proof()},
-		"a page, by Origin":                  {req: anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"}), asset: "the-website", proof: iw.proof()},
-		"a page, by Fetch Metadata":          {req: anAppsRequest("the-website", map[string]string{"Sec-Fetch-Mode": "cors"}), asset: "the-website", proof: iw.proof()},
-		"an unknown platform":                {req: anAppsRequest("the-website", nil), asset: "the-website", proof: &InstalledAppKeyProof{Platform: "toaster", Evidence: []byte("x")}},
-		"another key than the attested":      {req: anAppsRequest("the-website", nil), asset: "the-website", proof: iw.proof(), mod: func() { iw.said.Public = &other.PublicKey }},
-		"another package":                    {req: anAppsRequest("the-website", nil), asset: "the-website", proof: iw.proof(), mod: func() { iw.said.AppPackages = []string{"org.evil"} }},
-		"another signing certificate":        {req: anAppsRequest("the-website", nil), asset: "the-website", proof: iw.proof(), mod: func() { iw.said.AppSigners = [][]byte{bytes.Repeat([]byte{1}, 32)} }},
-		"no program stated":                  {req: anAppsRequest("the-website", nil), asset: "the-website", proof: iw.proof(), mod: func() { iw.said.AppIDPresent, iw.said.AppPackages = false, nil }},
-		"a TPM key the owner did not accept": {req: anAppsRequest("the-website", nil), asset: "the-website", proof: &InstalledAppKeyProof{Platform: "tpm", Evidence: []byte("x")}, mod: func() { iw.said.Platform = "tpm" }},
-		"a platform that vouches as another": {req: anAppsRequest("the-website", nil), asset: "the-website", proof: &InstalledAppKeyProof{Platform: "apple", Evidence: []byte("x")}},
+		"no proof":       {req: app, asset: "the-website", why: "needs a hardware attestation"},
+		"empty evidence": {req: app, asset: "the-website", proof: func() *InstalledAppKeyProof { return &InstalledAppKeyProof{Platform: "android"} }, why: "needs a hardware attestation"},
+		"a request no app signed": {req: func() *http.Request { return httptest.NewRequest("POST", "/x", nil) }, asset: "the-website", proof: good,
+			why: "only an app's back end"},
+		"another app's asset": {req: func() *http.Request { return anAppsRequest("some-other-app", nil) }, asset: "the-website", proof: good,
+			why: "its own asset only"},
+		"a page, by Origin": {req: func() *http.Request {
+			return anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"})
+		}, asset: "the-website", proof: good,
+			why: "web page"},
+		"a page, by Fetch Metadata": {req: func() *http.Request { return anAppsRequest("the-website", map[string]string{"Sec-Fetch-Mode": "cors"}) }, asset: "the-website", proof: good,
+			why: "web page"},
+		"an unknown platform": {req: app, asset: "the-website", proof: func() *InstalledAppKeyProof {
+			p := good()
+			p.Platform = "toaster"
+			return p
+		}, why: "not 'toaster'"},
+		"another key than the attested": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.Public = &other.PublicKey },
+			why: "attested key is not the key"},
+		"another package": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppPackages = []string{"org.evil"} },
+			why: "not made by the program the owner named"},
+		"no program stated, though a package is": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppIDPresent = false },
+			why: "not made by the program the owner named"},
+		"no package stated": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppPackages = nil },
+			why: "not made by the program the owner named"},
+		"another signing certificate": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppSigners = [][]byte{bytes.Repeat([]byte{1}, 32)} },
+			why: "certificate the owner did not name"},
+		"one certificate of two is not the owner's": {req: app, asset: "the-website", proof: good,
+			mod: func() { iw.said.AppSigners = [][]byte{bytes.Repeat([]byte{0xab}, 32), bytes.Repeat([]byte{1}, 32)} },
+			why: "certificate the owner did not name"},
+		"no signing certificate stated": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppSigners = nil },
+			why: "names no signing certificate"},
+		"a TPM key the owner did not accept": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.Platform = "tpm" },
+			why: "not accepted a TPM key"},
+		"a platform that vouches as another": {req: app, asset: "the-website", proof: func() *InstalledAppKeyProof {
+			p := good()
+			p.Platform = "apple" // the stand-in attests android
+			return p
+		}, why: "not proved by the platform it names"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			saved := *iw.said
@@ -229,19 +262,30 @@ func TestAnInstalledAppSignInRestsOnProofAndNotOnTheCallersWord(t *testing.T) {
 			if c.mod != nil {
 				c.mod()
 			}
-			_, err := iw.start(c.req, c.asset, c.proof)
+			var p *InstalledAppKeyProof
+			if c.proof != nil {
+				p = c.proof() // built now, after mod, so it is fresh and signs what is attested
+			}
+			_, err := iw.start(c.req(), c.asset, p)
 			var refused *SignInRefused
 			if !errors.As(err, &refused) {
 				t.Fatalf("started: %v", err)
 			}
+			if !strings.Contains(refused.Reason, c.why) {
+				t.Fatalf("refused for the wrong reason: %q, want it to say %q", refused.Reason, c.why)
+			}
 		})
+	}
+	// The same proof, with nothing wrong, starts: the cases above fail for their one fault.
+	if _, err := iw.start(app(), "the-website", good()); err != nil {
+		t.Fatalf("a proof with nothing wrong was refused: %v", err)
 	}
 	// An owner who named nothing accepts no installed-app key at all.
 	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
 	a.InstalledApp = asset.InstalledAppIdentity{}
 	_ = iw.org.assetHandler.Store.UpsertAsset(a)
-	if _, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof()); err == nil {
-		t.Fatal("an installed-app key was accepted for an app whose owner named no program")
+	if _, err := iw.start(app(), "the-website", good()); err == nil || !strings.Contains(err.Error(), "has not said which installed program") {
+		t.Fatalf("an installed-app key was accepted for an app whose owner named no program: %v", err)
 	}
 }
 
@@ -646,6 +690,16 @@ func TestAnAppleAppAttestKeySpeaksForThePersonByAnAssertion(t *testing.T) {
 	if err := check(assert(hash), func(s *agentmessage.PersonStatement) { s.MessageID = "m2" }); err == nil {
 		t.Fatal("an assertion was accepted for a statement it did not sign")
 	}
+	// The signer's identifier and the key it comes with must be one key: a valid
+	// assertion by this key under another machine's identifier is not that machine's.
+	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	otherID, err := iacrypto.MachineAIDForKey(elliptic.Marshal(elliptic.P256(), otherKey.PublicKey.X, otherKey.PublicKey.Y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := check(assert(hash), func(s *agentmessage.PersonStatement) { s.Signer = otherID }); err == nil || !strings.Contains(err.Error(), "not the same key") {
+		t.Fatalf("a signer's identifier that is not its key was accepted: %v", err)
+	}
 	// The owner's program is the one asked on every use.
 	as, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
 	as.InstalledApp.AppleAppID = "TEAM123456.org.evil"
@@ -733,5 +787,79 @@ func TestRemovingAMemberThroughTheRouteEndsTheirGrant(t *testing.T) {
 	}
 	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok {
 		t.Fatal("a removed member's grant is still held after the owner removed them")
+	}
+}
+
+// An Apple key proves it holds the key by an assertion over the sign-in
+// statement, made for the owner's program: a plain signature, one by another
+// key, one over other words and one for another program are each refused.
+func TestAnAppleInstalledAppKeyIsHeldToAnAssertionAtSignIn(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.said.Platform = "apple"
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	for name, sign := range map[string]func(ask []byte) []byte{
+		"a plain signature": func(ask []byte) []byte {
+			d := sha256.Sum256(InstalledAppSignInStatement("the-website", ask, iw.key))
+			sig, _ := ecdsa.SignASN1(rand.Reader, iw.priv, d[:])
+			return sig
+		},
+		"an assertion by another key": func(ask []byte) []byte {
+			d := sha256.Sum256(InstalledAppSignInStatement("the-website", ask, iw.key))
+			return anAppAttestAssertion(other, "TEAM123456.org.example.portal", 3, d[:])
+		},
+		"an assertion over other words": func(ask []byte) []byte {
+			d := sha256.Sum256([]byte("other words"))
+			return anAppAttestAssertion(iw.priv, "TEAM123456.org.example.portal", 3, d[:])
+		},
+		"an assertion for another program": func(ask []byte) []byte {
+			d := sha256.Sum256(InstalledAppSignInStatement("the-website", ask, iw.key))
+			return anAppAttestAssertion(iw.priv, "TEAM123456.org.evil", 3, d[:])
+		},
+		"no signature": func([]byte) []byte { return nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := iw.proof()
+			p.KeySignature = sign(iw.asked)
+			_, err := iw.start(anAppsRequest("the-website", nil), "the-website", p)
+			var refused *SignInRefused
+			if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "did not sign this sign-in") {
+				t.Fatalf("an Apple key's sign-in with %s was not refused for it: %v", name, err)
+			}
+		})
+	}
+	if _, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof()); err != nil {
+		t.Fatalf("a proper assertion was refused: %v", err)
+	}
+}
+
+// Behind a trusted proxy every request reaches the core from the proxy's own
+// address, so the per-caller cap counts the visitor the proxy names, not the proxy.
+func TestTheEndNonceCapCountsTheVisitorBehindAProxyNotTheProxy(t *testing.T) {
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.1")
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	endAppKeyMu.Lock()
+	endAppKeyAsked = map[string]endAppKeyAsk{}
+	endAppKeyMu.Unlock()
+	t.Cleanup(func() { endAppKeyMu.Lock(); endAppKeyAsked = map[string]endAppKeyAsk{}; endAppKeyMu.Unlock() })
+	begin := func(visitor string) int {
+		bb, _ := json.Marshal(map[string]string{"site_aid": a.PairwiseAID, "key": iw.key})
+		r := httptest.NewRequest("POST", "/x", bytes.NewReader(bb))
+		r.RemoteAddr = "10.0.0.1:4000"
+		r.Header.Set("X-Forwarded-For", visitor)
+		rec := httptest.NewRecorder()
+		iw.org.handleBeginEndAppKey(rec, r)
+		return rec.Code
+	}
+	for i := 0; i < endAppKeyPerCaller; i++ {
+		if code := begin("198.51.100.7"); code != 200 {
+			t.Fatalf("nonce %d: %d", i, code)
+		}
+	}
+	if code := begin("198.51.100.7"); code != http.StatusTooManyRequests {
+		t.Fatalf("a visitor behind the proxy was not capped: %d", code)
+	}
+	if code := begin("198.51.100.8"); code != 200 {
+		t.Fatalf("one visitor behind the proxy stopped another: %d", code)
 	}
 }
