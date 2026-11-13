@@ -8,6 +8,7 @@ import 'package:pointycastle/export.dart';
 import 'package:http/http.dart' as http;
 
 import 'app_checks.dart';
+import 'witnessed.dart';
 
 /// Sealed front-end traffic (ADR-072 section 2 step 5, Amendment 4): the Dart
 /// port of identity-bot's `packages/login-web/src/seal.ts` and
@@ -347,6 +348,36 @@ List<int> sealKeyStatementText(String rid, Uint8List pub, int sn) =>
 Uint8List checkedSealKey(AppLink link, AnswerLogs logs) {
   final r = checkSealKey(link.rid, link.seal,
       known: logs.get(link.rid), min: link.min);
+  logs.set(link.rid, r.log);
+  return r.key;
+}
+
+/// [checkedSealKey], and where the relay identifier names witnesses (and the
+/// link says where to ask them) the witnesses are asked for the log too
+/// (`checkedSealKey` in `login-web/src/app.ts`, which this follows). What a link
+/// carries is only as new as the link: a log the witnesses vouch for that goes
+/// on past the link's means the key the link vouched the sealing key for has
+/// been rotated away, and that is a [TrustRefused], with the witnessed log
+/// kept so that a stale link stays refused. A log that carries on from what the
+/// witnesses vouch for (a removal does not wait for them) is taken as before,
+/// held to the link's minimum. Witnesses that cannot be reached, or have
+/// receipted nothing, change nothing.
+Future<Uint8List> checkedSealKeyWitnessed(
+    AppLink link, AnswerLogs logs, http.Client client) async {
+  final r = checkSealKey(link.rid, link.seal,
+      known: logs.get(link.rid), min: link.min);
+  if (link.wit.isNotEmpty) {
+    final mine =
+        readAnswerLog(link.rid, r.log, (why) => throw TrustRefused(why));
+    final j = judgeLinkLog(link.rid, r.log,
+        await askWitnesses(link.rid, mine.inception, link.wit, client));
+    if (j.verdict == LinkVerdict.moved_on || j.verdict == LinkVerdict.apart) {
+      if (j.verdict == LinkVerdict.moved_on) logs.set(link.rid, j.log!);
+      throw TrustRefused(j.verdict == LinkVerdict.moved_on
+          ? 'the link\'s sealing key is refused: the utility app\'s relay identifier has moved on since this link was made, as its witnesses show: ask the utility app\'s owner for a new link'
+          : 'the link\'s sealing key is refused: the utility app\'s relay identifier has a different key log at the witnesses than the link carries');
+    }
+  }
   logs.set(link.rid, r.log);
   return r.key;
 }

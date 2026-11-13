@@ -5,8 +5,8 @@ import assert from "node:assert";
 import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { make } from "../test-vectors/make-seal-vectors.mjs";
-import { checkSealKey, clockAnswerSkew } from "../dist/app.js";
-import { readWitnessedLog } from "../dist/witnessed.js";
+import { checkedSealKey, checkSealKey, clockAnswerSkew } from "../dist/app.js";
+import { judgeLinkLog, readWitnessedLog } from "../dist/witnessed.js";
 import { openRequest, sealRequest, sealPaddedRequestForVectors, SealError } from "../dist/seal.js";
 
 const v = JSON.parse(readFileSync(new URL("../test-vectors/seal.json", import.meta.url), "utf8"));
@@ -42,6 +42,24 @@ for (const c of v.statement_refusals) {
 for (const c of v.witnessed.cases) {
   if (c.refuse) await assert.rejects(readWitnessedLog(c.rid, c.answers), /witnesses' key log is refused/, "witnessed: " + c.name);
   else assert.equal((await readWitnessedLog(c.rid, c.answers)).events, c.events, "witnessed: " + c.name);
+}
+
+for (const c of v.witnessed.against_link) {
+  const j = await judgeLinkLog(c.rid, c.link_log, c.answers);
+  assert.equal(j.verdict, c.verdict, "against the link: " + c.name);
+}
+
+for (const c of v.witnessed.page) {
+  const held = { "https://w0.example/api": c.held.w0, "https://w1.example/api": c.held.w1 };
+  const fetchWit = async (url) => {
+    const a = held[String(url).replace(/\/witness\/kel\/.*/, "")];
+    if (a === "down") throw new TypeError("network down");
+    return a ? new Response(JSON.stringify(a), { status: 200 }) : new Response("not held", { status: 404 });
+  };
+  const link = { aid: "", kel: "", rid: c.rid, api: "https://tasks.example", seal: c.statement, min: c.min, wit: c.wit };
+  const take = checkedSealKey(link, { get: () => null, set: () => {} }, fetchWit);
+  if (c.expect === "taken") assert.deepEqual((await take).key, spk, "a page: " + c.name);
+  else await assert.rejects(take, /moved on since this link was made/, "a page: " + c.name);
 }
 
 for (const c of v.requests) {

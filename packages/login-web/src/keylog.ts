@@ -33,6 +33,8 @@ export interface CheckedLog {
   /** The key the log names now. */
   key: Uint8Array;
   events: LogEvent[];
+  /** The inception event as published: what a witness is shown to prove the log is known (X-Inception-Event). */
+  inception: string;
 }
 
 /** Reads the signed key log a relay identifier's answer carries (a CESR stream:
@@ -105,6 +107,13 @@ export async function readAnswerLog(rid: string, encoded: string | null | undefi
     prev = { d: ev.d, n: ev.n![0] };
     events.push({ sn: i, ilk: ev.t as string, said: ev.d });
   }
-  return { key: key!, events };
+  return { key: key!, events, inception: parts[0].event };
 }
 
+
+/** Whether `log` holds every event `base` holds, in the same order, and perhaps
+ *  more after them: the one rule for taking a newer log in place of one already
+ *  held. Events are compared by sequence number, type and SAID. */
+export function logExtends(log: LogEvent[], base: LogEvent[]): boolean {
+  return log.length >= base.length && base.every((e, i) => log[i].sn === e.sn && log[i].ilk === e.ilk && log[i].said === e.said);
+}

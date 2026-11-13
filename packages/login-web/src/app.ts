@@ -17,9 +17,11 @@
  * (`fetchFn`) uses, so the page is the button and this module, and nothing else.
  * It reads no framework and touches only what a browser has.
  */
-import { deriveIdentifier, readAnswerLog } from "./keylog.js";
+import { deriveIdentifier, logExtends, readAnswerLog } from "./keylog.js";
+export { logExtends };
 import type { CheckedLog, LogEvent } from "./keylog.js";
 export type { CheckedLog, LogEvent };
+import { askWitnesses, judgeLinkLog } from "./witnessed.js";
 import { SEAL_PATH, SealError, sealKeyStatementText, sealRequest, unb64u } from "./seal.js";
 import {
   blake3Qb64,
@@ -59,12 +61,32 @@ export interface AppLink {
    *  that number (`checkSealKey`), so a page that has seen nothing before is not handed an
    *  earlier log. */
   min: string;
+  /** Where to ask the relay identifier's witnesses for its key log, each the address a witness's
+   *  routes are under (`<address>/witness/kel/<rid>`), as the owner's Identity Agent wrote them. Empty
+   *  when the identifier has none. Nothing vouches for an address: what a witness answers is checked
+   *  against the identifier's own inception (`readWitnessedLog`), and an address that is wrong is only
+   *  a witness that cannot be reached. */
+  wit: string[];
 }
+
+/** The most witnesses a link names. */
+export const MAX_LINK_WITNESSES = 8;
 
 /** `<sequence number>.<SAID>`, or null when `min` is not that. */
 export function readMinimum(min: unknown): { sn: number; said: string } | null {
   const m = typeof min === "string" ? /^(0|[1-9][0-9]{0,2})\.([A-Za-z0-9_-]{20,100})$/.exec(min) : null;
   return m ? { sn: Number(m[1]), said: m[2] } : null;
+}
+
+/** The witness addresses a link's `wit` names, comma separated; throws unless each is an https address (or a local one), none is
+ *  named twice, and there are no more than `MAX_LINK_WITNESSES`. No `wit` is no addresses. */
+function readWitnessAddresses(text: string | null): string[] {
+  if (text === null || text === "") return [];
+  const list = text.split(",").map((a) => a.replace(/\/+$/, ""));
+  if (list.length > MAX_LINK_WITNESSES || list.some((a) => !/^https:\/\/[^\s,]+$/.test(a) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/][^\s,]*$/.test(a)) || new Set(list).size !== list.length) {
+    throw new Error("the link names a witness address that is not one this page asks");
+  }
+  return list;
 }
 
 /** How long after it was made a sign-in link is still taken, in seconds. A link carries `iat`, the
@@ -84,6 +106,7 @@ export function readAppLink(hash: string, now = Date.now()): AppLink {
   if (!link.aid || !link.kel) throw new Error("the link names no utility app and key log");
   if (!link.rid) throw new Error("the link names no relay identifier to check the utility app's answers against");
   if (!link.seal) throw new Error("the link names no sealing key to seal calls to the utility app with");
+  const wit = readWitnessAddresses(p.get("wit"));
   if (!readMinimum(link.min)) throw new Error("the link names no latest key log event the utility app's relay identifier must have reached");
   if (!/^https:\/\//.test(link.api) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(link.api)) {
     throw new Error("the link names no back end to sign in at");
@@ -93,7 +116,7 @@ export function readAppLink(hash: string, now = Date.now()): AppLink {
   const age = now / 1000 - iat;
   if (age > LINK_MAX_AGE_SECONDS) throw new Error("this link was made more than 7 days ago and is no longer taken: ask the utility app's owner for a new one");
   if (age < -LINK_MAX_AHEAD_SECONDS) throw new Error("this link is dated later than this device's clock says it is now: set the date and time on this device, or ask the utility app's owner for a new link");
-  return link;
+  return { ...link, wit };
 }
 
 // ---- the app's key log ---------------------------------------------------
@@ -224,13 +247,6 @@ export async function checkAnswerKeyLog(rid: string, encoded: string): Promise<C
   return readAnswerLog(rid, encoded, (why: string): never => {
     throw new Error("the answer's key log is refused: " + why);
   });
-}
-
-/** Whether `log` holds every event `base` holds, in the same order, and perhaps
- *  more after them: the one rule for taking a newer log in place of one already
- *  held. Events are compared by sequence number, type and SAID. */
-export function logExtends(log: LogEvent[], base: LogEvent[]): boolean {
-  return log.length >= base.length && base.every((e, i) => log[i].sn === e.sn && log[i].ilk === e.ilk && log[i].said === e.said);
 }
 
 /** What a page remembers of an app's key log between answers, per relay
@@ -373,9 +389,29 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
   return { key: key!, log: keep };
 }
 
-/** The link's sealing key, checked against the log this page holds, which is then the longer. */
-async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min">, logs: LogMemory): Promise<{ key: Uint8Array; log: string }> {
+/** The link's sealing key, checked against the log this page holds, which is then the longer. Where the relay
+ *  identifier names witnesses (and the link says where to ask them) the page also asks them for the log
+ *  (`askWitnesses`), because what a link carries is only as new as the link: a log the witnesses vouch for that
+ *  goes on past the link's means the key the link vouched the sealing key for has been rotated away, and that is
+ *  refused, with the witnessed log kept so that a stale link stays refused. A log that carries on from what the
+ *  witnesses vouch for (they may not have been told yet, a removal does not wait for them) is taken as before,
+ *  held to the link's minimum. Witnesses that cannot be reached, or have receipted nothing, change nothing. */
+export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch): Promise<{ key: Uint8Array; log: string }> {
   const r = await checkSealKey(link.rid, link.seal, logs.get(link.rid), link.min);
+  if (link.wit?.length) {
+    const mine = await readAnswerLog(link.rid, r.log, (why): never => {
+      throw new Error(why);
+    });
+    const j = await judgeLinkLog(link.rid, r.log, await askWitnesses(link.rid, mine.inception, link.wit, ask));
+    if (j.verdict === "moved_on" || j.verdict === "apart") {
+      if (j.verdict === "moved_on") logs.set(link.rid, j.log as string);
+      throw new Error(
+        j.verdict === "moved_on"
+          ? "the link's sealing key is refused: the utility app's relay identifier has moved on since this link was made, as its witnesses show: ask the utility app's owner for a new link"
+          : "the link's sealing key is refused: the utility app's relay identifier has a different key log at the witnesses than the link carries",
+      );
+    }
+  }
   logs.set(link.rid, r.log);
   return r;
 }
@@ -569,12 +605,12 @@ export interface AppFetch {
  *  a proof made with the key. A refusal is an Error the button shows. */
 export async function appFetch(
   link: AppLink,
-  opts: { fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory } = {},
+  opts: { fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory; witnessFetch?: typeof fetch } = {},
 ): Promise<AppFetch> {
   const logs = opts.logs ?? browserLogMemory();
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const appKey = await checkAppKeyLog(link.aid, link.kel);
-  const sealKey = (await checkedSealKey(link, logs)).key;
+  const sealKey = (await checkedSealKey(link, logs, opts.witnessFetch ?? underlying)).key;
   const mine = await (opts.browserKey ?? appBrowserKey)(linkSlot(link));
   const sessionEndpoint = `${link.api}/signin/session`;
   let skew = 0;
@@ -661,7 +697,7 @@ export interface AppSession {
  *  app's, keeps its session and ends it. A page has no copy of any of it. */
 export function appSession(
   link: AppLink,
-  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory } = {},
+  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory; witnessFetch?: typeof fetch } = {},
 ): AppSession {
   const logs = opts.logs ?? browserLogMemory();
   const storage = opts.storage ?? sessionStorage;
@@ -684,7 +720,7 @@ export function appSession(
       const proof = await proofHeaders(k.privateKey, method, path, await sha256b64u(token), body, skew);
       const headers: Record<string, string> = lowerCase({ Authorization: "Bearer " + token, ...proof });
       if (method !== "GET") headers["content-type"] = "application/json";
-      r = await sealedCall(link, (await (sealKey ??= checkedSealKey(link, logs))).key, { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
+      r = await sealedCall(link, (await (sealKey ??= checkedSealKey(link, logs, opts.witnessFetch ?? underlying))).key, { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
       const off = clockAnswerSkew(r);
       if (off === null) break;
       if (again) throw new Error("This device's clock is too far from the utility app's. Set the date and time on this device, then try again.");

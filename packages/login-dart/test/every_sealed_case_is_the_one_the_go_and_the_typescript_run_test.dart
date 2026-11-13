@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:login_dart/app_checks.dart';
 import 'package:login_dart/seal.dart';
 import 'package:login_dart/witnessed.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 // The Dart port of sealed front-end traffic is held to the cases the TypeScript
@@ -25,7 +27,8 @@ List<Map<String, dynamic>> of(String k) =>
     (v[k] as List).cast<Map<String, dynamic>>();
 
 void main() {
-  test('the log a relay identifier\u2019s witnesses vouch for, case by case', () {
+  test('the log a relay identifier\u2019s witnesses vouch for, case by case',
+      () {
     final w = v['witnessed'] as Map<String, dynamic>;
     final cases = (w['cases'] as List).cast<Map<String, dynamic>>();
     expect(cases.length, greaterThanOrEqualTo(10));
@@ -33,12 +36,66 @@ void main() {
       final rid = c['rid'] as String;
       final answers = c['answers'] as List<Object?>;
       if (c['refuse'] == true) {
-        expect(() => readWitnessedLog(rid, answers),
-            throwsA(isA<TrustRefused>()),
+        expect(
+            () => readWitnessedLog(rid, answers), throwsA(isA<TrustRefused>()),
             reason: 'witnessed: ${c['name']}');
       } else {
         expect(readWitnessedLog(rid, answers).events, c['events'],
             reason: 'witnessed: ${c['name']}');
+      }
+    }
+  });
+
+  test('the log a link carried, against the log its witnesses vouch for', () {
+    final w = v['witnessed'] as Map<String, dynamic>;
+    final cases = (w['against_link'] as List).cast<Map<String, dynamic>>();
+    expect(cases.length, greaterThanOrEqualTo(4));
+    for (final c in cases) {
+      expect(
+          judgeLinkLog(c['rid'] as String, c['link_log'] as String,
+                  c['answers'] as List<Object?>)
+              .verdict
+              .name,
+          c['verdict'],
+          reason: 'against the link: ${c['name']}');
+    }
+  });
+
+  test('a link that names witnesses is taken or refused by what they answer',
+      () async {
+    final w = v['witnessed'] as Map<String, dynamic>;
+    final cases = (w['page'] as List).cast<Map<String, dynamic>>();
+    expect(cases.length, greaterThanOrEqualTo(4));
+    final spk0 = unb64((v['seal_key'] as Map)['public_b64u'] as String);
+    for (final c in cases) {
+      final held = {
+        'https://w0.example/api': (c['held'] as Map)['w0'],
+        'https://w1.example/api': (c['held'] as Map)['w1'],
+      };
+      final client = MockClient((req) async {
+        final a =
+            held[req.url.toString().replaceAll(RegExp(r'/witness/kel/.*'), '')];
+        if (a == 'down') throw http.ClientException('network down');
+        if (a == null) return http.Response('not held', 404);
+        return http.Response(jsonEncode(a), 200);
+      });
+      final link = AppLink(
+          '',
+          '',
+          c['rid'] as String,
+          'https://tasks.example',
+          c['statement'] as String,
+          c['min'] as String,
+          (c['wit'] as List).cast<String>());
+      final take = checkedSealKeyWitnessed(link, AnswerLogs(), client);
+      if (c['expect'] == 'taken') {
+        expect(await take, spk0, reason: 'a page: ${c['name']}');
+      } else {
+        await expectLater(
+            take,
+            throwsA(isA<TrustRefused>().having((e) => e.message, 'message',
+                contains('moved on since this link was made'))),
+            reason: 'a page: ${c['name']}');
       }
     }
   });
@@ -167,11 +224,15 @@ void main() {
   test('the clock answer is the shared one', () {
     final ca = v['clock_answer'] as Map<String, dynamic>;
     final now = DateTime.parse(ca['now'] as String);
-    SealedAnswer a(int status, String body) =>
-        (status: status, contentType: 'application/json', body: utf8.encode(body));
+    SealedAnswer a(int status, String body) => (
+          status: status,
+          contentType: 'application/json',
+          body: utf8.encode(body)
+        );
     expect(clockAnswerSkew(a(ca['status'] as int, ca['body'] as String), now),
         Duration(milliseconds: ca['skew_ms'] as int));
-    for (final c in (ca['not_clock_answers'] as List).cast<Map<String, dynamic>>()) {
+    for (final c
+        in (ca['not_clock_answers'] as List).cast<Map<String, dynamic>>()) {
       expect(clockAnswerSkew(a(c['status'] as int, c['body'] as String), now),
           isNull,
           reason: c['name'] as String);

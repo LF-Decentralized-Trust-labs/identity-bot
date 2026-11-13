@@ -5,7 +5,7 @@
 // `node test-vectors/make-seal-vectors.mjs` after `npm run build` to rewrite it.
 import { createECDH, createHash, hkdfSync, webcrypto } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { keyFor, minimum, relayChain, rotation, sealStatement, witnessAnswer, witnessFor } from "../src/app-test-support.mjs";
+import { keyFor, logHeader, minimum, relayChain, rotation, sealStatement, witnessAnswer, witnessFor } from "../src/app-test-support.mjs";
 import { sealAnswerWithAnyNForVectors, sealPaddedRequestForVectors, sealRequest } from "../dist/seal.js";
 
 const enc = new TextEncoder();
@@ -185,7 +185,7 @@ export async function make() {
   const chainRot = relayChain("witnessed-rot", 1, { b: [W[0].aid, W[1].aid, W[2].aid], bt: "2", over: { 1: { br: [W[2].aid], ba: [W[3].aid], bt: "2" } } });
   const plain = relayChain("witnessed-none", 1);
   const witnessed = {
-    about: "A relay identifier's key log as its witnesses hold it (packages/login-web/src/witnessed.ts, packages/login-dart/lib/witnessed.dart, and in Go identity-agent-core/drivers through witnessed_vectors_test.go). Each case gives `answers` (what each witness the identifier names answered to GET /witness/kel/{rid}: every event with its bytes, the controller's signature and that witness's own receipt) and `rid`. A reader pools the receipts, reads each answer as a key log, counts for each event the distinct witnesses designated at that event whose indexed signature over the event's bytes verifies, and takes the longest log every event of which has its threshold: `events` is how many events that is. `refuse` means no log is taken.",
+    about: "A relay identifier's key log as its witnesses hold it (packages/login-web/src/witnessed.ts, packages/login-dart/lib/witnessed.dart, and in Go identity-agent-core/drivers through witnessed_vectors_test.go). Each case gives `answers` (what each witness the identifier names answered to GET /witness/kel/{rid}: every event with its bytes, the controller's signature and that witness's own receipt) and `rid`. A reader pools the receipts, reads each answer as a key log, counts for each event the distinct witnesses designated at that event whose indexed signature over the event's bytes verifies, and takes the longest log every event of which has its threshold: `events` is how many events that is. `refuse` means no log is taken. `page`: a link that names witnesses, taken or refused as `expect` says, by what each address (`w0`, `w1`: the first and second of `wit`) answers. `against_link`: a log a link carried (`link_log`) judged against those answers is `agrees`, `moved_on`, `apart` or `none`.",
     cases: [
       case_("every witness gives the whole log, with its receipt", [ans(W[0], 0), ans(W[1], 1), ans(W[2], 2)], 2),
       case_("exactly a threshold of witnesses answers", [ans(W[0], 0), ans(W[1], 1)], 2),
@@ -204,6 +204,26 @@ export async function make() {
       case_("a witness list that a rotation changed: the witness it cut does not count", [ans(W[0], 0, 2, chainRot), ans(W[1], 1, 1, chainRot), ans(W[2], 2, 2, chainRot)], 1, { rid: chainRot.aid }),
       case_("an identifier whose inception names no witnesses", [witnessAnswer(plain, 2)], null, { rid: plain.aid }),
     ],
+    // What a page does with the log a link carried (`link_log`, already read) once it has asked the witnesses (src/witnessed.ts `judgeLinkLog`):
+    // the link's log holds what they vouch for (`agrees`), they vouch for more (`moved_on`: the key the link vouched a sealing key for is
+    // not current), the two disagree on an event (`apart`), or they gave no log to take (`none`).
+    against_link: [
+      { name: "the link holds what the witnesses vouch for", link_log: chainW.log(), answers: [ans(W[0], 0), ans(W[1], 1)], verdict: "agrees" },
+      { name: "the link is ahead of witnesses that have not been told yet", link_log: chainW.log(), answers: [ans(W[0], 0, 1), ans(W[1], 1, 1)], verdict: "agrees" },
+      { name: "the witnesses vouch for a rotation the link's log does not have", link_log: chainW.log(1), answers: [ans(W[0], 0), ans(W[1], 1)], verdict: "moved_on" },
+      { name: "the link and the witnesses hold different events at one place", link_log: logHeader(forkChain.events), answers: [ans(W[0], 0), ans(W[1], 1)], verdict: "apart" },
+      { name: "the witnesses have receipted nothing", link_log: chainW.log(), answers: [ans(W[0], 0)], verdict: "none" },
+      { name: "no witness answered", link_log: chainW.log(), answers: [], verdict: "none" },
+    ].map((c) => ({ ...c, rid: chainW.aid })),
+    // A page given a link that names witnesses (`wit`, by address) asks each for the log (GET <address>/witness/kel/<rid>) and goes by it:
+    // `held` is what each address answers (`down` is a witness that cannot be reached). `taken` gives the sealing key; `moved_on` is refused
+    // with "moved on since this link was made". `statement` is the link's sealing key statement, `min` its latest event.
+    page: [
+      { name: "witnesses that vouch for what the link carries", statement: sealStatement(chainW, sk.pub), min: minimum(chainW), held: { w0: ans(W[0], 0), w1: ans(W[1], 1) }, expect: "taken" },
+      { name: "a link made before the rotation the witnesses vouch for", statement: sealStatement(chainW, sk.pub, { log: chainW.log(1), sn: 0, signer: chainW.key(0) }), min: minimum(chainW, 1), held: { w0: ans(W[0], 0), w1: ans(W[1], 1) }, expect: "moved_on" },
+      { name: "witnesses that cannot be reached", statement: sealStatement(chainW, sk.pub, { log: chainW.log(1), sn: 0, signer: chainW.key(0) }), min: minimum(chainW, 1), held: { w0: "down", w1: "down" }, expect: "taken" },
+      { name: "witnesses that have receipted too little", statement: sealStatement(chainW, sk.pub, { log: chainW.log(1), sn: 0, signer: chainW.key(0) }), min: minimum(chainW, 1), held: { w0: ans(W[0], 0) }, expect: "taken" },
+    ].map((c) => ({ ...c, rid: chainW.aid, wit: ["https://w0.example/api", "https://w1.example/api"] })),
   };
 
   // What the relay sees of size: the ciphertext's length is its bucket and the tag, nothing finer.

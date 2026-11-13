@@ -18,7 +18,7 @@ const refuses = (p, re, what) => assert.rejects(p, (e) => re.test(e.message), wh
 // the link
 const sl = await sealing(relay);
 const link = `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${sl.statement}&min=${sl.min}&iat=${nowSeconds()}`;
-assert.deepEqual(readAppLink(link), { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: sl.statement, min: sl.min });
+assert.deepEqual(readAppLink(link), { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: sl.statement, min: sl.min, wit: [] });
 assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&api=https://a.example&seal=s&min=${sl.min}&iat=${nowSeconds()}`), /no relay identifier/);
 assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${sl.min}&iat=${nowSeconds()}`), /no sealing key/);
 assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=s&min=${sl.min}&iat=${nowSeconds()}`), /no back end/);

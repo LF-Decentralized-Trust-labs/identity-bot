@@ -59,14 +59,16 @@ void main() {
           l.rid,
           l.api,
           l.seal,
-          l.min
+          l.min,
+          l.wit
         ], [
           e['aid'],
           e['kel'],
           e['rid'],
           e['api'],
           e['seal'],
-          e['min']
+          e['min'],
+          e['wit']
         ], reason: '${c['name']}');
       });
     }

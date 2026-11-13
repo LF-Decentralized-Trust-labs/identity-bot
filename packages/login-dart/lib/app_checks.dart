@@ -114,9 +114,41 @@ const linkMaxAge = Duration(days: 7);
 /// How far ahead of this device's clock a link may be dated before the clock is blamed.
 const linkMaxAhead = Duration(days: 1);
 
+/// The most witnesses a link names.
+const maxLinkWitnesses = 8;
+
+final _witnessHttps = RegExp(r'^https://[^\s,]+$');
+final _witnessLocal = RegExp(r'^http://(127\.0\.0\.1|localhost)[:/][^\s,]*$');
+
+/// The witness addresses a link's `wit` names, comma separated; a [TrustRefused]
+/// unless each is an https address (or a local one), none is named twice and
+/// there are no more than [maxLinkWitnesses]. No `wit` is no addresses.
+List<String> readWitnessAddresses(String? text) {
+  if (text == null || text.isEmpty) return const [];
+  final list = [
+    for (final a in text.split(',')) a.replaceAll(RegExp(r'/+$'), '')
+  ];
+  if (list.length > maxLinkWitnesses ||
+      list.any(
+          (a) => !_witnessHttps.hasMatch(a) && !_witnessLocal.hasMatch(a)) ||
+      list.toSet().length != list.length) {
+    throw const TrustRefused(
+        'the link names a witness address that is not one this page asks');
+  }
+  return list;
+}
+
 class AppLink {
   final String aid, kel, rid, api, seal, min;
-  const AppLink(this.aid, this.kel, this.rid, this.api, this.seal, this.min);
+
+  /// Where to ask the relay identifier's witnesses for its key log, each the
+  /// address a witness's routes are under (`<address>/witness/kel/<rid>`). Empty
+  /// when the identifier has none. Nothing vouches for an address: what a
+  /// witness answers is checked against the identifier's own inception
+  /// (`readWitnessedLog`).
+  final List<String> wit;
+  const AppLink(this.aid, this.kel, this.rid, this.api, this.seal, this.min,
+      [this.wit = const []]);
 
   /// Reads [link]; a link with no fragment, or one naming no back end the way
   /// the page requires, or made longer ago than [linkMaxAge] as of [now], is a
@@ -144,6 +176,7 @@ class AppLink {
           'the link names no sealing key to seal calls to the app with');
     }
     final min = p['min'] ?? '';
+    final wit = readWitnessAddresses(p['wit']);
     if (readMinimum(min) == null) {
       throw const TrustRefused(
           'the link names no latest key log event the utility app\'s relay identifier must have reached');
@@ -169,7 +202,7 @@ class AppLink {
           'this link is dated later than this device\'s clock says it is now: set the date and time on this device, or ask the utility app\'s owner for a new link');
     }
     return AppLink(p['aid']!, p['kel']!, rid,
-        api.replaceAll(RegExp(r'/+$'), ''), seal, min);
+        api.replaceAll(RegExp(r'/+$'), ''), seal, min, wit);
   }
 }
 
@@ -343,7 +376,11 @@ class LogEvent {
 class CheckedLog {
   final Uint8List key;
   final List<LogEvent> events;
-  const CheckedLog(this.key, this.events);
+
+  /// The inception event as published: what a witness is shown to prove the log
+  /// is known (X-Inception-Event).
+  final String inception;
+  const CheckedLog(this.key, this.events, this.inception);
 }
 
 final _eventHead = RegExp(r'^\{"v":"KERI10JSON([0-9a-f]{6})_"');
@@ -462,7 +499,7 @@ CheckedLog readAnswerLog(
     prevNext = n[0] as String;
     events.add(LogEvent(i, m['t'] as String, d));
   }
-  return CheckedLog(key!, events);
+  return CheckedLog(key!, events, parts[0].event);
 }
 
 /// Whether [log] holds every event [base] holds, in the same order, and perhaps

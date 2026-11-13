@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
+
 import 'app_checks.dart';
 
 /// A relay identifier's key log as its witnesses hold it, ADR-072 Amendment 5:
@@ -214,4 +216,74 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
   final log = b64uEncode(utf8.encode(stream));
   final checked = readAnswerLog(rid, log, (why) => throw TrustRefused(why));
   return WitnessedLog(log, n, checked);
+}
+
+/// How the log a link carried stands to the log the witnesses vouch for.
+enum LinkVerdict {
+  /// The link's log holds every event they vouch for (and perhaps more, which
+  /// they have not been told yet).
+  agrees,
+
+  /// They vouch for events after the link's last: the key the link vouched a
+  /// sealing key for is not current.
+  moved_on,
+
+  /// The two have different events at one place.
+  apart,
+
+  /// The witnesses gave no log a page can take.
+  none,
+}
+
+/// Judges [linkLog] (already read from the link, base64url) against the
+/// [answers] of the identifier's witnesses, as login-web's `judgeLinkLog`.
+/// [log] is the witnessed log to remember when there is one: it is what keeps a
+/// link made before a rotation refused afterwards.
+({LinkVerdict verdict, String? log}) judgeLinkLog(
+    String rid, String linkLog, List<Object?> answers) {
+  final WitnessedLog w;
+  try {
+    w = readWitnessedLog(rid, answers);
+  } on TrustRefused {
+    return (verdict: LinkVerdict.none, log: null);
+  }
+  final mine = readAnswerLog(rid, linkLog, (why) => throw TrustRefused(why));
+  if (logExtends(mine.events, w.checked.events)) {
+    return (verdict: LinkVerdict.agrees, log: w.log);
+  }
+  if (logExtends(w.checked.events, mine.events)) {
+    return (verdict: LinkVerdict.moved_on, log: w.log);
+  }
+  return (verdict: LinkVerdict.apart, log: w.log);
+}
+
+/// The most a page takes of one witness's answer.
+const _maxWitnessAnswer = 512 << 10;
+const _witnessTimeout = Duration(seconds: 8);
+
+/// Asks each witness address (`<address>/witness/kel/<rid>`) for the log,
+/// presenting [inception] (the identifier's first event as published) in
+/// X-Inception-Event, which is all that lets a page read it. Every address is
+/// asked at once; one that cannot be reached, answers anything but 200 with
+/// JSON, or answers too much, gives nothing.
+Future<List<Object?>> askWitnesses(String rid, String inception,
+    List<String> addresses, http.Client client) async {
+  final proof = b64uEncode(utf8.encode(inception));
+  final got = await Future.wait(addresses.map((address) async {
+    try {
+      final r = await client.get(
+          Uri.parse('$address/witness/kel/${Uri.encodeComponent(rid)}'),
+          headers: {'X-Inception-Event': proof}).timeout(_witnessTimeout);
+      if (r.statusCode != 200 || r.bodyBytes.length > _maxWitnessAnswer) {
+        return null;
+      }
+      return jsonDecode(utf8.decode(r.bodyBytes));
+    } catch (_) {
+      return null;
+    }
+  }));
+  return [
+    for (final a in got)
+      if (a != null) a
+  ];
 }

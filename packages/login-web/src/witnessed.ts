@@ -17,7 +17,7 @@
  * code, this module through its own, and login-dart through its.
  */
 import { decodeMatterRaw, verifyEd25519 } from "@identity-agent/login-verify/browser";
-import { MAX_LOG_EVENTS, readAnswerLog } from "./keylog.js";
+import { MAX_LOG_EVENTS, logExtends, readAnswerLog } from "./keylog.js";
 import type { CheckedLog } from "./keylog.js";
 import { b64u } from "./seal.js";
 
@@ -191,4 +191,59 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
     throw new Error(why);
   });
   return { log, events: best.through, checked };
+}
+
+/** How the log a link carried stands to the log the witnesses vouch for:
+ *  - `agrees`: the link's log holds every event they vouch for (and perhaps more, which they have not been told yet);
+ *  - `moved_on`: they vouch for events after the link's last, so the key the link vouched a sealing key for is not current;
+ *  - `apart`: the two have different events at one place;
+ *  - `none`: the witnesses gave no log a page can take (none reached, none receipted, none readable). */
+export type LinkVerdict = "agrees" | "moved_on" | "apart" | "none";
+
+/** Judges `linkLog` (a log already read from the link, base64url) against the `answers` of the identifier's witnesses.
+ *  `log` is the witnessed log to remember when there is one, which is what keeps a link made before a rotation
+ *  refused afterwards. */
+export async function judgeLinkLog(rid: string, linkLog: string, answers: unknown[]): Promise<{ verdict: LinkVerdict; log?: string }> {
+  let w: WitnessedLog;
+  try {
+    w = await readWitnessedLog(rid, answers);
+  } catch {
+    return { verdict: "none" };
+  }
+  const mine = await readAnswerLog(rid, linkLog, (why): never => {
+    throw new Error(why);
+  });
+  if (logExtends(mine.events, w.checked.events)) return { verdict: "agrees", log: w.log };
+  if (logExtends(w.checked.events, mine.events)) return { verdict: "moved_on", log: w.log };
+  return { verdict: "apart", log: w.log };
+}
+
+/** The most a page takes of one witness's answer. */
+const MAX_WITNESS_ANSWER = 512 << 10;
+const WITNESS_TIMEOUT_MS = 8000;
+
+/** Asks each witness address (`<address>/witness/kel/<rid>`) for the log, presenting `inception` (the identifier's
+ *  first event as published) in X-Inception-Event, which is all that lets a page read it. Every address is asked at
+ *  once; one that cannot be reached, answers anything but 200 with JSON, or answers too much, gives nothing. */
+export async function askWitnesses(rid: string, inception: string, addresses: string[], ask: typeof fetch): Promise<unknown[]> {
+  const proof = b64u(utf8.encode(inception));
+  const got = await Promise.all(
+    addresses.map(async (address) => {
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), WITNESS_TIMEOUT_MS);
+        try {
+          const r = await ask(`${address}/witness/kel/${encodeURIComponent(rid)}`, { method: "GET", headers: { "X-Inception-Event": proof }, signal: ctl.signal });
+          if (r.status !== 200) return null;
+          const text = await r.text();
+          return text.length > MAX_WITNESS_ANSWER ? null : JSON.parse(text);
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return got.filter((a) => a !== null);
 }
