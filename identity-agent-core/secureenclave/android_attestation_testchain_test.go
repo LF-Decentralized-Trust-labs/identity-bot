@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -27,7 +26,7 @@ type chainSpec struct {
 	noAuth       bool
 	imported     bool
 	created      time.Time
-	leafKey      *rsa.PublicKey
+	leafKey      any               // *rsa.PublicKey or *ecdsa.PublicKey
 	rootKey      *ecdsa.PrivateKey // nil: a fresh one
 	skipIntermed bool
 	noOAEP       bool
@@ -102,7 +101,11 @@ func keyDescription(s chainSpec) []byte {
 	if s.dupPurpose {
 		hw = append(hw, explicit(kmTagPurpose, set(kmPurposeDecrypt)))
 	}
-	hw = append(hw, explicit(kmTagAlgorithm, mustDER(kmAlgorithmRSA)))
+	if _, isEC := s.leafKey.(*ecdsa.PublicKey); isEC {
+		hw = append(hw, explicit(kmTagAlgorithm, mustDER(kmAlgorithmEC)))
+	} else {
+		hw = append(hw, explicit(kmTagAlgorithm, mustDER(kmAlgorithmRSA)))
+	}
 	if s.noAuth {
 		hw = append(hw, explicit(kmTagNoAuthRequired, mustDER(asn1.NullRawValue)))
 	}
