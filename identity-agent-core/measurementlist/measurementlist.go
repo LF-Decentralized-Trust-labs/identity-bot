@@ -231,9 +231,9 @@ type wireEntryV2 struct {
 	Retired      json.RawMessage `json:"retired"`
 }
 
-// Content is what a list says, apart from who vouched for it: the same in a
-// list signed by a pinned key and in a credential anchored in a publisher's key
-// history, so the rules below are written once.
+// Content is what a list says, apart from who vouched for it: what the
+// credential anchored in a publisher's key history carries, apart from the
+// anchoring that vouches for it.
 type Content struct {
 	Sequence    int64                  `json:"sequence"`
 	PublishedAt string                 `json:"published_at"`
