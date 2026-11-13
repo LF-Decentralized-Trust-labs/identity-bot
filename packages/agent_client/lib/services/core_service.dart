@@ -14,6 +14,7 @@ import '../models/public_name_rule.dart';
 import '../models/what_the_watcher_found.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
+import '../config/accepted_measurements.dart' show MeasurementBundleSource, refreshMeasurementList;
 import '../config/the_publishers_list_verdict.dart';
 
 class HealthResponse {
@@ -2417,7 +2418,13 @@ class CoreService {
     /// should not appear to.
     List<String> acceptedMeasurements = const [],
 
+    /// Where the publisher's bundle comes from; a seam for tests.
+    List<MeasurementBundleSource>? measurementSources,
   }) async {
+    // The core uses a list for an hour after its witnesses were asked, so hand
+    // it one again before every adoption (ADR-078). Never throws, and a refusal
+    // is left for the core to explain when it refuses the box.
+    await refreshMeasurementList(this, sources: measurementSources);
     final response = await _client.post(
       Uri.parse('$baseUrl/api/pairing/adopt'),
       headers: {'Content-Type': 'application/json'},

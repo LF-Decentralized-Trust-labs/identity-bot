@@ -270,7 +270,8 @@ class IdentityProfiles {
       // getting entirely plausible answers about the wrong identity — until the
       // app was restarted.
       await pointThisAppAtItsAgent();
-      await handTheCoreTheMeasurementList(CoreService(baseUrl: AgentConfig.agentBaseUrl));
+      // Not awaited, as below; adoption hands the list over again.
+      unawaited(handTheCoreTheMeasurementList(CoreService(baseUrl: AgentConfig.agentBaseUrl)));
       return;
     }
 
@@ -290,7 +291,9 @@ class IdentityProfiles {
           'app could not tell it which half it is running');
     }
     await pointThisAppAtItsAgent();
-    await handTheCoreTheMeasurementList(core.coreClient);
+    // Not awaited: a slow fetch (up to 10 s per source) must not delay start.
+    // Adoption hands the list over again and does wait (CoreService.adoptAgent).
+    unawaited(handTheCoreTheMeasurementList(core.coreClient));
   }
 
   /// Give the core the publisher's list of accepted software, now that it is

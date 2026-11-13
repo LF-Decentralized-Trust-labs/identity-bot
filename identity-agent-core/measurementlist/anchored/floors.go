@@ -95,7 +95,7 @@ func Merge(a, b Floors) (Floors, error) {
 }
 
 // Checker is Verify with the floors kept: it reads them, never lets them be
-// lower than the snapshot the build shipped with, verifies, and records the new
+// lower than its Snapshot, verifies, and records the new
 // floors before the list is returned. A list is not used on the strength of a
 // floor that did not stick.
 type Checker struct {
