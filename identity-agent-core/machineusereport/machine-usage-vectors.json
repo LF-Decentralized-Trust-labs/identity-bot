@@ -17,9 +17,16 @@
       }
     },
     {
-      "why": "the payload was changed after signing",
+      "why": "one figure changed after signing, still well-formed",
       "report": {
-        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}}}",
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":9},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+      }
+    },
+    {
+      "why": "the same report re-encoded, with the old signature",
+      "report": {
+        "payload": "{\n \"identity\": \"EBoxIdentifierForTheMachineUseVectors0000000\",\n \"kind\": \"machine-usage/1\",\n \"nonce\": \"n-1\",\n \"readings\": [\n  {\n   \"at\": \"2026-11-13T12:00:00Z\",\n   \"cpu_cores\": 2,\n   \"disk_total_bytes\": 21474836480,\n   \"disk_used_bytes\": 5368709120,\n   \"load_1\": 0.5,\n   \"load_15\": 0.3,\n   \"load_5\": 0.4,\n   \"memory_cache_bytes\": 268435456,\n   \"memory_programs_bytes\": 104857600,\n   \"memory_programs_peak_bytes\": 157286400,\n   \"memory_total_bytes\": 1073741824\n  },\n  {\n   \"at\": \"2026-11-13T12:01:00Z\",\n   \"cpu_cores\": 2,\n   \"disk_total_bytes\": 21474836480,\n   \"disk_used_bytes\": 5368709120,\n   \"load_1\": 0.5,\n   \"load_15\": 0.3,\n   \"load_5\": 0.4,\n   \"memory_cache_bytes\": 268435456,\n   \"memory_programs_bytes\": 125829120,\n   \"memory_programs_peak_bytes\": 125829120,\n   \"memory_total_bytes\": 1073741824\n  },\n  {\n   \"at\": \"2026-11-13T12:02:00Z\",\n   \"cpu_cores\": 2,\n   \"disk_total_bytes\": 21474836480,\n   \"disk_used_bytes\": 5368709120,\n   \"load_1\": 0.5,\n   \"load_15\": 0.3,\n   \"load_5\": 0.4,\n   \"memory_cache_bytes\": 268435456,\n   \"memory_programs_bytes\": 115343360,\n   \"memory_programs_peak_bytes\": 209715200,\n   \"memory_total_bytes\": 1073741824\n  }\n ],\n \"signed_at\": \"2026-11-13T12:03:00Z\",\n \"since\": \"2026-11-13T12:00:00Z\"\n}",
         "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
       }
     },
@@ -37,6 +44,22 @@
       "report": {
         "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
         "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+      }
+    },
+    {
+      "why": "no nonce given by the checker",
+      "expect_nonce": "-",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+      }
+    },
+    {
+      "why": "a report with no nonce, checked with none",
+      "expect_nonce": "-",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BCmeoFEX7OuXY_arPsmHGuv6_qsN05xiIP_AWtpojEx-wUvp1lr_uYfcFLzMGMfS8Oes7ZiFQXSyH44ZE0IECYO"
       }
     },
     {

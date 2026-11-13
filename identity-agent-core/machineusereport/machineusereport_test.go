@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,9 +65,20 @@ func build(t *testing.T) VectorSet {
 		other[i] = byte(i + 1)
 	}
 	add("signed by another key", sign(t, other, base()), "", "")
-	add("the payload was changed after signing", Signed{Payload: v.Valid.Payload[:len(v.Valid.Payload)-2] + "}}", Signature: v.Valid.Signature}, "", "")
+	// Well-formed JSON with one figure changed and the old signature: refused only because
+	// the signature is checked over the bytes given.
+	add("one figure changed after signing, still well-formed", Signed{Payload: strings.Replace(v.Valid.Payload, `"cpu_cores":2`, `"cpu_cores":9`, 1), Signature: v.Valid.Signature}, "", "")
+	// The same meaning, re-spaced, with the old signature: bytes are what is signed.
+	var generic map[string]any
+	_ = json.Unmarshal([]byte(v.Valid.Payload), &generic)
+	respaced, _ := json.MarshalIndent(generic, "", " ")
+	add("the same report re-encoded, with the old signature", Signed{Payload: string(respaced), Signature: v.Valid.Signature}, "", "")
 	add("the right key, but a report for another box", v.Valid, "EAnotherBox0000000000000000000000000000000", "")
 	add("a replay: answers another request", v.Valid, "", "n-2")
+	add("no nonce given by the checker", v.Valid, "", "-")
+	nn := base()
+	nn.Nonce = ""
+	add("a report with no nonce, checked with none", sign(t, seed, nn), "", "-")
 	k := base()
 	k.Kind = "something-else/1"
 	add("the right key, signed as another kind of thing", sign(t, seed, k), "", "")
@@ -112,11 +124,17 @@ func TestVectorFileIsReproducibleAndHolds(t *testing.T) {
 		if id == "" {
 			id = got.Identity
 		}
+		if nonce == "" {
+			nonce = got.Nonce
+		}
+		if nonce == "-" {
+			nonce = "" // the checker supplied no nonce
+		}
 		if _, err := Verify(c.Report, pub, id, nonce); err == nil {
 			t.Errorf("accepted: %s", c.Why)
 		}
 	}
-	if len(got.Refused) < 9 {
+	if len(got.Refused) < 12 {
 		t.Fatal("a refusal case was removed")
 	}
 }

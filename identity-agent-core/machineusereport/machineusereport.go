@@ -59,11 +59,19 @@ type Signed struct {
 
 // Verify checks s against pub, the box's key from its key log, and returns what it reports.
 // expectIdentity is the box the caller means; a report signed by the right key that names
-// another box is refused. When expectNonce is not empty the report must carry it.
+// another box is refused. expectNonce is required: it is what the caller sent with its
+// request, and a report that does not carry it is refused, so an old report cannot be
+// replayed as a new answer.
+//
+// That pub is the key of expectIdentity is the caller's to ensure, from the box's key log;
+// a key learned from anywhere else (the host, say) proves nothing here.
 //
 // What a valid report does not show: that the readings are true. They are the box's word,
 // signed; a box that is compromised can sign anything.
 func Verify(s Signed, pub []byte, expectIdentity, expectNonce string) (Report, error) {
+	if expectNonce == "" {
+		return Report{}, errors.New("a nonce is required: a report cannot be checked against nothing")
+	}
 	if ok, err := login.VerifyString(s.Payload, s.Signature, pub); err != nil || !ok {
 		return Report{}, errors.New("the report was not signed by this box's key")
 	}
@@ -76,7 +84,7 @@ func Verify(s Signed, pub []byte, expectIdentity, expectNonce string) (Report, e
 		return Report{}, fmt.Errorf("this is not a machine-use report (%q)", r.Kind)
 	case r.Identity != expectIdentity:
 		return Report{}, errors.New("the report is for another box")
-	case expectNonce != "" && r.Nonce != expectNonce:
+	case r.Nonce != expectNonce:
 		return Report{}, errors.New("the report answers another request")
 	case r.Since.After(r.SignedAt):
 		return Report{}, errors.New("the report starts after it was signed")
