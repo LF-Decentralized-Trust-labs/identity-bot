@@ -46,7 +46,11 @@ void hold(Map<String, dynamic> c, Object? Function() f,
 void main() {
   test('every link case', () {
     for (final c in of('links')) {
-      hold(c, () => AppLink.parse(c['hash'] as String), (r) {
+      hold(
+          c,
+          () => AppLink.parse(c['hash'] as String,
+              now: DateTime.fromMillisecondsSinceEpoch(c['now_ms'] as int,
+                  isUtc: true)), (r) {
         final l = r as AppLink;
         final e = c['expect'] as Map<String, dynamic>;
         expect([

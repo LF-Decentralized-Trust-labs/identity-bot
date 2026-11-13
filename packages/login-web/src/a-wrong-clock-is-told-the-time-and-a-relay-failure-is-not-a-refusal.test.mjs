@@ -5,11 +5,11 @@
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
 import { answerText, appFetch, appSession, AppUnreachable, browserKeyThumbprint, readAppLink } from "../dist/app.js";
-import { b64u, enc, identity, logMemory, relayChain, sealing } from "./app-test-support.mjs";
+import { b64u, enc, identity, logMemory, relayChain, sealing, nowSeconds } from "./app-test-support.mjs";
 
 const app = identity(), relay = relayChain("relay");
 const sl = await sealing(relay);
-const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${sl.statement}&min=${sl.min}`);
+const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${sl.statement}&min=${sl.min}&iat=${nowSeconds()}`);
 const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
 const jwk = { kty: "EC", crv: "P-256", x: b64u(new Uint8Array(32).fill(1)), y: b64u(new Uint8Array(32).fill(2)) };
 const mine = { privateKey: pair.privateKey, jwk, thumbprint: browserKeyThumbprint(jwk) };

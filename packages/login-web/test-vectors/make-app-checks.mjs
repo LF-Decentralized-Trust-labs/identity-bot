@@ -37,16 +37,28 @@ export async function make() {
 
   const SEAL = "c2VhbA";
   const MIN = "1.EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl";
+  const IAT = NOW / 1000 - 3600; // made an hour ago
   const links = [
-    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}&min=${MIN}`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL, min: MIN } },
-    { name: "no sealing key", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${MIN}`, refuse: "no sealing key" },
-    { name: "no latest key log event", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}`, refuse: "no latest key log event" },
-    { name: "a latest key log event with no sequence number", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=${MIN.slice(2)}`, refuse: "no latest key log event" },
-    { name: "a latest key log event with a sequence number that is not plain", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=01.${MIN.slice(2)}`, refuse: "no latest key log event" },
-    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example&seal=${SEAL}&min=${MIN}`, refuse: "no relay identifier" },
-    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=${SEAL}&min=${MIN}`, refuse: "no back end" },
-    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=${SEAL}&min=${MIN}`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9", seal: SEAL, min: MIN } },
-  ];
+    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}&min=${MIN}&iat=${IAT}`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL, min: MIN } },
+    ...[
+      ["no time it was made", "", "no time it was made"],
+      ["a time it was made that is not whole seconds", `&iat=${IAT}.5`, "no time it was made"],
+      ["a time it was made written with a leading zero", `&iat=0${IAT}`, "no time it was made"],
+      ["a time it was made in milliseconds", `&iat=${IAT * 1000}`, "no time it was made"],
+      ["a link made 7 days ago to the second", `&iat=${NOW / 1000 - 7 * 86400}`, null],
+      ["a link made a second more than 7 days ago", `&iat=${NOW / 1000 - 7 * 86400 - 1}`, "more than 7 days ago"],
+      ["a link made a day ahead of this device's clock to the second", `&iat=${NOW / 1000 + 86400}`, null],
+      ["a link made more than a day ahead of this device's clock", `&iat=${NOW / 1000 + 86400 + 1}`, "later than this device's clock"],
+    ].map(([name, iat, refuse]) => ({ name, now_ms: NOW, hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}&min=${MIN}${iat}`,
+      ...(refuse ? { refuse } : { expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL, min: MIN } }) })),
+    { name: "no sealing key", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${MIN}&iat=${IAT}`, refuse: "no sealing key" },
+    { name: "no latest key log event", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&iat=${IAT}`, refuse: "no latest key log event" },
+    { name: "a latest key log event with no sequence number", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=${MIN.slice(2)}&iat=${IAT}`, refuse: "no latest key log event" },
+    { name: "a latest key log event with a sequence number that is not plain", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=${SEAL}&min=01.${MIN.slice(2)}&iat=${IAT}`, refuse: "no latest key log event" },
+    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example&seal=${SEAL}&min=${MIN}&iat=${IAT}`, refuse: "no relay identifier" },
+    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=${SEAL}&min=${MIN}&iat=${IAT}`, refuse: "no back end" },
+    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=${SEAL}&min=${MIN}&iat=${IAT}`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9", seal: SEAL, min: MIN } },
+  ].map((l) => ({ name: l.name, now_ms: NOW, hash: l.hash, ...(l.refuse ? { refuse: l.refuse } : { expect: l.expect }) }));
 
   const keyLogs = [];
   const kl = (name, aid, encoded, refuse) => keyLogs.push({ name, aid, encoded, ...(refuse ? { refuse } : { expect_key_hex: hex(app.key) }) });

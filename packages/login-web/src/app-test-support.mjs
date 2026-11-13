@@ -131,3 +131,6 @@ export function logMemory() {
   const m = new Map();
   return { get: (rid) => m.get(rid) ?? null, set: (rid, log) => m.set(rid, log) };
 }
+
+/** The `iat` of a link made just now: whole seconds since 1970. */
+export const nowSeconds = () => Math.floor(Date.now() / 1000);

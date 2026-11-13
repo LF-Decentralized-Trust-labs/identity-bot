@@ -64,10 +64,18 @@ export function readMinimum(min: unknown): { sn: number; said: string } | null {
   return m ? { sn: Number(m[1]), said: m[2] } : null;
 }
 
-/** Reads `#aid=…&kel=…&rid=…&api=…&seal=…&min=…`, the fragment a link to the page carries.
+/** How long after it was made a sign-in link is still taken, in seconds. A link carries `iat`, the
+ *  time the owner's Identity Agent made it (whole seconds since 1970): a link is made each time the
+ *  owner asks for one, so a link older than this is one nobody has just been given. It bounds how
+ *  stale the key log inside it may be. */
+export const LINK_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+/** How far ahead of this device's clock a link may be dated, in seconds, before the clock is blamed. */
+export const LINK_MAX_AHEAD_SECONDS = 24 * 60 * 60;
+
+/** Reads `#aid=…&kel=…&rid=…&api=…&seal=…&min=…&iat=…`, the fragment a link to the page carries.
  *  A fragment is sent to no server. Throws, saying why, when the link is not
- *  one a page can act on. */
-export function readAppLink(hash: string): AppLink {
+ *  one a page can act on, or was made longer ago than `LINK_MAX_AGE_SECONDS` (as of `now`, ms). */
+export function readAppLink(hash: string, now = Date.now()): AppLink {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
   const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, ""), seal: p.get("seal") ?? "", min: p.get("min") ?? "" };
   if (!link.aid || !link.kel) throw new Error("the link names no app and key log");
@@ -77,6 +85,11 @@ export function readAppLink(hash: string): AppLink {
   if (!/^https:\/\//.test(link.api) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(link.api)) {
     throw new Error("the link names no back end to sign in at");
   }
+  const iat = /^[1-9][0-9]{9,10}$/.test(p.get("iat") ?? "") ? Number(p.get("iat")) : null;
+  if (iat === null) throw new Error("the link names no time it was made");
+  const age = now / 1000 - iat;
+  if (age > LINK_MAX_AGE_SECONDS) throw new Error("this link was made more than 7 days ago and is no longer taken: ask the utility app's owner for a new one");
+  if (age < -LINK_MAX_AHEAD_SECONDS) throw new Error("this link is dated later than this device's clock says it is now: set the date and time on this device, or ask the utility app's owner for a new link");
   return link;
 }
 

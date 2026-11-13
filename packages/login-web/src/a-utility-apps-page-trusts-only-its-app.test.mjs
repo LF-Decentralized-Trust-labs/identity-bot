@@ -5,7 +5,7 @@
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
 import { ed25519SigQb64 } from "../../login-verify/dist/browser.js";
-import { b64u, enc, identity, logMemory, relayChain, sealing } from "./app-test-support.mjs";
+import { b64u, enc, identity, logMemory, relayChain, sealing, nowSeconds } from "./app-test-support.mjs";
 import {
   ANSWER_LOG, ANSWER_SIG, answerText, appFetch, browserKeyThumbprint, checkAppAnswer, checkAppChallenge,
   checkAppKeyLog, proofHeaders, proofText, readAppLink, serverSkew,
@@ -17,13 +17,13 @@ const refuses = (p, re, what) => assert.rejects(p, (e) => re.test(e.message), wh
 
 // the link
 const sl = await sealing(relay);
-const link = `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${sl.statement}&min=${sl.min}`;
+const link = `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${sl.statement}&min=${sl.min}&iat=${nowSeconds()}`;
 assert.deepEqual(readAppLink(link), { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: sl.statement, min: sl.min });
-assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&api=https://a.example&seal=s&min=${sl.min}`), /no relay identifier/);
-assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${sl.min}`), /no sealing key/);
-assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=s&min=${sl.min}`), /no back end/);
+assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&api=https://a.example&seal=s&min=${sl.min}&iat=${nowSeconds()}`), /no relay identifier/);
+assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&min=${sl.min}&iat=${nowSeconds()}`), /no sealing key/);
+assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=s&min=${sl.min}&iat=${nowSeconds()}`), /no back end/);
 assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example&seal=s`), /no latest key log event/);
-assert.doesNotThrow(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=s&min=${sl.min}`));
+assert.doesNotThrow(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=s&min=${sl.min}&iat=${nowSeconds()}`));
 
 // the key log
 assert.deepEqual(await checkAppKeyLog(app.aid, app.log()), app.key);

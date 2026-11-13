@@ -101,13 +101,22 @@ void deriveIdentifier(String text, String aid, void Function(String) fail) {
 /// for: `checkSealKey`, and [min], the latest event of the relay identifier's key
 /// log the owner's Identity Agent has seen, `<sequence number>.<SAID>`, which the
 /// log shown must hold). A fragment is never sent to any server.
+/// How long after it was made a sign-in link is still taken (`LINK_MAX_AGE_SECONDS`
+/// in `login-web/src/app.ts`): a link carries `iat`, the time the owner's Identity
+/// Agent made it, in whole seconds.
+const linkMaxAge = Duration(days: 7);
+
+/// How far ahead of this device's clock a link may be dated before the clock is blamed.
+const linkMaxAhead = Duration(days: 1);
+
 class AppLink {
   final String aid, kel, rid, api, seal, min;
   const AppLink(this.aid, this.kel, this.rid, this.api, this.seal, this.min);
 
   /// Reads [link]; a link with no fragment, or one naming no back end the way
-  /// the page requires, is a [TrustRefused].
-  factory AppLink.parse(String link) {
+  /// the page requires, or made longer ago than [linkMaxAge] as of [now], is a
+  /// [TrustRefused].
+  factory AppLink.parse(String link, {DateTime? now}) {
     final hash =
         link.contains('#') ? link.substring(link.indexOf('#') + 1) : '';
     Map<String, String> p = {};
@@ -137,6 +146,22 @@ class AppLink {
     if (!RegExp(r'^https://').hasMatch(api) &&
         !RegExp(r'^http://(127\.0\.0\.1|localhost)[:/]').hasMatch(api)) {
       throw const TrustRefused('the link names no back end to sign in at');
+    }
+    final iatText = p['iat'] ?? '';
+    final iat = RegExp(r'^[1-9][0-9]{9,10}$').hasMatch(iatText)
+        ? int.parse(iatText)
+        : null;
+    if (iat == null) {
+      throw const TrustRefused('the link names no time it was made');
+    }
+    final age = (now ?? DateTime.now()).millisecondsSinceEpoch / 1000 - iat;
+    if (age > linkMaxAge.inSeconds) {
+      throw const TrustRefused(
+          'this link was made more than 7 days ago and is no longer taken: ask the utility app\'s owner for a new one');
+    }
+    if (age < -linkMaxAhead.inSeconds) {
+      throw const TrustRefused(
+          'this link is dated later than this device\'s clock says it is now: set the date and time on this device, or ask the utility app\'s owner for a new link');
     }
     return AppLink(p['aid']!, p['kel']!, rid,
         api.replaceAll(RegExp(r'/+$'), ''), seal, min);
