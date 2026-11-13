@@ -40,18 +40,28 @@ export function minimum(relay, n = relay.events.length) {
   return `${n - 1}.${relay.events[n - 1].said}`;
 }
 
+/** `clock` (`{ now: () => ms }`) makes the wrapped back end take only calls dated within two minutes of it, and
+ *  answer another, as appserve does, with the signed, sealed 409 that tells the time. */
 export async function sealing(relay, origin = "https://tasks.example") {
   const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
   const pub = new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey));
   const statement = sealStatement(relay, pub);
   const title = (n) => n.replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
   const seen = [];
-  const wrap = (inner, rid = relay.aid) => async (url, init) => {
+  const wrap = (inner, rid = relay.aid, clock = null) => async (url, init) => {
     seen.push({ url: String(url), method: init.method, body: init.body });
     if (new URL(String(url)).pathname !== SEAL_PATH || init.method !== "POST") return new Response("not here", { status: 404 });
     const { content, reply } = await openRequest(rid, pair, init.body);
     const call = JSON.parse(new TextDecoder().decode(content));
     const headers = Object.fromEntries(Object.entries(call.headers).map(([k, v]) => [title(k), v]));
+    seen.at(-1).ts = call.ts;
+    if (clock && Math.abs(Date.parse(call.ts) - clock.now()) > 120_000) {
+      const body = enc.encode(JSON.stringify({ error: "clock", server_time: new Date(clock.now()).toISOString().replace(/\.\d{3}Z$/, "Z") }));
+      const { answerText } = await import("../dist/app.js");
+      const sig = b64u(relay.sign(enc.encode(await answerText(relay.aid, call.headers["x-browser-answer-nonce"], 409, "application/json", body))));
+      const clockAnswer = JSON.stringify({ status: 409, content_type: "application/json", body: b64u(body), log: relay.log(), sig });
+      return new Response(await reply.seal(enc.encode(clockAnswer)), { status: 200, headers: { "content-type": "application/json" } });
+    }
     const r = await inner(origin + call.target, { method: call.method, headers, body: call.method === "GET" ? undefined : call.body });
     const bytes = new Uint8Array(await r.arrayBuffer());
     const answer = JSON.stringify({ status: r.status, content_type: r.headers.get("content-type") ?? "", body: b64u(bytes),

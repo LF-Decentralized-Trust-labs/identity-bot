@@ -401,7 +401,7 @@ async function holdLog(rid: string, got: CheckedLog, text: string, known: string
  *  log to remember: the longer of the two. */
 export async function checkAppAnswer(a: AnswerCheck): Promise<{ log: string }> {
   const fail = (why: string): never => {
-    throw new Error("the answer is not the app's: " + why);
+    throw new Error("the answer is not the utility app's: " + why);
   };
   if (typeof a.rid !== "string" || !a.rid) fail("the link names no relay identifier to check it against");
   const sigRaw = decodeBase64UrlStrict(a.sig ?? "");
@@ -465,6 +465,30 @@ async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min">, logs:
   return r;
 }
 
+/** The relay that carries a call to the app's back end did not carry it (it answered with
+ *  something other than the one sealed answer), as in a restart. Nothing was believed or
+ *  refused: the call can be made again. Not a refusal to trust. */
+export class AppUnreachable extends Error {
+  constructor(public readonly status: number) {
+    super(`The utility app could not be reached just now (the relay answered ${status}). Try again in a moment.`);
+    this.name = "AppUnreachable";
+  }
+}
+
+/** The answer the back end signs to a call that opened but was dated by a clock the
+ *  back end does not share: 409, `{"error":"clock","server_time":…}` (appserve.ClockError).
+ *  Gives the back end's clock less this device's, in ms, or null when the answer is
+ *  not that. It is read only from an answer `sealedCall` has already shown to be the app's. */
+export function clockAnswerSkew(r: SealedAnswer, now = Date.now()): number | null {
+  if (r.status !== 409) return null;
+  try {
+    const j = JSON.parse(new TextDecoder().decode(r.bytes)) as { error?: unknown; server_time?: unknown };
+    return j && j.error === "clock" ? serverSkew(j.server_time, now) : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface SealedCall {
   method: string;
   /** Path and query, as the back end's routes see them. */
@@ -503,15 +527,17 @@ export async function sealedCall(
   const { outer, reply } = await sealRequest(link.rid, sealKey, content);
   const r = await underlying(link.api + SEAL_PATH, { method: "POST", cache: "no-store", headers: { "content-type": "application/json" }, body: outer });
   const text = await r.text();
-  if (r.status !== 200) throw new Error(`the app's relay did not carry the call (${r.status})`);
+  // The relay is only the road: it failing (a restart, a busy moment) is not the
+  // answer being wrong, so the person is told to try again, not warned off.
+  if (r.status !== 200) throw new AppUnreachable(r.status);
   let inner: { status?: unknown; content_type?: unknown; body?: unknown; log?: unknown; sig?: unknown };
   try {
     inner = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await reply.open(text)));
   } catch (e) {
-    throw e instanceof SealError ? new Error("the answer is not the app's: it does not open") : new Error("the answer is not the app's: it is not readable");
+    throw e instanceof SealError ? new Error("the answer is not the utility app's: it does not open") : new Error("the answer is not the utility app's: it is not readable");
   }
   const bytes = unb64u(inner?.body);
-  if (!Number.isInteger(inner?.status) || typeof inner?.content_type !== "string" || !bytes) throw new Error("the answer is not the app's: it is not readable");
+  if (!Number.isInteger(inner?.status) || typeof inner?.content_type !== "string" || !bytes) throw new Error("the answer is not the utility app's: it is not readable");
   logs.set(link.rid, (await checkAppAnswer({ rid: link.rid, nonce, status: inner.status as number, contentType: inner.content_type as string, body: bytes,
     log: typeof inner.log === "string" ? inner.log : null, known: logs.get(link.rid), sig: typeof inner.sig === "string" ? inner.sig : null })).log);
   return { status: inner.status as number, contentType: inner.content_type as string, bytes };
@@ -642,16 +668,25 @@ export async function appFetch(
     const method = (init.method ?? "GET").toUpperCase();
     const isStart = method === "POST" && url === sessionEndpoint;
     let body = init.body as string | undefined;
-    const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
     if (isStart) body = JSON.stringify({ ...JSON.parse(body ?? "{}"), jwk: mine.jwk });
-    if (!isStart && started) {
-      if (Date.parse(String(started.expiry)) < Date.now() + skew) throw new Error("the sign-in lapsed; start again");
-      Object.assign(headers, await proofHeaders(mine.privateKey, method, new URL(url).pathname + new URL(url).search, started.token, body ?? "", skew));
-    }
-    const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
     const u = new URL(url);
-    if (url !== link.api && !url.startsWith(link.api + "/")) throw new Error("this page speaks only to its own app's back end");
-    const r = await sealedCall(link, sealKey, { method, target: u.pathname + u.search, headers: lowerCase(headers), body: body ?? "" }, nonce, underlying, logs, Date.now() + skew);
+    if (url !== link.api && !url.startsWith(link.api + "/")) throw new Error("this page speaks only to its own utility app's back end");
+    // A device whose clock is off by more than the back end takes is told the time
+    // in a signed answer, and dates the call by it, once.
+    let r: SealedAnswer;
+    for (let again = false; ; again = true) {
+      const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+      if (!isStart && started) {
+        if (Date.parse(String(started.expiry)) < Date.now() + skew) throw new Error("the sign-in lapsed; start again");
+        Object.assign(headers, await proofHeaders(mine.privateKey, method, new URL(url).pathname + new URL(url).search, started.token, body ?? "", skew));
+      }
+      const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
+      r = await sealedCall(link, sealKey, { method, target: u.pathname + u.search, headers: lowerCase(headers), body: body ?? "" }, nonce, underlying, logs, Date.now() + skew);
+      const off = clockAnswerSkew(r);
+      if (off === null) break;
+      if (again) throw new Error("This device's clock is too far from the utility app's to sign in. Set the date and time on this device, then try again.");
+      skew = off;
+    }
     const bytes = r.bytes;
     if (isStart && r.status >= 200 && r.status < 300) {
       const s = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
@@ -727,11 +762,18 @@ export function appSession(
     const token = storage.getItem(slot);
     if (!token) throw new SessionEnded();
     const k = await key();
-    const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
-    const proof = await proofHeaders(k.privateKey, method, path, await sha256b64u(token), body, skew);
-    const headers: Record<string, string> = lowerCase({ Authorization: "Bearer " + token, ...proof });
-    if (method !== "GET") headers["content-type"] = "application/json";
-    const r = await sealedCall(link, (await (sealKey ??= checkedSealKey(link, logs))).key, { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
+    let r: SealedAnswer;
+    for (let again = false; ; again = true) {
+      const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
+      const proof = await proofHeaders(k.privateKey, method, path, await sha256b64u(token), body, skew);
+      const headers: Record<string, string> = lowerCase({ Authorization: "Bearer " + token, ...proof });
+      if (method !== "GET") headers["content-type"] = "application/json";
+      r = await sealedCall(link, (await (sealKey ??= checkedSealKey(link, logs))).key, { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
+      const off = clockAnswerSkew(r);
+      if (off === null) break;
+      if (again) throw new Error("This device's clock is too far from the utility app's. Set the date and time on this device, then try again.");
+      skew = off;
+    }
     const bytes = r.bytes;
     if (r.status === 401) {
       storage.removeItem(slot);

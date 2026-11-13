@@ -77,7 +77,8 @@ Uint8List _unpad(Uint8List p) {
 
 Uint8List _hkdf(Uint8List secret, Uint8List salt, String info, int bytes) {
   final k = HKDFKeyDerivator(SHA256Digest())
-    ..init(HkdfParameters(secret, bytes, salt, Uint8List.fromList(utf8.encode(info))));
+    ..init(HkdfParameters(
+        secret, bytes, salt, Uint8List.fromList(utf8.encode(info))));
   final out = Uint8List(bytes);
   k.deriveKey(null, 0, out, 0);
   return out;
@@ -132,8 +133,11 @@ class SealReply {
       throw const SealRefused();
     }
     final d = _direction(_secret, _epk, _spk, _rid, 'answer', nn);
-    return jsonEncode(
-        {'v': sealVersion, 'n': b64uEncode(nn), 'ct': b64uEncode(_sealWith(d, content))});
+    return jsonEncode({
+      'v': sealVersion,
+      'n': b64uEncode(nn),
+      'ct': b64uEncode(_sealWith(d, content))
+    });
   }
 
   /// Opens a sealed answer; a [SealRefused] if it is not this call's.
@@ -202,8 +206,7 @@ Uint8List _agree(BigInt d, Uint8List peer) {
   }
 }
 
-Uint8List _publicOf(BigInt d) =>
-    (_curve.G * d)!.getEncoded(false);
+Uint8List _publicOf(BigInt d) => (_curve.G * d)!.getEncoded(false);
 
 BigInt _freshScalar(SecureRandom rng) {
   while (true) {
@@ -215,7 +218,8 @@ BigInt _freshScalar(SecureRandom rng) {
 SecureRandom _secureRandom() {
   final r = FortunaRandom();
   final dart = Random.secure();
-  r.seed(KeyParameter(Uint8List.fromList(List.generate(32, (_) => dart.nextInt(256)))));
+  r.seed(KeyParameter(
+      Uint8List.fromList(List.generate(32, (_) => dart.nextInt(256)))));
   return r;
 }
 
@@ -232,7 +236,8 @@ SecureRandom _secureRandom() {
   final secret = _agree(d, spk);
   final ct = _sealWith(_direction(secret, epk, spk, rid, 'request'), content);
   return (
-    outer: jsonEncode({'v': sealVersion, 'epk': b64uEncode(epk), 'ct': b64uEncode(ct)}),
+    outer: jsonEncode(
+        {'v': sealVersion, 'epk': b64uEncode(epk), 'ct': b64uEncode(ct)}),
     reply: SealReply._(secret, epk, spk, rid),
   );
 }
@@ -289,7 +294,9 @@ List<int> sealKeyStatementText(String rid, Uint8List pub, int sn) =>
   } catch (_) {
     fail('it is not JSON');
   }
-  if (st is! Map || (st.keys.map((k) => '$k').toList()..sort()).join(',') != 'key,log,sig,sn') {
+  if (st is! Map ||
+      (st.keys.map((k) => '$k').toList()..sort()).join(',') !=
+          'key,log,sig,sn') {
     fail('it has fields it should not, or lacks some');
   }
   final key = b64uDecode(st['key']);
@@ -301,7 +308,8 @@ List<int> sealKeyStatementText(String rid, Uint8List pub, int sn) =>
   if (key.length != 65 || key[0] != 4) {
     fail('the key is not an uncompressed P-256 point');
   }
-  final got = readAnswerLog(rid, text, (why) => fail('its key log is refused: $why'));
+  final got =
+      readAnswerLog(rid, text, (why) => fail('its key log is refused: $why'));
   final sn = st['sn'];
   if (sn is! int || sn != got.events.length - 1) {
     fail('it is made at a sequence number other than its key log\'s last');
@@ -311,8 +319,10 @@ List<int> sealKeyStatementText(String rid, Uint8List pub, int sn) =>
     fail('the link\'s latest key log event is not spelled one way');
   }
   if (floor != null &&
-      (floor.sn >= got.events.length || got.events[floor.sn].said != floor.said)) {
-    fail('its key log does not reach the latest event your Identity Agent has seen for the app\'s relay identifier: it may be an earlier log, from before a key was rotated away');
+      (floor.sn >= got.events.length ||
+          got.events[floor.sn].said != floor.said)) {
+    fail(
+        'its key log does not reach the latest event your Identity Agent has seen for the app\'s relay identifier: it may be an earlier log, from before a key was rotated away');
   }
   final keep = holdLog(rid, got, text, known, fail, floored: floor != null);
   if (!ed25519Verify(got.key, sealKeyStatementText(rid, key, sn), sig)) {
@@ -328,6 +338,82 @@ Uint8List checkedSealKey(AppLink link, AnswerLogs logs) {
       known: logs.get(link.rid), min: link.min);
   logs.set(link.rid, r.log);
   return r.key;
+}
+
+/// The relay that carries a call to the utility app's back end did not carry it (it
+/// answered with something other than the one sealed answer), as in a restart.
+/// Nothing was believed or refused: the call can be made again. Not a [TrustRefused].
+class AppUnreachable implements Exception {
+  final int status;
+  const AppUnreachable(this.status);
+  String get message =>
+      'The utility app could not be reached just now (the relay answered $status). Try again in a moment.';
+  @override
+  String toString() => message;
+}
+
+/// The back end's clock and this device's differ by more than a call may be dated
+/// by, and being told the time did not mend it.
+class ClockWrong implements Exception {
+  const ClockWrong();
+  String get message =>
+      'This device\'s clock is too far from the utility app\'s. Set the date and time on this device, then try again.';
+  @override
+  String toString() => message;
+}
+
+/// The back end's clock less this device's, when [r] is the signed answer to a call
+/// that opened but was dated by a clock the back end does not share: 409,
+/// `{"error":"clock","server_time":…}` (appserve.ClockError). Null when it is not.
+/// [sealedCall] has already shown the answer to be the app's.
+Duration? clockAnswerSkew(SealedAnswer r, DateTime now) {
+  if (r.status != 409) return null;
+  try {
+    final j = jsonDecode(utf8.decode(r.body));
+    if (j is Map && j['error'] == 'clock')
+      return serverSkew(j['server_time'], now);
+  } catch (_) {}
+  return null;
+}
+
+/// The parts of one call, which depend on the skew they are dated by (a proof
+/// carries a time).
+typedef SealedCallParts = ({
+  String method,
+  String target,
+  Map<String, String> headers,
+  List<int> body,
+  String nonce,
+});
+
+/// [sealedCall] for a device whose clock may be wrong: [make] builds the call dated
+/// by [skew]; when the back end says, in a signed answer, that the date is out of
+/// its window, the call is made once more dated by the back end's own time. Gives
+/// the answer and the skew that worked. A second clock answer is a [ClockWrong].
+Future<({SealedAnswer answer, Duration skew})> sealedCallDated(
+  http.Client client,
+  AppLink link,
+  Uint8List sealKey, {
+  required Future<SealedCallParts> Function(Duration skew) make,
+  required AnswerLogs logs,
+  required DateTime Function() now,
+  Duration skew = Duration.zero,
+}) async {
+  for (var again = false;; again = true) {
+    final p = await make(skew);
+    final r = await sealedCall(client, link, sealKey,
+        method: p.method,
+        target: p.target,
+        headers: p.headers,
+        body: p.body,
+        nonce: p.nonce,
+        logs: logs,
+        now: now().add(skew));
+    final off = clockAnswerSkew(r, now());
+    if (off == null) return (answer: r, skew: skew);
+    if (again) throw const ClockWrong();
+    skew = off;
+  }
 }
 
 /// The headers the back end reads inside a sealed call. Any other is dropped
@@ -365,7 +451,8 @@ Future<SealedAnswer> sealedCall(
     'target': target,
     'headers': {
       for (final e in headers.entries)
-        if (sealedHeaderNames.contains(e.key.toLowerCase())) e.key.toLowerCase(): e.value,
+        if (sealedHeaderNames.contains(e.key.toLowerCase()))
+          e.key.toLowerCase(): e.value,
       'x-browser-answer-nonce': nonce,
     },
     'body': utf8.decode(body),
@@ -374,21 +461,26 @@ Future<SealedAnswer> sealedCall(
   final sealed = sealRequest(link.rid, sealKey, inner);
   final r = await client.post(Uri.parse('${link.api}$sealPath'),
       headers: {'content-type': 'application/json'}, body: sealed.outer);
-  if (r.statusCode != 200) {
-    throw TrustRefused(
-        'the app\'s relay did not carry the call (${r.statusCode})');
-  }
+  // The relay is only the road: it failing (a restart, a busy moment) is not the
+  // answer being wrong, so the person is told to try again, not warned off.
+  if (r.statusCode != 200) throw AppUnreachable(r.statusCode);
   Object? a;
   try {
     a = jsonDecode(utf8.decode(sealed.reply.open(utf8.decode(r.bodyBytes))));
   } on SealRefused {
-    throw const TrustRefused('the answer is not the app\'s: it does not open');
+    throw const TrustRefused(
+        'the answer is not the utility app\'s: it does not open');
   } catch (_) {
-    throw const TrustRefused('the answer is not the app\'s: it is not readable');
+    throw const TrustRefused(
+        'the answer is not the utility app\'s: it is not readable');
   }
   final bytes = a is Map ? b64uDecode(a['body']) : null;
-  if (a is! Map || a['status'] is! int || a['content_type'] is! String || bytes == null) {
-    throw const TrustRefused('the answer is not the app\'s: it is not readable');
+  if (a is! Map ||
+      a['status'] is! int ||
+      a['content_type'] is! String ||
+      bytes == null) {
+    throw const TrustRefused(
+        'the answer is not the utility app\'s: it is not readable');
   }
   logs.set(
       link.rid,
@@ -401,5 +493,9 @@ Future<SealedAnswer> sealedCall(
           log: a['log'] is String ? a['log'] as String : null,
           known: logs.get(link.rid),
           sig: a['sig'] is String ? a['sig'] as String : null));
-  return (status: a['status'] as int, contentType: a['content_type'] as String, body: bytes);
+  return (
+    status: a['status'] as int,
+    contentType: a['content_type'] as String,
+    body: bytes
+  );
 }

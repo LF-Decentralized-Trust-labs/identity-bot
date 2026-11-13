@@ -138,8 +138,8 @@ class AppLink {
         !RegExp(r'^http://(127\.0\.0\.1|localhost)[:/]').hasMatch(api)) {
       throw const TrustRefused('the link names no back end to sign in at');
     }
-    return AppLink(
-        p['aid']!, p['kel']!, rid, api.replaceAll(RegExp(r'/+$'), ''), seal, min);
+    return AppLink(p['aid']!, p['kel']!, rid,
+        api.replaceAll(RegExp(r'/+$'), ''), seal, min);
   }
 }
 
@@ -299,7 +299,10 @@ class LogEvent {
   const LogEvent(this.sn, this.ilk, this.said);
   @override
   bool operator ==(Object other) =>
-      other is LogEvent && other.sn == sn && other.ilk == ilk && other.said == said;
+      other is LogEvent &&
+      other.sn == sn &&
+      other.ilk == ilk &&
+      other.said == said;
   @override
   int get hashCode => Object.hash(sn, ilk, said);
 }
@@ -336,10 +339,12 @@ CheckedLog readAnswerLog(
     final end = pos + 40 < text.length ? pos + 40 : text.length;
     final head = _eventHead.firstMatch(text.substring(pos, end));
     if (head == null) {
-      fail('its key log has something that is not an event where one must begin');
+      fail(
+          'its key log has something that is not an event where one must begin');
     }
     final len = int.parse(head!.group(1)!, radix: 16);
-    if (pos + len > text.length || !text.substring(pos, pos + len).endsWith('}')) {
+    if (pos + len > text.length ||
+        !text.substring(pos, pos + len).endsWith('}')) {
       fail('an event of its key log is not as long as it says');
     }
     final event = text.substring(pos, pos + len);
@@ -379,7 +384,8 @@ CheckedLog readAnswerLog(
       deriveIdentifier(event, rid, fail);
     } else {
       if (m['t'] != 'rot' || m['i'] != rid) {
-        fail('an event after the inception is not a rotation of the identifier the link names');
+        fail(
+            'an event after the inception is not a rotation of the identifier the link names');
       }
       if (m['s'] != i.toRadixString(16)) fail('a rotation is out of sequence');
       if (m['p'] != prevSaid) {
@@ -390,7 +396,8 @@ CheckedLog readAnswerLog(
         fail('a rotation names its SAID other than once');
       }
       final dummy = event.replaceFirst(needle, '"d":"${'#' * d.length}"');
-      if (matterEncode('E', blake3(Uint8List.fromList(utf8.encode(dummy)))) != d) {
+      if (matterEncode('E', blake3(Uint8List.fromList(utf8.encode(dummy)))) !=
+          d) {
         fail('a rotation\'s SAID is not the digest of the rotation');
       }
     }
@@ -408,7 +415,8 @@ CheckedLog readAnswerLog(
     if (verkey == null) fail('its key is not spelled one way');
     // A rotation is made with exactly the key the event before committed to.
     if (prevNext != null &&
-        matterEncode('E', blake3(Uint8List.fromList(utf8.encode(k[0] as String)))) !=
+        matterEncode(
+                'E', blake3(Uint8List.fromList(utf8.encode(k[0] as String)))) !=
             prevNext) {
       fail('a rotation is made with a key the event before did not commit to');
     }
@@ -440,7 +448,8 @@ bool logExtends(List<LogEvent> log, List<LogEvent> base) {
 /// have been reached.
 ({int sn, String said})? readMinimum(Object? min) {
   final m = min is String
-      ? RegExp(r'^(0|[1-9][0-9]{0,2})\.([A-Za-z0-9_-]{20,100})$').firstMatch(min)
+      ? RegExp(r'^(0|[1-9][0-9]{0,2})\.([A-Za-z0-9_-]{20,100})$')
+          .firstMatch(min)
       : null;
   return m == null ? null : (sn: int.parse(m.group(1)!), said: m.group(2)!);
 }
@@ -502,11 +511,13 @@ String holdLog(String rid, CheckedLog got, String text, String? known,
     // log shown is held to that and replaces it; with none, refusing is the only way
     // not to take the first log offered as if this app had never seen one.
     if (floored) return text;
-    fail('what this app kept of the app\'s key log cannot be read, and the link gives nothing to hold the log to');
+    fail(
+        'what this app kept of the app\'s key log cannot be read, and the link gives nothing to hold the log to');
     return text; // not reached: [fail] throws
   }
   if (!logExtends(got.events, held.events)) {
-    fail('its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away');
+    fail(
+        'its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away');
   }
   return held.events.length == got.events.length ? known : text;
 }
@@ -527,7 +538,8 @@ String checkAnswer({
   String? known,
   required String? sig,
 }) {
-  Never fail(String why) => _fail('the answer is not the app\'s: ', why);
+  Never fail(String why) =>
+      _fail('the answer is not the utility app\'s: ', why);
   if (rid.isEmpty) {
     fail('the link names no relay identifier to check it against');
   }
@@ -592,10 +604,10 @@ String sessionBinding(String token) => sha256B64u(utf8.encode(token));
 /// The string signed for a request to the app's own back end (`proofText` in
 /// the SDK, `appserve.Proof` in the add-ons, label IABK1, no host). While
 /// signing in the binding is the sign-in's id.
-String backEndProofString(String method, String target, String ts,
-        String nonce, String binding, List<int> body) =>
+String backEndProofString(String method, String target, String ts, String nonce,
+        String binding, List<int> body) =>
     ['IABK1', method, target, ts, nonce, binding, sha256B64u(body)].join('\n');
 
 /// RFC 7638 thumbprint of a P-256 public key given as its coordinates.
-String browserKeyThumbprint(String x, String y) => sha256B64u(
-    utf8.encode('{"crv":"P-256","kty":"EC","x":"$x","y":"$y"}'));
+String browserKeyThumbprint(String x, String y) =>
+    sha256B64u(utf8.encode('{"crv":"P-256","kty":"EC","x":"$x","y":"$y"}'));

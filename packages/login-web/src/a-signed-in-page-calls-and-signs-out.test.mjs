@@ -59,7 +59,7 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn: f
 {
   const s = open(backEnd({ signer: other }));
   s.keep("tok1");
-  await assert.rejects(s.call("GET", "/session/x"), /not the app's/);
+  await assert.rejects(s.call("GET", "/session/x"), /not the utility app's/);
 }
 
 // a 401 ends the session in a sentence and forgets it
@@ -76,7 +76,7 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn: f
   const st = store();
   const s = open(backEnd({ signer: (p) => (p === "/session/whoami" ? relay : other), status: (p) => (p === "/session/whoami" ? 200 : 401) }), st);
   s.keep("tok1");
-  await assert.rejects(s.call("GET", "/session/x"), /not the app's/);
+  await assert.rejects(s.call("GET", "/session/x"), /not the utility app's/);
   assert.equal(s.held(), "tok1", "anyone on the way can forge a 401, so it ends nothing");
 }
 
