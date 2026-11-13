@@ -24,16 +24,14 @@ const pair = async (d) => {
 };
 const server = await pair(Buffer.from(v.seal_key.private_hex, "hex"));
 
-// the link's sealing key is the relay identifier's and nobody else's
-assert.deepEqual(await checkSealKey(v.rid, v.seal_key.statement), spk);
-const st = JSON.parse(Buffer.from(v.seal_key.statement, "base64url"));
-const re = (o) => Buffer.from(JSON.stringify({ ...st, ...o })).toString("base64url");
-const rejects = (p, re_, what) => assert.rejects(p, (e) => re_.test(e.message), what);
-await rejects(checkSealKey(v.rid, re({ key: Buffer.from([4, ...new Uint8Array(64).fill(7)]).toString("base64url") })), /did not sign this key/, "a key the identifier did not sign");
-await rejects(checkSealKey("E" + v.rid.slice(1).split("").reverse().join(""), v.seal_key.statement), /not the relay identifier the link names/, "a link naming another identifier");
-await rejects(checkSealKey(v.rid, re({ extra: 1 })), /fields it should not/, "an extra field");
-await rejects(checkSealKey(v.rid, re({ key: Buffer.from([2, ...new Uint8Array(32)]).toString("base64url") })), /uncompressed/, "a compressed point");
-await rejects(checkSealKey(v.rid, "!!"), /not readable/, "junk");
+// the link's sealing key is vouched for by the relay identifier's CURRENT key, at its log's last event
+assert.deepEqual((await checkSealKey(v.rid, v.seal_key.statement)).key, spk);
+assert.equal((await checkSealKey(v.rid, v.seal_key.statement)).log, v.relay_log, "the log to remember is the statement's");
+// and the page keeps the longest log it has seen: a statement is read against it, and a longer one is taken
+assert.equal((await checkSealKey(v.rid, v.seal_key.statement, v.relay_log)).log, v.relay_log);
+for (const c of v.statement_refusals) {
+  await assert.rejects(checkSealKey(c.rid, c.statement, c.known_log), (e) => /sealing key is refused/.test(e.message), "a statement: " + c.name);
+}
 
 for (const c of v.requests) {
   const eph = await pair(unhex(c.eph_d_hex));

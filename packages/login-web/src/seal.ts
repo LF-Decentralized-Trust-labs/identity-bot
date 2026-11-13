@@ -202,7 +202,8 @@ export async function openRequest(rid: string, key: CryptoKeyPair, outer: string
   return { content, reply: reply(secret, epk, spk, rid) };
 }
 
-/** What the relay identifier's key signs to vouch for a sealing key. */
-export function sealKeyStatementText(rid: string, pub: Uint8Array): Uint8Array {
-  return utf8.encode(`APP-SEAL-KEY-V1\n${rid}\n${b64u(pub)}`);
+/** What the relay identifier's key signs to vouch for a sealing key: the identifier, the
+ *  sequence number of the event of its key log whose key signs, and the key. */
+export function sealKeyStatementText(rid: string, pub: Uint8Array, sn: number): Uint8Array {
+  return utf8.encode(`APP-SEAL-KEY-V1\n${rid}\n${sn}\n${b64u(pub)}`);
 }

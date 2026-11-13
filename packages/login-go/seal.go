@@ -99,7 +99,7 @@ const (
 )
 
 // SealKey is the back end's sealing key: the one a front end seals its calls to.
-// It is made from the relay identifier's seed, so it needs no keeping of its own.
+// It is made from the seed of the relay identifier's current key, so it needs no keeping of its own.
 type SealKey struct{ priv *ecdh.PrivateKey }
 
 // SealKeyFromSeed makes the sealing key of the relay identifier whose signing
@@ -123,22 +123,33 @@ func SealKeyFromSeed(seed []byte) (*SealKey, error) {
 // Public is the sealing key's public half, 65 bytes (uncompressed).
 func (k *SealKey) Public() []byte { return k.priv.PublicKey().Bytes() }
 
-// SealKeyStatementText is what the relay identifier's key signs to vouch for a
-// sealing key: the identifier, then the key.
-func SealKeyStatementText(rid string, pub []byte) []byte {
-	return []byte(sealKeyLabel + "\n" + rid + "\n" + b64.EncodeToString(pub))
+// SealKeyStatementText is what the relay identifier's current key signs to
+// vouch for a sealing key: the identifier, the sequence number of the event of
+// its key log whose key signs, and the key. The sequence number binds the
+// statement to one point of the log, so a statement made when an earlier key was
+// current is not one a later key made.
+func SealKeyStatementText(rid string, sn int, pub []byte) []byte {
+	return []byte(sealKeyLabel + "\n" + rid + "\n" + strconv.Itoa(sn) + "\n" + b64.EncodeToString(pub))
 }
 
 // SealKeyStatement is what a sign-in link carries (`seal`): the relay
-// identifier's inception, the sealing key, and the identifier's signature over
-// SealKeyStatementText. `inception` is the event as the identifier is the
-// digest of it, and `sign` signs with the identifier's key.
-func SealKeyStatement(inception []byte, k *SealKey, rid string, sign func([]byte) ([]byte, error)) (string, error) {
-	sig, err := sign(SealKeyStatementText(rid, k.Public()))
+// identifier's whole signed key log (`kel`, the CESR stream a core keeps, whose
+// last event is the one numbered `sn`), the sealing key, `sn`, and the
+// signature of the identifier's CURRENT key over SealKeyStatementText. A page
+// reads the log as it reads an answer's, and holds the statement to the key that
+// log names now, so a key the identifier has rotated away from vouches for nothing.
+func SealKeyStatement(kel []byte, sn int, k *SealKey, rid string, sign func([]byte) ([]byte, error)) (string, error) {
+	sig, err := sign(SealKeyStatementText(rid, sn, k.Public()))
 	if err != nil {
 		return "", err
 	}
-	j, err := json.Marshal(map[string]string{"inception": b64.EncodeToString(inception), "key": b64.EncodeToString(k.Public()), "sig": b64.EncodeToString(sig)})
+	// The fields are in the order the page's own statements have them.
+	j, err := json.Marshal(struct {
+		Log string `json:"log"`
+		Key string `json:"key"`
+		Sn  int    `json:"sn"`
+		Sig string `json:"sig"`
+	}{b64.EncodeToString(kel), b64.EncodeToString(k.Public()), sn, b64.EncodeToString(sig)})
 	if err != nil {
 		return "", err
 	}

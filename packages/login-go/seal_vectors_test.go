@@ -16,6 +16,8 @@ const sealVectorsPath = "../login-web/test-vectors/seal.json"
 type sealVectors struct {
 	RID       string `json:"rid"`
 	Inception string `json:"relay_inception"`
+	RelayLog  string `json:"relay_log"`
+	RelaySN   int    `json:"relay_sn"`
 	SeedHex   string `json:"relay_seed_hex"`
 	SealKey   struct {
 		PrivateHex string `json:"private_hex"`
@@ -75,7 +77,11 @@ func TestSealKeyIsMadeFromTheIdentifiersSeedAndVouchedFor(t *testing.T) {
 	}
 	// Ed25519 signs deterministically, so the statement is the same bytes.
 	signer := ed25519.NewKeyFromSeed(seed)
-	st, err := SealKeyStatement([]byte(v.Inception), k, v.RID, func(b []byte) ([]byte, error) { return ed25519.Sign(signer, b), nil })
+	kel, err := b64.DecodeString(v.RelayLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := SealKeyStatement(kel, v.RelaySN, k, v.RID, func(b []byte) ([]byte, error) { return ed25519.Sign(signer, b), nil })
 	if err != nil {
 		t.Fatal(err)
 	}

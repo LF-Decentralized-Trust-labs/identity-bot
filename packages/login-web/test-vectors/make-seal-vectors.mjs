@@ -3,25 +3,22 @@
 // are deterministic, and the "ephemeral" key of each call is a fixed one, so the file is the same
 // every time it is made (the TypeScript test makes it again and compares). Run
 // `node test-vectors/make-seal-vectors.mjs` after `npm run build` to rewrite it.
-import { createECDH, createHash, createPrivateKey, hkdfSync, sign as edSign, webcrypto } from "node:crypto";
+import { createECDH, createHash, hkdfSync, webcrypto } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { blake3Qb64, ed25519VerkeyQb64 } from "../../login-verify/dist/browser.js";
-import { sealKeyStatementText, sealPaddedRequestForVectors, sealRequest } from "../dist/seal.js";
+import { relayChain, sealStatement } from "../src/app-test-support.mjs";
+import { sealPaddedRequestForVectors, sealRequest } from "../dist/seal.js";
 
 const enc = new TextEncoder();
 const b64u = (b) => Buffer.from(b).toString("base64url");
 const hex = (b) => Buffer.from(b).toString("hex");
-const PKCS8_ED25519 = Buffer.from("302e020100300506032b657004220420", "hex");
 
-// The relay identifier: one key, one inception, as a core makes it.
-const seed = createHash("sha256").update("seal-vectors:relay").digest();
-const priv = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519, seed]), format: "der", type: "pkcs8" });
-const pub = Buffer.from(priv.export({ format: "jwk" }).x, "base64url");
-const key = ed25519VerkeyQb64(new Uint8Array(pub));
-const ev = (d) => `{"v":"KERI10JSON000000_","t":"icp","d":"${d}","i":"${d}","s":"0","kt":"1","k":["${key}"],"nt":"1","n":[],"bt":"0","b":[],"c":[],"a":[]}`;
-const RID = blake3Qb64(enc.encode(ev("#".repeat(44))));
-const inception = ev(RID);
-const sign = (bytes) => new Uint8Array(edSign(null, Buffer.from(bytes), priv));
+// The relay identifier: an inception and one rotation, as a core makes them (the page's
+// own key-log test support), so its CURRENT key is its second, and its first key has left.
+const chain = relayChain("seal-vectors:relay", 1);
+const RID = chain.aid;
+const seed = createHash("sha256").update("app-checks:seal-vectors:relay:1").digest(); // the current key's seed
+const inception = chain.events[0].text;
+const SN = chain.events.length - 1;
 
 // The sealing key from the seed: the first counter whose 32 bytes are a P-256 scalar.
 function sealKeyFromSeed(s) {
@@ -47,7 +44,7 @@ const jwkPair = async (d, publicKey) => {
 export async function make() {
   const sk = sealKeyFromSeed(seed);
   const serverPair = await jwkPair(sk.d);
-  const statement = b64u(JSON.stringify({ inception: b64u(enc.encode(inception)), key: b64u(sk.pub), sig: b64u(sign(sealKeyStatementText(RID, sk.pub))) }));
+  const statement = sealStatement(chain, sk.pub);
   const ephD = (label) => createHash("sha256").update("seal-vectors:eph:" + label).digest();
 
   const longBody = JSON.stringify({ words: "héllo ".repeat(300) });
@@ -117,16 +114,44 @@ export async function make() {
     { name: "a ciphertext respelled in its unused bits", request: first.name, answer_outer: tamper(first.answer_outer, (o) => { o.ct = respell(o.ct); }) },
     { name: "the field names in upper case", request: first.name, answer_outer: JSON.stringify({ V: 1, N: JSON.parse(first.answer_outer).n, CT: JSON.parse(first.answer_outer).ct }) },
   ];
+  const otherKey = createECDH("prime256v1"); otherKey.generateKeys();
+  const stmt = (o) => b64u(JSON.stringify({ ...JSON.parse(Buffer.from(statement, "base64url")), ...o }));
+  const without = (k) => { const o = JSON.parse(Buffer.from(statement, "base64url")); delete o[k]; return b64u(JSON.stringify(o)); };
+  const shorter = chain.log(1); // the log as it stood before the rotation
+  const flipSig = (t) => t.slice(0, 5) + (t[5] === "A" ? "B" : "A") + t.slice(6);
+  const otherRid = "E" + RID.slice(1).split("").reverse().join("");
+  const statement_refusals = [
+    { name: "a key the identifier did not sign", rid: RID, statement: stmt({ key: b64u(createECDHPub(ephD("not signed"))) }) },
+    { name: "a link naming another identifier", rid: otherRid, statement },
+    { name: "a field it does not know", rid: RID, statement: stmt({ extra: 1 }) },
+    { name: "no key log", rid: RID, statement: without("log") },
+    { name: "no sequence number", rid: RID, statement: without("sn") },
+    { name: "an inception alone, as the first version of this carried", rid: RID, statement: b64u(JSON.stringify({ inception: b64u(enc.encode(inception)), key: JSON.parse(Buffer.from(statement, "base64url")).key, sig: JSON.parse(Buffer.from(statement, "base64url")).sig })) },
+    { name: "a compressed point", rid: RID, statement: stmt({ key: b64u(new Uint8Array([2, ...new Uint8Array(32)])) }) },
+    { name: "a signature respelled in its unused bits", rid: RID, statement: stmt({ sig: JSON.parse(Buffer.from(statement, "base64url")).sig.slice(0, -1) + "B" }) },
+    { name: "a changed signature", rid: RID, statement: stmt({ sig: flipSig(JSON.parse(Buffer.from(statement, "base64url")).sig) }) },
+    { name: "a statement text that is not readable", rid: RID, statement: "!!" },
+    { name: "the key the log has left, vouching for the key", rid: RID, statement: sealStatement(chain, sk.pub, { signer: chain.key(0) }) },
+    { name: "the key the log has left, vouching at its own, earlier sequence number, in the whole log", rid: RID, statement: sealStatement(chain, sk.pub, { signer: chain.key(0), sn: 0 }) },
+    { name: "a statement made at the first event, with the log as it stood then, once a longer log is known", rid: RID, statement: sealStatement(chain, sk.pub, { log: shorter, sn: 0, signer: chain.key(0) }), known_log: chain.log() },
+    { name: "a statement whose sequence number is not its log's last", rid: RID, statement: stmt({ sn: 0 }) },
+    { name: "a sequence number that is text", rid: RID, statement: stmt({ sn: "1" }) },
+    { name: "a key log of another identifier", rid: RID, statement: stmt({ log: relayChain("another", 1).log() }) },
+    { name: "a key log whose last event is not signed by the key it names", rid: RID, statement: stmt({ log: (() => { const t = Buffer.from(chain.log(), "base64url").toString(); const i = t.length - 10; return b64u(t.slice(0, i) + (t[i] === "A" ? "B" : "A") + t.slice(i + 1)); })() }) },
+  ];
+
   // What the relay sees of size: the ciphertext's length is its bucket and the tag, nothing finer.
   const sizes = [0, 1, 1019, 1020, 1021, 2043, 2044, 5000].map((n) => ({ content_len: n, ct_len: Math.max(1024, 2 ** Math.ceil(Math.log2(n + 4))) + 16 }));
 
   return {
-    about: "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's seed, and its statement is made from the inception, key and signature.",
+    about: "Sealed front-end traffic (packages/login-web/src/seal.ts, packages/login-go/seal.go) as cases both must hold alike. Made by make-seal-vectors.mjs; the TypeScript test makes it again and compares. `requests`: sealing `content` to the sealing key with the fixed ephemeral key must give `outer` exactly, opening `outer` gives `content` and a reply that seals `answer_content` to `answer_outer` exactly and opens it again. `refusals`: opening must fail. `answer_refusals`: the reply of the named request must not open it. `sizes`: a ciphertext is its bucket and 16 bytes of tag. `seal_key`: the sealing key is made from the relay identifier's CURRENT key's seed, and its statement is made from the identifier's whole key log, the key, the log's last sequence number and the current key's signature over them. `statement_refusals`: a statement (read against `known_log`, the longest log the page holds, when there is one) must be refused.",
     rid: RID,
     relay_inception: inception,
+    relay_log: chain.log(),
+    relay_sn: SN,
     relay_seed_hex: hex(seed),
     seal_key: { private_hex: hex(sk.d), public_b64u: b64u(sk.pub), statement },
-    requests, refusals, answer_refusals, sizes,
+    requests, refusals, answer_refusals, statement_refusals, sizes,
   };
 }
 
