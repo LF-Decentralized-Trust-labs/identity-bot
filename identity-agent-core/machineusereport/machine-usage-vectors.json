@@ -1,0 +1,78 @@
+{
+  "about": "A sealed box's signed machine-use report (ADR-079), worked from a fixed key. payload is the exact text signed; signature is CESR (code 0B) over those bytes. Each refused report must fail Verify with the key and the expectations given.",
+  "seed_hex": "c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0",
+  "identity": "EBoxIdentifierForTheMachineUseVectors0000000",
+  "public_key_hex": "7529c456d938d2b8fe90fa6ccf916d346770a64bcbb7b5323b687acde20cd00c",
+  "nonce": "n-1",
+  "valid": {
+    "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+    "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+  },
+  "refused": [
+    {
+      "why": "signed by another key",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BAk3cPesM30yADibB5WmUouIKZwiicQ9rgwhOCyUBz0CwDrxTtOx6ADBUdwYNhryncbCCqanrylDHuO2wUDnyUN"
+      }
+    },
+    {
+      "why": "the payload was changed after signing",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}}}",
+        "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+      }
+    },
+    {
+      "why": "the right key, but a report for another box",
+      "expect_identity": "EAnotherBox0000000000000000000000000000000",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+      }
+    },
+    {
+      "why": "a replay: answers another request",
+      "expect_nonce": "n-2",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BCrEVbwcRCAlSDcvz3gNYPfAcmPJ0CKJg60H3usPsw5P655ND8ud1nAf0FGh8WtkUfDxJWZSVmPJnXi6ZXUYvUM"
+      }
+    },
+    {
+      "why": "the right key, signed as another kind of thing",
+      "report": {
+        "payload": "{\"kind\":\"something-else/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BA0bltDiGL2PRaAYuEXsgfc0zaRAl4eur0pDSm9eaR0q3k4cuM-4LKFQOFeYVaBLA7ibQVMKObCB2CVKiChnMEN"
+      }
+    },
+    {
+      "why": "a reading with more in programs than the machine has",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":2147483648,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BCXPhr6p-fIh6HBAjDsgmsNdRYWfF6GhwjlSJ7AG-27X44lnEdSd9RcRwVnPbQ5Na1jffGrY25P6fSR26Y1484O"
+      }
+    },
+    {
+      "why": "readings out of order",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BDAvWDNGB5StDfUjzuMaIjmspxSkgSfxn3PweOADBqxZgZIESdIqYIlXcBEDEeWLMxfaHDUUC5BZHq0_C2msNIC"
+      }
+    },
+    {
+      "why": "a reading from after the report was signed",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":157286400,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T13:03:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BBOXz2sLLmhW45Fl8jH3H5BBDD-qOLk6844YrBK2rsYkLnlpIfCLlhto3vhnxaEUI878jfpGUr6xD6upq1KgYAM"
+      }
+    },
+    {
+      "why": "a peak below what was held",
+      "report": {
+        "payload": "{\"kind\":\"machine-usage/1\",\"identity\":\"EBoxIdentifierForTheMachineUseVectors0000000\",\"nonce\":\"n-1\",\"signed_at\":\"2026-11-13T12:03:00Z\",\"since\":\"2026-11-13T12:00:00Z\",\"readings\":[{\"at\":\"2026-11-13T12:00:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":104857600,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":1,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:01:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":125829120,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":125829120,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2},{\"at\":\"2026-11-13T12:02:00Z\",\"memory_total_bytes\":1073741824,\"memory_programs_bytes\":115343360,\"memory_cache_bytes\":268435456,\"memory_programs_peak_bytes\":209715200,\"load_1\":0.5,\"load_5\":0.4,\"load_15\":0.3,\"disk_used_bytes\":5368709120,\"disk_total_bytes\":21474836480,\"cpu_cores\":2}]}",
+        "signature": "0BDg8aN4pEGcUV_BgSYPZF288k140MlFHo9Z5mhPlyL4942qd5Ua_w8jpdpAIP9Q8w9VBtPbXIeQvwrPtQ6JJjAI"
+      }
+    }
+  ]
+}
