@@ -135,7 +135,19 @@ func (c *Checker) CheckAsking(b *Bundle, ask Asker, now time.Time) (*Result, err
 	if err != nil {
 		return nil, err
 	}
-	if next != held {
+	// Re-read and merge just before saving: another Checker over the same store
+	// (the lock above covers only this one) may have saved higher floors while
+	// this list was being checked. Merge never lowers anything, so what is
+	// written is at least what is on disk and at least what was just accepted.
+	latest, err := c.Store.Load()
+	if err != nil {
+		return nil, err
+	}
+	next, err = Merge(latest, next)
+	if err != nil {
+		return nil, err
+	}
+	if next != latest {
 		if err := c.Store.Save(next); err != nil {
 			return nil, fmt.Errorf("recording what was accepted: %w", err)
 		}

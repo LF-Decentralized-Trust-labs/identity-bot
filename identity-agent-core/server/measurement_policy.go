@@ -154,6 +154,10 @@ type measurementLists struct {
 	peers func() anchored.PeerTipAsker
 	now   func() time.Time
 
+	// checkMu makes one check at a time read, verify and save the floors, so a
+	// slower check of an older list cannot save over a newer one's floors.
+	checkMu sync.Mutex
+
 	mu       sync.Mutex
 	staged   *measurementlist.List
 	stagedAt time.Time
@@ -270,6 +274,8 @@ func (m *measurementLists) check(ctx context.Context, raw []byte) (*anchored.Res
 	if m.peers != nil {
 		peers = m.peers()
 	}
+	m.checkMu.Lock()
+	defer m.checkMu.Unlock()
 	checker := &anchored.Checker{Pin: pin, Store: m.floors(), Peers: anchored.PeersOf(ctx, peers)}
 	now := m.clock()
 	res, err := checker.CheckAsking(b, anchored.Resolver{Witnesses: asker}.Asker(ctx), now)

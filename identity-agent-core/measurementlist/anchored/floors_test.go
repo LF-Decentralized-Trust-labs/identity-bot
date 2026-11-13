@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -85,5 +86,84 @@ func TestPinnedFromTheBuild(t *testing.T) {
 	}
 	if _, err := ParsePin(p.aid, base64RawURL(onekey(t).icp), p.registry, p.schema); err == nil {
 		t.Fatal("an inception of another identity was pinned for this one")
+	}
+}
+
+// Two checks that overlap must not leave the floors lower than the better of
+// them: the one that finishes last used to save what it had read before the
+// other finished.
+func TestAnOverlappingCheckOfAnOlderListDoesNotLowerTheSavedFloors(t *testing.T) {
+	p := onekey(t)
+	published(p, 5)
+	old, oldTip := p.bundle(), p.tip()
+	published(p, 6)
+	newer, newerTip := p.bundle(), p.tip()
+	store := FileFloors{Path: filepath.Join(t.TempDir(), "floors.json")}
+	a := &Checker{Pin: p.pin(), Store: store}
+	b := &Checker{Pin: p.pin(), Store: store}
+
+	// a has read the empty floors and is waiting for the witnesses when b accepts 6
+	res, err := a.CheckAsking(old, func(string, []string, int) ([]TipReply, error) {
+		if _, err := b.Check(newer, p.answers(newerTip, 2), now); err != nil {
+			t.Fatalf("list 6: %v", err)
+		}
+		return p.answers(oldTip, 2), nil
+	}, now)
+	if err != nil {
+		t.Fatalf("a was checked against floors that were empty when it began: %v", err)
+	}
+	_ = res
+	fl, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fl.ListSequence != 6 || fl.KeyHistorySN != newerTip.SN || fl.KeyHistorySAID != newerTip.SAID ||
+		fl.NewestPublishedAt < res.List.PublishedAt.Unix() {
+		t.Fatalf("the floors went down: %+v", fl)
+	}
+	if _, err := a.Check(old, p.answers(oldTip, 2), now); !errors.Is(err, ErrBehind) {
+		t.Fatalf("list 5 after list 6: %v", err)
+	}
+}
+
+func TestListFiveIsRefusedAfterSixWhetherSequentialOrConcurrent(t *testing.T) {
+	p := onekey(t)
+	published(p, 5)
+	old, oldTip := p.bundle(), p.tip()
+	published(p, 6)
+	newer, newerTip := p.bundle(), p.tip()
+	store := FileFloors{Path: filepath.Join(t.TempDir(), "floors.json")}
+	c := &Checker{Pin: p.pin(), Store: store}
+	if _, err := c.Check(newer, p.answers(newerTip, 2), now); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = c.Check(old, p.answers(oldTip, 2), now)
+		}()
+	}
+	wg.Wait()
+	for _, e := range errs {
+		if !errors.Is(e, ErrBehind) {
+			t.Fatalf("list 5 after list 6: %v", e)
+		}
+	}
+	if fl, _ := store.Load(); fl.ListSequence != 6 {
+		t.Fatalf("%+v", fl)
+	}
+}
+
+func TestMergeNeverLowersAnything(t *testing.T) {
+	hi := Floors{ListSequence: 6, ListDigest: "d6", HasKeyHistory: true, KeyHistorySN: 9, KeyHistorySAID: "s9", NewestPublishedAt: 600}
+	lo := Floors{ListSequence: 5, ListDigest: "d5", HasKeyHistory: true, KeyHistorySN: 7, KeyHistorySAID: "s7", NewestPublishedAt: 500}
+	for _, c := range [][2]Floors{{hi, lo}, {lo, hi}, {hi, Floors{}}, {Floors{}, hi}} {
+		got, err := Merge(c[0], c[1])
+		if err != nil || got != hi {
+			t.Fatalf("Merge(%+v, %+v) = %+v, %v", c[0], c[1], got, err)
+		}
 	}
 }
