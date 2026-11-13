@@ -1,28 +1,16 @@
 package measurementlist
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"identity-agent-core/update"
 )
 
 var now = time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
-
-// A fixed key derived from a label, so the committed vectors are reproducible.
-// Its private half is not secret and it signs nothing real.
-func vectorKey(label string) (ed25519.PrivateKey, PinnedKey) {
-	seed := sha256.Sum256([]byte(label))
-	priv := ed25519.NewKeyFromSeed(seed[:])
-	return priv, PinnedKey{ID: "test-publisher-1", Public: priv.Public().(ed25519.PublicKey)}
-}
 
 func meas(b byte) string { return strings.Repeat(hex.EncodeToString([]byte{b}), MeasurementSize) }
 
@@ -43,11 +31,11 @@ func entry(image string, b byte) map[string]any {
 
 func baseDoc() map[string]any {
 	return map[string]any{
-		"list_version":   1,
-		"sequence":       7,
-		"published_at":   "2026-11-01T00:00:00Z",
-		"expires_at":     "2026-12-01T00:00:00Z",
-		"signing_key_id": "test-publisher-1",
+		"d":            "E-the-credential-said",
+		"dt":           "2026-11-01T00:00:00.000000+00:00",
+		"sequence":     7,
+		"published_at": "2026-11-01T00:00:00Z",
+		"expires_at":   "2026-12-01T00:00:00Z",
 		"images": map[string]any{
 			"individual":   []any{entry("individual-v19", 0x11), entry("individual-v20", 0x12)},
 			"organization": []any{entry("organization-v10", 0x21)},
@@ -55,24 +43,26 @@ func baseDoc() map[string]any {
 	}
 }
 
-// sign is the publisher's side, in test only: the real signer is private.
-func sign(t testing.TB, priv ed25519.PrivateKey, doc map[string]any) []byte {
+// read is the core's own path: the attribute block of a list credential read
+// strictly, then held to the rules. The digest stands for the credential.
+func read(t testing.TB, doc map[string]any, r Rules) (*List, error) {
 	t.Helper()
-	unsigned, _ := json.Marshal(doc)
-	msg, err := SignedBytes(unsigned)
+	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc["signature"] = update.EncodeBase64URL(ed25519.Sign(priv, msg))
-	out, _ := json.Marshal(doc)
-	return out
+	c, err := ContentOfAttributes(raw)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(raw)
+	return FromContent(c, hex.EncodeToString(sum[:]), r)
 }
 
-func policy(k PinnedKey) Policy { return Policy{Key: k, Now: now} }
+func rules() Rules { return Rules{Now: now} }
 
-func TestAGenuineListVerifies(t *testing.T) {
-	priv, key := vectorKey("a")
-	l, err := Verify(sign(t, priv, baseDoc()), policy(key))
+func TestAGenuineListIsRead(t *testing.T) {
+	l, err := read(t, baseDoc(), rules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,70 +71,53 @@ func TestAGenuineListVerifies(t *testing.T) {
 	}
 }
 
-func TestATamperedListIsRefused(t *testing.T) {
-	priv, key := vectorKey("a")
-	raw := sign(t, priv, baseDoc())
-	// Swap one accepted measurement for another, leaving the signature alone.
-	tampered := []byte(strings.Replace(string(raw), meas(0x11), meas(0x99), 1))
-	if string(tampered) == string(raw) {
-		t.Fatal("test did not change the list")
-	}
-	if _, err := Verify(tampered, policy(key)); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("got %v, want ErrBadSignature", err)
-	}
-	// Adding an entry is the attack that matters.
-	d := baseDoc()
-	signed := sign(t, priv, d)
-	var m map[string]any
-	json.Unmarshal(signed, &m)
-	m["images"].(map[string]any)["individual"] = append(m["images"].(map[string]any)["individual"].([]any), entry("individual-v21", 0x99))
-	added, _ := json.Marshal(m)
-	if _, err := Verify(added, policy(key)); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("an appended measurement: got %v, want ErrBadSignature", err)
-	}
-}
-
-func TestAListSignedByAnotherKeyIsRefused(t *testing.T) {
-	other, _ := vectorKey("attacker")
-	_, pinned := vectorKey("a")
-	if _, err := Verify(sign(t, other, baseDoc()), policy(pinned)); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("got %v, want ErrBadSignature", err)
-	}
-	// Same key, wrong id: realms with separate keys must not read each other.
-	priv, key := vectorKey("a")
-	d := baseDoc()
-	d["signing_key_id"] = "dev-publisher-1"
-	if _, err := Verify(sign(t, priv, d), policy(key)); !errors.Is(err, ErrWrongKeyID) {
-		t.Fatalf("got %v, want ErrWrongKeyID", err)
-	}
-}
-
 func TestAnOldListIsRefused(t *testing.T) {
-	priv, key := vectorKey("a")
-	raw := sign(t, priv, baseDoc()) // sequence 7
-	p := policy(key)
-	p.MinSequence = 8
-	if _, err := Verify(raw, p); !errors.Is(err, ErrOldList) {
+	r := rules()
+	r.MinSequence = 8
+	if _, err := read(t, baseDoc(), r); !errors.Is(err, ErrOldList) { // sequence 7
 		t.Fatalf("got %v, want ErrOldList", err)
 	}
-	p.MinSequence = 7 // the same list again is not old
-	if _, err := Verify(raw, p); err != nil {
+	r.MinSequence = 7 // the same list again is not old
+	if _, err := read(t, baseDoc(), r); err != nil {
 		t.Fatalf("the current list was refused: %v", err)
 	}
 }
 
+func TestADifferentListAtTheSameSequenceIsRefused(t *testing.T) {
+	first, err := read(t, baseDoc(), rules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := baseDoc()
+	other["images"] = map[string]any{"individual": []any{entry("individual-v19", 0x55)}}
+	r := rules()
+	r.MinSequence, r.SeenDigest = 7, first.Digest
+	if _, err := read(t, other, r); !errors.Is(err, ErrConflictingList) {
+		t.Fatalf("got %v, want ErrConflictingList", err)
+	}
+	if _, err := read(t, baseDoc(), r); err != nil {
+		t.Fatalf("the list accepted at that sequence was refused again: %v", err)
+	}
+}
+
 func TestAnExpiredListIsRefused(t *testing.T) {
-	priv, key := vectorKey("a")
-	p := policy(key)
-	p.Now = time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := Verify(sign(t, priv, baseDoc()), p); !errors.Is(err, ErrExpired) {
+	r := rules()
+	r.Now = time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := read(t, baseDoc(), r); !errors.Is(err, ErrExpired) {
 		t.Fatalf("got %v, want ErrExpired", err)
 	}
 }
 
+func TestAListDatedInTheFutureIsRefused(t *testing.T) {
+	d := baseDoc()
+	d["published_at"] = "2026-11-13T00:00:00Z"
+	if _, err := read(t, d, rules()); !errors.Is(err, ErrNotYetPublished) {
+		t.Fatalf("got %v, want ErrNotYetPublished", err)
+	}
+}
+
 func TestAMeasurementNotOnTheListIsNotAccepted(t *testing.T) {
-	priv, key := vectorKey("a")
-	l, _ := Verify(sign(t, priv, baseDoc()), policy(key))
+	l, _ := read(t, baseDoc(), rules())
 	has := func(kind string, m []byte) bool {
 		for _, a := range l.Measurements(kind) {
 			if string(a) == string(m) {
@@ -170,16 +143,15 @@ func TestAMeasurementNotOnTheListIsNotAccepted(t *testing.T) {
 	}
 }
 
-// Item 7: during an update both images are valid; an entry is retired by its
-// date, and a retired entry is carried but not accepted.
+// During an update both images are valid; an entry is retired by its date, and
+// a retired entry is carried but not accepted.
 func TestEntriesAreAcceptedOnlyInsideTheirWindow(t *testing.T) {
-	priv, key := vectorKey("a")
 	d := baseDoc()
 	old, next, future := entry("individual-v19", 0x11), entry("individual-v20", 0x12), entry("individual-v21", 0x13)
 	old["valid_until"] = "2026-11-20T00:00:00Z"
 	future["valid_from"] = "2026-12-01T00:00:00Z"
 	d["images"] = map[string]any{"individual": []any{old, next, future}}
-	l, err := Verify(sign(t, priv, d), policy(key))
+	l, err := read(t, d, rules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,8 +173,7 @@ func TestEntriesAreAcceptedOnlyInsideTheirWindow(t *testing.T) {
 }
 
 func TestEveryEntryKeepsWhatItWasComputedFrom(t *testing.T) {
-	priv, key := vectorKey("a")
-	l, err := Verify(sign(t, priv, baseDoc()), policy(key))
+	l, err := read(t, baseDoc(), rules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,135 +184,62 @@ func TestEveryEntryKeepsWhatItWasComputedFrom(t *testing.T) {
 	}
 }
 
-func TestNoPinnedKeyVerifiesNothing(t *testing.T) {
-	priv, _ := vectorKey("a")
-	if _, err := Verify(sign(t, priv, baseDoc()), Policy{Now: now}); !errors.Is(err, ErrNoKey) {
-		t.Fatalf("got %v, want ErrNoKey", err)
+func TestMalformedContentIsRefused(t *testing.T) {
+	one := func(mut func(e map[string]any)) func(map[string]any) {
+		return func(d map[string]any) {
+			e := entry("i", 1)
+			mut(e)
+			d["images"] = map[string]any{"individual": []any{e}}
+		}
 	}
-}
-
-func TestAPublishedTestKeyCannotBePinned(t *testing.T) {
-	if _, err := ParseKeyHex("x", "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"); err == nil {
-		t.Fatal("the RFC 8032 test key was accepted as a publisher key")
+	cf := func(k string, v any) func(map[string]any) {
+		return one(func(e map[string]any) {
+			if v == nil {
+				delete(e["computed_from"].(map[string]any), k)
+			} else {
+				e["computed_from"].(map[string]any)[k] = v
+			}
+		})
 	}
-}
-
-func TestMalformedContentIsRefusedEvenWhenSigned(t *testing.T) {
-	priv, key := vectorKey("a")
 	cases := map[string]func(map[string]any){
-		"short measurement": func(d map[string]any) {
-			e := entry("i", 0x11)
-			e["measurement"] = meas(0x11)[:90]
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"upper case": func(d map[string]any) {
-			e := entry("i", 0xab)
-			e["measurement"] = strings.ToUpper(meas(0xab))
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
+		"short measurement": one(func(e map[string]any) { e["measurement"] = meas(0x11)[:90] }),
+		"upper case":        one(func(e map[string]any) { e["measurement"] = strings.ToUpper(meas(0xab)) }),
 		"duplicate": func(d map[string]any) {
 			d["images"] = map[string]any{"individual": []any{entry("a", 1), entry("b", 1)}}
 		},
 		"shared across kinds": func(d map[string]any) {
 			d["images"] = map[string]any{"individual": []any{entry("a", 1)}, "organization": []any{entry("b", 1)}}
 		},
-		"empty kind": func(d map[string]any) { d["images"] = map[string]any{"individual": []any{}} },
-		"no kinds":   func(d map[string]any) { d["images"] = map[string]any{} },
-		"no image name": func(d map[string]any) {
-			e := entry("", 1)
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"no firmware hash": func(d map[string]any) {
-			e := entry("i", 1)
-			delete(e["computed_from"].(map[string]any), "ovmf_sha256")
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"no cpu model": func(d map[string]any) {
-			e := entry("i", 1)
-			e["computed_from"].(map[string]any)["cpu_model"] = ""
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"zero vcpus": func(d map[string]any) {
-			e := entry("i", 1)
-			e["computed_from"].(map[string]any)["vcpus"] = 0
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"no command-line hash": func(d map[string]any) {
-			e := entry("i", 1)
-			delete(e["computed_from"].(map[string]any), "cmdline_sha256")
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"no validity start": func(d map[string]any) {
-			e := entry("i", 1)
-			e["valid_from"] = ""
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"window ends before it starts": func(d map[string]any) {
-			e := entry("i", 1)
-			e["valid_until"] = "2026-10-01T00:00:00Z"
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"unknown entry field": func(d map[string]any) {
-			e := entry("i", 1)
-			e["note"] = "x"
-			d["images"] = map[string]any{"individual": []any{e}}
-		},
-		"unknown version": func(d map[string]any) { d["list_version"] = 2 },
-		"unknown field":   func(d map[string]any) { d["extra"] = true },
-		"zero sequence":   func(d map[string]any) { d["sequence"] = 0 },
-		"expiry first":    func(d map[string]any) { d["expires_at"] = "2026-10-01T00:00:00Z" },
-		"future":          func(d map[string]any) { d["published_at"] = "2026-11-13T00:00:00Z" },
+		"empty kind":                   func(d map[string]any) { d["images"] = map[string]any{"individual": []any{}} },
+		"no kinds":                     func(d map[string]any) { d["images"] = map[string]any{} },
+		"no image name":                one(func(e map[string]any) { e["image"] = "" }),
+		"no firmware hash":             cf("ovmf_sha256", nil),
+		"no cpu model":                 cf("cpu_model", ""),
+		"zero vcpus":                   cf("vcpus", 0),
+		"no command-line hash":         cf("cmdline_sha256", nil),
+		"no validity start":            one(func(e map[string]any) { e["valid_from"] = "" }),
+		"window ends before it starts": one(func(e map[string]any) { e["valid_until"] = "2026-10-01T00:00:00Z" }),
+		"unknown entry field":          one(func(e map[string]any) { e["note"] = "x" }),
+		"unknown version":              func(d map[string]any) { d["list_version"] = 3 },
+		"unknown field":                func(d map[string]any) { d["extra"] = true },
+		"zero sequence":                func(d map[string]any) { d["sequence"] = 0 },
+		"expiry first":                 func(d map[string]any) { d["expires_at"] = "2026-10-01T00:00:00Z" },
+		"no credential date":           func(d map[string]any) { d["dt"] = "" },
+		"not whole seconds":            func(d map[string]any) { d["published_at"] = "2026-11-01T00:00:00.5Z" },
+		"not in UTC":                   func(d map[string]any) { d["expires_at"] = "2026-12-01T00:00:00+01:00" },
 	}
 	for name, mut := range cases {
 		d := baseDoc()
 		mut(d)
-		if _, err := Verify(sign(t, priv, d), policy(key)); err == nil {
-			t.Errorf("%s: a signed but malformed list was accepted", name)
+		if _, err := read(t, d, rules()); err == nil {
+			t.Errorf("%s: a malformed list was accepted", name)
 		}
 	}
 	for _, raw := range []string{"", "null", "[]", "{", "{}"} {
-		if _, err := Verify([]byte(raw), policy(key)); err == nil {
-			t.Errorf("%q was accepted", raw)
+		if c, err := ContentOfAttributes([]byte(raw)); err == nil {
+			if _, err := FromContent(c, "x", rules()); err == nil {
+				t.Errorf("%q was accepted", raw)
+			}
 		}
 	}
 }
-
-// A signature made for a list is not a signature on anything else, and the
-// reverse: the same key signing the bare canonical bytes is not a list.
-func TestTheSignatureIsBoundToThisKindOfDocument(t *testing.T) {
-	priv, key := vectorKey("a")
-	d := baseDoc()
-	unsigned, _ := json.Marshal(d)
-	canonical, _ := update.CanonicalizeWithoutField(unsigned, "signature")
-	d["signature"] = update.EncodeBase64URL(ed25519.Sign(priv, canonical)) // no prefix
-	raw, _ := json.Marshal(d)
-	if _, err := Verify(raw, policy(key)); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("got %v, want ErrBadSignature", err)
-	}
-}
-
-// The committed vectors are what other implementations check against. They are
-// reproduced byte for byte from the fixed key, so they cannot drift unseen.
-func TestTheCommittedVectorsVerifyAndAreReproducible(t *testing.T) {
-	priv, key := vectorKey("measurement-list-vectors-v1")
-	want := sign(t, priv, baseDoc())
-	if os.Getenv("WRITE_VECTORS") != "" {
-		os.WriteFile("testdata/valid.json", want, 0o644)
-		os.WriteFile("testdata/publisher_key.hex", []byte(hex.EncodeToString(key.Public)+"\n"), 0o644)
-	}
-	got, err := os.ReadFile("testdata/valid.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(want) {
-		t.Fatal("testdata/valid.json differs from what the fixed key produces; rerun with WRITE_VECTORS=1 only if the format changed on purpose")
-	}
-	hexKey, _ := os.ReadFile("testdata/publisher_key.hex")
-	if strings.TrimSpace(string(hexKey)) != hex.EncodeToString(key.Public) {
-		t.Fatal("testdata/publisher_key.hex does not match the vector key")
-	}
-	if _, err := Verify(got, policy(key)); err != nil {
-		t.Fatal(err)
-	}
-}
-

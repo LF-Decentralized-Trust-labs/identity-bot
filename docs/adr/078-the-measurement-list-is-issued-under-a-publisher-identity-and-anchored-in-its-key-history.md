@@ -36,7 +36,7 @@ ADR-076 takes the list of accepted launch measurements from a document signed wi
 ## Consequences
 
 - The publisher can be a single key held by one box, and later several keys, with the same checker and the same pin.
-- `PinnedKeyID` and `PinnedKeyHex` are gone, replaced by the pin of decision 3; a build without a pin accepts no list. The signed-document reader in `measurementlist` (`Verify`) has no caller in the core and goes with the Dart verifier.
+- `PinnedKeyID` and `PinnedKeyHex` are gone, replaced by the pin of decision 3; a build without a pin accepts no list. The signed-document reader in `measurementlist` (`Verify`, `SignedBytes`, the pinned key and its vectors) is deleted; the rules for a list's content stay in `measurementlist` (`FromContent`) and are tested through the credential's attribute block.
 - An anchored list may say `list_version` 2 in its attribute block, and its entries then carry `environment`, `svn`, `smt` and `retired`, read by the same code as a signed list's.
 - ADR-076 decision 7 stands and applies to whatever issues a list: the issuing tool refuses an entry marked as development.
 - The floors (the highest list sequence and its hash, the newest place of the publisher's history this device has held, and the newest `published_at` accepted) never fall below the build's bundled snapshot.
