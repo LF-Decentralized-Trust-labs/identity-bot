@@ -280,10 +280,20 @@ func (m *measurementLists) check(ctx context.Context, raw []byte) (*anchored.Res
 		}
 		return nil, err
 	}
-	m.mu.Lock()
-	m.staged, m.stagedAt = res.List, now
-	m.mu.Unlock()
+	m.stage(res.List, now)
 	return res, nil
+}
+
+// stage makes a checked list the one in use, unless one with a higher sequence
+// is already staged: two requests can finish in the other order from the one
+// they were checked in, and the older list may carry entries the newer dropped.
+func (m *measurementLists) stage(list *measurementlist.List, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.staged != nil && list.Sequence < m.staged.Sequence {
+		return
+	}
+	m.staged, m.stagedAt = list, now
 }
 
 // recordDuplicity keeps the evidence of a conflicting history. It is never read
