@@ -2405,8 +2405,11 @@ class CoreService {
     /// An agent with no measurement policy refuses every sealed machine, by
     /// design: read as "accept anything", a missing policy would make every
     /// other check decorative. So something has to say which software is
-    /// acceptable, and until a signed list is published this is where it comes
-    /// from — the owner stating their own policy on an owner-only route.
+    /// acceptable. The published list of accepted software is that policy
+    /// (the app hands it to the core at start, and the core decides); this
+    /// field is the owner adding to it for this one adoption, such as an image
+    /// they built themselves — the owner stating their own policy on an
+    /// owner-only route.
     ///
     /// It does not make a measurement trustworthy. It records which value the
     /// owner decided to accept. Where that value came from — a published list,
