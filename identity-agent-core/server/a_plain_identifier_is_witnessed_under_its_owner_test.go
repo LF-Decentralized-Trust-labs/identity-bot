@@ -130,6 +130,33 @@ func TestAPlainIdentifierIsWitnessedOnlyOnceItsOwnerSaysItIsItsOwn(t *testing.T)
 	if got := event(); got != http.StatusOK {
 		t.Fatalf("a covered identifier's inception was not taken: %d", got)
 	}
+	// An identifier held under one owner cannot be taken by another that says it is its own, nor can a
+	// contact this witness already witnesses for be declared anybody's.
+	owner2, _ := keri.GenerateSigner(true)
+	owner2Key, _ := owner2.PublicKey()
+	const owner2AID = "ESecondOwnerIdentifierxxxxxxxxxxxxxxxxxxxxxxxx"
+	peer.willWitnessFor(t, owner2AID)
+	_ = peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner2AID, PublicKey: owner2Key, Status: "accepted", ContactCategory: "general"})
+	_ = peer.svc.Store.SetConfig("witness.delegators_covered", `{"`+ownerAID+`":true,"`+owner2AID+`":true}`)
+	declareBy := func(who string, signer keri.Signer, id string, inception []byte, said string) (int, string) {
+		stamp := time.Now().UTC().Format(time.RFC3339Nano)
+		b, _ := signer.Sign([]byte(witness.CoverStatement(who, key, id, said, stamp)))
+		sg, _ := keri.MatterQB64(keri.CodeEd25519Sig, b)
+		return post("/api/witness/cover", witness.CoverRequest{Owner: who, AID: id, InceptionB64: base64.StdEncoding.EncodeToString(inception), Stamp: stamp, Signature: sg})
+	}
+	if code, _ := declareBy(owner2AID, owner2, aid, raw, said); code != http.StatusForbidden {
+		t.Fatalf("an identifier held under one owner was taken by another: %d", code)
+	}
+	contactAID, contactSaid, contactRaw, _ := signedInception(t, key)
+	peer.willWitnessFor(t, contactAID)
+	if code, _ := declareBy(ownerAID, owner, contactAID, contactRaw, contactSaid); code != http.StatusForbidden {
+		t.Fatalf("a contact this witness already witnesses for was declared another's: %d", code)
+	}
+	// Said again by the owner it is held under, it is taken (and is not counted twice).
+	if code, body := cover(nil); code != http.StatusOK {
+		t.Fatalf("an owner could not say again what it had said: %d %s", code, body)
+	}
+
 	// And only while the owner is witnessed: when it is not, the identifier is not either.
 	meta, _ := peer.svc.Store.GetContactMeta(ownerAID)
 	meta.WitnessingFor = false

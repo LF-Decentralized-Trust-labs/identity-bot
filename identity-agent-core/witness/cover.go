@@ -89,11 +89,19 @@ func (s *Service) AcceptCover(req CoverRequest) error {
 	if meta, _ := s.Store.GetContactMeta(req.Owner); meta == nil || !meta.WitnessingFor {
 		return fmt.Errorf("not_covered: this witness does not witness for the owner")
 	}
-	if s.delegateOf(req.AID) != req.Owner && !s.delegatesAccepted(req.Owner) {
+	// An identifier already held is held under whoever it is held under: a
+	// declaration cannot take it from them, nor take a contact this witness
+	// already witnesses for (a root identifier's inception is public too), and it
+	// takes no more of the owner's allowance to say it again.
+	heldUnder := s.delegateOf(req.AID)
+	meta, _ := s.Store.GetContactMeta(req.AID)
+	if heldUnder != "" && heldUnder != req.Owner || heldUnder == "" && meta != nil && meta.WitnessingFor {
+		return fmt.Errorf("not_covered: this identifier is already witnessed for another")
+	}
+	if heldUnder != req.Owner && !s.delegatesAccepted(req.Owner) {
 		return fmt.Errorf("not_covered: the owner's agreement does not cover its identifiers, or this witness's operator does not accept more")
 	}
 	// Held under the owner as a delegate is, with no contact made for it.
-	meta, _ := s.Store.GetContactMeta(req.AID)
 	if meta == nil {
 		meta = &ContactMeta{ContactAID: req.AID}
 	}
