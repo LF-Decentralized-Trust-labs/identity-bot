@@ -47,6 +47,9 @@ func TestAPageCannotCallItselfTheInstalledApp(t *testing.T) {
 		if code != http.StatusForbidden || strings.Contains(body, "collector_secret") {
 			t.Fatalf("origin %q: installed_app got %d %s", origin, code, body)
 		}
+		if origin == "" && !strings.Contains(body, "utility app's installed front end") {
+			t.Fatalf("the refusal does not name the kind of app: %s", body)
+		}
 	}
 	// The gate is the key, not the word: with the key presented it is let through.
 	if _, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, "", "installed_app", w.srv.URL, true); code != 0 {

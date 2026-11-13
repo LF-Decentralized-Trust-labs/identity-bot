@@ -378,7 +378,7 @@ func (h *Handler) HandlePutFrontEnds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.FrontEndsAreDeclared() {
-		h.writeJSON(w, map[string]string{"error": "this app was made before it could say how it is used, so there is nothing to switch off until its front ends are declared"}, http.StatusConflict)
+		h.writeJSON(w, map[string]string{"error": "this utility app was made before it could say how it is used, so there is nothing to switch off until its front ends are declared"}, http.StatusConflict)
 		return
 	}
 	off, err := SwitchOff(a.DeviceFrontEnds, *body.SwitchedOff)

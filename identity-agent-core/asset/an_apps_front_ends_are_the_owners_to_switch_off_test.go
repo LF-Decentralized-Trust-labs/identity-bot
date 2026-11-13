@@ -56,7 +56,7 @@ func TestTheSwitchIsKeptAndCanBeSwitchedBackOn(t *testing.T) {
 		t.Fatalf("answered %d: %s", rec.Code, rec.Body)
 	}
 	a, _, _ := h.Store.GetAsset("a")
-	if why := a.FrontEndRefusal("browser"); !strings.Contains(why, "switched off") {
+	if why := a.FrontEndRefusal("browser"); !strings.Contains(why, "utility app has switched off") {
 		t.Fatalf("the saved asset admits a switched-off front end: %q", why)
 	}
 	if why := a.FrontEndRefusal("installed_app"); why != "" {
