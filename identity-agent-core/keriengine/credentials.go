@@ -55,12 +55,25 @@ func (e *Engine) FormatCredential(claims map[string]interface{}, schemaSaid, iss
 // is a registry nothing vouches for: a verifier has no way to tell it from one
 // invented after the fact to backdate an issuance.
 func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptResponse, error) {
+	return e.inceptRegistry(name, false)
+}
+
+// InceptBackerlessRegistry is InceptRegistry for a registry founded with the
+// configuration trait "NB": it never has backers, so its events are witnessed
+// only through its issuer's own key log (keripy's noBackers). It is what a
+// public statement that must be checkable from the key log alone is issued
+// into, such as the list of accepted sealed-box software.
+func (e *Engine) InceptBackerlessRegistry(name string) (*drivers.DriverRegistryInceptResponse, error) {
+	return e.inceptRegistry(name, true)
+}
+
+func (e *Engine) inceptRegistry(name string, noBackers bool) (*drivers.DriverRegistryInceptResponse, error) {
 	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	p, err := e.prepareRegistry(id)
+	p, err := e.prepareRegistry(id, noBackers)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +88,18 @@ func (e *Engine) PrepareRegistryInception(name string) (*drivers.PreparedRegistr
 		return nil, err
 	}
 	defer release()
-	return e.prepareRegistry(id)
+	return e.prepareRegistry(id, false)
+}
+
+// PrepareBackerlessRegistryInception is PrepareRegistryInception for a registry
+// with the "NB" trait (see InceptBackerlessRegistry).
+func (e *Engine) PrepareBackerlessRegistryInception(name string) (*drivers.PreparedRegistry, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.prepareRegistry(id, true)
 }
 
 // AppendPreparedRegistry appends a registry's inception exactly as it was
@@ -89,7 +113,7 @@ func (e *Engine) AppendPreparedRegistry(name string, p *drivers.PreparedRegistry
 	return e.appendPreparedRegistry(id, p)
 }
 
-func (e *Engine) prepareRegistry(id *identity) (*drivers.PreparedRegistry, error) {
+func (e *Engine) prepareRegistry(id *identity, noBackers bool) (*drivers.PreparedRegistry, error) {
 	// A registry needs a nonce, or two registries founded by the same issuer
 	// would have the same identifier — and an issuance into one would read as
 	// an issuance into the other.
@@ -97,7 +121,7 @@ func (e *Engine) prepareRegistry(id *identity) (*drivers.PreparedRegistry, error
 	if err != nil {
 		return nil, err
 	}
-	vcp, err := keri.BuildRegistryInception(keri.RegistryInput{Issuer: id.AID, Nonce: nonce})
+	vcp, err := keri.BuildRegistryInception(keri.RegistryInput{Issuer: id.AID, Nonce: nonce, NoBackers: noBackers})
 	if err != nil {
 		return nil, fmt.Errorf("building the registry: %w", err)
 	}
@@ -216,6 +240,13 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 // IssueCredentialInRegistry.
 func (e *Engine) IssueCredential(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) (*drivers.DriverIssueCredentialResponse, error) {
 	return e.issue(name, claims, schemaSaid, holderAid, edges, "")
+}
+
+// IssueUntargetedCredentialInRegistry issues a credential that names no holder
+// into a registry: a public statement and not something issued to somebody, so
+// its attribute block has no `i`. The issuer is not made its own holder.
+func (e *Engine) IssueUntargetedCredentialInRegistry(name string, claims map[string]interface{}, schemaSaid, registrySaid string) (*drivers.DriverIssueCredentialResponse, error) {
+	return e.IssueCredentialInRegistry(name, claims, schemaSaid, "", nil, registrySaid)
 }
 
 // IssueCredentialInRegistry issues a credential into a registry, so it can

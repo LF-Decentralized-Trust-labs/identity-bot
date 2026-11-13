@@ -36,6 +36,13 @@ func aGatedCore(t *testing.T, dir string) (*CoreServer, http.Handler) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Stop does nothing for a core that was never started, and these cores are
+	// not: the work an unlock starts (the anchoring loop, the witnessing worker)
+	// would then run on past the test and write into its directory while it is
+	// being removed. Marked running so the stop is a real one.
+	s.mu.Lock()
+	s.running = true
+	s.mu.Unlock()
 	t.Cleanup(s.Stop)
 	return s, s.buildRouter()
 }

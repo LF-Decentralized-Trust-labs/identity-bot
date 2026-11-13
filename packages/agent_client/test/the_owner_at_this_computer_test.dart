@@ -256,7 +256,7 @@ void main() {
       // accepted_measurements.dart fetches the publisher's signed list of
       // accepted software from MEASUREMENT_LIST_URL: a public document on a
       // public host, never the core, so it carries no owner proof. The list
-      // is trusted only after it verifies against the pinned publisher key.
+      // is trusted only after it is checked by the core against the pinned publisher identity.
       if (!f.path.endsWith('.dart') ||
           f.path.endsWith('the_owner_at_this_computer.dart') ||
           f.path.contains('a_socket_to_the_agent') ||

@@ -2,15 +2,23 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/measurementlist"
+	"identity-agent-core/measurementlist/anchored"
+	"identity-agent-core/watcher"
 )
 
 // Which software an owner will adopt a sealed box for.
@@ -22,18 +30,21 @@ import (
 //
 // Two ways in, both the owner's:
 //
-//   - The signed, published measurement list (package measurementlist), read
-//     from AGENT_MEASUREMENT_LIST_FILE and checked against the publisher key
-//     pinned in this build. When one verifies it is the policy, and nothing
-//     else is added to it — except by the owner's own statement on one
-//     adoption request, below, which survives an accepted list on purpose.
-//     When the variable is unset the file measurement_list.json in the data
-//     directory is read instead, which is how an app hands the core a list
-//     (desktop and embedded alike): the app supplies the bytes and the core
-//     decides.
+//   - The published list of accepted software (package measurementlist/anchored):
+//     a credential issued under the publisher's identity, which this build pins
+//     (an identifier, never a key), and anchored in that identity's witnessed
+//     key history. An app hands the core a candidate bundle on
+//     POST /api/measurement-list; the core asks the publisher's witnesses for
+//     the publisher's latest state itself, checks the bundle against it and
+//     against the floors it keeps, and only then stages the list. A staged
+//     list is the policy for a short time after that check and while its own
+//     dates hold (see measurementLists.policy), and nothing else is added to
+//     it — except by the owner's own statement on one adoption request, below,
+//     which survives an accepted list on purpose. Nothing is read from a file
+//     or the environment: whoever delivers bytes decides nothing.
 //   - AGENT_ACCEPTED_MEASUREMENTS on this agent, for a standing policy that
-//     survives restarts. It is the bootstrap: used only while no signed list
-//     has ever been accepted here; after one has, it is never used again.
+//     survives restarts. It is the bootstrap: used only while no list has ever
+//     been accepted here; after one has, it is never used again.
 //   - accepted_measurements on the adoption request itself, for one adoption.
 //     /api/pairing/adopt is owner-only, so this is the owner speaking, not the
 //     box — but see the warning on the request field. It is kept after a list
@@ -105,115 +116,208 @@ func shortMeasurement(v string) string {
 	return v[:20] + "…"
 }
 
-// measurementListFloorFile records the highest list sequence accepted here,
-// and the hash of the list accepted at it.
-const measurementListFloorFile = "measurement_list_sequence"
+// measurementFloorsFile is where the floors are kept (anchored.FileFloors): the
+// highest list sequence accepted and the list accepted at it, and the newest
+// place of the publisher's key history seen.
+const measurementFloorsFile = "measurement_list_floors.json"
 
-// acceptedMeasurements is measurementPolicy without the reason, for callers
-// that only need the measurements. The error is only for a malformed bootstrap.
+// measurementDuplicityFile keeps the evidence when a publisher's history
+// conflicts with the one this core holds: the place, both digests and the
+// signed message offered.
+const measurementDuplicityFile = "measurement_publisher_duplicity.json"
+
+// listFreshFor is how long after the publisher's witnesses were asked a list is
+// still used for a decision. A withdrawal or a newer list can only be seen by
+// asking again, so this is the longest a withdrawn list can outlive its
+// withdrawal here; an adoption asks first (the app calls the route before it
+// offers one), so for an adoption the answer is as fresh as the question.
+const listFreshFor = time.Hour
+
+// acceptedMeasurements is the policy without the reason, for callers that only
+// need the measurements. The error is only for a malformed bootstrap.
 func acceptedMeasurements(dataDir, entityType string, now time.Time) ([][]byte, error) {
-	m, _, err := measurementPolicy(dataDir, entityType, now)
+	m, _, err := (&measurementLists{dataDir: dataDir}).policy(entityType, now)
 	return m, err
 }
 
-// measurementPolicy decides this agent's standing policy at time now: the
-// verified signed list if there is one, otherwise the bootstrap from the
-// environment — but the bootstrap only until a signed list has ever been
-// accepted here.
+// measurementLists is what a core knows of the publisher's list: the floors on
+// disk and the list it last checked (in memory only: after a restart it has to
+// be checked again, with the witnesses, before it decides anything).
+type measurementLists struct {
+	dataDir string
+	// pin is what this build trusts; nil is anchored.Pinned.
+	pin func() (anchored.Pin, error)
+	// asker is who asks the publisher's witnesses; nil means nobody can be asked.
+	asker func() anchored.TipAsker
+	// peers asks the person's peer watchers for the publisher's tip too; nil
+	// asks nobody.
+	peers func() anchored.PeerTipAsker
+	now   func() time.Time
+
+	// checkMu makes one check at a time read, verify and save the floors, so a
+	// slower check of an older list cannot save over a newer one's floors.
+	checkMu sync.Mutex
+
+	mu       sync.Mutex
+	staged   *measurementlist.List
+	stagedAt time.Time
+}
+
+func (m *measurementLists) floors() anchored.FileFloors {
+	return anchored.FileFloors{Path: filepath.Join(m.dataDir, measurementFloorsFile)}
+}
+
+func (m *measurementLists) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// policy decides this agent's standing policy at time now: the list checked
+// with the publisher's witnesses, if there is a fresh one, otherwise the
+// bootstrap from the environment — but the bootstrap only until a list has ever
+// been accepted here.
 //
 // Once a list has been accepted (the recorded floor is above zero) the
 // bootstrap is never consulted again. The bootstrap is the oldest policy there
-// is; letting any list failure fall back to it would let a corrupted file, a
-// deleted file, an older list or an expired one force that policy, and undo the
+// is; letting any list failure fall back to it would let a restart, a deleted
+// file, an older list or an expired one force that policy, and undo the
 // rollback protection the floor exists for. From then on every failure of the
 // list means NO measurement is accepted, and the second result says why.
 //
 // Fail closed at every step. A verified list that names nothing for this
 // agent's image kind yields an empty policy, which acceptableMeasurement
 // refuses: the publisher has said nothing is acceptable.
-func measurementPolicy(dataDir, entityType string, now time.Time) ([][]byte, string, error) {
-	floor, _, floorErr := measurementlist.ReadFloor(filepath.Join(dataDir, measurementListFloorFile))
+func (m *measurementLists) policy(entityType string, now time.Time) ([][]byte, string, error) {
+	floors, floorErr := m.floors().Load()
 	if floorErr != nil {
 		// A damaged record is not "nothing accepted yet".
-		why := fmt.Sprintf("the record of the newest accepted measurement list cannot be read, so no box is accepted: %v", floorErr)
+		why := fmt.Sprintf("the record of the newest accepted list of software cannot be read, so no box is accepted: %v", floorErr)
 		log.Printf("[identity-agent-core] %s", why)
 		return nil, why, nil
 	}
-	everAccepted := floor > 0
+	everAccepted := floors.ListSequence > 0
+	// For the dates a list holds (its expiry, an entry's window) "now" is never
+	// earlier than the newest list this core has accepted was published, so a
+	// host that sets the clock back cannot revive what the core has seen close.
+	// How long ago the list was checked is a question for the real clock.
+	checkedAt := now
+	now = floors.NoEarlierThanTheFloor(now)
 
-	path := measurementListPath(dataDir)
+	m.mu.Lock()
+	list, at := m.staged, m.stagedAt
+	m.mu.Unlock()
+
 	var listErr error
 	switch {
-	case path != "":
-		list, err := verifiedMeasurementList(path, dataDir, now)
-		if err == nil {
-			if entityType == "" {
-				why := "a measurement list verified but this agent does not declare its image kind, so no box is accepted"
-				log.Printf("[identity-agent-core] %s", why)
-				return nil, why, nil
-			}
-			m := list.Measurements(entityType)
-			log.Printf("[identity-agent-core] using signed measurement list sequence %d: %d accepted for %q",
-				list.Sequence, len(m), entityType)
-			return m, "", nil
+	case list != nil && checkedAt.Before(at):
+		listErr = errors.New("this computer's clock is earlier than when the list was last checked")
+	case list != nil && checkedAt.Sub(at) > listFreshFor:
+		listErr = fmt.Errorf("the list was last checked with the publisher's witnesses at %s, which is too long ago to rely on: a withdrawal could have come since",
+			at.UTC().Format(time.RFC3339))
+	case list != nil && !now.Before(list.ExpiresAt):
+		listErr = fmt.Errorf("the list expired at %s", list.ExpiresAt.UTC().Format(time.RFC3339))
+	case list != nil:
+		if entityType == "" {
+			why := "a list of software verified but this agent does not declare its image kind, so no box is accepted"
+			log.Printf("[identity-agent-core] %s", why)
+			return nil, why, nil
 		}
-		listErr = err
+		out := list.MeasurementsAt(entityType, now)
+		log.Printf("[identity-agent-core] using the publisher's list sequence %d: %d accepted for %q", list.Sequence, len(out), entityType)
+		return out, "", nil
 	case everAccepted:
-		listErr = fmt.Errorf("there is no measurement list: AGENT_MEASUREMENT_LIST_FILE is not set and %s is absent", defaultMeasurementListFile)
+		listErr = errors.New("the list has not been checked with the publisher's witnesses since this core started")
 	}
 	if everAccepted {
-		why := fmt.Sprintf("a signed measurement list (sequence %d) was accepted here before and the list now cannot be used (%v); "+
-			"the older bootstrap policy is never used again, so no box is accepted until a valid list at that sequence or later is in place",
-			floor, listErr)
+		why := fmt.Sprintf("a list of software (sequence %d) was accepted here before and the list now cannot be used (%v); "+
+			"the older bootstrap policy is never used again, so no box is accepted until the list is checked again",
+			floors.ListSequence, listErr)
 		log.Printf("[identity-agent-core] %s", why)
 		return nil, why, nil
 	}
-	if listErr != nil {
-		log.Printf("[identity-agent-core] the measurement list was NOT used (%v); using the bootstrap policy", listErr)
+	m.mu.Lock()
+	staged := m.staged != nil
+	m.mu.Unlock()
+	if staged {
+		// a list was checked this run, so a floor should exist; one that does not
+		// is the floors file removed, not "nothing was ever accepted"
+		why := fmt.Sprintf("a list was checked here but its record is gone (%v), so no box is accepted", listErr)
+		log.Printf("[identity-agent-core] %s", why)
+		return nil, why, nil
 	}
-	m, err := acceptedMeasurementsFromEnv()
-	return m, "", err
+	b, err := acceptedMeasurementsFromEnv()
+	return b, "", err
 }
 
-// defaultMeasurementListFile is where an app that launches this core, or an
-// embedded one that has no environment to give, leaves the signed list: inside
-// the data directory, under this name. It is only bytes; the core verifies it
-// against the pinned key, the floor and the expiry on every decision, so
-// whoever writes it decides nothing.
-const defaultMeasurementListFile = "measurement_list.json"
-
-// measurementListPath is AGENT_MEASUREMENT_LIST_FILE when set, otherwise the
-// default file in the data directory when one is there, otherwise "".
-func measurementListPath(dataDir string) string {
-	if p := strings.TrimSpace(os.Getenv("AGENT_MEASUREMENT_LIST_FILE")); p != "" {
-		return p
+// check is the whole of the route's work: the bundle is checked against the pin,
+// the floors and the publisher's witnesses (asked now), and staged if it holds.
+func (m *measurementLists) check(ctx context.Context, raw []byte) (*anchored.Result, error) {
+	pinFn := m.pin
+	if pinFn == nil {
+		pinFn = anchored.Pinned
 	}
-	if dataDir == "" {
-		return ""
-	}
-	p := filepath.Join(dataDir, defaultMeasurementListFile)
-	if _, err := os.Stat(p); err == nil {
-		return p
-	}
-	return ""
-}
-
-// pinnedPublisherKey is the compiled-in key; a variable only so a test can pin its own.
-var pinnedPublisherKey = measurementlist.Pinned
-
-func verifiedMeasurementList(path, dataDir string, now time.Time) (*measurementlist.List, error) {
-	key, err := pinnedPublisherKey()
+	pin, err := pinFn()
 	if err != nil {
 		return nil, err
 	}
-	return measurementlist.LoadFile(path, filepath.Join(dataDir, measurementListFloorFile), key, now)
+	b, err := anchored.ParseBundle(raw)
+	if err != nil {
+		return nil, err
+	}
+	var asker anchored.TipAsker
+	if m.asker != nil {
+		asker = m.asker()
+	}
+	var peers anchored.PeerTipAsker
+	if m.peers != nil {
+		peers = m.peers()
+	}
+	m.checkMu.Lock()
+	defer m.checkMu.Unlock()
+	checker := &anchored.Checker{Pin: pin, Store: m.floors(), Peers: anchored.PeersOf(ctx, peers)}
+	now := m.clock()
+	res, err := checker.CheckAsking(b, anchored.Resolver{Witnesses: asker}.Asker(ctx), now)
+	if err != nil {
+		var dup *anchored.Duplicity
+		if errors.As(err, &dup) {
+			m.recordDuplicity(dup)
+		}
+		return nil, err
+	}
+	m.stage(res.List, now)
+	return res, nil
+}
+
+// stage makes a checked list the one in use, unless one with a higher sequence
+// is already staged: two requests can finish in the other order from the one
+// they were checked in, and the older list may carry entries the newer dropped.
+func (m *measurementLists) stage(list *measurementlist.List, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.staged != nil && list.Sequence < m.staged.Sequence {
+		return
+	}
+	m.staged, m.stagedAt = list, now
+}
+
+// recordDuplicity keeps the evidence of a conflicting history. It is never read
+// back to accept anything; it is what the owner or a watcher is shown.
+func (m *measurementLists) recordDuplicity(d *anchored.Duplicity) {
+	rec, _ := json.Marshal(map[string]any{"sn": d.SN, "held": d.Held, "offered": d.Offered,
+		"offered_message_b64": base64.StdEncoding.EncodeToString(d.Message), "seen_at": m.clock().UTC().Format(time.RFC3339)})
+	if err := atomicfile.Write(filepath.Join(m.dataDir, measurementDuplicityFile), append(rec, '\n'), 0o600); err != nil {
+		log.Printf("[identity-agent-core] the publisher's history conflicts with the one held here (place %d), and the evidence could not be kept: %v", d.SN, err)
+		return
+	}
+	log.Printf("[identity-agent-core] THE PUBLISHER'S HISTORY CONFLICTS with the one held here at place %d: evidence kept in %s", d.SN, measurementDuplicityFile)
 }
 
 // currentMeasurements is the policy to decide with, right now. A server built
-// with a policy function re-reads the list file and re-checks its expiry and
-// entry windows on every call, so a list that expired or was replaced since
-// startup is not honoured on a decision made today. The second result is why
-// nothing is accepted, when that is the list's doing.
+// with a policy function decides it on every call, so a list that expired or
+// went stale since startup is not honoured on a decision made today. The second
+// result is why nothing is accepted, when that is the list's doing.
 func (s *CoreServer) currentMeasurements() ([][]byte, string) {
 	if s.measurementPolicy == nil {
 		return s.AcceptedMeasurements, ""
@@ -243,4 +347,36 @@ func (s *CoreServer) acceptableOrOwnerNamed(named [][]byte) func([]byte) bool {
 		}
 		return false
 	}
+}
+
+// heldPublisherTip is what this core has itself checked of the publisher's key
+// history: the newest place it has held and that event's SAID. It is what a peer
+// is told when it asks (POST /public/kel-tip), and only for the publisher this
+// build pins: a core has nothing else to say about any other identity. Nothing
+// is held until a list has been accepted here.
+func (m *measurementLists) heldPublisherTip(aid string) (int, string, bool) {
+	pinFn := m.pin
+	if pinFn == nil {
+		pinFn = anchored.Pinned
+	}
+	pin, err := pinFn()
+	if err != nil || aid == "" || aid != pin.Publisher {
+		return 0, "", false
+	}
+	fl, err := m.floors().Load()
+	if err != nil || !fl.HasKeyHistory {
+		return 0, "", false
+	}
+	return fl.KeyHistorySN, fl.KeyHistorySAID, true
+}
+
+// peerTipsOf lets the checker ask the watcher's peers for the publisher's tip.
+type peerTipsOf struct{ w *watcher.Service }
+
+func (p peerTipsOf) AskPeerTips(ctx context.Context, aid string) []anchored.PeerTip {
+	var out []anchored.PeerTip
+	for _, a := range p.w.AskPeerTips(ctx, aid) {
+		out = append(out, anchored.PeerTip{Peer: a.Peer, SN: a.SN, SAID: a.SAID})
+	}
+	return out
 }

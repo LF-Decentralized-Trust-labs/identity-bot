@@ -225,6 +225,43 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 		jsonreply.Write(w, http.StatusOK, resp)
 	})
 
+	// A tip request is asked of a contact about the one identity every build
+	// pins, and answered from what this core has itself checked of it (see
+	// heldPublisherTip). It is answered only for a contact who signed it, and
+	// holds nothing that could be told about anybody else: strangers and every
+	// other identity get the same "holds nothing". Limited like a cross-check.
+	r.Post("/public/kel-tip", func(w http.ResponseWriter, r *http.Request) {
+		var req watcher.KelTipRequest
+		r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid body", err.Error())
+			return
+		}
+		if !preLim.allow(callerKey(r)) {
+			writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+			return
+		}
+		var held func(string) (int, string, bool)
+		if s.measurementLists != nil {
+			held = s.measurementLists.heldPublisherTip
+		}
+		resp, fromContact, err := s.WatcherService.KelTip(req, s.ownPublicURL(r), held)
+		if fromContact {
+			if !contactLim.allow(req.Requester) {
+				writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+				return
+			}
+		} else if !checkLim.allow(callerKey(r)) || !checkAll.allow("all strangers") {
+			writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "kel-tip failed", err.Error())
+			return
+		}
+		jsonreply.Write(w, http.StatusOK, resp)
+	})
+
 	if os.Getenv("WATCHER_DEBUG") == "true" {
 		r.Get("/debug/watcher/first-seen", s.handleDebugWatcherFirstSeen)
 		r.Get("/debug/watcher/coverage", s.handleDebugWatcherCoverage)

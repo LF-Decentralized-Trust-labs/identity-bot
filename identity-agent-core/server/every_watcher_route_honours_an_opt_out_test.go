@@ -105,6 +105,7 @@ func TestEveryWatcherRouteHonoursAnOptOut(t *testing.T) {
 		"GET /{aid}/did.json":        discovery,
 		"GET /public/{aid}/did.json": discovery,
 		"GET /{aid}/kel":             discovery,
+		"POST /public/kel-tip":       "answers from the key history this core itself checked of the one publisher a build pins (heldPublisherTip), never from the watcher's records of anybody",
 		"GET /{aid}/keri.cesr":       discovery,
 		"GET /api/kerl":              discovery,
 		"GET /api/didcomm/did":       discovery,

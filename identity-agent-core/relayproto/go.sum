@@ -6,6 +6,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/grapeid/keri-go v0.5.1-0.20261108070129-11308439ee52 h1:OA98uNdb59eGKdZw8jYZjmH5W5gp1hRFPcu4za3dflg=
 github.com/grapeid/keri-go v0.5.1-0.20261108070129-11308439ee52/go.mod h1:HhTAxqI4AtUJJlPudsYlm2C0SHG3vi8fFhnNc0izIog=
+github.com/grapeid/keri-go v0.5.1-0.20261113011744-edad9b2daf64 h1:8ep8wC/SY9+61PP/djnXq3FzvKWsOYKzgjdVXnbzY+0=
+github.com/grapeid/keri-go v0.5.1-0.20261113011744-edad9b2daf64/go.mod h1:HhTAxqI4AtUJJlPudsYlm2C0SHG3vi8fFhnNc0izIog=
 github.com/hashicorp/yamux v0.1.2 h1:XtB8kyFOyHXYVFnwT5C3+Bdo8gArse7j2AQ0DA0Uey8=
 github.com/hashicorp/yamux v0.1.2/go.mod h1:C+zze2n6e/7wshOZep2A70/aQU6QBRWJO/G6FT1wIns=
 github.com/klauspost/cpuid/v2 v2.0.12 h1:p9dKCg8i4gmOxtv35DvrYoWqYzQrvEVdjQ762Y0OqZE=

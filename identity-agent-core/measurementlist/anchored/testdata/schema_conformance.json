@@ -1,0 +1,871 @@
+{
+ "attributes": [
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "accept",
+   "name": "a plain list",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "environment": "production",
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "smt": false,
+       "svn": 3,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 2,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "accept",
+   "name": "a list with the handover fields",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "environment": "production",
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "retired": {
+        "at": "2026-12-01T00:00:00Z",
+        "kind": "update",
+        "source_until": "2026-12-15T00:00:00Z"
+       },
+       "smt": false,
+       "svn": 3,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 2,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "accept",
+   "name": "a retired entry",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": "2027-01-01T00:00:00Z"
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "accept",
+   "name": "an entry with an end",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "guest_features": "0x1",
+        "initrd_sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+        "kernel_sha256": "0000000000000000000000000000000000000000000000000000000000000003",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "accept",
+   "name": "every optional recipe field",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ],
+     "org": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "accept",
+   "name": "two image kinds",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "extra": 1,
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a field the schema does not list",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "no date of its own",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z"
+   },
+   "expect": "refuse",
+   "name": "no sequence",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 0
+   },
+   "expect": "refuse",
+   "name": "sequence 0",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7.5
+   },
+   "expect": "refuse",
+   "name": "a fractional sequence",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": "7"
+   },
+   "expect": "refuse",
+   "name": "a sequence written as text",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T01:00:00+01:00",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a time that is not UTC",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00.5Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a time with fractions of a second",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "tomorrow",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a time that is not a time",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2026-11-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "an expiry before publication",
+   "why": "a rule of the content, not of the shape"
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {},
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "no image kinds",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": []
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a kind with no entries",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a measurement in capitals",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a measurement of the wrong length",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 0
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "no virtual processors",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a recipe without its command line",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "abc",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a firmware hash that is not a hash",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "smt": false,
+       "svn": 3,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 2,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a handover entry with no environment",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "environment": "production",
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "smt": false,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 2,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a handover entry with no security version",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "environment": "production",
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "smt": false,
+       "svn": -1,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 2,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a negative security version",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "environment": "production",
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "smt": false,
+       "svn": 4294967296,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 2,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a security version past 32 bits",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "environment": "production",
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "smt": false,
+       "svn": 3,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "list_version": 3,
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a list version this reader does not know",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "svn": 3,
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "handover fields in a plain list",
+   "why": ""
+  },
+  {
+   "attributes": {
+    "d": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "dt": "2026-11-12T00:00:00Z",
+    "expires_at": "2027-01-11T00:00:00Z",
+    "i": "DGLDzhg7VO1UEFOs4Av-gUU7hcRbdvyO_5nw7IbKBrQt",
+    "images": {
+     "individual": [
+      {
+       "computed_from": {
+        "cmdline_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "cpu_model": "EPYC-v4",
+        "ovmf_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "vcpus": 1
+       },
+       "image": "individual-v1",
+       "measurement": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+       "valid_from": "2026-11-01T00:00:00Z",
+       "valid_until": null
+      }
+     ]
+    },
+    "published_at": "2026-11-12T00:00:00Z",
+    "sequence": 7
+   },
+   "expect": "refuse",
+   "name": "a holder inside the attributes",
+   "why": ""
+  }
+ ],
+ "credential": {
+  "credential": "{\"v\":\"ACDC10JSON000345_\",\"d\":\"EHDHBUOB9fc_Pe36sYqHvKsK3JBI9Kmr9J73fs0t0wha\",\"i\":\"DHbZ-dycUlMWjF2_w6gXKR2gdXSaOX-WGfcXP5CUC6J7\",\"ri\":\"EJxjwgDQakhvaSdi6qZ-ChvCEtxsSP0v2NE7IXiP-QcR\",\"s\":\"EBS9J1CFeQE5ocy5ybhx4zVKGHd5OPAO1h1QXuXGbO4Z\",\"a\":{\"d\":\"EDZArWyaoMBFum9X2stJELVd08_3-ZrC2tBrw3gqorNO\",\"dt\":\"2026-11-12T00:00:00Z\",\"sequence\":7,\"published_at\":\"2026-11-12T00:00:00Z\",\"expires_at\":\"2027-01-11T00:00:00Z\",\"images\":{\"individual\":[{\"image\":\"individual-v1\",\"measurement\":\"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007\",\"computed_from\":{\"ovmf_sha256\":\"0000000000000000000000000000000000000000000000000000000000000001\",\"vcpus\":1,\"cpu_model\":\"EPYC-v4\",\"cmdline_sha256\":\"0000000000000000000000000000000000000000000000000000000000000002\"},\"valid_from\":\"2026-11-01T00:00:00Z\",\"valid_until\":null}]}}}",
+  "issuer": "DHbZ-dycUlMWjF2_w6gXKR2gdXSaOX-WGfcXP5CUC6J7",
+  "registry": "EJxjwgDQakhvaSdi6qZ-ChvCEtxsSP0v2NE7IXiP-QcR",
+  "said": "EHDHBUOB9fc_Pe36sYqHvKsK3JBI9Kmr9J73fs0t0wha"
+ },
+ "now": "2026-11-13T00:00:00Z"
+}

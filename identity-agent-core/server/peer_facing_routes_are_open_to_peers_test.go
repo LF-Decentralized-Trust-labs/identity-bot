@@ -86,7 +86,7 @@ func TestEveryRouteMountedUnderPublicIsDeclaredPublic(t *testing.T) {
 		}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"GET /public/kel-digest", "POST /public/kel-check"} {
+	for _, want := range []string{"GET /public/kel-digest", "POST /public/kel-check", "POST /public/kel-tip"} {
 		found := false
 		for _, g := range seen {
 			found = found || g == want
@@ -230,7 +230,7 @@ func TestOversizedBodiesOnPeerRoutesAreRefused(t *testing.T) {
 	s := watcherAgent(t, "EAID", 1, "Edigest")
 	base := servedThroughTheRealRouter(t, &peerAgent{core: s})
 	big := `{"aid":"` + strings.Repeat("a", 2<<20) + `"}`
-	for _, path := range []string{"/public/kel-check", "/api/witness/withdraw",
+	for _, path := range []string{"/public/kel-check", "/public/kel-tip", "/api/witness/withdraw",
 		"/api/witness/withdraw/confirm", "/api/witness/event"} {
 		resp, err := http.Post(base+path, "application/json", strings.NewReader(big))
 		if err != nil {

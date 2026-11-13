@@ -14,6 +14,8 @@ import '../models/public_name_rule.dart';
 import '../models/what_the_watcher_found.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
+import '../config/accepted_measurements.dart' show MeasurementBundleSource, refreshMeasurementList;
+import '../config/the_publishers_list_verdict.dart';
 
 class HealthResponse {
   final String status;
@@ -909,6 +911,28 @@ class CoreService {
     } else {
       throw Exception('OOBI request failed: ${response.statusCode}');
     }
+  }
+
+  /// Hands the core a candidate bundle of the publisher's list of accepted
+  /// software. The core asks the publisher's witnesses for the publisher's
+  /// latest state itself, checks the bundle against it and against what this
+  /// core has already accepted, and only then uses the list (ADR-078). The app
+  /// that fetched the bundle decides nothing, so this may be called with any
+  /// bundle, as often as wanted.
+  Future<MeasurementListVerdict> submitMeasurementList(Uint8List bundle) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/measurement-list'),
+      headers: {'Content-Type': 'application/json'},
+      body: bundle,
+    );
+    RootSeedRefused.throwIfRefused(response);
+    Map<String, dynamic> body;
+    try {
+      body = jsonDecode(response.body) as Map<String, dynamic>;
+    } on FormatException {
+      body = const {};
+    }
+    return MeasurementListVerdict.fromResponse(response.statusCode, body);
   }
 
   /// Asks a machine this identity owns, through the local agent.
@@ -2382,8 +2406,11 @@ class CoreService {
     /// An agent with no measurement policy refuses every sealed machine, by
     /// design: read as "accept anything", a missing policy would make every
     /// other check decorative. So something has to say which software is
-    /// acceptable, and until a signed list is published this is where it comes
-    /// from — the owner stating their own policy on an owner-only route.
+    /// acceptable. The published list of accepted software is that policy
+    /// (the app hands it to the core at start, and the core decides); this
+    /// field is the owner adding to it for this one adoption, such as an image
+    /// they built themselves — the owner stating their own policy on an
+    /// owner-only route.
     ///
     /// It does not make a measurement trustworthy. It records which value the
     /// owner decided to accept. Where that value came from — a published list,
@@ -2391,7 +2418,13 @@ class CoreService {
     /// should not appear to.
     List<String> acceptedMeasurements = const [],
 
+    /// Where the publisher's bundle comes from; a seam for tests.
+    List<MeasurementBundleSource>? measurementSources,
   }) async {
+    // The core uses a list for an hour after its witnesses were asked, so hand
+    // it one again before every adoption (ADR-078). Never throws, and a refusal
+    // is left for the core to explain when it refuses the box.
+    await refreshMeasurementList(this, sources: measurementSources);
     final response = await _client.post(
       Uri.parse('$baseUrl/api/pairing/adopt'),
       headers: {'Content-Type': 'application/json'},

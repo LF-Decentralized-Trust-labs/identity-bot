@@ -10,7 +10,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/accepted_measurements.dart';
+import '../config/agent_config.dart';
+import '../config/the_publishers_list_verdict.dart';
 import 'backend_process_service.dart';
+import 'core_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
 import 'secure_key_store.dart';
@@ -246,16 +249,6 @@ class IdentityProfiles {
 
     final dir = await dataDirectoryForActive();
 
-    // Hand the core the publisher's signed measurement list, as bytes in its
-    // data directory. The core verifies it and decides what to adopt; a list
-    // that cannot be fetched leaves whatever was there, and never stops the
-    // core starting.
-    try {
-      await stageMeasurementList(dir);
-    } catch (e) {
-      debugPrint('[IdentityProfiles] measurement list not refreshed: $e');
-    }
-
     final starter = coreStarter;
     if (starter != null) return starter(dir);
 
@@ -277,6 +270,8 @@ class IdentityProfiles {
       // getting entirely plausible answers about the wrong identity — until the
       // app was restarted.
       await pointThisAppAtItsAgent();
+      // Not awaited, as below; adoption hands the list over again.
+      unawaited(handTheCoreTheMeasurementList(CoreService(baseUrl: AgentConfig.agentBaseUrl)));
       return;
     }
 
@@ -296,6 +291,31 @@ class IdentityProfiles {
           'app could not tell it which half it is running');
     }
     await pointThisAppAtItsAgent();
+    // Not awaited: a slow fetch (up to 10 s per source) must not delay start.
+    // Adoption hands the list over again and does wait (CoreService.adoptAgent).
+    unawaited(handTheCoreTheMeasurementList(core.coreClient));
+  }
+
+  /// Give the core the publisher's list of accepted software, now that it is
+  /// answering.
+  ///
+  /// A core keeps no list across a restart: it uses one only after its
+  /// witnesses were asked, and once any list has been accepted it refuses every
+  /// box until it is handed one again (ADR-078). So this runs at every start.
+  /// The core decides; a list that cannot be fetched or is refused never stops
+  /// the core being used, it only leaves boxes refused, with the core's reason.
+  /// [sources] is a seam for tests.
+  @visibleForTesting
+  static Future<MeasurementListVerdict?> handTheCoreTheMeasurementList(
+    CoreService core, {
+    List<MeasurementBundleSource>? sources,
+  }) async {
+    try {
+      return await refreshMeasurementList(core, sources: sources);
+    } catch (e) {
+      debugPrint('[IdentityProfiles] measurement list not handed to the core: $e');
+      return null;
+    }
   }
 
   /// Re-establish the embedded core if it has stopped answering.
