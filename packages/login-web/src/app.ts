@@ -17,6 +17,7 @@
  * (`fetchFn`) uses, so the page is the button and this module, and nothing else.
  * It reads no framework and touches only what a browser has.
  */
+import { SEAL_PATH, SealError, sealKeyStatementText, sealRequest, unb64u } from "./seal.js";
 import {
   blake3Qb64,
   decodeBase64UrlStrict,
@@ -26,6 +27,10 @@ import {
 } from "@identity-agent/login-verify/browser";
 
 const utf8 = new TextEncoder();
+
+function lowerCase(h: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]));
+}
 
 function b64uEncode(bytes: Uint8Array): string {
   let s = "";
@@ -44,16 +49,19 @@ export interface AppLink {
   rid: string;
   /** The back end's address. */
   api: string;
+  /** The back end's sealing key, vouched for by the relay identifier (`checkSealKey`). */
+  seal: string;
 }
 
-/** Reads `#aid=…&kel=…&rid=…&api=…`, the fragment a link to the page carries.
+/** Reads `#aid=…&kel=…&rid=…&api=…&seal=…`, the fragment a link to the page carries.
  *  A fragment is sent to no server. Throws, saying why, when the link is not
  *  one a page can act on. */
 export function readAppLink(hash: string): AppLink {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
-  const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, "") };
+  const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, ""), seal: p.get("seal") ?? "" };
   if (!link.aid || !link.kel) throw new Error("the link names no app and key log");
   if (!link.rid) throw new Error("the link names no relay identifier to check the app's answers against");
+  if (!link.seal) throw new Error("the link names no sealing key to seal calls to the app with");
   if (!/^https:\/\//.test(link.api) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(link.api)) {
     throw new Error("the link names no back end to sign in at");
   }
@@ -352,6 +360,24 @@ export interface AnswerCheck {
   sig: string | null;
 }
 
+/** The log to remember once `got` (read from `text`) has been shown: the longer of it and
+ *  `known`, the longest this page already holds for `rid`. Refuses (through `fail`) a log
+ *  that does not carry on from the one held, which is how a key the log has since left is
+ *  kept from being believed again. The one rule for an answer and a sealing key alike. */
+async function holdLog(rid: string, got: CheckedLog, text: string, known: string | null | undefined, fail: (why: string) => never): Promise<string> {
+  if (!known) return text;
+  let held: CheckedLog | undefined;
+  try {
+    held = await readAnswerLog(rid, known, (why): never => {
+      throw new Error(why);
+    });
+  } catch {
+    return text; // what was kept is unreadable: it is no memory, and not something an app can write
+  }
+  if (!logExtends(got.events, held.events)) fail("its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away");
+  return held.events.length === got.events.length ? known : text;
+}
+
 /** Throws unless this answer is the app's: signed with the CURRENT key of the
  *  relay identifier `rid` the link named, as its key log names it, a log that
  *  carries on from the longest one this page already holds; for the call made
@@ -365,24 +391,103 @@ export async function checkAppAnswer(a: AnswerCheck): Promise<{ log: string }> {
   const sigRaw = decodeBase64UrlStrict(a.sig ?? "");
   if (!sigRaw || !sigRaw.length) fail("it is not signed");
   const got = await readAnswerLog(a.rid, a.log, fail);
-  let keep = a.log as string;
-  if (a.known) {
-    let held: CheckedLog | undefined;
-    try {
-      held = await readAnswerLog(a.rid, a.known, (why): never => {
-        throw new Error(why);
-      });
-    } catch {
-      held = undefined; // what was kept is unreadable: it is no memory, and not something an app can write
-    }
-    if (held) {
-      if (!logExtends(got.events, held.events)) fail("its key log is behind or apart from the one this page already knows for the app: the key that signed it may have been rotated away");
-      if (held.events.length === got.events.length) keep = a.known;
-    }
-  }
+  const keep = await holdLog(a.rid, got, a.log as string, a.known, fail);
   const signed = utf8.encode(await answerText(a.rid, a.nonce, a.status, a.contentType, a.body));
   if (!(await verifyEd25519(sigRaw!, signed, got.key))) fail("its signature does not hold for this call");
   return { log: keep };
+}
+
+// ---- sealed traffic ------------------------------------------------------
+
+/** The back end's sealing key the link carries, 65 bytes, with the relay identifier's key
+ *  log to remember, or an Error saying why not. The statement is the identifier's whole
+ *  signed key log, the key, the log's last sequence number `sn`, and a signature over
+ *  `sealKeyStatementText(rid, key, sn)`. It is read as an answer's log is: the log is the
+ *  identifier `rid`'s own, from its inception, and carries on from the longest this page
+ *  already holds (`known`); and the signature is the key that log names NOW, at its last
+ *  event. So a key the identifier has rotated away from vouches for nothing, and a
+ *  statement made at an earlier event is not taken for a later one. */
+export async function checkSealKey(rid: string, encoded: string, known?: string | null): Promise<{ key: Uint8Array; log: string }> {
+  const fail = (why: string): never => {
+    throw new Error("the link's sealing key is refused: " + why);
+  };
+  const json = decodeBase64UrlStrict(typeof encoded === "string" ? encoded : "");
+  if (!json) fail("it is not readable");
+  let st: { log?: unknown; key?: unknown; sn?: unknown; sig?: unknown };
+  try {
+    st = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(json!));
+  } catch {
+    return fail("it is not JSON");
+  }
+  if (Object.keys(st ?? {}).sort().join(",") !== "key,log,sig,sn") fail("it has fields it should not, or lacks some");
+  const key = unb64u(st.key);
+  const sig = unb64u(st.sig);
+  if (typeof st.log !== "string" || !key || !sig) fail("a part of it is not spelled one way");
+  if (key!.length !== 65 || key![0] !== 4) fail("the key is not an uncompressed P-256 point");
+  const got = await readAnswerLog(rid, st.log as string, (why): never => fail("its key log is refused: " + why));
+  if (st.sn !== got.events.length - 1) fail("it is made at a sequence number other than its key log's last");
+  const keep = await holdLog(rid, got, st.log as string, known, fail);
+  if (!(await verifyEd25519(sig!, sealKeyStatementText(rid, key!, st.sn as number), got.key))) fail("the relay identifier's current key did not sign this key");
+  return { key: key!, log: keep };
+}
+
+/** The link's sealing key, checked against the log this page holds, which is then the longer. */
+async function checkedSealKey(link: Pick<AppLink, "rid" | "seal">, logs: LogMemory): Promise<{ key: Uint8Array; log: string }> {
+  const r = await checkSealKey(link.rid, link.seal, logs.get(link.rid));
+  logs.set(link.rid, r.log);
+  return r;
+}
+
+export interface SealedCall {
+  method: string;
+  /** Path and query, as the back end's routes see them. */
+  target: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
+export interface SealedAnswer {
+  status: number;
+  contentType: string;
+  bytes: Uint8Array;
+}
+
+/** Makes a call to the back end that the relay reads none of: one fixed POST
+ *  whose body is the call sealed for the back end, and whose answer is read
+ *  only once opened and shown to be the app's for this call (`checkAppAnswer`).
+ *  The proof and session headers are part of what is sealed. A refusal to open
+ *  or to believe is an Error; the relay's own failure is an Error that says so. */
+export async function sealedCall(
+  link: Pick<AppLink, "rid" | "api">,
+  sealKey: Uint8Array,
+  call: SealedCall,
+  nonce: string,
+  underlying: typeof fetch,
+  logs: LogMemory,
+  now = Date.now(),
+): Promise<SealedAnswer> {
+  const content = utf8.encode(JSON.stringify({
+    method: call.method,
+    target: call.target,
+    headers: { ...call.headers, "x-browser-answer-nonce": nonce },
+    body: call.body,
+    ts: new Date(now).toISOString().replace(/\.\d{3}Z$/, "Z"),
+  }));
+  const { outer, reply } = await sealRequest(link.rid, sealKey, content);
+  const r = await underlying(link.api + SEAL_PATH, { method: "POST", cache: "no-store", headers: { "content-type": "application/json" }, body: outer });
+  const text = await r.text();
+  if (r.status !== 200) throw new Error(`the app's relay did not carry the call (${r.status})`);
+  let inner: { status?: unknown; content_type?: unknown; body?: unknown; log?: unknown; sig?: unknown };
+  try {
+    inner = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await reply.open(text)));
+  } catch (e) {
+    throw e instanceof SealError ? new Error("the answer is not the app's: it does not open") : new Error("the answer is not the app's: it is not readable");
+  }
+  const bytes = unb64u(inner?.body);
+  if (!Number.isInteger(inner?.status) || typeof inner?.content_type !== "string" || !bytes) throw new Error("the answer is not the app's: it is not readable");
+  logs.set(link.rid, (await checkAppAnswer({ rid: link.rid, nonce, status: inner.status as number, contentType: inner.content_type as string, body: bytes,
+    log: typeof inner.log === "string" ? inner.log : null, known: logs.get(link.rid), sig: typeof inner.sig === "string" ? inner.sig : null })).log);
+  return { status: inner.status as number, contentType: inner.content_type as string, bytes };
 }
 
 // ---- the browser's key ---------------------------------------------------
@@ -500,6 +605,7 @@ export async function appFetch(
   const logs = opts.logs ?? browserLogMemory();
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const appKey = await checkAppKeyLog(link.aid, link.kel);
+  const sealKey = (await checkedSealKey(link, logs)).key;
   const mine = await (opts.browserKey ?? appBrowserKey)(linkSlot(link));
   const sessionEndpoint = `${link.api}/signin/session`;
   let skew = 0;
@@ -516,19 +622,18 @@ export async function appFetch(
       Object.assign(headers, await proofHeaders(mine.privateKey, method, new URL(url).pathname + new URL(url).search, started.token, body ?? "", skew));
     }
     const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
-    headers["X-Browser-Answer-Nonce"] = nonce;
-    const r = await underlying(url, { ...init, method, headers, body, cache: "no-store" });
-    const bytes = new Uint8Array(await r.arrayBuffer());
-    logs.set(link.rid, (await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
-      log: r.headers.get(ANSWER_LOG), known: logs.get(link.rid), sig: r.headers.get(ANSWER_SIG) })).log);
-    if (isStart && r.ok) {
+    const u = new URL(url);
+    if (url !== link.api && !url.startsWith(link.api + "/")) throw new Error("this page speaks only to its own app's back end");
+    const r = await sealedCall(link, sealKey, { method, target: u.pathname + u.search, headers: lowerCase(headers), body: body ?? "" }, nonce, underlying, logs, Date.now() + skew);
+    const bytes = r.bytes;
+    if (isStart && r.status >= 200 && r.status < 300) {
       const s = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
       skew = serverSkew(s.server_time);
       const c = await checkAppChallenge({ aid: link.aid, key: appKey, body: s.canonical_body, sig: s.sig, pointer: s.relay_or_qr_url, ownThumbprint: mine.thumbprint, now: Date.now() + skew });
       // The app's own name for this sign-in is what each later proof is bound to.
       started = { token: s.session_token, expiry: Date.parse(c.expiry) };
     }
-    return new Response(bytes, { status: r.status, headers: { "content-type": r.headers.get("content-type") ?? "application/json" } });
+    return new Response(bytes as BufferSource, { status: r.status, headers: { "content-type": r.contentType || "application/json" } });
   }) as typeof fetch;
   return { fetchFn, sessionEndpoint, browserKey: mine.thumbprint, link };
 }
@@ -584,6 +689,7 @@ export function appSession(
   const storage = opts.storage ?? sessionStorage;
   const underlying = opts.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const slot = "session:" + linkSlot(link);
+  let sealKey: Promise<{ key: Uint8Array; log: string }> | undefined;
   let skew = 0;
   let synced = false;
   let mine: Promise<BrowserKey> | undefined;
@@ -596,12 +702,10 @@ export function appSession(
     const k = await key();
     const nonce = b64uEncode(crypto.getRandomValues(new Uint8Array(12)));
     const proof = await proofHeaders(k.privateKey, method, path, await sha256b64u(token), body, skew);
-    const headers: Record<string, string> = { Authorization: "Bearer " + token, "X-Browser-Answer-Nonce": nonce, ...proof };
-    if (method !== "GET") headers["Content-Type"] = "application/json";
-    const r = await underlying(link.api + path, { method, cache: "no-store", headers, ...(method === "GET" ? {} : { body }) });
-    const bytes = new Uint8Array(await r.arrayBuffer());
-    logs.set(link.rid, (await checkAppAnswer({ rid: link.rid, nonce, status: r.status, contentType: r.headers.get("content-type") ?? "", body: bytes,
-      log: r.headers.get(ANSWER_LOG), known: logs.get(link.rid), sig: r.headers.get(ANSWER_SIG) })).log);
+    const headers: Record<string, string> = lowerCase({ Authorization: "Bearer " + token, ...proof });
+    if (method !== "GET") headers["content-type"] = "application/json";
+    const r = await sealedCall(link, (await (sealKey ??= checkedSealKey(link, logs))).key, { method, target: path, headers, body: method === "GET" ? "" : body }, nonce, underlying, logs, Date.now() + skew);
+    const bytes = r.bytes;
     if (r.status === 401) {
       storage.removeItem(slot);
       throw new SessionEnded();

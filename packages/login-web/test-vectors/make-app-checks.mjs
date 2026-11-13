@@ -35,11 +35,13 @@ export async function make() {
   const thumb = browserKeyThumbprint({ x, y });
   const NOW = Date.parse("2026-11-11T12:00:00Z");
 
+  const SEAL = "c2VhbA";
   const links = [
-    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example" } },
-    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example`, refuse: "no relay identifier" },
-    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example`, refuse: "no back end" },
-    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9" } },
+    { name: "a complete link", hash: `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${SEAL}`, expect: { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: SEAL } },
+    { name: "no sealing key", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example`, refuse: "no sealing key" },
+    { name: "no relay identifier", hash: `#aid=${app.aid}&kel=x&api=https://a.example&seal=${SEAL}`, refuse: "no relay identifier" },
+    { name: "a back end that is not https or local", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=${SEAL}`, refuse: "no back end" },
+    { name: "a local back end", hash: `#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=${SEAL}`, expect: { aid: app.aid, kel: "x", rid: relay.aid, api: "http://127.0.0.1:9", seal: SEAL } },
   ];
 
   const keyLogs = [];

@@ -154,12 +154,12 @@ sequenceDiagram
 - an app's back end signing as the app, with its App Body key, to the routes an app may use (Amendment 1)
 - the front-end kind in a challenge and an assertion, with test vectors (Amendment 2)
 - the owner's setting of which front ends an app offers may be used through, and its enforcement when a sign-in starts and again when it is approved (Amendment 2)
+- sealed front-end traffic: the format, test vectors, the page's side and the Go side (Amendment 4); the add-ons' back end and AI Chat's side are built in their own repositories
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
 - an installed front end's hardware key and its app-key grant
 - an app claiming its own relay name
-- sealed front-end traffic
 - the back end carrying a front end's signed request to the core
 - an app's approval request for one action
 - revocation pushed to the app
@@ -205,3 +205,21 @@ The talk-route path that ADR-066 describes is built, and conforms to this ADR as
 **Not built, still:** the installed front end's hardware key and app-key grant (the proof `installed_app` waits for), and revocation pushed to the app.
 
 **Accepted for now: an installed app signs in as `browser`.** Until an installed app has a key of its own (above), the installed Flutter apps sign in with a browser key and name the `browser` kind, because `installed_app` is refused on every route. So **switching off "browser" on an app also stops its installed apps, and switching off "installed app" stops nothing yet.** The owner's switch says so in plain words where it is shown. When the installed app's own key is built, installed apps move to `installed_app` and the two switches mean what they say.
+
+## Amendment 4 (2026-11-12): how front-end traffic is sealed, and what the relay still sees
+
+Section 2 step 5 says traffic between a front end and the app's back end is sealed. This sets the format. The test vectors are `packages/login-web/test-vectors/seal.json`; the TypeScript is `packages/login-web/src/seal.ts` and the Go is `packages/login-go/seal.go`, and both reproduce every vector byte for byte.
+
+**The outer call.** Every call is one `POST` to one fixed path, `/sealed`, whose body is `{"v":1,"epk":…,"ct":…}`, and every answer is one `200` whose body is `{"v":1,"ct":…}`. Method, route, query, headers, session, proof, status and body are all inside `ct`, so a relay carrying it cannot tell a sign-in from a chat message.
+
+**The seal.** The front end makes a fresh P-256 key for each call (`epk`) and agrees a secret with the back end's sealing key by ECDH. HKDF-SHA256, salted by `epk` then the sealing key, gives the request and the answer each their own AES-256-GCM key and nonce. Each is used once, because `epk` is new each time. The relay identifier and the direction are the associated data, so a call cannot be taken for an answer or for another app's. The plaintext is its length (4 bytes), the content, then zeros to a size of 1024 bytes doubling, so size shows only which bucket a message is in. A message may carry 16 MiB at most.
+
+**The sealing key.** The back end's sealing key is derived from the relay identifier's seed, so it is kept nowhere of its own and is the same on every machine the app runs on. The sign-in link carries it as `seal`: the relay identifier's inception, the key, and the identifier's signature over the key. The page checks that the inception derives the link's `rid` and that the identifier signed the key, so only the relay identifier the link names can vouch for it. A link without `seal` is refused. **Links made before this carry none, so they stop working and must be made again.**
+
+**The signatures travel inside.** The browser's proof (the headers of step 5, unchanged) is part of the sealed call, and the app's signed answer (ADR-072 Amendment 1's `APP-ANSWER-V1`) is part of the sealed answer. Both are checked after opening, exactly as before. A back end refuses a sealed call whose `epk` it has seen within the request window; a call with no session, which carries no proof, is therefore not replayable by the relay either.
+
+**What the relay can still see.** That someone reached the app, and when; the size of each call and answer, to the bucket; the order and spacing of calls, which can suggest what the person is doing; the relay identifier and the relay name; and where the page's request came from, as the relay's own connection tells it. It can still refuse to carry a call, delay one, or drop one; the page then says the app could not be reached. It cannot read, alter, replay or swap any call or answer without the page refusing it.
+
+**Not covered.** The page's own origin and the page code itself are as trusted as the host that serves them. A person's device that is compromised is not helped by this.
+
+**Installed front ends** use the same format with their own key in the proof (their hardware key is still not built, as above). `login-verify` carries no front-end traffic and has no sealing code.

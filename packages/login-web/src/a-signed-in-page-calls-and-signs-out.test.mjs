@@ -4,12 +4,13 @@
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
 import { ANSWER_LOG, ANSWER_SIG, SessionEnded, answerText, appSession, browserKeyThumbprint, readAppLink, signInProblem } from "../dist/app.js";
-import { b64u, enc, identity, logMemory, relayChain } from "./app-test-support.mjs";
+import { b64u, enc, identity, logMemory, relayChain, sealing } from "./app-test-support.mjs";
 
 const app = identity();
 const relay = relayChain("relay");
 const other = identity();
-const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example`);
+const sl = await sealing(relay);
+const L = readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example&seal=${sl.statement}`);
 const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
 const jwk = { kty: "EC", crv: "P-256", x: b64u(new Uint8Array(32).fill(1)), y: b64u(new Uint8Array(32).fill(2)) };
 const mine = { privateKey: pair.privateKey, jwk, thumbprint: browserKeyThumbprint(jwk) };
@@ -29,7 +30,7 @@ function backEnd({ signer = relay, status = () => 200 } = {}) {
     return new Response(body, { status: code, headers: { "content-type": "application/json", [ANSWER_LOG]: relay.log(), [ANSWER_SIG]: sig } });
   };
 }
-const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, browserKey: async () => mine, logs: logMemory() });
+const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn: fetchFn.sealed ? fetchFn : sl.wrap(fetchFn), browserKey: async () => mine, logs: logMemory() });
 
 // no session yet
 {
@@ -84,12 +85,12 @@ const open = (fetchFn, storage = store()) => appSession(L, { storage, fetchFn, b
 {
   const st = store();
   const keys = [];
-  const asking = (link) => appSession(link, { storage: st, fetchFn: backEnd(), browserKey: async (slot) => (keys.push(slot), mine), logs: logMemory() });
+  const asking = (link) => appSession(link, { storage: st, fetchFn: sl.wrap(backEnd()), browserKey: async (slot) => (keys.push(slot), mine), logs: logMemory() });
   const real = asking(L);
   real.keep("tok-real");
   const crafted = [
-    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${other.aid}&api=https://tasks.example`),
-    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://evil.example`),
+    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${other.aid}&api=https://tasks.example&seal=${sl.statement}`),
+    readAppLink(`#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://evil.example&seal=${sl.statement}`),
   ];
   for (const link of crafted) {
     const s = asking(link);

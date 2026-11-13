@@ -5,7 +5,7 @@
 import assert from "node:assert";
 import { webcrypto } from "node:crypto";
 import { ed25519SigQb64 } from "../../login-verify/dist/browser.js";
-import { b64u, enc, identity, logMemory, relayChain } from "./app-test-support.mjs";
+import { b64u, enc, identity, logMemory, relayChain, sealing } from "./app-test-support.mjs";
 import {
   ANSWER_LOG, ANSWER_SIG, answerText, appFetch, browserKeyThumbprint, checkAppAnswer, checkAppChallenge,
   checkAppKeyLog, proofHeaders, proofText, readAppLink, serverSkew,
@@ -16,11 +16,13 @@ const relay = relayChain("relay");
 const refuses = (p, re, what) => assert.rejects(p, (e) => re.test(e.message), what);
 
 // the link
-const link = `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/`;
-assert.deepEqual(readAppLink(link), { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example" });
-assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&api=https://a.example`), /no relay identifier/);
-assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example`), /no back end/);
-assert.doesNotThrow(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9`));
+const sl = await sealing(relay);
+const link = `#aid=${app.aid}&kel=${app.log()}&rid=${relay.aid}&api=https://tasks.example/&seal=${sl.statement}`;
+assert.deepEqual(readAppLink(link), { aid: app.aid, kel: app.log(), rid: relay.aid, api: "https://tasks.example", seal: sl.statement });
+assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&api=https://a.example&seal=s`), /no relay identifier/);
+assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=https://a.example`), /no sealing key/);
+assert.throws(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://evil.example&seal=s`), /no back end/);
+assert.doesNotThrow(() => readAppLink(`#aid=${app.aid}&kel=x&rid=${relay.aid}&api=http://127.0.0.1:9&seal=s`));
 
 // the key log
 assert.deepEqual(await checkAppKeyLog(app.aid, app.log()), app.key);
@@ -86,7 +88,7 @@ function backEnd({ lie = false } = {}) {
   };
 }
 const L = readAppLink(link);
-const a = await appFetch(L, { fetchFn: backEnd(), browserKey: async () => mine, logs: logMemory() });
+const a = await appFetch(L, { fetchFn: sl.wrap(backEnd()), browserKey: async () => mine, logs: logMemory() });
 assert.equal(a.sessionEndpoint, "https://tasks.example/signin/session");
 assert.equal(a.browserKey, thumb);
 const started = await (await a.fetchFn(a.sessionEndpoint, { method: "POST", body: JSON.stringify({ browserKey: thumb }) })).json();
@@ -95,9 +97,9 @@ assert.deepEqual(JSON.parse(calls[0].body).jwk, jwk, "the start carries this bro
 const polled = await (await a.fetchFn(`${a.sessionEndpoint}/sid1`, {})).json();
 assert.equal(polled.state, "connecting");
 assert.ok(calls[1].headers["X-Browser-Proof"] && calls[1].headers["X-Browser-Proof-Nonce"], "a poll carries a proof");
-const liar = await appFetch(L, { fetchFn: backEnd({ lie: true }), browserKey: async () => mine, logs: logMemory() });
+const liar = await appFetch(L, { fetchFn: sl.wrap(backEnd({ lie: true })), browserKey: async () => mine, logs: logMemory() });
 await refuses(liar.fetchFn(liar.sessionEndpoint, { method: "POST", body: "{}" }), /another app/, "a back end that hands over another app's challenge");
-const unsigned = await appFetch(L, { fetchFn: async () => new Response("{}", { status: 200 }), browserKey: async () => mine, logs: logMemory() });
+const unsigned = await appFetch(L, { fetchFn: sl.wrap(async () => new Response("{}", { status: 200 })), browserKey: async () => mine, logs: logMemory() });
 await refuses(unsigned.fetchFn(unsigned.sessionEndpoint, { method: "POST", body: "{}" }), /not signed/, "an answer nobody signed");
 await refuses(appFetch({ ...L, kel: app.log({ cesr_signatures: [ed25519SigQb64(new Uint8Array(64))] }) }, { browserKey: async () => mine }), /key log is refused/, "a link whose key log is not the app's");
 

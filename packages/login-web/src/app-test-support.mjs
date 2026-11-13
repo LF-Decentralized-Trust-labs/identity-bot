@@ -19,6 +19,42 @@ export function identity() {
   return { aid, key: new Uint8Array(pub), text, sign, log };
 }
 
+// A back end's sealing key, vouched for by `relay` (the relay identifier), and what answers
+// sealed calls: `wrap(inner)` takes a back end written as a plain `fetch` (url, init) -> Response
+// (what the tests wrote before sealing) and makes the `fetchFn` a page is given: it opens the
+// one POST to /sealed, runs `inner` on the call inside, and seals what `inner` answered (status,
+// content type, body, and the app's signature headers) for the page.
+import { webcrypto } from "node:crypto";
+import { openRequest, SEAL_PATH, sealKeyStatementText } from "../dist/seal.js";
+
+/** A sealing key's statement as the relay identifier's current key makes it: the whole key log, the key,
+ *  the log's last sequence number, and the signature over them (`sealKeyStatementText`). */
+export function sealStatement(relay, pub, over = {}) {
+  const sn = over.sn ?? relay.events.length - 1;
+  return b64u(JSON.stringify({ log: over.log ?? relay.log(), key: b64u(pub), sn, sig: b64u((over.signer ?? relay).sign(sealKeyStatementText(relay.aid, pub, sn))) }));
+}
+
+export async function sealing(relay, origin = "https://tasks.example") {
+  const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const pub = new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey));
+  const statement = sealStatement(relay, pub);
+  const title = (n) => n.replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
+  const seen = [];
+  const wrap = (inner, rid = relay.aid) => async (url, init) => {
+    seen.push({ url: String(url), method: init.method, body: init.body });
+    if (new URL(String(url)).pathname !== SEAL_PATH || init.method !== "POST") return new Response("not here", { status: 404 });
+    const { content, reply } = await openRequest(rid, pair, init.body);
+    const call = JSON.parse(new TextDecoder().decode(content));
+    const headers = Object.fromEntries(Object.entries(call.headers).map(([k, v]) => [title(k), v]));
+    const r = await inner(origin + call.target, { method: call.method, headers, body: call.method === "GET" ? undefined : call.body });
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const answer = JSON.stringify({ status: r.status, content_type: r.headers.get("content-type") ?? "", body: b64u(bytes),
+      log: r.headers.get("x-keri-app-answer-log"), sig: r.headers.get("x-keri-app-answer-sig") });
+    return new Response(await reply.seal(enc.encode(answer)), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { pair, statement, wrap, seen };
+}
+
 // ---- a relay identifier's key log, made the way a core makes one ----------
 // (keri-go BuildInception / BuildRotation / SignEvent / ExportKEL): each event's JSON
 // with its real length in the version string and its SAID, followed by one signature group.
