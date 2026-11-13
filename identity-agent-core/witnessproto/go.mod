@@ -2,7 +2,7 @@ module github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/w
 
 go 1.25.0
 
-require github.com/grapeid/keri-go v0.5.1-0.20261108070129-11308439ee52
+require github.com/grapeid/keri-go v0.5.1-0.20261113011744-edad9b2daf64
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

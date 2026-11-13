@@ -4,6 +4,8 @@ github.com/cloudflare/circl v1.6.3 h1:9GPOhQGF9MCYUeXyMYlqTR6a5gTrgR/fBLXvUgtVcg
 github.com/cloudflare/circl v1.6.3/go.mod h1:2eXP6Qfat4O/Yhh8BznvKnJ+uzEoTQ6jVKJRn81BiS4=
 github.com/grapeid/keri-go v0.5.1-0.20261108070129-11308439ee52 h1:OA98uNdb59eGKdZw8jYZjmH5W5gp1hRFPcu4za3dflg=
 github.com/grapeid/keri-go v0.5.1-0.20261108070129-11308439ee52/go.mod h1:HhTAxqI4AtUJJlPudsYlm2C0SHG3vi8fFhnNc0izIog=
+github.com/grapeid/keri-go v0.5.1-0.20261113011744-edad9b2daf64 h1:8ep8wC/SY9+61PP/djnXq3FzvKWsOYKzgjdVXnbzY+0=
+github.com/grapeid/keri-go v0.5.1-0.20261113011744-edad9b2daf64/go.mod h1:HhTAxqI4AtUJJlPudsYlm2C0SHG3vi8fFhnNc0izIog=
 github.com/klauspost/cpuid/v2 v2.0.12 h1:p9dKCg8i4gmOxtv35DvrYoWqYzQrvEVdjQ762Y0OqZE=
 github.com/klauspost/cpuid/v2 v2.0.12/go.mod h1:g2LTdtYhdyuGPqyWyv7qRAmj1WBqxuObKfj5c0PQa7c=
 github.com/zeebo/assert v1.1.0 h1:hU1L1vLTHsnO8x8c9KAR5GmM5QscxHg5RNU5z5qbUWY=
