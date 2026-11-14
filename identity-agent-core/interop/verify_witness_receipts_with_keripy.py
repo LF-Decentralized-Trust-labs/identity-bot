@@ -1,6 +1,6 @@
 """Judge the witness receipts identity-agent-core writes with keripy's own parser.
 
-    OUR_RECEIPTS_OUT=/tmp/r.json go test ./drivers -run TestWriteOurReceiptsForKeripyToJudge
+    OUR_RECEIPTS_OUT=/tmp/r.json go test ./witnessproto -run TestWriteOurReceiptsForKeripyToJudge
     python3 -I interop/verify_witness_receipts_with_keripy.py /tmp/r.json   # needs keri==1.3.6
 
 The cases are keripy's own inception (made by make_witness_receipt_vectors.py)
