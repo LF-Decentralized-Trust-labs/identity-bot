@@ -12,9 +12,12 @@ import (
 //
 // Fails when askStanding goes back to asking one watcher after another.
 func TestTheStandingWatchersAreAskedAtOnce(t *testing.T) {
+	// Asked in turn they take watchers*slow (2.4s); at once, about slow. The
+	// bound sits well between, so a loaded machine does not fail it.
 	const slow = 400 * time.Millisecond
+	const watchers = 6
 	var urls []string
-	for i := 0; i < 4; i++ {
+	for i := 0; i < watchers; i++ {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(slow)
 			http.Error(w, "not today", http.StatusServiceUnavailable)
@@ -25,7 +28,7 @@ func TestTheStandingWatchersAreAskedAtOnce(t *testing.T) {
 	ws := serviceAsking(t, newTestWatcherKey(1), urls...)
 	start := time.Now()
 	got := ws.askStanding(t.Context(), "EAlice", 0, "Edigest", &VerifyKelResult{})
-	if len(got) != 4 {
+	if len(got) != watchers {
 		t.Fatalf("%d answers, want one per watcher", len(got))
 	}
 	for i, a := range got {
@@ -33,7 +36,7 @@ func TestTheStandingWatchersAreAskedAtOnce(t *testing.T) {
 			t.Fatalf("answer %d is %q from %s, want unavailable from %s (in the order listed)", i, a.outcome, a.w.URL, urls[i])
 		}
 	}
-	if took := time.Since(start); took > 2*slow {
-		t.Fatalf("four watchers that each take %v took %v together: they were asked one after another", slow, took)
+	if took := time.Since(start); took > 4*slow {
+		t.Fatalf("%d watchers that each take %v took %v together: they were asked one after another", watchers, slow, took)
 	}
 }
