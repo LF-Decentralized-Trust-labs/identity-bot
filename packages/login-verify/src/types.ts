@@ -62,6 +62,10 @@ export interface LoginChallenge {
    *  `installed_app` (ADR-072 §2, amended). Signed; the assertion repeats it,
    *  so the person approves a named kind. */
   front_end?: string;
+  /** The relay identifier of the utility app a sign-in is for, as its owner's
+   *  Identity Agent recorded it (ADR-072 Amendment 7). Signed, so a front end
+   *  handed a link naming another relay identifier can see the challenge is not for it. */
+  rid?: string;
   callback_url: string;
   session_token: string;
   sig?: string;

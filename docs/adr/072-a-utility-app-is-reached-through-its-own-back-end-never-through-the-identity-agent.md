@@ -157,6 +157,7 @@ sequenceDiagram
 - an installed front end's hardware key, proved by a hardware attestation the core verifies, and its app-key grant, which lasts until it is ended and which the person and the owner can end (Amendment 3)
 - sealed front-end traffic: the format, test vectors, the page's side in TypeScript and in Dart (`packages/login-dart`, which every installed front end uses), and the Go side (Amendment 4)
 - a relay identifier's witnesses, the owner's declaration that makes a witness hold its log, and the page's and Dart's reading of the log from them, with test vectors (Amendment 5)
+- the relay identifier in a utility app's sign-in challenge, the owner's record of it, and the page's and Dart's check of it against the link, with test vectors (Amendment 7)
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
@@ -311,3 +312,18 @@ Section 2 step 2 had the link name the app. A page took the app's identifier, th
 **What this does not close.** A pin is as current as the page's last publication: a page published with a stale `min` is held to that older floor until it is published again. The pin does not protect a visitor from the host that serves the page.
 
 The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedApp`, `pinAppLink`, `readPinnedAppLink`, `pinnedAppLink`). The test is `a-page-signs-in-only-to-the-app-it-is-pinned-to.test.mjs`.
+
+## Amendment 7 (2026-11-13): the sign-in challenge is signed for the app's relay identifier
+
+Amendment 6 pins a hosted page to its app, so a crafted link cannot move that page to another relay identifier or back end. A front end with no pin takes the link as it comes: every installed front end, and any page built on `readAppLink` alone. Nothing the Identity Agent signed named the relay identifier, so a link carrying the real identifier (`aid`) and key log (`kel`) but another relay identifier (`rid`) and back end (`api`) let such a front end's sign-in through: the other back end passed the challenge to the real Identity Agent and back, the person approved it, and the front end then sealed every later call for the link's relay identifier and took every answer signed by it. Whoever wrote the link read and answered all of it.
+
+**The challenge names the relay identifier.** The owner's Identity Agent records a utility app's relay identifier (`PUT /api/assets/{id}/relay-id`, owner only, or `asset.Handler.SetRelayID` from whatever learns it) and puts it in the signed challenge as `rid`, after `front_end` and before `callback_url`. It may be recorded again, as an app given a new relay identifier needs. It is left out when none is recorded, so a challenge for anything else keeps its form. The Go and TypeScript canonical forms and `core-canonical-and-spellings.json` carry it.
+
+**A front end requires it to equal the link's.** `checkAppChallenge` (`packages/login-web/src/app.ts`) and `checkChallenge` (`packages/login-dart/lib/app_checks.dart`) take the relay identifier the link names and refuse a challenge whose `rid` is another, or is missing. A missing one is refused because a challenge that names none says nothing about which relay identifier the app stands behind: taking it would leave every app whose identifier is not recorded open to the link above. `app-checks.json` holds the cases, run in TypeScript and Dart alike. On a pinned page the check repeats what the pin already holds; it is kept there so the page and an installed front end run one check.
+
+**Rollout.** Two older parties break, in this order, and the order of rollout follows from them:
+
+1. **The person's Identity Agent.** It reads a challenge strictly. One built before this change refuses a challenge carrying `rid` as unreadable, so the sign-in is refused. A utility app's owner therefore records relay identifiers only once the Identity Agents of the people who sign in to it understand `rid`.
+2. **The front end.** One built on this change refuses a challenge with no `rid`, so it is shipped only once its app's owner records the relay identifier. A front end built before this change ignores `rid` and goes on working, unprotected, until it is updated.
+
+**What this does not close.** The link's `api` is still not signed. While the front end holds the relay identifier's current key log, that is enough: every answer is checked against that log (Amendments 1 and 4) and every call is sealed to the key it vouches for, so a back end at another address can carry the traffic or drop it but cannot read it or answer it. It is not enough when the front end takes an older log from the link: a holder of a key the identifier has rotated away from, such as a removed machine, can write a link with an older `min` and no `wit`, and a front end that has never seen a newer log takes its sealing key and its answers. That is the open case Amendment 5 lists as "a link that names no witness", now the way in for a back end at another address; the challenge naming the relay identifier does not close it. A relay identifier that is replaced is safe only from when the new one is recorded: whatever records it must do so in the same step as the replacement, or a link naming the old one still matches the challenge until it does.
