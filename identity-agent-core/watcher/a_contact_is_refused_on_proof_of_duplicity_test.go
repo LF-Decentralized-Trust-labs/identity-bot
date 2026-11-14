@@ -287,24 +287,3 @@ func TestAnyOneStandingWatcherShowingAForkIsEnough(t *testing.T) {
 		t.Fatalf("agreeing watcher: %+v fetches=%d", res, agree.LogFetches.Load())
 	}
 }
-
-// An organisation is advised several standing watchers for coverage; that is a
-// recommendation about reach, and it never decides a refusal.
-func TestAnOrganisationIsAdvisedAtLeastTwoStandingWatchers(t *testing.T) {
-	ws, _ := migratedWatcher(t)
-	if !ws.StandingPolicyMet() {
-		t.Fatal("an individual has no minimum")
-	}
-	if err := ws.Store.SetConfig(configEntityKind, EntityOrganisation); err != nil {
-		t.Fatal(err)
-	}
-	if ws.StandingPolicyMet() {
-		t.Fatal("an organisation with one standing watcher meets the advice")
-	}
-	if err := ws.SetStandingWatchers([]StandingWatcher{{URL: "https://w2.example/x"}}); err != nil {
-		t.Fatal(err)
-	}
-	if !ws.StandingPolicyMet() {
-		t.Fatal("two standing watchers should meet it")
-	}
-}

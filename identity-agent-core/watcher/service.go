@@ -290,7 +290,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// answer the rest of this pipeline (open alerts, escalation) is built on.
 	// A watcher whose digest differs is then asked for its log and judged on
 	// it: what it can prove is acted on, what it cannot is shown.
-	answers := s.askStanding(ctx, in.AID, seq, digest, result)
+	answers := s.askStanding(ctx, in.AID, seq, digest)
 	for i := range answers {
 		s.judge(ctx, in, &answers[i])
 		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
@@ -778,12 +778,20 @@ func (s *Service) RecordCheck(res *VerifyKelResult) error {
 // has dealt with and when. Everyone else gets the signed "never seen" answer,
 // which is a valid DigestStatement, so a client cannot tell it from a watcher
 // that has not met the identity. The read runs either way, so it costs the same.
+// A first sighting that was not proven under the controller's own signatures is
+// answered the same way.
 func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) {
 	rec, err := s.Disclosable(aid, seq)
 	if err != nil {
 		return nil, err
 	}
 	if !s.PublicWatcherService() {
+		rec = nil
+	}
+	// Only a first sighting of a log its own controller signed is testimony. An
+	// unproven one is a digest of whatever was shown, which nobody can check, so
+	// it is answered as never seen rather than served as a signed fact.
+	if rec != nil && !rec.Proven {
 		rec = nil
 	}
 	resp := DigestResponse{AID: aid, SequenceNumber: seq}

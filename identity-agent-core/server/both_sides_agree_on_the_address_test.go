@@ -110,7 +110,11 @@ func TestAskerAndAnswererAgreeOnTheAddressEndToEnd(t *testing.T) {
 		t.Fatalf("first contact: %+v %v", res, err)
 	}
 	// Only now does the hosted watcher hold something else for EBob.
-	if err := hosted.RecordFirstSeen("EBob", 0, "Edifferent", watcher.SourceOOBI, "http://hosted/oobi"); err != nil {
+	now := time.Now().UTC()
+	if err := hosted.Store.RecordFirstSeen(watcher.FirstSeenRecord{
+		AID: "EBob", SequenceNum: 0, KelDigest: "Edifferent", FirstSeenAt: now, LastConfirmedAt: now,
+		SeenCount: 1, SourceType: watcher.SourceOOBI, SourceURL: "http://hosted/oobi", Proven: true,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	// A contact's answer is context: the escalation stands either way, and the

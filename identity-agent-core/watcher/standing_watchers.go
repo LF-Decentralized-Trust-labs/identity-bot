@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 
 	"identity-agent-core/drivers"
 )
@@ -18,21 +19,10 @@ import (
 // evidence (proof_of_duplicity.go), and a watcher that withholds, cannot be
 // reached or cannot back up its answer is the same as no watcher.
 //
-// watcher_config "entity_kind" is "individual" (the default) or "organisation".
+// An organisation is advised several (at least two, and five to seven); that is
+// advice about reach (ADR-075), and nothing here counts or enforces it.
 
-const (
-	configStandingWatchers = "standing_watchers"
-	configEntityKind       = "entity_kind"
-
-	EntityIndividual   = "individual"
-	EntityOrganisation = "organisation"
-
-	// An organisation is advised to ask at least this many standing watchers, and
-	// is expected to have this many (5 to 7), so that one being down or lying
-	// leaves others able to show a fork. It is coverage, not a vote.
-	OrgMinWatchers         = 2
-	OrgRecommendedWatchers = 5
-)
+const configStandingWatchers = "standing_watchers"
 
 // StandingWatcher is one standing watcher.
 type StandingWatcher struct {
@@ -70,23 +60,6 @@ func (s *Service) SetStandingWatchers(ws []StandingWatcher) error {
 	return s.Store.SetConfig(configStandingWatchers, string(b))
 }
 
-// EntityKind is "individual" unless the owner is an organisation.
-func (s *Service) EntityKind() string {
-	if s.Store != nil {
-		if v, _ := s.Store.GetConfig(configEntityKind); v == EntityOrganisation {
-			return EntityOrganisation
-		}
-	}
-	return EntityIndividual
-}
-
-// StandingPolicyMet says whether the standing watchers give the entity the
-// coverage it is advised: individuals have no minimum (the default plus peers);
-// an organisation asks at least OrgMinWatchers.
-func (s *Service) StandingPolicyMet() bool {
-	return s.EntityKind() != EntityOrganisation || len(s.StandingWatchers()) >= OrgMinWatchers
-}
-
 type standingAnswer struct {
 	w       StandingWatcher
 	outcome string // match, mismatch, unknown, unavailable; then, for a mismatch once judged: fork, faulty, ahead, behind, superseded
@@ -100,37 +73,50 @@ type standingAnswer struct {
 	rival bool
 }
 
-// askStanding asks every standing watcher for its digest at seq.
-func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest string, result *VerifyKelResult) []standingAnswer {
-	var out []standingAnswer
-	for _, w := range s.StandingWatchers() {
-		resp, latency, err := s.L2.QueryDigest(ctx, w.URL, aid, seq)
-		a := standingAnswer{w: w, outcome: "unknown", resp: resp}
-		if err != nil {
-			a.outcome = "unavailable"
-			a.resp = nil
-			s.emit("kel_l2_query_latency", map[string]interface{}{
-				"url": w.URL, "error": err.Error(), "latency_ms": latency.Milliseconds(),
-			})
-		} else {
-			switch {
-			case resp.Digest == nil:
-			case *resp.Digest == digest:
-				a.outcome = "match"
-				a.rival = resp.RivalAtOrBelow
-				// A watcher that agrees at the tip may hold events after it. The
-				// digest at the next place says so, and the log it then shows
-				// either carries a later key state or is judged like any other.
-				if next, _, err := s.L2.QueryDigest(ctx, w.URL, aid, seq+1); err == nil && next.Digest != nil {
-					a.later = true
-				}
-			default:
-				a.outcome = "mismatch"
-			}
-		}
-		out = append(out, a)
+// askStanding asks every standing watcher for its digest at seq, all at once,
+// so a slow watcher costs its own time and not the sum of the others'. The
+// answers are in the order the watchers are listed.
+func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest string) []standingAnswer {
+	ws := s.StandingWatchers()
+	out := make([]standingAnswer, len(ws))
+	var wg sync.WaitGroup
+	for i, w := range ws {
+		wg.Add(1)
+		go func(i int, w StandingWatcher) {
+			defer wg.Done()
+			out[i] = s.askOneStanding(ctx, w, aid, seq, digest)
+		}(i, w)
 	}
+	wg.Wait()
 	return out
+}
+
+func (s *Service) askOneStanding(ctx context.Context, w StandingWatcher, aid string, seq int, digest string) standingAnswer {
+	resp, latency, err := s.L2.QueryDigest(ctx, w.URL, aid, seq)
+	a := standingAnswer{w: w, outcome: "unknown", resp: resp}
+	if err != nil {
+		a.outcome = "unavailable"
+		a.resp = nil
+		s.emit("kel_l2_query_latency", map[string]interface{}{
+			"url": w.URL, "error": err.Error(), "latency_ms": latency.Milliseconds(),
+		})
+		return a
+	}
+	switch {
+	case resp.Digest == nil:
+	case *resp.Digest == digest:
+		a.outcome = "match"
+		a.rival = resp.RivalAtOrBelow
+		// A watcher that agrees at the tip may hold events after it. The
+		// digest at the next place says so, and the log it then shows
+		// either carries a later key state or is judged like any other.
+		if next, _, err := s.L2.QueryDigest(ctx, w.URL, aid, seq+1); err == nil && next.Digest != nil {
+			a.later = true
+		}
+	default:
+		a.outcome = "mismatch"
+	}
+	return a
 }
 
 // judge settles a watcher's mismatch by asking it for its log and proving what
