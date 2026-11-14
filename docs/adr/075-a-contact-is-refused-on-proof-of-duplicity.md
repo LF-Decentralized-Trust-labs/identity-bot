@@ -87,7 +87,7 @@ question to put to a watcher that disagrees is not "how many of you agree" but
    that holds what the controller published is enough to show a fork, so several
    raise the chance one does. Nothing counts watchers or operators to decide a
    refusal. An organisation is advised at least two standing watchers, and five
-   to seven. There is no "held" state and no grouping of watchers by operator.
+   to seven. That is advice about reach: the agent does not count or enforce it. There is no "held" state and no grouping of watchers by operator.
 9. **A hosted watcher keeps and serves the other branch, and every signature.**
    A watcher service keeps a correctly signed event that conflicts with the one
    it holds, as published, beside the first-seen one (which is never rewritten),

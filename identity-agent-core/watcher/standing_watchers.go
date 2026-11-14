@@ -18,21 +18,10 @@ import (
 // evidence (proof_of_duplicity.go), and a watcher that withholds, cannot be
 // reached or cannot back up its answer is the same as no watcher.
 //
-// watcher_config "entity_kind" is "individual" (the default) or "organisation".
+// An organisation is advised several (at least two, and five to seven); that is
+// advice about reach (ADR-075), and nothing here counts or enforces it.
 
-const (
-	configStandingWatchers = "standing_watchers"
-	configEntityKind       = "entity_kind"
-
-	EntityIndividual   = "individual"
-	EntityOrganisation = "organisation"
-
-	// An organisation is advised to ask at least this many standing watchers, and
-	// is expected to have this many (5 to 7), so that one being down or lying
-	// leaves others able to show a fork. It is coverage, not a vote.
-	OrgMinWatchers         = 2
-	OrgRecommendedWatchers = 5
-)
+const configStandingWatchers = "standing_watchers"
 
 // StandingWatcher is one standing watcher.
 type StandingWatcher struct {
@@ -68,23 +57,6 @@ func (s *Service) SetStandingWatchers(ws []StandingWatcher) error {
 		return err
 	}
 	return s.Store.SetConfig(configStandingWatchers, string(b))
-}
-
-// EntityKind is "individual" unless the owner is an organisation.
-func (s *Service) EntityKind() string {
-	if s.Store != nil {
-		if v, _ := s.Store.GetConfig(configEntityKind); v == EntityOrganisation {
-			return EntityOrganisation
-		}
-	}
-	return EntityIndividual
-}
-
-// StandingPolicyMet says whether the standing watchers give the entity the
-// coverage it is advised: individuals have no minimum (the default plus peers);
-// an organisation asks at least OrgMinWatchers.
-func (s *Service) StandingPolicyMet() bool {
-	return s.EntityKind() != EntityOrganisation || len(s.StandingWatchers()) >= OrgMinWatchers
 }
 
 type standingAnswer struct {
