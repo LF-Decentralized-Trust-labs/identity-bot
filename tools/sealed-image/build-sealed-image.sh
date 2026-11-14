@@ -432,6 +432,17 @@ chroot "$WORK/root" systemctl enable systemd-networkd >/dev/null 2>&1 || \
 # Deterministic where it can be: an image that differs run to run cannot be
 # pinned to a measurement anybody checks.
 rm -rf "$WORK/root/var/cache/apt" "$WORK/root/var/lib/apt/lists"
+
+# A measured image never changes in place: an update is a new image with a new measurement. Debian's apt package
+# enables its own daily timers when it is installed, so they are taken out (they have nothing to do on a root that is
+# read-only and whose package lists are removed above), and then the image is checked for anything that could update
+# it or restart services behind the Identity Agent: the packages unattended-upgrades and needrestart, their programs, any
+# apt timer, and apt's periodic settings. Fails the build rather than ship an image that could drift from its
+# measurement.
+say "Checking the image cannot update itself"
+find "$WORK/root/etc/systemd/system" -path '*.wants/*' \( -name 'apt-daily*' -o -name 'unattended-upgrades*' \) -delete 2>/dev/null || true
+"$(dirname "${BASH_SOURCE[0]}")/check-no-self-update.sh" "$WORK/root" \
+  || fail "the image could update itself, which would make its measurement stop describing it (see above)"
 : > "$WORK/root/etc/machine-id"
 : > "$WORK/root/etc/hostname"
 rm -f "$WORK/root/etc/ssh/ssh_host_"* 2>/dev/null || true
