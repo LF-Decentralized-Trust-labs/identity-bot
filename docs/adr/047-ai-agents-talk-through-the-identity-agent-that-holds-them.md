@@ -6,6 +6,7 @@
 **Amended:** 2026-11-03 — The AI agent asked may send progress notes before it answers (see §Amendment 2)
 **Amended:** 2026-11-03 — An AI agent at rest may open a conversation toward an AI agent its grant names, at a rate its grant states (see §Amendment 3)
 **Amended:** 2026-11-12 — A conversation closes by a signed entry from its opener or its owner, never for being quiet (see ADR-077)
+**Amended:** 2026-11-14 — An ask to an AI agent another Identity Agent holds rests on the AI agent's own grant and the owner's per-contact rule, not on the person's reach, and a conversation may be opened by an AI agent another Identity Agent holds (see ADR-080)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context

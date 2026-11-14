@@ -171,6 +171,11 @@ type CoreServer struct {
 	assetStoreErr     error                   // why assetHandler is nil, when a store file could not be read
 	inboundDIDComm    InboundDIDCommHandler   // overlay hook for inbound DIDComm messages; nil = deliver-only
 
+	// Who keeps AI agents' conversations, and what a contact says its AI agents
+	// are called (ADR-080). Nil: nothing of either is taken.
+	peerMessageKeeper   PeerMessageKeeper
+	peerDirectoryKeeper PeerDirectoryKeeper
+
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
 	extraRoutes []func(chi.Router)

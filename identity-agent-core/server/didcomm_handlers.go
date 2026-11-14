@@ -784,6 +784,19 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	//
 	// skid and kid are the AUTHENTICATED header values, not anything read out of
 	// the message. A sender that could name itself could name somebody else.
+	//
+	// A message between AI agents that two Identity Agents hold is the
+	// exception: its words are kept by whatever keeps those AI agents'
+	// conversations, under the owner's rule for that contact, and nowhere else
+	// (ADR-068, ADR-080). Copying it here would keep a second plaintext of an ask the rule refused, for every
+	// controller to read, with no limit on how many a contact could send.
+	if jwm.Type == didcomm.TypeAgentPeerMessage {
+		s.recordTraffic(skid, jwm.ID, "", "didcomm.message.received", "ok", jwm.Type+" to "+kid, nil)
+		s.routeInboundDIDComm(kid, skid, jwm)
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{"status": "accepted", "message_id": jwm.ID, "type": jwm.Type})
+		return
+	}
 	proof := s.proofOfReceipt(skid, &peer.DID, signed)
 	s.storeInboundAsNotification(skid, kid, jwm, true, proof)
 	// The log row commits to the proof just kept, so it cannot be swapped later.

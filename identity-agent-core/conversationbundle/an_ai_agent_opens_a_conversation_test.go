@@ -98,14 +98,14 @@ func TestAnAskInAnAIAgentsConversationReachesNoFurtherThanItsOpener(t *testing.T
 		return agentmessage.Record{MessageID: "m3", Seq: 3, Kind: agentmessage.KindAsk, From: "EB", To: to, GrantSAID: "Egrant_b", IATime: "2026-11-02T10:01:00Z"}
 	}
 	args := func(to string) []byte { return agentmessage.AskArgs(to, "words") }
-	v.checkOpenerReach("entry 3", ask("EB2"), args("EB2"))
+	v.checkOpenerReach("entry 3", ask("EB2"), localAskAllowed(args("EB2")))
 	if !strings.Contains(openingFaults(v), "opener") {
 		t.Fatalf("an ask beyond what the opener could reach was accepted: %q", openingFaults(v))
 	}
 	v = newVerifier()
 	v.creds["Egrant_a"] = openingGrant("Egrant_a", "EA", "EB", "EC")
 	v.checkOpening("entry 1", openingEntry("EA", "EB"))
-	v.checkOpenerReach("entry 3", ask("EC"), args("EC"))
+	v.checkOpenerReach("entry 3", ask("EC"), localAskAllowed(args("EC")))
 	if len(v.r.Faults) != 0 {
 		t.Fatalf("an ask the opener could have made was refused: %s", openingFaults(v))
 	}
@@ -119,7 +119,7 @@ func TestAnOpenersRevokedGrantEndsItsConversation(t *testing.T) {
 	v.creds["Egrant_a"] = g
 	v.checkOpening("entry 1", openingEntry("EA", "EB"))
 	later := agentmessage.Record{MessageID: "m3", Seq: 3, Kind: agentmessage.KindAsk, From: "EB", To: "EC", GrantSAID: "Egrant_b", IATime: "2026-11-02T10:01:00Z"}
-	v.checkOpenerReach("entry 3", later, agentmessage.AskArgs("EC", "words"))
+	v.checkOpenerReach("entry 3", later, localAskAllowed(agentmessage.AskArgs("EC", "words")))
 	if !strings.Contains(openingFaults(v), "was not in force") {
 		t.Fatalf("an ask after its opener's grant was revoked was accepted: %q", openingFaults(v))
 	}
