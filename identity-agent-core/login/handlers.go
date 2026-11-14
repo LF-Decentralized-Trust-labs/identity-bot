@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,11 +38,13 @@ func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
 }
 
 type Handler struct {
-	Store      *RelationshipStore
-	Pending    *PendingStore
-	KeriDriver drivers.KeriEngine
-	DevRelay   string
-	HTTPClient *http.Client
+	Store   *RelationshipStore
+	Pending *PendingStore
+	// InstalledApps is the person's own record of the installed-app sign-ins they approved.
+	InstalledApps *InstalledAppSignInStore
+	KeriDriver    drivers.KeriEngine
+	DevRelay      string
+	HTTPClient    *http.Client
 	// PeerClient, when set, is the client for a call to rawURL, an address a site
 	// supplied (its challenge, callback, introductions and registry). The server
 	// sets it to the guarded client; unset, HTTPClient is used.
@@ -111,14 +114,19 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	apps, err := NewInstalledAppSignInStore(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	relay := OwnerRelayURL()
 	return &Handler{
-		Store:      store,
-		Pending:    NewPendingStore(),
-		KeriDriver: keri,
-		DevRelay:   relay,
-		HTTPClient: &http.Client{Timeout: 15 * time.Second},
-		dataDir:    dataDir,
+		InstalledApps: apps,
+		Store:         store,
+		Pending:       NewPendingStore(),
+		KeriDriver:    keri,
+		DevRelay:      relay,
+		HTTPClient:    &http.Client{Timeout: 15 * time.Second},
+		dataDir:       dataDir,
 	}, nil
 }
 
@@ -482,10 +490,21 @@ func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Ass
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body := boundedread.Snippet(resp.Body)
-		return fmt.Errorf("callback %d: %s", resp.StatusCode, string(body))
+		return &callbackRefusedError{status: resp.StatusCode, msg: fmt.Sprintf("callback %d: %s", resp.StatusCode, string(body))}
 	}
 	return nil
 }
+
+// callbackRefusedError is the host's own answer that it did not take the
+// sign-in. Only a 4xx is a definite refusal; a 5xx leaves it unknown.
+type callbackRefusedError struct {
+	status int
+	msg    string
+}
+
+func (e *callbackRefusedError) Error() string { return e.msg }
+
+func (e *callbackRefusedError) definite() bool { return e.status >= 400 && e.status < 500 }
 
 // ScoreAttestation returns the identity-level custom_data for an assertion
 // (exported for the OIDC adapter).
@@ -758,7 +777,22 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 		return nil, err
 	}
 
+	// An installed app's approval lasts until it is ended, so the person's own
+	// record is kept first: a grant the host accepts always has one to end it by.
+	undo, err := h.recordInstalledAppSignIn(rel, bundle)
+	if err != nil {
+		return nil, fmt.Errorf("could not keep a record of this sign-in, so it was not approved: %w", err)
+	}
 	if err := h.postAssertion(bundle.CallbackURL, bundle.SessionToken, assertion, creds); err != nil {
+		// Drop the record only when the host definitely refused (a 4xx). A
+		// timeout or a server error may have come after the host accepted, and a
+		// live grant with no record is one the person cannot end; a record for a
+		// grant that was never made is cleared by the host's 410 when they try
+		// to end it.
+		var refused *callbackRefusedError
+		if errors.As(err, &refused) && refused.definite() {
+			undo()
+		}
 		return nil, err
 	}
 

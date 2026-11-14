@@ -713,6 +713,14 @@ func TestAnAppleAppAttestKeySpeaksForThePersonByAnAssertion(t *testing.T) {
 func TestOneCallerCannotFillTheNoncesThatEndGrants(t *testing.T) {
 	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
 	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	// The begin route only answers for a live grant, so there has to be one.
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aPersonsIdentityAgent(t).Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL}); err != nil {
+		t.Fatal(err)
+	}
 	endAppKeyMu.Lock()
 	endAppKeyAsked = map[string]endAppKeyAsk{}
 	endAppKeyMu.Unlock()
@@ -838,6 +846,14 @@ func TestTheEndNonceCapCountsTheVisitorBehindAProxyNotTheProxy(t *testing.T) {
 	t.Setenv("TRUSTED_PROXIES", "10.0.0.1")
 	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
 	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	// The begin route only answers for a live grant, so there has to be one.
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aPersonsIdentityAgent(t).Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL}); err != nil {
+		t.Fatal(err)
+	}
 	endAppKeyMu.Lock()
 	endAppKeyAsked = map[string]endAppKeyAsk{}
 	endAppKeyMu.Unlock()
@@ -861,5 +877,98 @@ func TestTheEndNonceCapCountsTheVisitorBehindAProxyNotTheProxy(t *testing.T) {
 	}
 	if code := begin("198.51.100.8"); code != 200 {
 		t.Fatalf("one visitor behind the proxy stopped another: %d", code)
+	}
+}
+
+// The person's own Identity Agent keeps what they approved, lists it, and ends
+// it with the signed end the app's host already takes.
+func TestThePersonsIdentityAgentListsAnInstalledAppTheyApprovedAndEndsIt(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := aPersonsIdentityAgent(t)
+	list := func() []login.InstalledAppSignIn {
+		rec := httptest.NewRecorder()
+		person.HandleInstalledAppSignIns(rec, httptest.NewRequest("GET", "/x", nil))
+		var out struct {
+			L []login.InstalledAppSignIn `json:"installed_app_sign_ins"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.L
+	}
+	if len(list()) != 0 {
+		t.Fatal("the list holds something never approved")
+	}
+	if _, err := person.Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	got := list()
+	if len(got) != 1 || got[0].Key != iw.key {
+		t.Fatalf("the approved sign-in is not listed: %+v", got)
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); !ok {
+		t.Fatal("the grant is not live before it is ended")
+	}
+	body, _ := json.Marshal(map[string]string{"site_aid": got[0].SiteAID, "key": got[0].Key})
+	rec := httptest.NewRecorder()
+	person.HandleEndInstalledAppSignIn(rec, httptest.NewRequest("POST", "/x", bytes.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("ending it: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok {
+		t.Fatal("the grant still speaks after the person ended it from their list")
+	}
+	if len(list()) != 0 {
+		t.Fatal("an ended sign-in is still listed")
+	}
+	// A key the person never approved is refused, not forwarded.
+	rec = httptest.NewRecorder()
+	person.HandleEndInstalledAppSignIn(rec, httptest.NewRequest("POST", "/x", bytes.NewReader(body)))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("ending a sign-in not on the list answered %d", rec.Code)
+	}
+}
+
+// The app's owner ended the grant first. Pressing End on the person's list is
+// then not an error: the host says it is no longer live, the entry leaves the
+// list, and the person is told it had already been ended.
+func TestEndingASignInTheOwnerAlreadyEndedDropsItFromTheListAndSaysSo(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := aPersonsIdentityAgent(t)
+	if _, err := person.Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iw.org.browserKeys().End("the-website", iw.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	body, _ := json.Marshal(map[string]string{"site_aid": a.PairwiseAID, "key": iw.key})
+	rec := httptest.NewRecorder()
+	person.HandleEndInstalledAppSignIn(rec, httptest.NewRequest("POST", "/x", bytes.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("an already-ended sign-in answered %d %s, not 200", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Already bool   `json:"already_ended"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if !out.Already || out.Message != "It had already been ended" {
+		t.Fatalf("the person was not told it had already been ended: %s", rec.Body.String())
+	}
+	lr := httptest.NewRecorder()
+	person.HandleInstalledAppSignIns(lr, httptest.NewRequest("GET", "/x", nil))
+	var l struct {
+		L []login.InstalledAppSignIn `json:"installed_app_sign_ins"`
+	}
+	_ = json.Unmarshal(lr.Body.Bytes(), &l)
+	if len(l.L) != 0 {
+		t.Fatalf("a sign-in the host says is not live is still listed: %+v", l.L)
 	}
 }

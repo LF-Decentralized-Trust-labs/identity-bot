@@ -124,9 +124,13 @@ func (s *CoreServer) handleEndAppKeyGrant(w http.ResponseWriter, r *http.Request
 // nonce from the core, then an assertion naming it, for the grant's key and the
 // installed_app kind, from the person the grant is for.
 const (
-	endAppKeyAudience = "end-app-key"
+	endAppKeyAudience = login.EndAppKeyAudience
 	endAppKeyLife     = 5 * time.Minute
 )
+
+// errNoLongerLive is the host's answer (410 Gone) when the grant is not live.
+// The person's Identity Agent matches it by status, not by this text.
+const errNoLongerLive = "no longer live"
 
 type endAppKeyAsk struct {
 	assetID, key string
@@ -166,6 +170,12 @@ func (s *CoreServer) handleBeginEndAppKey(w http.ResponseWriter, r *http.Request
 	assetID, found := s.assetIDOfSite(body.SiteAID)
 	if !found {
 		writeError(w, http.StatusNotFound, "no such app", "")
+		return
+	}
+	// A grant that is not live (the owner ended it, or it was already ended) is
+	// said so, so the person's list can drop it instead of showing it as live.
+	if _, live := s.browserKeys().Get(assetID, body.Key, time.Now()); !live {
+		writeError(w, http.StatusGone, errNoLongerLive, "")
 		return
 	}
 	nb := make([]byte, 24)
@@ -236,7 +246,12 @@ func (s *CoreServer) handleEndAppKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec, held := s.browserKeys().Get(ask.assetID, ask.key, time.Now())
-	if !held || rec.Person != res.PairwiseAID {
+	if !held {
+		// Ended between the nonce and the answer: the same "not live" as at /begin.
+		writeError(w, http.StatusGone, errNoLongerLive, "")
+		return
+	}
+	if rec.Person != res.PairwiseAID {
 		writeError(w, http.StatusForbidden, "not authorized", "")
 		return
 	}

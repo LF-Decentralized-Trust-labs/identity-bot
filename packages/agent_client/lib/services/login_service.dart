@@ -84,6 +84,15 @@ class LoginPreview {
   final List<LoginCredentialRequest> requestedCredentials;
   final LoginScoreRequest? requestedScore;
 
+  /// The kind of front end the sign-in is for (`browser` or `installed_app`),
+  /// as the core names it; empty when it did not say.
+  final String frontEnd;
+
+  /// True when approving lets the front end's key speak for the person until
+  /// they or the app's owner end it (an installed app's grant). The consent
+  /// screen says so before the person approves.
+  final bool lastsUntilEnded;
+
   LoginPreview({
     required this.sessionToken,
     required this.rpSessionUrl,
@@ -96,6 +105,8 @@ class LoginPreview {
     this.pairwiseAid,
     this.requestedCredentials = const [],
     this.requestedScore,
+    this.frontEnd = '',
+    this.lastsUntilEnded = false,
   });
 
   factory LoginPreview.fromJson(Map<String, dynamic> json) {
@@ -115,6 +126,8 @@ class LoginPreview {
       ),
       expiry: json['expiry'] ?? '',
       pairwiseAid: json['pairwise_aid'],
+      frontEnd: json['front_end'] as String? ?? '',
+      lastsUntilEnded: json['lasts_until_ended'] == true,
       requestedCredentials: ((json['requested_credentials'] as List<dynamic>?) ?? [])
           .map((e) => LoginCredentialRequest.fromJson(e as Map<String, dynamic>))
           .toList(),

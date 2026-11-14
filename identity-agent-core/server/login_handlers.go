@@ -34,6 +34,9 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 			r.Post("/approve", s.loginHandler.HandleApprove)
 			r.Post("/decline", s.loginHandler.HandleDecline)
 			r.Get("/pending", s.loginHandler.HandlePendingList)
+			// The person's own list of the installed apps they approved, and ending one.
+			r.Get("/installed-apps", s.loginHandler.HandleInstalledAppSignIns)
+			r.Post("/installed-apps/end", s.loginHandler.HandleEndInstalledAppSignIn)
 		}
 		// Issue a signed login challenge for an asset (available even without a
 		// per-user loginHandler).
