@@ -193,6 +193,50 @@ key log and is signed by the identity's key before believing it. An event is sen
 exactly the witnesses it names, and a send that runs in the background is not cut short
 by its caller returning.
 
+### The key state notice and a witness's location (added 2026-11-13)
+
+Two signed statements a witness makes about itself are defined in the `witnessproto`
+module, so that a witness or watcher outside this core and the core itself build and
+check them with one implementation. No route in the core serves or asks for them yet;
+this fixes their form.
+
+**The key state notice** is KERI's reply `/ksn/{witness}`: the route names the witness
+that signs it, not the identifier it is about, as keripy's does, and the reply carries
+keripy's key state record of the identifier after its newest event (`vn`, `i`, `s`, `p`,
+`d`, `f`, `dt`, `et`, `kt`, `k`, `nt`, `n`, `bt`, `b`, `c`, `ee`, `di`, in keripy's
+order). The witness signs the reply's bytes with its own non-transferable key, the
+unindexed `0B` signature keripy attaches to a reply from such a key. A reader believes a
+notice only when it is signed by the witness it asked (a key it took from the log it is
+checking, never one the answer names), its route names that witness, its digest commits
+to it, it is about the identifier asked, and it is dated within five minutes of now.
+
+**A witness's location** is KERI's `/loc/scheme` reply for the witness itself, signed the
+same way, naming an `http` or `https` address with a host and nothing but a host, port and
+path. Any other address is refused when it is built and when it is read. A controller's
+own address is the separate `endpoint-record/1` of ADR-062; this one is a witness's
+statement of its own address, in the form KERI defines for exactly that.
+
+Both are pinned against keripy 1.3.6: `witnessproto/testdata/keripy_key_state_notice.json`
+holds a notice, a key state record and a location keripy made, and witnessproto reads
+them and makes the same bytes and signatures.
+
+Where this departs from keripy, so nobody takes it for more:
+
+- **Carried as JSON with a detached signature** (`rpy_b64`, `witness_aid`, `signature`),
+  not as a CESR stream with the signature attached, so keripy's own reactor will not
+  ingest it as it stands. The reply and the signature are keripy's.
+- **A notice for an identifier the witness holds nothing for**, or that the asker may not
+  read, is still given, with a record naming only the identifier. keripy gives no reply.
+  The asker must be able to tell an answer from no answer, and must not be able to tell
+  "not held" from "not allowed to read".
+- **Fresh by its date only.** keripy's reply carries no nonce from the asker, so neither
+  does this: a notice recorded just before a rotation can be replayed for up to five
+  minutes. Where an answer must be made for one question and no other, the nonce-signed
+  tip above is the one to ask.
+- **`f` is written equal to `s`.** keripy's `f` is the first-seen ordinal, which differs
+  from `s` only after a recovery rotation has superseded events; the record here follows
+  one chain.
+
 ### Task Types
 
 | `type` | Created by | Resolved by |

@@ -31,3 +31,18 @@ The judge is a small version of keri-go's `interop/verify_interop.py`
 module (`python -m keri_go_interop.judge cases.json`) installed from a pinned
 keri-go tag, with the case format (label, message_b64, event_b64, extra_b64)
 as its documented input, so both repos use one judge.
+
+## The key state notice and the witness location
+
+`make_key_state_notice_vectors.py` has keripy make a short key log (an
+inception with two witnesses, a rotation that cuts one and adds another, an
+interaction), state its key state, and have a witness sign the `/ksn/{witness}`
+reply carrying it and its own `/loc/scheme` reply. The output is
+`witnessproto/testdata/keripy_key_state_notice.json`, and
+`witnessproto/key_state_notice_keripy_test.go` checks that witnessproto
+believes both replies and makes the same record, notice and location byte for
+byte, with the same signatures.
+
+```
+kv/bin/python -I interop/make_key_state_notice_vectors.py > witnessproto/testdata/keripy_key_state_notice.json
+```
