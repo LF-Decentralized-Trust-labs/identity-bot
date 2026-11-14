@@ -6,8 +6,6 @@
 
 ---
 
----
-
 # Amendment — 2026-11-14: guardianship is a multi-signature on the dependent's own identifier
 
 > **This amendment replaces the delegation in the rest of this document.** Where
