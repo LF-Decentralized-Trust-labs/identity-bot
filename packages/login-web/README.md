@@ -134,7 +134,8 @@ session and a proof, believes an answer only if the app signed it for that call,
 throws `SessionEnded` (a sentence a person can act on) when the app says 401, and
 `signOut()` ends the session at the app and here. `signInProblem` is the one
 wording for a sign-in that was declined, ran out of time or could not reach the
-app; `SignInButton` already hands it to `onError`.
+app; `SignInButton` already hands it to `onError`. `refusalInWords` says a
+refused answer that leaves the sign-in open (its `lastRefusal`) in words.
 
 A page that wants none of React or a build step loads the ready-built
 `bundle/identity-agent-app.js` (`@identity-agent/login-web/bundle`, global
