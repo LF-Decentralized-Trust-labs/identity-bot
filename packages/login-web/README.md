@@ -94,14 +94,26 @@ this module:
 
 ```tsx
 import { SignInButton } from "@identity-agent/login-web";
-import { appFetch, readAppLink } from "@identity-agent/login-web/app";
+import { appFetch, loadPinnedApp, readPinnedAppLink } from "@identity-agent/login-web/app";
 
 // The link the person opened carries #aid=…&kel=…&rid=…&api=…&seal=…&min=…&iat=… (a fragment, sent to no server).
-const app = await appFetch(readAppLink(location.hash));
+// It is held to the app the page's own config.json pins: { "app": { "aid": …, "rid": …, "api": … } }.
+const app = await appFetch(readPinnedAppLink(location.hash, await loadPinnedApp()));
 <SignInButton sessionEndpoint={app.sessionEndpoint} fetchFn={app.fetchFn}
   browserKey={app.browserKey} frontEnd="browser" requestDisclosures={[]}
   onSuccess={({ appSessionToken }) => keepSession(appSessionToken)} />
 ```
+
+A hosted page is pinned to one app. Its own `config.json`, served beside it and
+written when the page is published, names the app's identifier, the relay
+identifier and the back end's address. `readPinnedAppLink` refuses a link that
+names any other, so a crafted link opened on the real page cannot run the
+sign-in against another back end, and a page with no pin signs nobody in. The
+key log is still the link's, since it can be newer than the page, and it is
+taken only if it derives the pinned identifier. A utility app's page never
+looks for an Identity Agent on the visitor's own machine (`SignInButton`'s
+`sameDeviceProbe` is off for `frontEnd="browser"`), so its policy need not allow
+any loopback address.
 
 `appFetch` refuses a key log that does not derive the app's identifier, makes
 the key the browser cannot export, believes an answer only if the app signed it
@@ -118,5 +130,6 @@ app; `SignInButton` already hands it to `onError`.
 
 A page that wants none of React or a build step loads the ready-built
 `bundle/identity-agent-app.js` (`@identity-agent/login-web/bundle`, global
-`IdentityAgentApp`: `readAppLink`, `appSession`, `mountSignIn`, `SessionEnded`).
+`IdentityAgentApp`: `loadPinnedApp` and `readPinnedApp` (a configuration already read), `readAppLink` (the pinned read: `readAppLink(location.hash, pin)`),
+`appSession`, `mountSignIn`, `SessionEnded`).
 `npm run build:app -- <folder>` makes it (`bundle/` by default, which git ignores): it is built from the sources, never committed, and a test fails if what it writes lacks what pages use.

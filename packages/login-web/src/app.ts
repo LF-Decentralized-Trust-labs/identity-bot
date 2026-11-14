@@ -119,6 +119,84 @@ export function readAppLink(hash: string, now = Date.now()): AppLink {
   return { ...link, wit };
 }
 
+// ---- the page's own pin --------------------------------------------------
+
+/** The one utility app a hosted page signs in to, as the page's own published configuration
+ *  names it: the app's identifier, the relay identifier its answers are signed for, and the
+ *  back end's address. A link is only a way in to that app: one that names another identifier,
+ *  relay identifier or address is refused (`pinAppLink`), so a crafted link opened on the real
+ *  page cannot run the sign-in against somebody else's back end. */
+export interface PinnedApp {
+  aid: string;
+  rid: string;
+  api: string;
+}
+
+const IDENTIFIER = /^[A-Za-z0-9_-]{20,100}$/;
+
+function backEndAddress(api: string): boolean {
+  return /^https:\/\/[^\s/?#]+(\/[^\s?#]*)?$/.test(api) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/[^\s?#]*)?$/.test(api);
+}
+
+/** The pin a page's configuration (its parsed `config.json`) carries under `app`:
+ *  `{ "app": { "aid": …, "rid": …, "api": … } }`. Throws, saying why, when there is none or
+ *  it is not one a page can hold a link to, so a page with no pin signs nobody in. */
+export function readPinnedApp(config: unknown): PinnedApp {
+  const fail = (why: string): never => {
+    throw new Error("this page is not set up to sign anybody in: " + why);
+  };
+  const app = (config && typeof config === "object" ? (config as { app?: unknown }).app : undefined) as Record<string, unknown> | undefined;
+  if (!app || typeof app !== "object") return fail("its configuration names no utility app");
+  const { aid, rid } = app;
+  const api = typeof app.api === "string" ? app.api.replace(/\/+$/, "") : "";
+  if (typeof aid !== "string" || !IDENTIFIER.test(aid)) fail("its configuration names no utility app identifier");
+  if (typeof rid !== "string" || !IDENTIFIER.test(rid)) fail("its configuration names no relay identifier");
+  if (!backEndAddress(api)) fail("its configuration names no back end");
+  return { aid: aid as string, rid: rid as string, api };
+}
+
+/** The pin from the page's own `config.json`, served beside it from the same origin. Throws,
+ *  saying why, when the file is missing or carries no pin: no pin, no sign-in. */
+export async function loadPinnedApp(fetchFn: typeof fetch = (...a) => fetch(...a), url = "config.json"): Promise<PinnedApp> {
+  let r: Response;
+  try {
+    r = await fetchFn(url, { cache: "no-store", credentials: "omit" });
+  } catch {
+    throw new Error("this page is not set up to sign anybody in: its configuration could not be read");
+  }
+  if (!r.ok) throw new Error(`this page is not set up to sign anybody in: it has no configuration beside it (HTTP ${r.status})`);
+  let config: unknown;
+  try {
+    config = await r.json();
+  } catch {
+    throw new Error("this page is not set up to sign anybody in: its configuration is not JSON");
+  }
+  return readPinnedApp(config);
+}
+
+/** `link`, when it names exactly the app `pin` names: the same identifier, relay identifier and
+ *  back end. Throws, in a sentence a person can act on, when it names any other. The key log the
+ *  link carries may be newer than any pin, which is why it is not pinned: it is taken only once
+ *  it derives the pinned identifier (`checkAppKeyLog`, which `appFetch` runs before anything). */
+export function pinAppLink(link: AppLink, pin: PinnedApp | null | undefined): AppLink {
+  const p = readPinnedApp({ app: pin });
+  const refuse = (what: string): never => {
+    throw new Error(`this link names ${what} than the one this page belongs to, so it is not taken: open the utility app again from your Identity Agent`);
+  };
+  if (link.aid !== p.aid) refuse("a different utility app");
+  if (link.rid !== p.rid) refuse("a different relay identifier");
+  if (link.api.replace(/\/+$/, "") !== p.api) refuse("a different back end");
+  return { ...link, api: p.api };
+}
+
+/** `readAppLink`, held to the page's pin (`pinAppLink`). With no pin it refuses: a hosted page
+ *  that does not know which app it belongs to signs nobody in. */
+export function readPinnedAppLink(hash: string, pin: PinnedApp | null | undefined, now = Date.now()): AppLink {
+  if (!pin) throw new Error("this page is not set up to sign anybody in: it is pinned to no utility app");
+  const p = readPinnedApp({ app: pin });
+  return pinAppLink(readAppLink(hash, now), p);
+}
+
 // ---- the app's key log ---------------------------------------------------
 
 /** The key the link's key log puts in force for `aid`; throws, saying why, when

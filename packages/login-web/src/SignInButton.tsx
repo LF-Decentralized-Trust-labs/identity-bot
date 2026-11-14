@@ -23,6 +23,11 @@ export interface SignInButtonProps {
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
   qrFallback?: boolean;
+  /** Whether to look for an Identity Agent on this device (at a fixed loopback address) and hand it
+   *  the sign-in. A website's page may; a utility app's page (`frontEnd` "browser") never does: its
+   *  sign-in goes through the app's own back end, and a hosted page reaches nothing on the
+   *  visitor's own machine. Defaults to true except for a utility app's page. */
+  sameDeviceProbe?: boolean;
   /** With a back end: forward `collectorSecret` to it and have it call
    *  confirmLoginSession — the Identity Agent will not name the person without it.
    *  With no back end: `signIn` is what the Identity Agent handed this page, and
@@ -62,6 +67,7 @@ export function SignInButton({
   theme = "auto",
   size = "medium",
   qrFallback = true,
+  sameDeviceProbe = frontEnd !== "browser",
   onSuccess,
   onError,
 }: SignInButtonProps) {
@@ -115,7 +121,7 @@ export function SignInButton({
         setShowQr(true);
       }
 
-      const hasAgent = await detectLocalAgent();
+      const hasAgent = sameDeviceProbe && (await detectLocalAgent());
       const rpBase = window.location.origin;
       if (hasAgent) {
         const ok = await triggerLocalLogin({
@@ -136,7 +142,7 @@ export function SignInButton({
     } finally {
       setBusy(false);
     }
-  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, frontEnd, fetchFn, qrFallback, onError]);
+  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, frontEnd, fetchFn, qrFallback, sameDeviceProbe, onError]);
 
   const isDark =
     theme === "dark" ||
