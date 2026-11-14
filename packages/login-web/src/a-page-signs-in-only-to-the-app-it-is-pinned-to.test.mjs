@@ -6,7 +6,7 @@
 import assert from "node:assert";
 import { identity, logMemory, minimum, nowSeconds, relayChain, sealing } from "./app-test-support.mjs";
 import {
-  AppUnreachable, checkAppKeyLog, checkedSealKey, checkSealKey, loadPinnedApp, pinAppLink, pinnedAppLink, readAppLink, readPinnedApp, readPinnedAppLink,
+  AppUnreachable, checkAppKeyLog, checkedSealKey, checkSealKey, LinkOutOfDate, renewedSealKey, loadPinnedApp, pinAppLink, pinnedAppLink, readAppLink, readPinnedApp, readPinnedAppLink,
 } from "../dist/app.js";
 import { probesSameDevice } from "../dist/SignInButton.js";
 
@@ -116,6 +116,33 @@ assert.deepEqual(readPinnedApp(config({ wit: "none" })).wit, []);
   // a statement from before the pinned event is refused when it is checked, before any call
   const old = await pinnedAppLink({ ...unpinned, min: `3.${otherRelay.events[0].said}` }, backEnd);
   await assert.rejects(checkedSealKey(old, logMemory(), backEnd), /does not reach/);
+}
+
+// the pinned floor and witnesses reach every place a statement is checked: a link's, a rotation's, and the page's memory
+{
+  const beyond = `2.${otherRelay.events[0].said}`;   // an event the relay identifier's log does not hold
+  // a link's statement, checked by checkedSealKey, is held to the floor as well as to min
+  const linked = { rid: relay.aid, seal: sl.statement, min: minimum(relay, 1), wit: [] };
+  await checkedSealKey(linked, logMemory(), async () => new Response("", { status: 404 }));
+  await assert.rejects(checkedSealKey({ ...linked, floor: beyond }, logMemory(), async () => new Response("", { status: 404 })), /does not reach the event this page is pinned to/);
+  // a link made from the pin asks the pinned witnesses, not none
+  const asked = [];
+  const ask = async (url) => { asked.push(String(url)); return String(url).endsWith("/sealing-key") ? new Response(sl.statement, { status: 200 }) : new Response("", { status: 404 }); };
+  const fromPin = await pinnedAppLink(pin, ask);
+  assert.deepEqual(fromPin.wit, [W1]);
+  await checkedSealKey(fromPin, logMemory(), ask);
+  assert.ok(asked.some((u) => u.startsWith(W1 + "/witness/kel/")), "the pinned witness is asked");
+  // a rotation fetches the statement in force and holds it to the floor and the witnesses, as a link's
+  const held = new Uint8Array(65);
+  asked.length = 0;
+  await renewedSealKey({ rid: relay.aid, api: pin.api, min: minimum(relay, 1), floor: pin.min, wit: [W1] }, logMemory(), ask, held);
+  assert.deepEqual(asked.filter((u) => u.endsWith("/sealing-key")), ["https://tasks.example/sealing-key"]);
+  assert.ok(asked.some((u) => u.startsWith(W1 + "/witness/kel/")), "a rotation asks the pinned witness");
+  await assert.rejects(renewedSealKey({ rid: relay.aid, api: pin.api, min: minimum(relay, 1), floor: beyond, wit: [] }, logMemory(), ask, held), LinkOutOfDate);
+  // a memory that cannot be read is replaced where the pin gives a floor, and refused where nothing does
+  const unreadable = { get: () => "not a key log", set() {} };
+  await checkSealKey(relay.aid, sl.statement, unreadable.get(), null, pin.min);
+  await assert.rejects(checkSealKey(relay.aid, sl.statement, unreadable.get(), null, null), /cannot be read/);
 }
 
 // a website's button looks for an Identity Agent on this device; a utility app's page never does unless told to

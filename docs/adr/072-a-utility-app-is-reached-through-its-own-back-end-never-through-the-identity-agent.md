@@ -306,6 +306,8 @@ Section 2 step 2 had the link name the app. A page took the app's identifier, th
 
 **A hosted page reaches nothing on the visitor's own machine.** Its sign-in button does not look for an Identity Agent at a loopback address (that probe belongs to a website's sign-in), and its policy allows no loopback address, so a link cannot make the page probe the visitor's ports.
 
-**What this does not close.** A pin is as current as the page's last publication: a witness added since then is named only by links, and a page published with a stale `min` is held to that older floor until it is published again. The pin does not protect a visitor from the host that serves the page.
+**When the relay identifier's witnesses change, the page is published again.** A link names the witnesses the relay identifier has now. If a pinned witness is dropped, every link leaves it out, and the page refuses every link, saying the link checks less, until the page is published again with the new list. That is deliberate: the page cannot tell a dropped witness from a link edited to skip one. To publish again, take `wit` (and `min`) from a fresh sign-in link and write the page's configuration with them. A witness added since publication is named by links and asked, but is not required until the page is published again.
+
+**What this does not close.** A pin is as current as the page's last publication: a page published with a stale `min` is held to that older floor until it is published again. The pin does not protect a visitor from the host that serves the page.
 
 The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedApp`, `pinAppLink`, `readPinnedAppLink`, `pinnedAppLink`). The test is `a-page-signs-in-only-to-the-app-it-is-pinned-to.test.mjs`.
