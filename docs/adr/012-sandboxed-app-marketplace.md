@@ -116,7 +116,9 @@ An app's manifest says how far its traffic may go: `network_mode` says whether i
 
 An app reaches the Identity Agent at the address in `IDENTITY_AGENT_API`, which it is given when it starts and must not assume: `http://agent.internal:{port}` inside a container, where `agent.internal` names the computer the Identity Agent runs on, and `http://127.0.0.1:{port}` for a compiled binary. The port is chosen for each running app, so an app reads it from the environment.
 
-The model calls and the conversation routes of ADR-013 are on the Identity Agent's own HTTP port, 5050 unless it was started on another; the example Open WebUI manifest names `http://agent.internal:5050/sandbox/llm/v1`.
+Every route of that API, `/health` included, takes `Authorization: Bearer $IDENTITY_AGENT_API_KEY`. The key is made new at each start of the app, is different for each instance, and is given in the environment (the manifest cannot set it); a call without it, or with another instance's key, is refused with 401. Where the API listens depends on the machine: on the container's own network gateway where the host can fence the container, otherwise on the one address the engine's name for the host leads to.
+
+The model route is on that API too, at `$IDENTITY_AGENT_API/llm/v1`, served for the instance behind its key: a container is never given the Identity Agent's own HTTP port (5050), because every route of that port would then be open to it. A manifest writes the route as `${IDENTITY_AGENT_API}/llm/v1` and, for an app that wants the key as its OpenAI key, `${IDENTITY_AGENT_API_KEY}`. The conversation routes of ADR-013 stay on the Identity Agent's own port for callers that are not a sandboxed container.
 
 
 ### 9. App Manifest Format

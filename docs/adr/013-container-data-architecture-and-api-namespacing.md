@@ -47,7 +47,7 @@ The code that serves `/sandbox/` and `/apps/`, captures conversations and transl
 
 ### Decision 1: An app's model calls go through the Identity Agent, which keeps the conversation
 
-An app makes its model calls to `/sandbox/llm/v1/` on the Identity Agent's own HTTP port, with the OpenAI-compatible API (its `OPENAI_API_BASE_URL`). From a container that is `http://agent.internal:5050/sandbox/llm/v1`, where 5050 is the Identity Agent's port unless it was started on another (ADR-012 §5). The Identity Agent adds the key the owner keeps, forwards the call, streams the answer back, and keeps the conversation in the owner's AI conversations, not in the app. An app needs no store of its own for them, and must not rely on keeping one.
+An app makes its model calls to `/sandbox/llm/v1/` on the Identity Agent's own HTTP port, with the OpenAI-compatible API (its `OPENAI_API_BASE_URL`). From a sandboxed container that is `$IDENTITY_AGENT_API/llm/v1`, served by the container's own Agent API behind its per-start key (ADR-012 §5): the container is not given the Identity Agent's own port (5050 unless it was started on another), which would open every route of it. A caller that is not a container uses `/sandbox/llm/v1/` on that port. The Identity Agent adds the key the owner keeps, forwards the call, streams the answer back, and keeps the conversation in the owner's AI conversations, not in the app. An app needs no store of its own for them, and must not rely on keeping one.
 
 ### Decision 2: An app's display is loaded through the Identity Agent
 
