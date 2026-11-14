@@ -21,7 +21,16 @@
 //
 //   - [KelLogContractFixture]: one key log as a watcher is sent it and serves
 //     it, which an agent's fetch of a log and a watcher's serving of it are both
-//     tested against.
+//     tested against;
+//
+//   - [ReceiptMessage], [SignEventReceipt], [VerifyEventReceipt],
+//     [WitnessPosition], [WitnessKey] and [IsEventSignedReceipt]: the witness
+//     receipt in keripy's form (ADR-070), so an Identity Agent and a hosted
+//     witness build and check it with one implementation, tested against
+//     keripy's own receipts ([KeripyWitnessReceiptVectors]);
+//
+//   - [WitnessesAfter]: the witness list in force after an event, which a
+//     receipt's index is a place in.
 //
 // The digest is pinned by kel-digest-vectors.json, which is part of this
 // package so that any other implementation can test itself against the same

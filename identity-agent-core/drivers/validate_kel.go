@@ -8,6 +8,8 @@ import (
 
 	keri "github.com/grapeid/keri-go"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+
 	"identity-agent-core/iacrypto"
 )
 
@@ -406,36 +408,26 @@ func ValidateKELInputFromRecords(aid string, records []map[string]interface{}) (
 // the holder of that key signed this event's digest, or it did not. A
 // transferable witness would mean resolving its key log and working out which
 // key was in force at the time, for every receipt and every verifier.
+//
+// This is the earlier form, an unindexed signature over the event's SAID
+// string; witnessproto.VerifyEventReceipt reads it, so there is one reader.
 func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 	if witnessAID == "" || eventSAID == "" || cesrSig == "" {
 		return fmt.Errorf("a receipt needs a witness, an event and a signature")
 	}
-	_, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
-	if err != nil {
-		return fmt.Errorf("%q is not a non-transferable witness identifier, so its receipts "+
-			"cannot be checked without resolving a key log first: %w", witnessAID, err)
+	if witnessproto.IsEventSignedReceipt(cesrSig) {
+		return fmt.Errorf("the receipt signature does not decode: it is signed over the event, not its SAID")
 	}
-	raw, err := iacrypto.DecodeEd25519SignatureQB64(cesrSig)
-	if err != nil {
-		return fmt.Errorf("the receipt signature does not decode: %w", err)
-	}
-	if keri.VerifyUnderKey(witnessAID, []byte(eventSAID), "", raw) != nil {
-		return fmt.Errorf("the receipt was not signed by %s, so that witness did not issue it",
-			witnessAID)
-	}
-	return nil
+	return witnessproto.VerifyEventReceipt(witnessAID, nil, eventSAID, cesrSig, nil)
 }
 
 // WitnessKey is the key a witness identifier is made of, in a form to compare
 // or count by, and false when it is not a canonical non-transferable
 // identifier. Two names for one witness give the same key, so a witness
-// counted by its key is counted once however it is written.
+// counted by its key is counted once however it is written. It is
+// witnessproto.WitnessKey.
 func WitnessKey(witnessAID string) (string, bool) {
-	pub, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
-	if err != nil {
-		return "", false
-	}
-	return string(pub), true
+	return witnessproto.WitnessKey(witnessAID)
 }
 
 // Designates is whether witnessAID is in the designated list, matched by key
@@ -557,35 +549,12 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 	return report, allMet
 }
 
-// WitnessesAfter is the one rule for the witness list in force: what an event
-// leaves it as, given what it was before. An inception (or delegated
-// inception) names the list outright; a rotation (or delegated rotation) cuts
-// the witnesses in br, then adds those in ba that are not already in it, so a
-// witness is in the list once and stands at one place; every other event
-// leaves it as it was. The bool is whether the event touched the list.
-//
-// A witness's receipt carries its place in this list, so everything that
-// reads a list, from a log's own events to a receipt arriving late, reads it
-// here.
+// WitnessesAfter is the witness list in force after ev, given the list before
+// it. The rule lives in witnessproto.WitnessesAfter, so a watcher outside the
+// core applies exactly the same one; everything in the core that reads a
+// witness list reads it through here.
 func WitnessesAfter(current []string, ev *keri.Event) ([]string, bool) {
-	switch ev.Ilk {
-	case "icp", "dip":
-		return append([]string{}, ev.Witnesses...), true
-	case "rot", "drt":
-		out := make([]string, 0, len(current)+len(ev.WitnessAdd))
-		for _, w := range current {
-			if !contains(ev.WitnessCut, w) {
-				out = append(out, w)
-			}
-		}
-		for _, w := range ev.WitnessAdd {
-			if !contains(out, w) {
-				out = append(out, w)
-			}
-		}
-		return out, true
-	}
-	return current, false
+	return witnessproto.WitnessesAfter(current, ev)
 }
 
 // AppendEvent is the log rawEvents with the event next at its end, for asking
@@ -621,13 +590,4 @@ func AppendEvent(rawEvents [][]byte, next []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("the event (sequence %d) does not follow the last event of the key log (sequence %d)", ev.SN, last.SN)
 	}
 	return append(append([][]byte(nil), rawEvents...), next), nil
-}
-
-func contains(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
 }
