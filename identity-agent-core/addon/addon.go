@@ -163,6 +163,15 @@ type Host interface {
 	HoldTheRecord() (string, bool, bool, func(), error)
 	InBackground(fn func(ctx context.Context))
 	InitAssetHandler() error
+	// ReviveAssetIdentity puts the identity of the asset stored under assetID
+	// back in the key engine after a restart, which holds only the owner's own
+	// until an asset's is asked for: asset keys are derived, so the same
+	// identity (and identifier) returns. The asset is read from the store, never
+	// taken from the caller. Call it when the engine has no log for an asset's
+	// name, then ask again. An error says why it could not (no such asset, a
+	// delegation still waiting for its key's device, an identifier that does not
+	// match the one stored).
+	ReviveAssetIdentity(assetID string) error
 	IsVaultEntry(name string) bool
 	IssueAssetCredential(kind *schemas.AssetGrant, holder string, issuer string, claims map[string]interface{}, expiry string, by Authority) (string, error)
 	IssueCapabilityGrant(agent *asset.Asset, by Authority) (string, error)
