@@ -408,36 +408,26 @@ func ValidateKELInputFromRecords(aid string, records []map[string]interface{}) (
 // the holder of that key signed this event's digest, or it did not. A
 // transferable witness would mean resolving its key log and working out which
 // key was in force at the time, for every receipt and every verifier.
+//
+// This is the earlier form, an unindexed signature over the event's SAID
+// string; witnessproto.VerifyEventReceipt reads it, so there is one reader.
 func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 	if witnessAID == "" || eventSAID == "" || cesrSig == "" {
 		return fmt.Errorf("a receipt needs a witness, an event and a signature")
 	}
-	_, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
-	if err != nil {
-		return fmt.Errorf("%q is not a non-transferable witness identifier, so its receipts "+
-			"cannot be checked without resolving a key log first: %w", witnessAID, err)
+	if witnessproto.IsEventSignedReceipt(cesrSig) {
+		return fmt.Errorf("the receipt signature does not decode: it is signed over the event, not its SAID")
 	}
-	raw, err := iacrypto.DecodeEd25519SignatureQB64(cesrSig)
-	if err != nil {
-		return fmt.Errorf("the receipt signature does not decode: %w", err)
-	}
-	if keri.VerifyUnderKey(witnessAID, []byte(eventSAID), "", raw) != nil {
-		return fmt.Errorf("the receipt was not signed by %s, so that witness did not issue it",
-			witnessAID)
-	}
-	return nil
+	return witnessproto.VerifyEventReceipt(witnessAID, nil, eventSAID, cesrSig, nil)
 }
 
 // WitnessKey is the key a witness identifier is made of, in a form to compare
 // or count by, and false when it is not a canonical non-transferable
 // identifier. Two names for one witness give the same key, so a witness
-// counted by its key is counted once however it is written.
+// counted by its key is counted once however it is written. It is
+// witnessproto.WitnessKey.
 func WitnessKey(witnessAID string) (string, bool) {
-	pub, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
-	if err != nil {
-		return "", false
-	}
-	return string(pub), true
+	return witnessproto.WitnessKey(witnessAID)
 }
 
 // Designates is whether witnessAID is in the designated list, matched by key
