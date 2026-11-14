@@ -994,3 +994,6 @@ export function appSession(
 }
 
 export { signInProblem } from "./signInProblem.js";
+
+export { signPersonStatement, personStatementBytes, personFingerprint, personSigner, personVerkey, lowSSignature, LIST_CONVERSATION } from "./personStatement.js";
+export type { PersonKind, PersonProof, PersonStatement, SignedStatement, StatementRequest } from "./personStatement.js";
