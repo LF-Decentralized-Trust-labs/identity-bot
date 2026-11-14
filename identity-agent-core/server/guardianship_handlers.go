@@ -188,9 +188,21 @@ func (s *CoreServer) handleUpdateGuardianship(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	for _, old := range []string{"guardian_aid", "delegated_aid_prefix", "co_guardians"} {
-		if _, ok := req[old]; ok {
-			writeError(w, http.StatusBadRequest, "Invalid request body", old+" is not a field: a guardian is a key in the dependent's key set, not an identifier")
+	// An update changes only what describes the guardianship. A guardian is a
+	// key in the dependent's key set, never an identifier, and the key set changes
+	// only by a rotation of the dependent's identifier, so neither is set here;
+	// any other field is refused rather than ignored, as on create.
+	for k := range req {
+		switch k {
+		case "dependent_name", "dependent_aid", "status", "hosting_type", "hosting_url", "metadata":
+		case "guardian_aid", "delegated_aid_prefix", "co_guardians":
+			writeError(w, http.StatusBadRequest, "Invalid request body", k+" is not a field: a guardian is a key in the dependent's key set, not an identifier")
+			return
+		case "multisig_participants", "multisig_threshold":
+			writeError(w, http.StatusBadRequest, "Invalid request body", k+" is not changed by an update: the key set changes only by a rotation of the dependent's identifier")
+			return
+		default:
+			writeError(w, http.StatusBadRequest, "Invalid request body", "unknown field "+k)
 			return
 		}
 	}
@@ -301,8 +313,11 @@ func checkMultisig(parts []store.MultisigParticipant, threshold int) error {
 		}
 		seen[p.PublicKey] = true
 	}
-	if threshold < 0 || threshold > len(parts) {
-		return fmt.Errorf("threshold %d cannot be met by %d keys", threshold, len(parts))
+	if len(parts) == 0 && threshold != 0 {
+		return fmt.Errorf("threshold %d cannot be met by no keys", threshold)
+	}
+	if len(parts) > 0 && (threshold < 1 || threshold > len(parts)) {
+		return fmt.Errorf("threshold %d cannot be met by %d keys, or needs no signature", threshold, len(parts))
 	}
 	return nil
 }

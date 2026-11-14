@@ -75,6 +75,7 @@ func TestAKeySetThatIsNotOneIsRefused(t *testing.T) {
 		"a threshold too big":      `"multisig_participants":[{"public_key":"Dk","role":"guardian"}],"multisig_threshold":2`,
 		"a negative threshold":     `"multisig_participants":[],"multisig_threshold":-1`,
 		"a threshold with no keys": `"multisig_threshold":1`,
+		"keys that need no signer": `"multisig_participants":[{"public_key":"Dk","role":"guardian"}],"multisig_threshold":0`,
 	} {
 		w := createGuardianship(t, s, `{"type":"minor_child","dependent_name":"Sam","hosting_type":"cloud",`+f+`}`)
 		if w.Code != http.StatusBadRequest {
@@ -83,14 +84,17 @@ func TestAKeySetThatIsNotOneIsRefused(t *testing.T) {
 	}
 }
 
-// An update cannot put a guardian's identifier back.
+// An update cannot put a guardian's identifier back, change the key set, or
+// carry a field it does not know.
 func TestAnUpdateCannotNameAGuardiansIdentifier(t *testing.T) {
 	s := agentWithDerivedIdentity(t)
 	rec := store.GuardianshipRecord{ID: "g1", Type: "minor_child", DependentName: "Sam", Status: "active"}
 	if err := s.DataStore.SaveGuardianship(rec); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{`"guardian_aid":"E1"`, `"delegated_aid_prefix":"E2"`, `"co_guardians":["E3"]`} {
+	for _, f := range []string{`"guardian_aid":"E1"`, `"delegated_aid_prefix":"E2"`, `"co_guardians":["E3"]`,
+		// The key set changes only by a rotation, and a field update does not know is refused, not ignored.
+		`"multisig_participants":[{"public_key":"Dk","role":"guardian"}]`, `"multisig_threshold":1`, `"co_guardian":"E4"`} {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(`{`+f+`}`))
 		r = withURLParam(r, "id", "g1")
