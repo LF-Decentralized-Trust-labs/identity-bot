@@ -17,10 +17,18 @@ clean; mkdir -p "$T/r/etc/needrestart"; expect "a needrestart directory" 1 "etc/
 clean; ln -s /lib/systemd/system/apt-daily.timer "$T/r/etc/systemd/system/multi-user.target.wants/apt-daily.timer"; expect "an enabled apt-daily timer" 1 "enabled: etc/systemd/system/multi-user.target.wants/apt-daily.timer"
 clean; mkdir -p "$T/r/etc/systemd/system/timers.target.wants"; ln -s /x "$T/r/etc/systemd/system/timers.target.wants/apt-daily-upgrade.timer"; expect "an enabled apt-daily-upgrade timer" 1 "apt-daily-upgrade"
 clean; touch "$T/r/etc/systemd/system/apt-daily.timer"; expect "an apt timer unit placed in etc" 1 "timer etc/systemd/system/apt-daily.timer"
-clean; echo 'APT::Periodic::Unattended-Upgrade "1";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic unattended upgrade on" 1 "apt.conf.d"
-clean; echo 'APT::Periodic::Update-Package-Lists "1";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic list update on" 1 "apt.conf.d"
+clean; echo 'APT::Periodic::Unattended-Upgrade "1";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic unattended upgrade on" 1 "apt periodic setting"
+clean; echo 'APT::Periodic::Update-Package-Lists "1";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic list update on" 1 "apt periodic setting"
 clean; echo 'APT::Periodic::Unattended-Upgrade "0";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic set to 0 passes" 0
 clean; echo '// APT::Periodic::Unattended-Upgrade "1";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "a commented setting passes" 0
-clean; echo 'APT::Periodic::Unattended-Upgrade "true";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic set to true" 1 "apt.conf.d"
+clean; echo 'APT::Periodic::Unattended-Upgrade "true";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic set to true" 1 "apt periodic setting"
+clean; mkdir -p "$T/r/usr/lib/systemd/system/timers.target.wants"; ln -s ../apt-daily.timer "$T/r/usr/lib/systemd/system/timers.target.wants/apt-daily.timer"; expect "an apt timer a package ships enabled in /usr/lib" 1 "enabled: usr/lib/systemd/system/timers.target.wants/apt-daily.timer"
+clean; mkdir -p "$T/r/usr/lib/systemd/system/timers.target.wants"; ln -s usr/lib "$T/r/lib"; touch "$T/r/usr/lib/systemd/system/timers.target.wants/apt-daily-upgrade.timer"; expect "the same, reached through a merged /lib" 1 "apt-daily-upgrade.timer"
+clean; mkdir -p "$T/r/usr/lib/systemd/system"; touch "$T/r/usr/lib/systemd/system/apt-daily.timer"; expect "an apt timer unit installed but not enabled passes" 0
+clean; echo 'APT::Periodic::Update-Package-Lists "1"; // was "0"' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "a setting turned on, with a 0 elsewhere on its line" 1 "apt periodic setting"
+clean; echo 'APT::Periodic::Update-Package-Lists "never";' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "periodic set to never passes" 0
+clean; echo 'APT::Periodic::Unattended-Upgrade "1";' > "$T/r/etc/apt/apt.conf"; expect "periodic on in apt.conf itself" 1 "apt periodic setting"
+clean; printf 'APT {\n  Periodic {\n    Update-Package-Lists "1";\n  };\n};\n' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "the block form is refused" 1 "apt periodic block"
+clean; echo 'APT::Periodic { Update-Package-Lists "1"; };' > "$T/r/etc/apt/apt.conf.d/20auto"; expect "the one-line block form is refused" 1 "apt periodic block"
 rm -rf "$T/r"; expect "not an image root is refused, not passed" 2 "not an image root"
 exit $fail

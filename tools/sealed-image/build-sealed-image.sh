@@ -436,7 +436,7 @@ rm -rf "$WORK/root/var/cache/apt" "$WORK/root/var/lib/apt/lists"
 # A measured image never changes in place: an update is a new image with a new measurement. Debian's apt package
 # enables its own daily timers when it is installed, so they are taken out (they have nothing to do on a root that is
 # read-only and whose package lists are removed above), and then the image is checked for anything that could update
-# it or restart services behind the agent: the packages unattended-upgrades and needrestart, their programs, any
+# it or restart services behind the Identity Agent: the packages unattended-upgrades and needrestart, their programs, any
 # apt timer, and apt's periodic settings. Fails the build rather than ship an image that could drift from its
 # measurement.
 say "Checking the image cannot update itself"
