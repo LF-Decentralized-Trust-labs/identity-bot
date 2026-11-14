@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // Failed before: /public/kel-digest gave anyone the digest and first-seen time
@@ -63,5 +64,34 @@ func TestBeingAPublicWatcherServiceIsOffUnlessTheOwnerSaidSo(t *testing.T) {
 	}
 	if (&Service{}).PublicWatcherService() {
 		t.Fatal("a watcher with no store is a public service")
+	}
+}
+
+// A digest first seen from a log that did not verify under its controller's own
+// signatures is not served as a signed fact: it is answered as never seen.
+//
+// Fails when GetPublicDigest serves a row whose Proven is false.
+func TestAnUnprovenFirstSightingIsNotServedAsTestimony(t *testing.T) {
+	k := newTestWatcherKey(7)
+	url, serving := servedBy(t, &k, nil)
+	now := time.Now().UTC()
+	if err := serving.Store.RecordFirstSeen(FirstSeenRecord{
+		AID: "EUnproven", SequenceNum: 0, KelDigest: "abcd", FirstSeenAt: now, LastConfirmedAt: now,
+		SeenCount: 1, SourceType: SourceOOBI, Proven: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seen(t, serving, "EProven", 0, "efgh")
+	if err := serving.Store.SetConfig(configPublicWatcher, "true"); err != nil {
+		t.Fatal(err)
+	}
+	c := clientTrusting(k)
+	got, _, err := c.QueryDigest(context.Background(), url, "EUnproven", 0)
+	if err != nil || got.Digest != nil || got.FirstSeenAt != nil {
+		t.Fatalf("an unproven sighting was served: %+v, %v", got, err)
+	}
+	got, _, err = c.QueryDigest(context.Background(), url, "EProven", 0)
+	if err != nil || got.Digest == nil || *got.Digest != "efgh" {
+		t.Fatalf("control: a proven sighting was not served: %+v, %v", got, err)
 	}
 }
