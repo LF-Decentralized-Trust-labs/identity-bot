@@ -27,7 +27,7 @@ func TestTheStandingWatchersAreAskedAtOnce(t *testing.T) {
 	}
 	ws := serviceAsking(t, newTestWatcherKey(1), urls...)
 	start := time.Now()
-	got := ws.askStanding(t.Context(), "EAlice", 0, "Edigest", &VerifyKelResult{})
+	got := ws.askStanding(t.Context(), "EAlice", 0, "Edigest")
 	if len(got) != watchers {
 		t.Fatalf("%d answers, want one per watcher", len(got))
 	}

@@ -76,7 +76,7 @@ type standingAnswer struct {
 // askStanding asks every standing watcher for its digest at seq, all at once,
 // so a slow watcher costs its own time and not the sum of the others'. The
 // answers are in the order the watchers are listed.
-func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest string, result *VerifyKelResult) []standingAnswer {
+func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest string) []standingAnswer {
 	ws := s.StandingWatchers()
 	out := make([]standingAnswer, len(ws))
 	var wg sync.WaitGroup

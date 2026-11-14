@@ -290,7 +290,7 @@ func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelR
 	// answer the rest of this pipeline (open alerts, escalation) is built on.
 	// A watcher whose digest differs is then asked for its log and judged on
 	// it: what it can prove is acted on, what it cannot is shown.
-	answers := s.askStanding(ctx, in.AID, seq, digest, result)
+	answers := s.askStanding(ctx, in.AID, seq, digest)
 	for i := range answers {
 		s.judge(ctx, in, &answers[i])
 		result.sourcesQueried = append(result.sourcesQueried, SourceOutcome{
