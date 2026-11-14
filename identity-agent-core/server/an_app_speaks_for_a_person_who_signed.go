@@ -95,6 +95,18 @@ func theControlAPersonSigns(r *http.Request) (conversation, kind string, ok bool
 	return "", "", false
 }
 
+// theListAPersonSigns says whether the request is the route a person lists
+// their own conversations on: GET /api/people/me/conversations. The
+// statement is for this one request, named by the request's nonce, which a GET
+// carries in its query (the app's signature covers the target) and no other
+// query value is allowed beside it.
+func theListAPersonSigns(r *http.Request) (nonce string, ok bool) {
+	if r.Method != http.MethodGet || strings.Trim(r.URL.Path, "/") != "api/people/me/conversations" {
+		return "", false
+	}
+	return r.URL.Query().Get("nonce"), true
+}
+
 // thePersonAnAppSpeaksFor settles who an app speaks for: a person only, and only
 // when every check below holds. A request that carries these headers and is not
 // an app's is refused where it is read (thePersonAsking).
@@ -135,7 +147,31 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 		msg   agentmessage.PersonMessage
 	)
 	cid, controlKind, isControl := theControlAPersonSigns(r)
-	if isControl {
+	listNonce, isList := theListAPersonSigns(r)
+	if isList {
+		// A list is for no conversation, to nobody, answers nothing and carries no
+		// words, and its salted fingerprint is of no words, so a statement with no
+		// salt is never taken. It is for this request, named by the nonce the
+		// request carries, and for nothing else.
+		words = nil
+		q := r.URL.Query()
+		switch {
+		case len(q) != 1 || len(q["nonce"]) != 1 || listNonce == "":
+			return refuse(errors.New("a list request carries one thing beside the statement: the nonce it is for"))
+		case len(body) != 0:
+			return refuse(errors.New("a list carries no words"))
+		case st.Kind != agentmessage.PersonKindList:
+			return refuse(fmt.Errorf("a statement of kind %q is not what this route takes: it takes a list", st.Kind))
+		case st.To != "" || st.InReplyTo != "" || st.RangeFirst != "" || st.RangeLast != "":
+			return refuse(errors.New("a list is to nobody and answers nothing"))
+		case st.MessageID != listNonce:
+			return refuse(errors.New("the statement is for another request than this one"))
+		case st.Audience != app.Asset:
+			// The statement names the one utility app it is for, and only that
+			// utility app's back end may present it (ADR-072 Amendment 8).
+			return refuse(errors.New("the statement is for another utility app than the one that presented it"))
+		}
+	} else if isControl {
 		if json.Unmarshal(body, &msg) != nil {
 			return refuse(errors.New("the request must be JSON"))
 		}
@@ -170,7 +206,7 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 	// is always for one conversation (its id is the person's to choose), so a
 	// request that names none, which opens a new one, is not what any statement
 	// said. The statement a person signed for c1 cannot open another.
-	if !isControl {
+	if !isControl && !isList {
 		if st.Conversation != msg.Conversation {
 			return refuse(errors.New("the statement is for another conversation than the request's, " +
 				"and a request that opens one names the conversation the person signed for"))
@@ -195,8 +231,19 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 	// Then the statement is the person's: well formed, the key's signature, this
 	// Identity Agent, a key the person's own sign-in at the app's asset named,
 	// signed just now. Judged by the trail's one check.
+	//
+	// A list is the one statement whose key may speak at another utility app's
+	// asset than the one that presents it: the person signed it, for this
+	// audience, under the key of the sign-in at the asset whose conversations
+	// they want listed, and the core lists that one party only.
+	var roster trail.KeyRoster = keysSpeakingAt{s: s, asset: app.Asset}
+	personAt := app.Asset
+	var listedAt browserKeyRecord
+	if isList {
+		roster = keysSpeakingAtTheirOwnAsset{s: s, found: &listedAt}
+	}
 	if verr := trail.CheckAuthor(trail.Write{Statement: st, Verkey: proof.Verkey, Signature: proof.Signature},
-		s.thisIdentityAgentsIdentifier(), keysSpeakingAt{s: s, asset: app.Asset}); verr != nil {
+		s.thisIdentityAgentsIdentifier(), roster); verr != nil {
 		return refuse(fmt.Errorf("the person's statement does not hold: %w", verr))
 	}
 	if ferr := trail.CheckFresh(st, time.Now()); ferr != nil {
@@ -210,7 +257,10 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 	} else if used {
 		return refuse(errors.New("this statement was already used"))
 	}
-	return coretypes.Signer{AID: who, Standing: "member", Asset: app.Asset}, js, salt, nil
+	if isList {
+		personAt = listedAt.Asset
+	}
+	return coretypes.Signer{AID: who, Standing: "member", Asset: personAt}, js, salt, nil
 }
 
 // theAIAgentARouteNames is the identifier a statement names an AI agent by, for

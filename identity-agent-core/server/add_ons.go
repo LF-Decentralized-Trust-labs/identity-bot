@@ -95,6 +95,14 @@ type Addon struct {
 	// statement; the add-on that keeps the trail owns what they are.
 	ConversationHead func(s *CoreServer, id string) (h ConversationHead, held bool, err error)
 
+	// ConversationsOfAPerson is every conversation held here that party
+	// (agentmessage.Person of a person's identifier) is a party to, with the
+	// utility app that keeps it, its head and count, and whether it holds an
+	// open ask (ADR-072 Amendment 7). The core serves them on
+	// GET /api/people/me/conversations, for the person whose own signed
+	// statement the request carries.
+	ConversationsOfAPerson func(s *CoreServer, party string) ([]ConversationOfAPerson, error)
+
 	// Who is calling. The core detects that a caller presented a bearer
 	// token or a body's signature, and asks the add-ons, in the order they
 	// registered, who that is. A credential no add-on recognises is refused
