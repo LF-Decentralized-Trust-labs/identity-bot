@@ -97,7 +97,8 @@ import { SignInButton } from "@identity-agent/login-web";
 import { appFetch, loadPinnedApp, readPinnedAppLink } from "@identity-agent/login-web/app";
 
 // The link the person opened carries #aid=…&kel=…&rid=…&api=…&seal=…&min=…&iat=… (a fragment, sent to no server).
-// It is held to the app the page's own config.json pins: { "app": { "aid": …, "rid": …, "api": … } }.
+// It is held to the app the page's own config.json pins:
+// { "app": { "aid": …, "kel": …, "rid": …, "api": …, "min": …, "wit": "<address>,…" or "none" } }.
 const app = await appFetch(readPinnedAppLink(location.hash, await loadPinnedApp()));
 <SignInButton sessionEndpoint={app.sessionEndpoint} fetchFn={app.fetchFn}
   browserKey={app.browserKey} frontEnd="browser" requestDisclosures={[]}
@@ -105,12 +106,19 @@ const app = await appFetch(readPinnedAppLink(location.hash, await loadPinnedApp(
 ```
 
 A hosted page is pinned to one app. Its own `config.json`, served beside it and
-written when the page is published, names the app's identifier, the relay
-identifier and the back end's address. `readPinnedAppLink` refuses a link that
-names any other, so a crafted link opened on the real page cannot run the
-sign-in against another back end, and a page with no pin signs nobody in. The
-key log is still the link's, since it can be newer than the page, and it is
-taken only if it derives the pinned identifier. A utility app's page never
+written when the page is published, names the app's identifier and key log, the
+relay identifier, the back end's address (compared byte for byte, so it is
+written in lower case up to the path), the relay identifier's latest key log
+event and its witnesses. `readPinnedAppLink` refuses a link that names another
+app, relay identifier or back end, so a crafted link opened on the real page
+cannot run the sign-in against another back end. It also refuses a link that
+leaves out a pinned witness or names an earlier event, and every sealing key
+statement must reach the pinned event as well as the link's. A page with no pin,
+or part of one, signs nobody in. The key log in a link is taken only if it
+derives the pinned identifier. A page opened with no sign-in link (on one
+conversation, say) uses `pinnedAppLink(pin)`, which fetches the statement in
+force from the pinned back end and checks it the same way, so nothing it holds
+lapses. A utility app's page never
 looks for an Identity Agent on the visitor's own machine (`SignInButton`'s
 `sameDeviceProbe` is off for `frontEnd="browser"`), so its policy need not allow
 any loopback address.
@@ -130,6 +138,6 @@ app; `SignInButton` already hands it to `onError`.
 
 A page that wants none of React or a build step loads the ready-built
 `bundle/identity-agent-app.js` (`@identity-agent/login-web/bundle`, global
-`IdentityAgentApp`: `loadPinnedApp` and `readPinnedApp` (a configuration already read), `readAppLink` (the pinned read: `readAppLink(location.hash, pin)`),
+`IdentityAgentApp`: `loadPinnedApp` and `readPinnedApp` (a configuration already read), `pinnedAppLink`, `readAppLink` (the pinned read: `readAppLink(location.hash, pin)`),
 `appSession`, `mountSignIn`, `SessionEnded`).
 `npm run build:app -- <folder>` makes it (`bundle/` by default, which git ignores): it is built from the sources, never committed, and a test fails if what it writes lacks what pages use.

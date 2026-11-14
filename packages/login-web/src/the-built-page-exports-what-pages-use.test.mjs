@@ -19,7 +19,7 @@ try {
   page.window = page;
   vm.runInNewContext(code + "\n;globalThis.__app = IdentityAgentApp;", page);
   const app = page.__app;
-  for (const name of ["appSession", "loadPinnedApp", "mountSignIn", "readPinnedApp", "readAppLink", "signInProblem"]) {
+  for (const name of ["appSession", "loadPinnedApp", "mountSignIn", "pinnedAppLink", "readPinnedApp", "readAppLink", "signInProblem"]) {
     assert.strictEqual(typeof app[name], "function", `the built page lacks ${name}`);
   }
   // The built page has no unpinned read of a link: one with no pin is refused before it is read.

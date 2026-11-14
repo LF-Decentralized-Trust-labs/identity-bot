@@ -67,6 +67,9 @@ export interface AppLink {
    *  against the identifier's own inception (`readWitnessedLog`), and an address that is wrong is only
    *  a witness that cannot be reached. */
   wit: string[];
+  /** A second minimum, the page's pinned one (`pinAppLink`): a sealing key statement's log must
+   *  reach it as well as `min`. Never read from a link. */
+  floor?: string;
 }
 
 /** The most witnesses a link names. */
@@ -122,37 +125,63 @@ export function readAppLink(hash: string, now = Date.now()): AppLink {
 // ---- the page's own pin --------------------------------------------------
 
 /** The one utility app a hosted page signs in to, as the page's own published configuration
- *  names it: the app's identifier, the relay identifier its answers are signed for, and the
- *  back end's address. A link is only a way in to that app: one that names another identifier,
- *  relay identifier or address is refused (`pinAppLink`), so a crafted link opened on the real
- *  page cannot run the sign-in against somebody else's back end. */
+ *  names it. A link is only a way in to that app: one that names another identifier, relay
+ *  identifier or back end is refused (`pinAppLink`), so a crafted link opened on the real page
+ *  cannot run the sign-in against somebody else's back end; and one that would check the relay
+ *  identifier's key log less than the pin does (fewer witnesses, an earlier minimum) is refused
+ *  too. Everything here is public: a pin is an address book, not a secret. */
 export interface PinnedApp {
+  /** The app's identifier. */
   aid: string;
+  /** The app's key log: one inception, so it does not change while the identifier lives
+   *  (`checkAppKeyLog` reads no other). Taken only once it derives `aid`. */
+  kel: string;
+  /** The relay identifier whose key signs every answer. */
   rid: string;
+  /** The back end's address: lower case up to the path, no trailing slash. A link must name it
+   *  exactly; it is not case-folded, so one spelling is taken and every other refused. */
   api: string;
+  /** The relay identifier's latest key log event when the page was published (`readMinimum`):
+   *  a floor no link may go below, and the log every sealing key statement must reach. */
+  min: string;
+  /** Where to ask the relay identifier's witnesses; a link must name every one of them. */
+  wit: string[];
 }
 
 const IDENTIFIER = /^[A-Za-z0-9_-]{20,100}$/;
 
+/** An https address (or one on this machine, for development) whose scheme and host are written
+ *  in lower case, with no query, fragment or trailing slash. */
 function backEndAddress(api: string): boolean {
-  return /^https:\/\/[^\s/?#]+(\/[^\s?#]*)?$/.test(api) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/[^\s?#]*)?$/.test(api);
+  const m = /^(https:\/\/[^\s/?#]+|http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?)(\/[^\s?#]*)?$/.exec(api);
+  return !!m && m[1] === m[1].toLowerCase() && !api.endsWith("/");
 }
 
 /** The pin a page's configuration (its parsed `config.json`) carries under `app`:
- *  `{ "app": { "aid": …, "rid": …, "api": … } }`. Throws, saying why, when there is none or
- *  it is not one a page can hold a link to, so a page with no pin signs nobody in. */
+ *  `{ "app": { "aid", "kel", "rid", "api", "min", "wit" } }`, `wit` comma separated or the word
+ *  `none`. Throws, saying why, when there is none or any part is missing or not one a page reads,
+ *  so a page with no pin, or half a pin, signs nobody in. */
 export function readPinnedApp(config: unknown): PinnedApp {
   const fail = (why: string): never => {
     throw new Error("this page is not set up to sign anybody in: " + why);
   };
   const app = (config && typeof config === "object" ? (config as { app?: unknown }).app : undefined) as Record<string, unknown> | undefined;
   if (!app || typeof app !== "object") return fail("its configuration names no utility app");
-  const { aid, rid } = app;
-  const api = typeof app.api === "string" ? app.api.replace(/\/+$/, "") : "";
+  const { aid, kel, rid, api, min, wit } = app;
   if (typeof aid !== "string" || !IDENTIFIER.test(aid)) fail("its configuration names no utility app identifier");
+  if (typeof kel !== "string" || !/^[A-Za-z0-9_-]{40,}$/.test(kel)) fail("its configuration carries no key log for the utility app");
   if (typeof rid !== "string" || !IDENTIFIER.test(rid)) fail("its configuration names no relay identifier");
-  if (!backEndAddress(api)) fail("its configuration names no back end");
-  return { aid: aid as string, rid: rid as string, api };
+  if (typeof api !== "string" || !backEndAddress(api)) fail("its configuration names no back end, written in lower case with no trailing slash");
+  if (!readMinimum(min)) fail("its configuration names no latest key log event of the relay identifier");
+  if (typeof wit !== "string" || !wit) fail("its configuration does not say where the relay identifier's witnesses are (or none)");
+  let witnesses: string[] = [];
+  try {
+    witnesses = wit === "none" ? [] : readWitnessAddresses(wit as string);
+  } catch {
+    fail("its configuration names a witness address that is not one this page asks");
+  }
+  if (wit !== "none" && !witnesses.length) fail("its configuration names no witness address");
+  return { aid: aid as string, kel: kel as string, rid: rid as string, api: api as string, min: min as string, wit: witnesses };
 }
 
 /** The pin from the page's own `config.json`, served beside it from the same origin. Throws,
@@ -174,27 +203,60 @@ export async function loadPinnedApp(fetchFn: typeof fetch = (...a) => fetch(...a
   return readPinnedApp(config);
 }
 
-/** `link`, when it names exactly the app `pin` names: the same identifier, relay identifier and
- *  back end. Throws, in a sentence a person can act on, when it names any other. The key log the
- *  link carries may be newer than any pin, which is why it is not pinned: it is taken only once
- *  it derives the pinned identifier (`checkAppKeyLog`, which `appFetch` runs before anything). */
+/** A pin handed in as an object is read again, the same way, before it is trusted. */
+function checkedPin(pin: PinnedApp | null | undefined): PinnedApp {
+  if (!pin) throw new Error("this page is not set up to sign anybody in: it is pinned to no utility app");
+  const wit = Array.isArray(pin.wit) ? (pin.wit.length ? pin.wit.join(",") : "none") : pin.wit;
+  return readPinnedApp({ app: { ...pin, wit } });
+}
+
+/** `link`, when it names exactly the app `pin` names (the same identifier, relay identifier and
+ *  back end, the last compared byte for byte) and checks the relay identifier's key log at least as
+ *  hard as the pin does: it names every pinned witness, and its minimum is at or past the pinned
+ *  one. Throws, in a sentence a person can act on, otherwise. What it returns carries the pinned
+ *  minimum as `floor`, which every sealing key statement must reach as well as the link's own. The
+ *  key log the link carries is not compared: it is taken only once it derives the pinned identifier
+ *  (`checkAppKeyLog`, which `appFetch` runs before anything). */
 export function pinAppLink(link: AppLink, pin: PinnedApp | null | undefined): AppLink {
-  const p = readPinnedApp({ app: pin });
+  const p = checkedPin(pin);
   const refuse = (what: string): never => {
-    throw new Error(`this link names ${what} than the one this page belongs to, so it is not taken: open the utility app again from your Identity Agent`);
+    throw new Error(`this link ${what} than the one this page belongs to, so it is not taken: open the utility app again from your Identity Agent`);
   };
-  if (link.aid !== p.aid) refuse("a different utility app");
-  if (link.rid !== p.rid) refuse("a different relay identifier");
-  if (link.api.replace(/\/+$/, "") !== p.api) refuse("a different back end");
-  return { ...link, api: p.api };
+  if (link.aid !== p.aid) refuse("names a different utility app");
+  if (link.rid !== p.rid) refuse("names a different relay identifier");
+  if (link.api !== p.api) refuse("names a different back end");
+  const missing = p.wit.filter((w) => !link.wit.includes(w));
+  if (missing.length) refuse("leaves out a witness of the utility app's relay identifier, so it checks less");
+  const mine = readMinimum(link.min);
+  const floor = readMinimum(p.min)!;
+  if (!mine || mine.sn < floor.sn || (mine.sn === floor.sn && mine.said !== floor.said)) refuse("names an earlier key log for the utility app's relay identifier");
+  return { ...link, floor: p.min };
 }
 
 /** `readAppLink`, held to the page's pin (`pinAppLink`). With no pin it refuses: a hosted page
  *  that does not know which app it belongs to signs nobody in. */
 export function readPinnedAppLink(hash: string, pin: PinnedApp | null | undefined, now = Date.now()): AppLink {
-  if (!pin) throw new Error("this page is not set up to sign anybody in: it is pinned to no utility app");
-  const p = readPinnedApp({ app: pin });
+  const p = checkedPin(pin);
   return pinAppLink(readAppLink(hash, now), p);
+}
+
+/** A link made from the pin alone, for a page opened with no sign-in link of its own (a link to one
+ *  conversation, say). Nothing in it has a lifetime: the sealing key statement now in force is
+ *  fetched from the pinned back end (`SEAL_STATEMENT_PATH`, as a rotation fetches it) and is
+ *  checked as a link's is, before any call, against the pinned minimum, the longest log this page
+ *  already knows and the pinned witnesses. A back end that cannot be reached is `AppUnreachable`. */
+export async function pinnedAppLink(pin: PinnedApp | null | undefined, fetchFn: typeof fetch = (...a) => fetch(...a)): Promise<AppLink> {
+  const p = checkedPin(pin);
+  let r: Response;
+  let seal: string;
+  try {
+    r = await fetchFn(p.api + SEAL_STATEMENT_PATH, { method: "GET", cache: "no-store" });
+    seal = await r.text();
+  } catch {
+    throw new AppUnreachable(0);
+  }
+  if (r.status !== 200) throw new AppUnreachable(r.status);
+  return { aid: p.aid, kel: p.kel, rid: p.rid, api: p.api, seal, min: p.min, wit: p.wit, floor: p.min };
 }
 
 // ---- the app's key log ---------------------------------------------------
@@ -432,8 +494,9 @@ export async function checkAppAnswer(a: AnswerCheck): Promise<{ log: string }> {
  *  event. So a key the identifier has rotated away from vouches for nothing, and a
  *  statement made at an earlier event is not taken for a later one. `min` is the link's
  *  latest event the Identity Agent has seen (`readMinimum`): the log must hold it, at that
- *  sequence number, so a page with no memory still takes no log shorter than it. */
-export async function checkSealKey(rid: string, encoded: string, known?: string | null, min?: string | null): Promise<{ key: Uint8Array; log: string }> {
+ *  sequence number, so a page with no memory still takes no log shorter than it. `pinnedMin` is
+ *  the page's own pinned minimum (`pinAppLink`), held the same way. */
+export async function checkSealKey(rid: string, encoded: string, known?: string | null, min?: string | null, pinnedMin?: string | null): Promise<{ key: Uint8Array; log: string }> {
   const fail = (why: string): never => {
     throw new Error("the link's sealing key is refused: " + why);
   };
@@ -462,7 +525,11 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
   const floor = min == null ? null : readMinimum(min);
   if (min != null && !floor) fail("the link's latest key log event is not spelled one way");
   if (floor && got.events[floor.sn]?.said !== floor.said) fail("its key log does not reach the latest event your Identity Agent has seen for the utility app's relay identifier: it may be an earlier log, from before a key was rotated away");
-  const keep = await holdLog(rid, got, st.log as string, known, fail, !!floor);
+  // The page's own pinned minimum (`pinAppLink`), held the same way: a link cannot go below it.
+  const pinned = pinnedMin == null ? null : readMinimum(pinnedMin);
+  if (pinnedMin != null && !pinned) fail("this page's pinned key log event is not spelled one way");
+  if (pinned && got.events[pinned.sn]?.said !== pinned.said) fail("its key log does not reach the event this page is pinned to for the utility app's relay identifier: it may be an earlier log, from before a key was rotated away");
+  const keep = await holdLog(rid, got, st.log as string, known, fail, !!floor || !!pinned);
   if (!(await verifyEd25519(sig!, sealKeyStatementText(rid, key!, st.sn as number), got.key))) fail("the relay identifier's current key did not sign this key");
   return { key: key!, log: keep };
 }
@@ -474,8 +541,8 @@ export async function checkSealKey(rid: string, encoded: string, known?: string 
  *  refused, with the witnessed log kept so that a stale link stays refused. A log that carries on from what the
  *  witnesses vouch for (they may not have been told yet, a removal does not wait for them) is taken as before,
  *  held to the link's minimum. Witnesses that cannot be reached, or have receipted nothing, change nothing. */
-export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch, statement: string = link.seal): Promise<{ key: Uint8Array; log: string }> {
-  const r = await checkSealKey(link.rid, statement, logs.get(link.rid), link.min);
+export async function checkedSealKey(link: Pick<AppLink, "rid" | "seal" | "min" | "floor"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch, statement: string = link.seal): Promise<{ key: Uint8Array; log: string }> {
+  const r = await checkSealKey(link.rid, statement, logs.get(link.rid), link.min, link.floor);
   if (link.wit?.length) {
     const mine = await readAnswerLog(link.rid, r.log, (why): never => {
       throw new Error(why);
@@ -521,7 +588,7 @@ export class LinkOutOfDate extends Error {
  *  for a link. `held` is the key the failed call was sealed to. A statement that fails a check is `LinkOutOfDate`; a
  *  statement that cannot be fetched is the relay failing (`AppUnreachable`); one that names the key already held
  *  is not a rotation, so it is `AppUnreachable` too (trying again can still work). */
-export async function renewedSealKey(link: Pick<AppLink, "rid" | "api" | "min"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch, held: Uint8Array): Promise<{ key: Uint8Array; log: string }> {
+export async function renewedSealKey(link: Pick<AppLink, "rid" | "api" | "min" | "floor"> & { wit?: string[] }, logs: LogMemory, ask: typeof fetch, held: Uint8Array): Promise<{ key: Uint8Array; log: string }> {
   let r: Response;
   let text: string;
   try {

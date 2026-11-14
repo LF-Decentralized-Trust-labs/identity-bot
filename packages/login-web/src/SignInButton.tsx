@@ -41,6 +41,12 @@ export interface SignInButtonProps {
   onError?: (err: Error) => void;
 }
 
+/** Whether a sign-in button looks for an Identity Agent on this device: as `sameDeviceProbe` says when
+ *  it is given, and otherwise yes for a website and no for a utility app's page (`frontEnd` "browser"). */
+export function probesSameDevice(frontEnd: SignInButtonProps["frontEnd"], sameDeviceProbe?: boolean): boolean {
+  return sameDeviceProbe ?? frontEnd !== "browser";
+}
+
 const SIZES = {
   small: { height: 32, font: 13, logo: 20 },
   medium: { height: 40, font: 15, logo: 24 },
@@ -67,7 +73,7 @@ export function SignInButton({
   theme = "auto",
   size = "medium",
   qrFallback = true,
-  sameDeviceProbe = frontEnd !== "browser",
+  sameDeviceProbe,
   onSuccess,
   onError,
 }: SignInButtonProps) {
@@ -121,7 +127,7 @@ export function SignInButton({
         setShowQr(true);
       }
 
-      const hasAgent = sameDeviceProbe && (await detectLocalAgent());
+      const hasAgent = probesSameDevice(frontEnd, sameDeviceProbe) && (await detectLocalAgent());
       const rpBase = window.location.origin;
       if (hasAgent) {
         const ok = await triggerLocalLogin({

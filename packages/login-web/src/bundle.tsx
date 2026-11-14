@@ -5,7 +5,7 @@
  * A page needs no build step, no React and no copy of any of it:
  *
  *   const pin = await IdentityAgentApp.loadPinnedApp();   // the page's own config.json (or readPinnedApp(parsed))
- *   const link = IdentityAgentApp.readAppLink(location.hash, pin);
+ *   const link = IdentityAgentApp.readAppLink(location.hash, pin);   // or, with no link: await pinnedAppLink(pin)
  *   const session = IdentityAgentApp.appSession(link);
  *   if (!session.held()) IdentityAgentApp.mountSignIn(el, link, session, { onSignedIn, onProblem });
  *   else await session.call("GET", "/session/something");
@@ -20,11 +20,11 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { SignInButton } from "./SignInButton.js";
-import { appFetch, appSession, loadPinnedApp, readPinnedApp, readPinnedAppLink, SessionEnded, type AppLink, type AppSession } from "./app.js";
+import { appFetch, appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink, SessionEnded, type AppLink, type AppSession } from "./app.js";
 import { signInProblem } from "./signInProblem.js";
 
 // A hosted page has no unpinned read of a link: `readAppLink` is the pinned one.
-export { appSession, loadPinnedApp, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem };
+export { appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem };
 
 export interface SignInHandlers {
   /** The person approved and the session is kept; call the app as them now. */
