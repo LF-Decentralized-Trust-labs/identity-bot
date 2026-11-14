@@ -42,11 +42,13 @@ authority relationship. Nothing is delegated.
    the guardian on the dependent's own isolated Identity Agent instance; an
    adult who comes under guardianship keeps the identifier they already have.
    Neither is replaced.
-2. **A guardian joins by rotation.** The dependent's Identity Agent rotates the
-   identifier to a multi-signature key set that includes the guardian's key, at
-   the threshold the template names. A rotation committed to the next-key
-   digest in advance is used; where there is none, a preparatory rotation
-   makes one first.
+2. **A guardian joins by rotation.** A newborn's identifier names the
+   guardian's key in its inception, in both the current key set and the next-key
+   commitment. For an identifier that already exists, KERI requires the keys a
+   rotation makes current to be the ones the event before it committed to in its
+   next-key digest, so a new guardian's key takes two rotations: the first
+   commits a next key set that includes it, and the second makes that set
+   current at the threshold the template names.
 3. **Only keys appear, never the guardian's identifier.** The dependent's key
    history shows that its key set changed on a date. It does not name the
    guardian's identifier, so no verifier can walk from the dependent to the
@@ -57,11 +59,13 @@ authority relationship. Nothing is delegated.
    attorney, a court's signing key and a reserved emergency signer are each
    another key in the set, with a threshold that fits (two of three leaves no
    tie; two of two needs a tie-break rule agreed when the guardianship is made).
-5. **Changing guardian is one rotation.** One event removes the outgoing
-   guardian's key and adds the incoming one, so there is no moment the dependent
-   is uncontrolled.
+5. **Changing guardian is the same pair of rotations.** The first commits a
+   next key set with the incoming guardian's key in place of the outgoing one;
+   the second makes it current. The outgoing guardian's key signs until then, so
+   there is no moment the dependent is uncontrolled.
 6. **Emancipation is a rotation, not a new identifier.** A rotation reduces the
-   key set to keys the dependent alone holds. The identifier, its key history,
+   key set to keys the dependent alone holds (committed in the next-key digest
+   beforehand, as in item 2). The identifier, its key history,
    its credentials and its contacts are unchanged. If a guardian is needed again,
    a rotation brings one back.
 7. **The key history is the proof.** The guardian's authority is that their key
@@ -72,16 +76,17 @@ authority relationship. Nothing is delegated.
 8. **What a guardian may do is enforced by threshold, not by the protocol.**
    The categories (identity, financial, medical, legal, communication) and levels
    (full, co-sign, view, blocked) are a policy the dependent's Identity Agent
-   enforces by requiring different thresholds for different kinds of event. The
-   key history carries only multi-signature events and knows nothing of categories.
-9. **Delegation is still right for what is not a person.** A device, a bot or an
-   AI agent acting for its owner is delegated (ADR-036, ADR-045); only human
+   enforces by asking for more or fewer of the key set's signers before it acts
+   on each kind of request. KERI itself signs every event at the one threshold
+   the key set states; the key history knows nothing of categories.
+9. **Delegation is still right for what is not a person.** An asset acting for
+   its owner, such as an AI agent or a bot, is delegated (ADR-045); only human
    guardianship leaves delegation.
 
 This is standard KERI: multi-signature inception and rotation with next-key
-digests, no new event type. The engine therefore needs multi-signature
-inception and rotation (ADR-037); it does not need delegated inception or
-rotation for guardianship.
+digests, no new event type. The KERI engine (ADR-037) therefore needs
+multi-signature inception and rotation, which it does not perform yet; it does
+not need delegated inception or rotation for guardianship.
 
 ## What changes in this document
 
@@ -89,11 +94,11 @@ rotation for guardianship.
 |---|---|
 | Context, "Privacy constraint" | Replaced: no delegation, so no delegator is exposed |
 | Guiding principle 2 | Replaced by item 1-3 above |
-| "Guardianship = KERI Delegation Between Guardianship P-AIDs" | Replaced by the decision above; the guardian's actions become: rotate to add or change a guardian (item 2, 5), change the threshold by rotation, and end guardianship by an emancipating rotation (item 6) |
+| "Guardianship = KERI Delegation Between Guardianship P-AIDs" | Replaced by the decision above; the guardian's actions become: rotations to add or change a guardian (items 2, 5), change the threshold by rotation, and end guardianship by an emancipating rotation (item 6) |
 | "Emancipation = Authority Transfer" | Replaced by item 6; there is no new inception and no topology change |
 | Data model | `guardian_guardianship_raid`, `dependent_guardianship_raid` and `co_guardian_raids_json` become `dependent_aid` (the dependent's own identifier), `multisig_participants_json` (the public keys in the set, each with its role) and `multisig_threshold` (kept); no identifier of any guardian is stored |
 | Consequence 8 (relay is a prerequisite) | Withdrawn: guardianship no longer uses pairwise identifiers |
-| Consequence 9 (delegated inception in the driver) | Replaced: multi-signature inception and rotation, as ADR-037 |
+| Consequence 9 (delegated inception in the driver) | Replaced: the KERI engine (ADR-037) must perform multi-signature inception and rotation |
 | Consequence 10 (store migration) | The legacy delegation fields are replaced by the three above; guardianship has not shipped, so it is still a hard migration |
 
 Unchanged: one identifier per Identity Agent instance, hosting of the
