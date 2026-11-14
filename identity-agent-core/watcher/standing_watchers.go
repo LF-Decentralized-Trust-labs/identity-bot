@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 
 	"identity-agent-core/drivers"
 )
@@ -72,37 +73,50 @@ type standingAnswer struct {
 	rival bool
 }
 
-// askStanding asks every standing watcher for its digest at seq.
+// askStanding asks every standing watcher for its digest at seq, all at once,
+// so a slow watcher costs its own time and not the sum of the others'. The
+// answers are in the order the watchers are listed.
 func (s *Service) askStanding(ctx context.Context, aid string, seq int, digest string, result *VerifyKelResult) []standingAnswer {
-	var out []standingAnswer
-	for _, w := range s.StandingWatchers() {
-		resp, latency, err := s.L2.QueryDigest(ctx, w.URL, aid, seq)
-		a := standingAnswer{w: w, outcome: "unknown", resp: resp}
-		if err != nil {
-			a.outcome = "unavailable"
-			a.resp = nil
-			s.emit("kel_l2_query_latency", map[string]interface{}{
-				"url": w.URL, "error": err.Error(), "latency_ms": latency.Milliseconds(),
-			})
-		} else {
-			switch {
-			case resp.Digest == nil:
-			case *resp.Digest == digest:
-				a.outcome = "match"
-				a.rival = resp.RivalAtOrBelow
-				// A watcher that agrees at the tip may hold events after it. The
-				// digest at the next place says so, and the log it then shows
-				// either carries a later key state or is judged like any other.
-				if next, _, err := s.L2.QueryDigest(ctx, w.URL, aid, seq+1); err == nil && next.Digest != nil {
-					a.later = true
-				}
-			default:
-				a.outcome = "mismatch"
-			}
-		}
-		out = append(out, a)
+	ws := s.StandingWatchers()
+	out := make([]standingAnswer, len(ws))
+	var wg sync.WaitGroup
+	for i, w := range ws {
+		wg.Add(1)
+		go func(i int, w StandingWatcher) {
+			defer wg.Done()
+			out[i] = s.askOneStanding(ctx, w, aid, seq, digest)
+		}(i, w)
 	}
+	wg.Wait()
 	return out
+}
+
+func (s *Service) askOneStanding(ctx context.Context, w StandingWatcher, aid string, seq int, digest string) standingAnswer {
+	resp, latency, err := s.L2.QueryDigest(ctx, w.URL, aid, seq)
+	a := standingAnswer{w: w, outcome: "unknown", resp: resp}
+	if err != nil {
+		a.outcome = "unavailable"
+		a.resp = nil
+		s.emit("kel_l2_query_latency", map[string]interface{}{
+			"url": w.URL, "error": err.Error(), "latency_ms": latency.Milliseconds(),
+		})
+		return a
+	}
+	switch {
+	case resp.Digest == nil:
+	case *resp.Digest == digest:
+		a.outcome = "match"
+		a.rival = resp.RivalAtOrBelow
+		// A watcher that agrees at the tip may hold events after it. The
+		// digest at the next place says so, and the log it then shows
+		// either carries a later key state or is judged like any other.
+		if next, _, err := s.L2.QueryDigest(ctx, w.URL, aid, seq+1); err == nil && next.Digest != nil {
+			a.later = true
+		}
+	default:
+		a.outcome = "mismatch"
+	}
+	return a
 }
 
 // judge settles a watcher's mismatch by asking it for its log and proving what
