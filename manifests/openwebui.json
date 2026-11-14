@@ -19,7 +19,8 @@
       "OLLAMA_BASE_URL": "",
       "ENABLE_OLLAMA_API": "false",
       "WEBUI_SECRET_KEY_FILE": "/app/backend/data/.webui_secret_key",
-      "HOME": "/tmp"
+      "HOME": "/tmp",
+      "ENABLE_PERSISTENT_CONFIG": "false"
     },
     "volumes": {
       "{APP_DATA}/data": "/app/backend/data"
