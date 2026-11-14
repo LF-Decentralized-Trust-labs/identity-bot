@@ -1,15 +1,13 @@
 package agentmessage
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"identity-agent-core/agentbody"
-	"identity-agent-core/iacrypto"
+	"identity-agent-core/fingerprint"
 )
 
 // A person signs a salted fingerprint of their words, never the words
@@ -29,38 +27,18 @@ const (
 
 // Salt sizes, in bytes.
 const (
-	MinSalt = 16
-	MaxSalt = 1024
+	MinSalt = fingerprint.MinSalt
+	MaxSalt = fingerprint.MaxSalt
 )
-
-const fingerprintTagV1 = "IA-FINGERPRINT-V1"
 
 // NewSalt is a fresh random salt of the shortest allowed size. A signer makes
 // one for every message.
-func NewSalt() ([]byte, error) {
-	salt := make([]byte, MinSalt)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	return salt, nil
-}
+func NewSalt() ([]byte, error) { return fingerprint.NewSalt() }
 
 // Fingerprint is the version 1 fingerprint of words under a salt. For an
 // entry the Identity Agent holds only as ciphertext, words is the ciphertext.
-func Fingerprint(salt, words []byte) (string, error) {
-	if len(salt) < MinSalt {
-		return "", fmt.Errorf("a salt of at least %d bytes is needed", MinSalt)
-	}
-	if len(salt) > MaxSalt {
-		return "", fmt.Errorf("a salt of at most %d bytes is allowed", MaxSalt)
-	}
-	pre := make([]byte, 0, len(fingerprintTagV1)+2+len(salt)+len(words))
-	pre = append(pre, fingerprintTagV1...)
-	pre = binary.BigEndian.AppendUint16(pre, uint16(len(salt)))
-	pre = append(pre, salt...)
-	pre = append(pre, words...)
-	return iacrypto.Blake3QB64Must(pre), nil
-}
+// The construction is package fingerprint's.
+func Fingerprint(salt, words []byte) (string, error) { return fingerprint.Of(salt, words) }
 
 // CheckFingerprint says whether fingerprint is the one of words under salt, at
 // the version stated. Version 0 has no salt and is checked only when
