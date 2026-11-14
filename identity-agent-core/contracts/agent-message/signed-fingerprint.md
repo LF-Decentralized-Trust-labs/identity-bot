@@ -37,8 +37,10 @@ a JSON integer (`true`, `1.0`, `"1"`) is refused; a field left out is empty (0
 for the version). It is then refused if: `agent`, `conversation`, `message_id`, `kind`, `from`,
 `signer`, `nonce`, `time` or `fingerprint` is empty; any field holds a CR or
 LF; `kind` is not one of `message`, `ask`, `split`, `hand-off`, `close`,
-`reopen`, `limit`; `to` is empty for a message, ask, split or hand-off, or not empty for
-a close, reopen or limit (a limit's words are the new turn limit, in decimal digits); a split has an empty `range_first` or `range_last`, or any
+`reopen`, `limit`, `list`; `to` is empty for a message, ask, split or hand-off, or not empty for
+a close, reopen, limit or list (a limit's words are the new turn limit, in decimal digits);
+`kind` is `list` and `conversation` is not `list`, or `conversation` is `list` and `kind` is
+not (a list is for no conversation, and nothing else may name the value); a list has an `in_reply_to`; `kind` is `list` and `audience` is empty, or `audience` is not empty and `kind` is not `list`; a split has an empty `range_first` or `range_last`, or any
 other kind has either; `fingerprint_version` is not 1 (0 and every other
 value are refused); `nonce` is under 16 **bytes** (UTF-8; a nonce of 8 two-byte characters is
 enough); `time` is not RFC 3339 as Go's `time.Parse` reads it: `YYYY-MM-DDTHH:MM:SS`,
@@ -46,3 +48,20 @@ an optional fraction after `.` or `,`, and then `Z` or `+hh:mm` / `-hh:mm`, all
 ASCII, a capital `T`, no spaces; a date alone, `20261106T100000Z` and a space in
 place of the `T` are refused, as are an hour of 24, a day that does not exist
 and a leap second. (The hour may be one digit.)
+
+## A list
+
+A `list` is what a person signs to have a utility app's back end list their own
+conversations across every utility app that keeps one (ADR-072 Amendment 7). It is
+for no conversation, to nobody, answers nothing and carries no words: `conversation` is the fixed
+value `list`, which is not the form a conversation's id takes (every id begins `c_`); `to`,
+`in_reply_to`, `range_first` and `range_last` are empty; and the fingerprint is the salted
+fingerprint of empty words, so a statement with no salt is never taken. Its
+`message_id` is the nonce of the one request it is for. It is never an entry of a trail
+and is never kept in one.
+
+A list also names its `audience`: the asset id of the one utility app that presents it
+(ADR-072 Amendment 8). A statement with an audience is signed as `IA-PERSON-MSG-V2`, the
+same lines as V1 in the same order and then the `audience` as a last line; every other kind is
+V1, unchanged. The header differs, so neither signature is read as the other. A list is
+refused by the Identity Agent when its audience is not the utility app that presents it.

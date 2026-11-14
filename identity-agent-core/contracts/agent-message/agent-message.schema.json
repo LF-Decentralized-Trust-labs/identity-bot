@@ -113,7 +113,7 @@
         "limit",
         "outcome"
       ],
-      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
+      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. A person also signs a list, which is for no conversation and is never an entry (ADR-072 Amendment 7). outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
     },
     "party": {
       "description": "An AI agent's identifier, or person: followed by a person's identifier.",
@@ -476,7 +476,7 @@
       }
     },
     "person_statement": {
-      "description": "What a person's device or session signs: IA-PERSON-MSG-V1 over the fingerprint of their words, never the words (signed-fingerprint.md). Keys are exactly these, in lower case, each at most once, and no value is null: a reader refuses a statement otherwise, as Go's decoder here does.",
+      "description": "What a person's device or session signs: IA-PERSON-MSG-V1 over the fingerprint of their words, never the words; a list, which names an audience, is IA-PERSON-MSG-V2 (signed-fingerprint.md). Keys are exactly these, in lower case, each at most once, and no value is null: a reader refuses a statement otherwise, as Go's decoder here does.",
       "type": "object",
       "required": [
         "agent",
@@ -527,6 +527,10 @@
           "type": "string"
         },
         "range_last": {
+          "type": "string"
+        },
+        "audience": {
+          "description": "The asset id of the utility app a list is for, the one that presents it; signed as a last line under IA-PERSON-MSG-V2. Present on a list and on nothing else (ADR-072 Amendment 8).",
           "type": "string"
         },
         "nonce": {

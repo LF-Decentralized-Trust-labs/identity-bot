@@ -191,3 +191,41 @@ func TestVersionZeroIsOldOnlyBeforeTheFirstSaltedEntry(t *testing.T) {
 		}
 	}
 }
+
+// A list is for no conversation: it names the fixed value and no recipient, it
+// answers nothing, and nothing that is for one conversation may name that value.
+func TestAListIsForNoConversationAndNothingElseIsForTheList(t *testing.T) {
+	s, _, signer := personFixture(t, "")
+	s.Kind, s.To, s.Conversation, s.Audience = PersonKindList, "", ListConversation, "ASSETCHAT"
+	if err := s.Check(); err != nil {
+		t.Fatalf("a well formed list was refused: %v", err)
+	}
+	if sig, err := SignPerson(signer, s); err != nil {
+		t.Fatal(err)
+	} else if _, vk, _ := agentbody.Identity(signer); VerifyPerson(s, vk, sig) != nil {
+		t.Fatal("a signed list did not verify")
+	}
+	for name, mutate := range map[string]func(*PersonStatement){
+		"a list for a conversation":     func(s *PersonStatement) { s.Conversation = "c_abcdefghijklmnopqrstuv" },
+		"a list naming a recipient":     func(s *PersonStatement) { s.To = "EAGENT" },
+		"a list answering something":    func(s *PersonStatement) { s.InReplyTo = "m_0" },
+		"a list naming a range":         func(s *PersonStatement) { s.RangeFirst, s.RangeLast = "1", "2" },
+		"a list with an unsalted print": func(s *PersonStatement) { s.FingerprintVersion = FingerprintV0 },
+		"a close for the list":          func(s *PersonStatement) { s.Kind = PersonKindClose },
+		"a message for the list":        func(s *PersonStatement) { s.Kind, s.To = PersonKindMessage, "EAGENT" },
+		"a reopen for the list":         func(s *PersonStatement) { s.Kind = PersonKindReopen },
+		"a limit for the list":          func(s *PersonStatement) { s.Kind = PersonKindLimit },
+	} {
+		c := s
+		mutate(&c)
+		if c.Check() == nil {
+			t.Errorf("%s passed", name)
+		}
+	}
+	// Every field is bound: a list's kind and conversation are in what is signed.
+	other := s
+	other.Kind, other.Conversation = PersonKindClose, "c_abcdefghijklmnopqrstuv"
+	if bytes.Equal(s.Bytes(), other.Bytes()) {
+		t.Fatal("a list and a close sign the same bytes")
+	}
+}

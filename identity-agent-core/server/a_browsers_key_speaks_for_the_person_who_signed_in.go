@@ -183,6 +183,34 @@ func (b *browserKeys) Whose(asset, thumbprint string, now time.Time) (string, bo
 	return r.Person, ok
 }
 
+// Find is the live record of the key with this thumbprint that speaks for this
+// person, at whichever asset the person's sign-in named it. A person is known by
+// a different identifier at each asset (ADR-066), so the person and the key
+// together name one record, and a key that speaks for another person, or not at
+// all, finds none. It is how a list the person signed for one utility app,
+// under the key of another's sign-in, is read (ADR-072 Amendment 8).
+func (b *browserKeys) Find(person, thumbprint string, now time.Time) (browserKeyRecord, bool) {
+	browserKeysLock.Lock()
+	defer browserKeysLock.Unlock()
+	all, err := b.load()
+	if err != nil {
+		return browserKeyRecord{}, false
+	}
+	var found browserKeyRecord
+	n := 0
+	for _, r := range all {
+		// liveAt, as for every other read: an installed app's hardware key
+		// speaks until its grant is ended, with no lapse time.
+		if r.Person == person && r.Thumbprint == thumbprint && r.liveAt(now) {
+			found = r
+			n++
+		}
+	}
+	// More than one is a key said to speak for one person at two assets: which
+	// is meant cannot be told, so none is.
+	return found, n == 1
+}
+
 // Of are the live records of the person at the asset.
 func (b *browserKeys) Of(asset, person string, now time.Time) []browserKeyRecord {
 	browserKeysLock.Lock()
@@ -391,4 +419,44 @@ func (s *CoreServer) assetIDOfSite(siteAID string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// keysSpeakingAtTheirOwnAsset is the trail.KeyRoster for a list: a key speaks
+// for the person at the one asset whose sign-in named it, wherever that is
+// (browserKeys.Find), and that asset must still stand behind the person. It
+// records the asset it found, which is the one the list is for.
+type keysSpeakingAtTheirOwnAsset struct {
+	s     *CoreServer
+	found *browserKeyRecord
+}
+
+var _ trail.AssertionRoster = keysSpeakingAtTheirOwnAsset{}
+
+// VerifyAssertion: a list may be signed by an installed app's key on Apple,
+// which signs only App Attest assertions. The key's own record names the asset,
+// and the check is the one every other statement at that asset gets
+// (keysSpeakingAt.VerifyAssertion), for the program the owner names for it now.
+func (k keysSpeakingAtTheirOwnAsset) VerifyAssertion(person, signer, verkey string, clientDataHash [32]byte, signature string) (bool, error) {
+	tp, err := login.BrowserKeyThumbprintOfMachineKey(verkey)
+	if err != nil {
+		return false, nil
+	}
+	rec, ok := k.s.browserKeys().Find(person, tp, time.Now())
+	if !ok {
+		return false, nil
+	}
+	return keysSpeakingAt{s: k.s, asset: rec.Asset}.VerifyAssertion(person, signer, verkey, clientDataHash, signature)
+}
+
+func (k keysSpeakingAtTheirOwnAsset) KeySpeaksFor(person, signer, verkey string) bool {
+	tp, err := login.BrowserKeyThumbprintOfMachineKey(verkey)
+	if err != nil {
+		return false
+	}
+	rec, ok := k.s.browserKeys().Find(person, tp, time.Now())
+	if !ok || !k.s.assetStillStands(rec) {
+		return false
+	}
+	*k.found = rec
+	return true
 }

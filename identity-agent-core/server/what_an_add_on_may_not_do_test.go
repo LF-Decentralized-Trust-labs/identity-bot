@@ -636,3 +636,15 @@ func TestOnlyANonIdentifierPrefixSparesTheIdentityRoutes(t *testing.T) {
 		}
 	}
 }
+
+// The AI agent add-on owns /api/mcp, and the server is refused if the core serves a route under a prefix an add-on
+// owns. So a route the core serves itself, such as a person's list of their conversations, is not under /api/mcp.
+func TestTheCoreServesNothingUnderThePrefixTheAIAgentAddOnOwns(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	onlyAddons(t, Addon{ID: "ai_agents", Prefixes: []string{"/api/mcp"},
+		Routes: func(s *CoreServer, r chi.Router) { r.Get("/mcp/agents", ok) }})
+	if msg, refused := panics(func() { New(Config{DataDir: t.TempDir()}) }); refused {
+		t.Fatalf("the core serves a route under /api/mcp, which an add-on owns: %s", msg)
+	}
+}

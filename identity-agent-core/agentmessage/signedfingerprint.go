@@ -123,7 +123,18 @@ const (
 	// PersonKindLimit raises a conversation's turn limit. Its words are the new
 	// limit in decimal digits, fingerprinted like any other words.
 	PersonKindLimit = "limit"
+	// PersonKindList is a person asking a utility app's back end to list their
+	// own conversations across every utility app that keeps one (ADR-072
+	// Amendment 7). It is for no conversation, to nobody, answers nothing and
+	// carries no words: the statement is never an entry of a trail.
+	PersonKindList = "list"
 )
+
+// ListConversation is the value of a list statement's conversation field. It is
+// not the form a conversation's id takes (every conversation's id begins "c_"),
+// so a list cannot be taken for a statement about one conversation, and no
+// statement about one conversation can be taken for a list.
+const ListConversation = "list"
 
 // PersonStatement is what a person's device or session signs: a statement
 // over the fingerprint of their words, never the words (ADR-067).
@@ -147,8 +158,14 @@ type PersonStatement struct {
 	InReplyTo string `json:"in_reply_to,omitempty"`
 	// RangeFirst and RangeLast are the entries a split carries, and only a
 	// split names them.
-	RangeFirst         string `json:"range_first,omitempty"`
-	RangeLast          string `json:"range_last,omitempty"`
+	RangeFirst string `json:"range_first,omitempty"`
+	RangeLast  string `json:"range_last,omitempty"`
+	// Audience is the utility app's asset id a list statement is for: the
+	// one that presents it. It is inside the signed bytes (IA-PERSON-MSG-V2),
+	// so a list signed for one utility app is no list for another (ADR-072
+	// Amendment 8). Only a list carries one, and every list does; every other
+	// kind is signed as IA-PERSON-MSG-V1 exactly as before.
+	Audience           string `json:"audience,omitempty"`
 	Nonce              string `json:"nonce"`
 	Time               string `json:"time"`
 	FingerprintVersion int    `json:"fingerprint_version"`
@@ -157,13 +174,22 @@ type PersonStatement struct {
 
 // Bytes is the string a person signs: IA-PERSON-MSG-V1 and then one field per
 // line in a fixed order (agent first), joined by a newline, no trailing newline.
+//
+// A statement with an audience (a list) is IA-PERSON-MSG-V2: the same lines and
+// then the audience as a last line. The header differs, so a V2 signature is
+// never a V1 one over the same lines and the reverse.
 func (s PersonStatement) Bytes() []byte {
-	return []byte(strings.Join([]string{
+	lines := []string{
 		"IA-PERSON-MSG-V1",
 		s.Agent, s.Conversation, s.MessageID, s.Kind, s.From, s.Signer, s.To, s.InReplyTo,
 		s.RangeFirst, s.RangeLast, s.Nonce, s.Time,
 		fmt.Sprint(s.FingerprintVersion), s.Fingerprint,
-	}, "\n"))
+	}
+	if s.Audience != "" {
+		lines[0] = "IA-PERSON-MSG-V2"
+		lines = append(lines, s.Audience)
+	}
+	return []byte(strings.Join(lines, "\n"))
 }
 
 // Check refuses a statement that is not well formed, before anything is
@@ -180,7 +206,7 @@ func (s PersonStatement) Check() error {
 		}
 	}
 	for _, v := range []string{s.Agent, s.Conversation, s.MessageID, s.Kind, s.From, s.Signer, s.To,
-		s.InReplyTo, s.RangeFirst, s.RangeLast, s.Nonce, s.Time, s.Fingerprint} {
+		s.InReplyTo, s.RangeFirst, s.RangeLast, s.Audience, s.Nonce, s.Time, s.Fingerprint} {
 		if strings.ContainsAny(v, "\r\n") {
 			return errors.New("a statement field may not contain a line break")
 		}
@@ -201,8 +227,20 @@ func (s PersonStatement) Check() error {
 		if s.To != "" {
 			return fmt.Errorf("a %s names no recipient", s.Kind)
 		}
+	case PersonKindList:
+		if s.To != "" || s.InReplyTo != "" {
+			return errors.New("a list names no recipient and answers nothing")
+		}
 	default:
 		return fmt.Errorf("%q is not a kind of entry a person signs", s.Kind)
+	}
+	// A list is for no conversation, and nothing else is for "list".
+	if (s.Kind == PersonKindList) != (s.Conversation == ListConversation) {
+		return fmt.Errorf("a statement's conversation is %q if and only if it is a list", ListConversation)
+	}
+	// Every list is for one utility app, and nothing else names one.
+	if (s.Kind == PersonKindList) != (s.Audience != "") {
+		return errors.New("a statement names an audience if and only if it is a list")
 	}
 	if s.Kind != PersonKindSplit && (s.RangeFirst != "" || s.RangeLast != "") {
 		return fmt.Errorf("only a split names a range, not a %s", s.Kind)

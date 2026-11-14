@@ -76,6 +76,12 @@ func coreAppRoutes() map[string]AppRoute {
 		// The head and count carry no words and name no person; the handler
 		// serves an app only the conversations it keeps.
 		"GET /api/conversations/{id}/head": {Capability: CapabilityConversationHeadRead},
+		// A person's own conversations across utility apps (ADR-072 Amendment 7):
+		// only with the person's own list statement beside the app's signature,
+		// and only for an app the owner gave this capability. It names no AI
+		// agent and no conversation, so a grant that limits either is refused on
+		// it rather than read as no limit.
+		"GET /api/people/me/conversations": {Capability: CapabilityConversationListRead},
 	}
 }
 

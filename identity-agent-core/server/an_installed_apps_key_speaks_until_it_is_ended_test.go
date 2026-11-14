@@ -972,3 +972,52 @@ func TestEndingASignInTheOwnerAlreadyEndedDropsItFromTheListAndSaysSo(t *testing
 		t.Fatalf("a sign-in the host says is not live is still listed: %+v", l.L)
 	}
 }
+
+// A list may be signed under an installed app's key (ADR-072 Amendment 8): the
+// key is found by its person wherever it signed in, though it has no lapse
+// time, and an Apple App Attest key's list is its assertion over the list, held
+// to the program the owner names for that asset, never a plain signature.
+func TestAnInstalledAppsKeySignsAListAsItSignsAnythingElse(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.said.Platform = "apple"
+	iw.signedIn(t)
+	person, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now())
+	if rec, ok := iw.org.browserKeys().Find(person, iw.key, time.Now()); !ok || rec.Asset != "the-website" {
+		t.Fatalf("an installed app's grant, which has no lapse time, was not found for a list: %+v %v", rec, ok)
+	}
+	id, err := iacrypto.MachineAIDForKey(elliptic.Marshal(elliptic.P256(), iw.pub.X, iw.pub.Y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verkey := aMachineVerkeyOf(t, iw.pub)
+	st := agentmessage.PersonStatement{
+		Agent: iw.org.thisIdentityAgentsIdentifier(), Conversation: agentmessage.ListConversation, MessageID: "n-list-0123456789",
+		Kind: agentmessage.PersonKindList, From: person, Signer: id, Audience: "the-central-place",
+		Nonce: "nonce-0123456789abcdefl1", Time: time.Now().UTC().Format(time.RFC3339),
+		FingerprintVersion: agentmessage.FingerprintV1, Fingerprint: "AAAA",
+	}
+	hash := sha256.Sum256(st.Bytes())
+	var found browserKeyRecord
+	check := func(sig string) error {
+		found = browserKeyRecord{}
+		return trail.CheckAuthor(trail.Write{Statement: st, Verkey: verkey, Signature: sig}, st.Agent,
+			keysSpeakingAtTheirOwnAsset{s: iw.org, found: &found})
+	}
+	assertion := base64.RawURLEncoding.EncodeToString(anAppAttestAssertion(iw.priv, "TEAM123456.org.example.portal", 9, hash[:]))
+	if err := check(assertion); err != nil {
+		t.Fatalf("an App Attest assertion over a list was refused: %v", err)
+	}
+	if found.Asset != "the-website" {
+		t.Fatalf("the list was read at %q, want the asset the key signed in to", found.Asset)
+	}
+	plain, _ := ecdsa.SignASN1(rand.Reader, iw.priv, hash[:])
+	if err := check(base64.RawURLEncoding.EncodeToString(plain)); err == nil {
+		t.Fatal("a plain signature was read as an Apple key's list")
+	}
+	as, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	as.InstalledApp.AppleAppID = "TEAM123456.org.evil"
+	_ = iw.org.assetHandler.Store.UpsertAsset(as)
+	if err := check(assertion); err == nil {
+		t.Fatal("a list asserted for a program the owner no longer names was accepted")
+	}
+}

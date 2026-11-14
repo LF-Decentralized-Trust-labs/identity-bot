@@ -57,6 +57,7 @@ needs. This one lists the route that carries a person's words (ADR-066, ADR-067)
 |---|---|---|
 | `POST /api/mcp/agents/{id}/conversations` | `agent.message.send` | `to` is the AI agent's `pairwise_aid`, not the `{id}` the path carries |
 | `GET /api/conversations/{id}/head` | `conversation.head.read` | none: the route gives no argument, so a grant that limits this capability is refused on it. Served only for a conversation this app keeps |
+| `GET /api/people/me/conversations?nonce=` | `conversation.list.read` | none: the route gives no argument, so a grant that limits this capability is refused on it. Served only with the person's own `list` statement (ADR-072 Amendments 7 and 8), which names the presenting utility app as its audience, for the one person it names, and only to a utility app the owner gave the capability |
 
 Reads of a conversation's entries are not listed: they carry no person's
 statement, so an add-on lists them only once it scopes a read to a person. The
