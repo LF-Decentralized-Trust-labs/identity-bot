@@ -35,7 +35,13 @@ type ChallengeBundle struct {
 	// for another. Omitted when the challenge names none, so a challenge for
 	// anything else keeps its form.
 	FrontEnd string `json:"front_end,omitempty"`
-	Sig      string `json:"sig,omitempty"`
+	// RelayID is the relay identifier of the utility app the sign-in is for, as the
+	// owner's Identity Agent recorded it (ADR-072 Amendment 7). Signed in the
+	// challenge, so a front end that was handed a link naming another relay
+	// identifier or back end can see the challenge is not for it, and refuse. Omitted
+	// when none is recorded, so a challenge for anything else keeps its form.
+	RelayID string `json:"rid,omitempty"`
+	Sig     string `json:"sig,omitempty"`
 }
 
 type RequestedCredential struct {

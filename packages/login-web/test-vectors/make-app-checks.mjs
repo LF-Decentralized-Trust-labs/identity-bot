@@ -82,16 +82,19 @@ export async function make() {
 
   const challenges = [];
   const ch = (name, over, o = {}) => {
-    const body = JSON.stringify({ v: "ASK1", t: 1, site_aid: app.aid, browser_key: thumb, expiry: "2026-11-11T12:10:00Z", session_token: "tok", ...over });
+    const body = JSON.stringify({ v: "ASK1", t: 1, site_aid: app.aid, browser_key: thumb, rid: relay.aid, expiry: "2026-11-11T12:10:00Z", session_token: "tok", ...over });
     const signer = o.signer ?? app;
     const c = { name, aid: app.aid, key_hex: hex(app.key), body, sig: ed25519SigQb64(signer.sign(enc.encode(body))),
-      pointer: o.pointer ?? "https://ia.example/i/tok", own_thumbprint: o.own ?? thumb, now_ms: NOW };
+      rid: o.rid ?? relay.aid, pointer: o.pointer ?? "https://ia.example/i/tok", own_thumbprint: o.own ?? thumb, now_ms: NOW };
     challenges.push(o.refuse ? { ...c, refuse: o.refuse } : { ...c, expect: { session_token: "tok", expiry: "2026-11-11T12:10:00Z", ...(over.front_end ? { front_end: over.front_end } : {}) } });
   };
   ch("the app's challenge for this key", {});
   ch("a challenge naming the browser kind", { front_end: "browser" });
   ch("an installed-app challenge", { front_end: "installed_app" }, { refuse: "another kind of front end" });
   ch("another browser's key", { browser_key: "x".repeat(43) }, { refuse: "this page's own key" });
+  ch("a challenge signed for another relay identifier", { rid: other.aid }, { refuse: "another relay identifier" });
+  ch("a challenge that names no relay identifier", { rid: undefined }, { refuse: "another relay identifier" });
+  ch("a link that names another relay identifier than the challenge", {}, { rid: other.aid, refuse: "another relay identifier" });
   ch("another app's challenge", { site_aid: relay.aid }, { refuse: "another utility app" });
   ch("a lapsed challenge", { expiry: "2026-11-11T11:59:59Z" }, { refuse: "lapsed" });
   ch("signed by another key", {}, { signer: other, refuse: "not signed by the utility app" });

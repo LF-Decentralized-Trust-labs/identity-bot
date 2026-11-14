@@ -18,7 +18,7 @@ const run = async (c, f, check) => {
 };
 for (const c of v.links) await run(c, () => readAppLink(c.hash, c.now_ms), (r) => assert.deepEqual(r, c.expect, c.name));
 for (const c of v.key_logs) await run(c, () => checkAppKeyLog(c.aid, c.encoded), (r) => assert.deepEqual(Buffer.from(r).toString("hex"), c.expect_key_hex, c.name));
-for (const c of v.challenges) await run(c, () => checkAppChallenge({ aid: c.aid, key: hex(c.key_hex), body: c.body, sig: c.sig, pointer: c.pointer, ownThumbprint: c.own_thumbprint, now: c.now_ms }), (r) => assert.deepEqual(JSON.parse(JSON.stringify(r)), c.expect, c.name));
+for (const c of v.challenges) await run(c, () => checkAppChallenge({ aid: c.aid, key: hex(c.key_hex), body: c.body, sig: c.sig, rid: c.rid, pointer: c.pointer, ownThumbprint: c.own_thumbprint, now: c.now_ms }), (r) => assert.deepEqual(JSON.parse(JSON.stringify(r)), c.expect, c.name));
 for (const c of v.answers) await run(c, () => checkAppAnswer({ rid: c.rid, nonce: c.nonce, status: c.status, contentType: c.content_type, body: new Uint8Array(Buffer.from(c.body_b64, "base64")), log: c.log, known: c.known, sig: c.sig }), (r) => assert.equal(r.log, c.expect_log, c.name));
 for (const c of v.proofs) assert.equal(await proofText(c.method, c.target, c.ts, c.nonce, c.binding, c.body), c.expect);
 for (const c of v.answer_texts) assert.equal(await answerText(c.rid, c.nonce, c.status, c.content_type, new Uint8Array(Buffer.from(c.body_b64, "base64"))), c.expect);

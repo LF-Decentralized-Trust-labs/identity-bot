@@ -273,7 +273,8 @@ Uint8List checkKeyLog(String aid, String encoded) {
 // ---- the challenge ---------------------------------------------------------
 
 /// The challenge the signed text says, or a [TrustRefused]: signed by the app's
-/// key, for the app, naming this device's own key, not lapsed. [body] is the
+/// key, for the app, naming this device's own key and the relay identifier [rid]
+/// the link names, not lapsed. [body] is the
 /// exact text the signature covers; it is read only after the signature has
 /// been checked.
 Map<String, dynamic> checkChallenge({
@@ -283,6 +284,7 @@ Map<String, dynamic> checkChallenge({
   required Object? sig,
   required Object? pointer,
   required String ownThumbprint,
+  required String rid,
   required DateTime now,
   String frontEnd = 'browser',
 }) {
@@ -310,6 +312,12 @@ Map<String, dynamic> checkChallenge({
     fail('the challenge is signed for another utility app');
   if (c['browser_key'] != ownThumbprint) {
     fail('the challenge does not name this page\'s own key');
+  }
+  // The relay identifier is in the signed body (ADR-072 Amendment 7): a link that
+  // names another relay identifier, and so another back end, is not the one the
+  // app's Identity Agent signed this for, and one that names none is refused the same.
+  if (c['rid'] != rid) {
+    fail('the challenge is signed for another relay identifier than the link names');
   }
   // The kind is in the signed body when the Identity Agent names one (ADR-072
   // Amendment 2): a challenge naming another kind than ours is not ours.
