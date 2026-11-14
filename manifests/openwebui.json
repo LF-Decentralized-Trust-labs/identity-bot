@@ -13,13 +13,17 @@
       "8080": "display"
     },
     "environment": {
-      "OPENAI_API_BASE_URL": "http://agent.internal:5050/sandbox/llm/v1",
-      "OPENAI_API_KEY": "injected-by-agent",
+      "OPENAI_API_BASE_URL": "${IDENTITY_AGENT_API}/llm/v1",
+      "OPENAI_API_KEY": "${IDENTITY_AGENT_API_KEY}",
       "WEBUI_AUTH": "false",
       "OLLAMA_BASE_URL": "",
-      "ENABLE_OLLAMA_API": "false"
+      "ENABLE_OLLAMA_API": "false",
+      "WEBUI_SECRET_KEY_FILE": "/app/backend/data/.webui_secret_key",
+      "HOME": "/tmp"
     },
-    "volumes": {}
+    "volumes": {
+      "{APP_DATA}/data": "/app/backend/data"
+    }
   },
   "resources": {
     "cpu_cores": 2,
