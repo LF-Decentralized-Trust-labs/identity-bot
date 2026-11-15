@@ -158,6 +158,7 @@ sequenceDiagram
 - sealed front-end traffic: the format, test vectors, the page's side in TypeScript and in Dart (`packages/login-dart`, which every installed front end uses), and the Go side (Amendment 4)
 - a relay identifier's witnesses, the owner's declaration that makes a witness hold its log, and the page's and Dart's reading of the log from them, with test vectors (Amendment 5)
 - the relay identifier in a utility app's sign-in challenge, the owner's record of it, and the page's and Dart's check of it against the link, with test vectors (Amendment 7)
+- the back-end address in the same challenge, the owner's record of it, the page's and Dart's check of it against the link, and the person's own record of the browser sign-ins they approved, which keeps both (Amendment 8)
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
@@ -327,3 +328,17 @@ Amendment 6 pins a hosted page to its app, so a crafted link cannot move that pa
 2. **The front end.** One built on this change refuses a challenge with no `rid`, so it is shipped only once its app's owner records the relay identifier. A front end built before this change ignores `rid` and goes on working, unprotected, until it is updated.
 
 **What this does not close.** The link's `api` is still not signed. While the front end holds the relay identifier's current key log, that is enough: every answer is checked against that log (Amendments 1 and 4) and every call is sealed to the key it vouches for, so a back end at another address can carry the traffic or drop it but cannot read it or answer it. It is not enough when the front end takes an older log from the link: a holder of a key the identifier has rotated away from, such as a removed machine, can write a link with an older `min` and no `wit`, and a front end that has never seen a newer log takes its sealing key and its answers. That is the open case Amendment 5 lists as "a link that names no witness", now the way in for a back end at another address; the challenge naming the relay identifier does not close it. A relay identifier that is replaced is safe only from when the new one is recorded: whatever records it must do so in the same step as the replacement, or a link naming the old one still matches the challenge until it does.
+
+## Amendment 8 (2026-11-15): the challenge also names the app's back-end address, and the person keeps where each session is
+
+Amendment 7 left the link's `api` unsigned. It is signed now, beside `rid`, for two reasons that are one change: a front end can hold the link's back end to what the owner recorded, and the person's Identity Agent learns where the app is. The second is what lets a person see the browser sessions they approved at one utility app and end one: the end goes to the app's back end, and until now only the browser knew its address and relay identifier.
+
+**The challenge names the back end.** The owner records it (`PUT /api/assets/{id}/back-end` `{"back_end": "https://…"}`, owner only, or `asset.Handler.SetBackEnd`), in the form a front end reads a link's: an https address (http only on this machine) in lower case, with no trailing slash. It is signed as `api`, after `rid` and before `callback_url`, and left out when none is recorded. The Go and TypeScript canonical forms and `core-canonical-and-spellings.json` carry it.
+
+**A front end requires it to equal the link's.** `checkAppChallenge` (`packages/login-web/src/app.ts`) and `checkChallenge` (`packages/login-dart/lib/app_checks.dart`) refuse a challenge whose `api` is another or is missing, for the reason Amendment 7 gives for `rid`. This replaces Amendment 7's "the link's `api` is still not signed": a link that carries the real relay identifier but another back end address is now refused at the challenge. What stays open is the case Amendment 7 names for an older key log, and a back end that is not the one named in the link is still read only through the answers' signatures.
+
+**The person's record keeps both.** `recordBrowserSignIn` stores the challenge's `rid` and `api` with the line it already kept (app, browser key, when approved), so a later end can be sent to that back end under that relay identifier. A sign-in at an app that had recorded neither keeps a line with neither, and an end cannot be sent for it.
+
+**Rollout** is Amendment 7's, with one more field: an Identity Agent that does not know `api` refuses a challenge carrying it as unreadable, so the owner records the back end only once the Identity Agents of the people who sign in understand it; and a front end built on this change refuses a challenge with none, so it is shipped only once the owner has recorded it. Record the relay identifier and the back end in the same step, and replace them together.
+
+The Go is `identity-agent-core/asset` (`SetBackEnd`), `identity-agent-core/login` (`ChallengeBundle.BackEnd`, `canonicalChallengeBody`, `recordBrowserSignIn`). The cases are in `packages/login-web/test-vectors/app-checks.json`, run in TypeScript and Dart alike.

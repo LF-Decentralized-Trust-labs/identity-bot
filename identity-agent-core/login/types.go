@@ -41,6 +41,12 @@ type ChallengeBundle struct {
 	// identifier or back end can see the challenge is not for it, and refuse. Omitted
 	// when none is recorded, so a challenge for anything else keeps its form.
 	RelayID string `json:"rid,omitempty"`
+	// BackEnd is the address of the utility app's back end, as the owner's Identity
+	// Agent recorded it (ADR-072 Amendment 8). Signed in the challenge, so a front end
+	// handed a link that names another back end can see the challenge is not for it,
+	// and so the person's Identity Agent knows where to send the end of a session.
+	// Omitted when none is recorded.
+	BackEnd string `json:"api,omitempty"`
 	Sig     string `json:"sig,omitempty"`
 }
 

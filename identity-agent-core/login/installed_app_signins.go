@@ -39,6 +39,11 @@ type InstalledAppSignIn struct {
 	// EndBase is where the app's host takes the signed end: the sign-in's own
 	// callback address without its last part.
 	EndBase string `json:"end_base"`
+	// RelayID and BackEnd are what the challenge named for the utility app (ADR-072
+	// Amendment 8): where the person's Identity Agent sends the end of a browser
+	// session. Empty for a sign-in whose app had not recorded them.
+	RelayID string `json:"relay_id,omitempty"`
+	BackEnd string `json:"back_end,omitempty"`
 }
 
 // InstalledAppSignInStore keeps them on disk, one per (app, key).
@@ -329,6 +334,7 @@ func (h *Handler) recordBrowserSignIn(rel *SiteRelationship, b *ChallengeBundle)
 	err = h.BrowserSignIns.Put(InstalledAppSignIn{
 		Key: b.BrowserKey, SiteAID: b.SiteAID, SiteOOBI: b.SiteOOBI, Audience: b.Audience,
 		PairwiseAID: rel.PairwiseAID, ApprovedAt: time.Now().UTC(), RelationshipKey: relKey,
+		RelayID: b.RelayID, BackEnd: b.BackEnd,
 	})
 	return func() {
 		if had {

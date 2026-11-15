@@ -81,3 +81,18 @@ func TestTheBrowserRecordKeepsOnlyTheMostRecentApprovals(t *testing.T) {
 		t.Fatal("the oldest approval was kept over a newer one")
 	}
 }
+
+// Fails without the address kept: the person's Identity Agent could not send the end
+// of a session to the app, because only the challenge it approved names where.
+func TestABrowserSignInKeepsWhereTheAppIs(t *testing.T) {
+	h := aBrowserRecordHandler(t)
+	_, err := h.recordBrowserSignIn(&SiteRelationship{PairwiseAID: "Dperson"}, &ChallengeBundle{SiteAID: "Dsite", BrowserKey: aTestKey,
+		FrontEnd: FrontEndBrowser, RelayID: "Erelay", BackEnd: "https://tasks.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := h.BrowserSignIns.Get("Dsite", aTestKey)
+	if !ok || got.RelayID != "Erelay" || got.BackEnd != "https://tasks.example.com" {
+		t.Fatalf("kept %+v", got)
+	}
+}

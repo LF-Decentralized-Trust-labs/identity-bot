@@ -318,6 +318,9 @@ export interface ChallengeCheck {
   /** The relay identifier the link this page was opened with names (`link.rid`): the
    *  challenge must be signed for that one (ADR-072 Amendment 7). */
   rid: string;
+  /** The back-end address the link names (`link.api`, its trailing slash already
+   *  dropped): the challenge must be signed for that one too (ADR-072 Amendment 8). */
+  api: string;
   /** The code to show the person. */
   pointer: string;
   /** This page's own browser-key thumbprint. */
@@ -355,6 +358,10 @@ export async function checkAppChallenge(c: ChallengeCheck): Promise<CheckedChall
   // another relay identifier, and so another back end, is not the one the app's
   // Identity Agent signed this for, and a challenge that names none is refused the same.
   if (typeof c.rid !== "string" || c.rid === "" || ch.rid !== c.rid) fail("the challenge is signed for another relay identifier than the link names");
+  // The back end the link names is signed beside it (Amendment 8), for the same reason:
+  // a link that carries the real relay identifier but another address would otherwise
+  // send every call there. A challenge that names none is refused the same.
+  if (typeof c.api !== "string" || c.api === "" || ch.api !== c.api) fail("the challenge is signed for another back end than the link names");
   // The kind is in the signed body when the Identity Agent names one (ADR-072
   // Amendment 2). A page is a browser; a challenge naming another is not its own.
   if (ch.front_end !== undefined && ch.front_end !== "browser") fail("the challenge is for another kind of front end");
@@ -871,7 +878,7 @@ export async function appFetch(
     if (isStart && r.status >= 200 && r.status < 300) {
       const s = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
       skew = serverSkew(s.server_time);
-      const c = await checkAppChallenge({ aid: link.aid, key: appKey, body: s.canonical_body, sig: s.sig, rid: link.rid, pointer: s.relay_or_qr_url, ownThumbprint: mine.thumbprint, now: Date.now() + skew });
+      const c = await checkAppChallenge({ aid: link.aid, key: appKey, body: s.canonical_body, sig: s.sig, rid: link.rid, api: link.api, pointer: s.relay_or_qr_url, ownThumbprint: mine.thumbprint, now: Date.now() + skew });
       // The app's own name for this sign-in is what each later proof is bound to.
       started = { token: s.session_token, expiry: Date.parse(c.expiry) };
     }

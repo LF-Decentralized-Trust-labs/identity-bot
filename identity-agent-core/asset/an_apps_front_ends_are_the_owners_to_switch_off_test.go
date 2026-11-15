@@ -328,3 +328,36 @@ func TestTheRelayIdentifierOfAnAppIsRecordedAndReplaced(t *testing.T) {
 		t.Fatalf("a website answered %d", rec.Code)
 	}
 }
+
+// Fails without the record: the back-end address a utility app's challenges are
+// signed for is kept, can be replaced, and is refused in any form a front end would
+// not read the link's address as.
+func TestTheBackEndOfAnAppIsRecordedInTheFormAFrontEndReads(t *testing.T) {
+	h, r := anAppHandler(t, Asset{ID: "a", AssetType: "app"})
+	r.(*chi.Mux).Put("/assets/{id}/back-end", h.HandleSetBackEnd)
+	for _, ok := range []string{"https://tasks.example.com", "https://tasks.example.com:8443/api", "http://127.0.0.1:8080", "http://localhost"} {
+		if rec := do(r, "PUT", "/assets/a/back-end", `{"back_end":"`+ok+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("%s answered %d: %s", ok, rec.Code, rec.Body)
+		}
+		if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != ok {
+			t.Fatalf("the app's back end is %q, not %q", a.BackEnd, ok)
+		}
+	}
+	for _, bad := range []string{`{}`, `{"back_end":""}`, `{"back_end":"https://Tasks.example.com"}`, `{"back_end":"https://tasks.example.com/"}`,
+		`{"back_end":"http://tasks.example.com"}`, `{"back_end":"https://tasks.example.com?x=1"}`, `{"back_end":"https://a b"}`, `{"back_end":"ftp://x"}`} {
+		if rec := do(r, "PUT", "/assets/a/back-end", bad); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s answered %d", bad, rec.Code)
+		}
+	}
+	if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != "http://localhost" {
+		t.Fatalf("a refused request changed it to %q", a.BackEnd)
+	}
+	if rec := do(r, "PUT", "/assets/nope/back-end", `{"back_end":"https://x.example"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("an asset that is not there answered %d", rec.Code)
+	}
+	h2, r2 := anAppHandler(t, Asset{ID: "site", AssetType: "domain"})
+	r2.(*chi.Mux).Put("/assets/{id}/back-end", h2.HandleSetBackEnd)
+	if rec := do(r2, "PUT", "/assets/site/back-end", `{"back_end":"https://x.example"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a website answered %d", rec.Code)
+	}
+}
