@@ -35,7 +35,7 @@ That the owner's statement is from someone with standing `owner`, and whether a 
 - The published vectors (`message-vectors.json`, `signed-fingerprint-vectors.json`), the schema and both independent checkers carry the new kinds.
 - A reader that knows only the earlier kinds refuses a statement of a new kind, as it refuses any kind it does not know.
 
-## Amendment (2026-11-15): the holder of a self-owned Identity Agent is its owner, and a person who stands
+## Amendment (2026-11-14): the holder of a self-owned Identity Agent is its owner, and a person who stands
 
 **Why.** The decisions above name the owner as someone other than the Identity Agent: the one its own inception event names, or the one sealed at provisioning. An Identity Agent on a person's own device names neither; its owner authority is its own identity (`ownerAuthority`'s last resort), so no one passed "standing `owner`" and nobody could close a conversation an AI agent of a contact had opened (ADR-080).
 
@@ -44,5 +44,5 @@ That the owner's statement is from someone with standing `owner`, and whether a 
 2. The holder signs a person's statement of kind `close`, `reopen` or `limit` with the identity's current key, the statement's `from` the identity's identifier and its `signer` the non-transferable identifier of that key. The request that carries it must also be the owner's: signed as the owner and admitted by the gate, or made by the owner's own app on this computer (the local owner secret). It goes only to the `/close`, `/reopen` and `/limit` routes: the holder's key does not sign words to an AI agent by this means.
 3. The entry records the holder as a person of standing `owner`, so the check in decision 3 above (a close by the opener or by a person of standing `owner`) is met with nothing new for a checker to learn. That the key is the identity's current key is the Identity Agent's word, as the owner's standing is.
 
-**Not decided here.** The individual app's close control (a close, a reopen and a limit action on a conversation, signed by the holder as in 2) is the other half; it is logged in `strategy/1-Strategy/tasks.md`. ADR-080 decision 9's caveat that nobody on a self-owned Identity Agent can close is dropped by the change that carries ADR-080, once it merges, because that text is not yet on `main`.
+**Not decided here.** How a front end offers the close, reopen and limit to the holder is the front end's own work; the routes and the signed statement above are what it builds on. ADR-080 decision 9 says a conversation another Identity Agent's AI agent opened stays open on a self-owned Identity Agent until this decision gives the holder a way to close it; this amendment is that way.
 
