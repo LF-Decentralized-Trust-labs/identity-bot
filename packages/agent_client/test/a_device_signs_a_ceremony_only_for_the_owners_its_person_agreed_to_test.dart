@@ -12,6 +12,7 @@ import 'package:test/test.dart';
 
 import 'support/a_witness.dart' show qb64;
 import 'support/kel_events.dart';
+import 'support/signing_with_seed.dart';
 import 'support/the_core.dart';
 
 // An invited owner's device reads what the ceremony is about, signs the first
@@ -258,6 +259,21 @@ void main() {
     await deviceOver(org(t1, raw1).$1, agreements)
         .sign('http://org', 'tok', CeremonyTerms.fromJson(t1), me: alice);
     final (t1b, raw1b) = await offer('rot1', second: 'mallory');
+    final (client, seen) = org(t1b, raw1b);
+    await expectLater(
+        deviceOver(client, agreements)
+            .sign('http://org', 'tok', CeremonyTerms.fromJson(t1b), me: alice),
+        throwsA(isA<CeremonyNotSigned>()));
+    expect(seen.where((r) => r.method == 'POST'), isEmpty);
+  });
+
+  test('a first rotation offered again at another place is not signed', () async {
+    final agreements = InMemoryCeremonyAgreements();
+    final (t1, raw1) = await offer('rot1');
+    await deviceOver(org(t1, raw1).$1, agreements)
+        .sign('http://org', 'tok', CeremonyTerms.fromJson(t1), me: alice);
+    // The same owners and keys, after another event: a second history.
+    final (t1b, raw1b) = await offer('rot1', priorOf: 'E${'B' * 43}');
     final (client, seen) = org(t1b, raw1b);
     await expectLater(
         deviceOver(client, agreements)

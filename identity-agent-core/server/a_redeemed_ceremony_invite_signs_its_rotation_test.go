@@ -10,90 +10,199 @@ import (
 	"testing"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
 	keri "github.com/grapeid/keri-go"
 )
 
-// The device that accepted an invitation into an ownership ceremony makes the
-// signature its key owes over a rotation, and nothing else: only a rotation of
-// the organisation that invited it, only one that reveals the key being used,
-// and only the key in force or the one it committed to.
-func TestADeviceSignsOnlyACeremonyRotationThatRevealsItsKey(t *testing.T) {
-	app := newInvitingApp(t)
-	s := redeemedAgent(t, app)
+// aCeremonyDevice is a phone's Identity Agent that accepted an invitation into
+// an ownership ceremony of a real organisation identity: one whose key history
+// the organisation serves at its address and a real witness holds.
+type aCeremonyDevice struct {
+	s       *CoreServer
+	org     *rotatingController
+	witness *peerAgent
+	served  []map[string]interface{} // what the organisation's address serves
+	r       chi.Router
+	root    []byte
+	relIdx  int
+}
 
-	rel, ok := s.loginHandler.Store.Get("EORGAID")
-	if !ok {
-		t.Fatal("no relationship was made for the organisation")
+func aCeremonyDeviceOf(t *testing.T) *aCeremonyDevice {
+	t.Helper()
+	app := newInvitingApp(t)
+	d := &aCeremonyDevice{s: redeemedAgent(t, app)}
+	d.witness, d.org = witnessedController(t)
+	pointTheBootstrapPoolAt(t, d.witness.witnessKey, servedThroughTheRealRouter(t, d.witness))
+	d.served = presentedInception(t, d.org)
+	orgSite := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/public/oobi/"+d.org.aid {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"kel": d.served})
+	}))
+	t.Cleanup(orgSite.Close)
+	in := redeemedInvite{base: app.URL, siteAID: d.org.aid, siteOOBI: orgSite.URL + "/public/oobi/" + d.org.aid, ceremony: true}
+	d.s.redeemedInvites.remember("tok", in)
+	if err := d.s.keepCeremonyInvite("tok", in); err != nil {
+		t.Fatal(err)
 	}
-	root, err := secureenclave.LoadRootSeed(s.DataDir)
+	rel, err := d.s.loginHandler.GetOrCreateRelationship(in.siteAID, &login.ChallengeBundle{SiteAID: in.siteAID, SiteOOBI: in.siteOOBI})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub := func(gen int) ed25519.PublicKey {
-		sd, err := backup.DerivePairwiseSeed(root, rel.RelationshipIndex, gen)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey)
+	d.relIdx = rel.RelationshipIndex
+	if d.root, err = secureenclave.LoadRootSeed(d.s.DataDir); err != nil {
+		t.Fatal(err)
 	}
-	rotation := func(prefix string, keys ...ed25519.PublicKey) []byte {
-		var ks, ns []string
-		for _, k := range keys {
-			ks = append(ks, iacrypto.VerkeyQB64(k))
-			d, _ := keri.NextDigest(iacrypto.VerkeyQB64(k))
-			ns = append(ns, d)
-		}
-		raw, err := keri.BuildRotation(keri.RotationInput{Prefix: prefix, Keys: ks, PriorSAID: prefix, SN: 1, NextDigests: ns})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return raw
-	}
-	r := chi.NewRouter()
-	s.mountCeremonySigningRoutes(r)
-	ask := func(token string, gen int, raw []byte) *httptest.ResponseRecorder {
-		b, _ := json.Marshal(map[string]any{"invite_token": token, "generation": gen, "raw_b64": base64.StdEncoding.EncodeToString(raw)})
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/redeemed-invites/ceremony-signature", strings.NewReader(string(b))))
-		return w
-	}
+	d.r = chi.NewRouter()
+	d.s.mountCeremonySigningRoutes(d.r)
+	return d
+}
 
-	raw := rotation("EORGAID", pub(0), pub(7))
-	w := ask("tok", 0, raw)
+func (d *aCeremonyDevice) pub(t *testing.T, gen int) ed25519.PublicKey {
+	t.Helper()
+	sd, err := backup.DerivePairwiseSeed(d.root, d.relIdx, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey)
+}
+
+func (d *aCeremonyDevice) ask(token string, gen int, raw []byte) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(map[string]any{"invite_token": token, "generation": gen, "raw_b64": base64.StdEncoding.EncodeToString(raw)})
+	w := httptest.NewRecorder()
+	d.r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/redeemed-invites/ceremony-signature", strings.NewReader(string(b))))
+	return w
+}
+
+// ceremonyRotation is a rotation of [prefix] at place [sn] after [prior],
+// revealing [keys], and its digest.
+func ceremonyRotation(t *testing.T, prefix string, sn uint64, prior string, keys ...ed25519.PublicKey) ([]byte, string) {
+	t.Helper()
+	var ks, ns []string
+	for _, k := range keys {
+		ks = append(ks, iacrypto.VerkeyQB64(k))
+		d, _ := keri.NextDigest(iacrypto.VerkeyQB64(k))
+		ns = append(ns, d)
+	}
+	raw, err := keri.BuildRotation(keri.RotationInput{Prefix: prefix, Keys: ks, PriorSAID: prior, SN: int(sn), NextDigests: ns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, ev.SAID
+}
+
+func signedBy(w *httptest.ResponseRecorder, pub ed25519.PublicKey, raw []byte) bool {
 	var got struct {
 		Sig string `json:"signature_b64"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &got)
 	sig, _ := base64.StdEncoding.DecodeString(got.Sig)
-	if w.Code != http.StatusOK || !ed25519.Verify(pub(0), raw, sig) {
+	return w.Code == http.StatusOK && ed25519.Verify(pub, raw, sig)
+}
+
+// The device that accepted an invitation into an ownership ceremony makes the
+// signature its key owes over a rotation, and nothing else: only a rotation of
+// the organisation that invited it, only one that reveals the key being used,
+// and only the key in force or the one it committed to.
+func TestADeviceSignsOnlyACeremonyRotationThatRevealsItsKey(t *testing.T) {
+	d := aCeremonyDeviceOf(t)
+	aid := d.org.aid
+
+	raw, said := ceremonyRotation(t, aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 7))
+	if w := d.ask("tok", 0, raw); !signedBy(w, d.pub(t, 0), raw) {
 		t.Fatalf("the device did not sign the rotation with its key: %d %s", w.Code, w.Body)
 	}
-	// The key it committed to signs a rotation that reveals it, as a hand-over's second does.
-	raw2 := rotation("EORGAID", pub(1))
-	w = ask("tok", 1, raw2)
-	_ = json.Unmarshal(w.Body.Bytes(), &got)
-	sig, _ = base64.StdEncoding.DecodeString(got.Sig)
-	if w.Code != http.StatusOK || !ed25519.Verify(pub(1), raw2, sig) {
+	// The key it committed to signs a rotation that reveals it, as a hand-over's
+	// second does, placed after the first one it signed.
+	raw2, _ := ceremonyRotation(t, aid, 2, said, d.pub(t, 1))
+	if w := d.ask("tok", 1, raw2); !signedBy(w, d.pub(t, 1), raw2) {
 		t.Fatalf("the committed key did not sign the second rotation: %d %s", w.Code, w.Body)
 	}
 
+	notMine, _ := ceremonyRotation(t, aid, 1, d.org.icpSAID, d.pub(t, 5))
+	other, _ := ceremonyRotation(t, "EOTHERAID", 1, "EOTHERAID", d.pub(t, 0))
+	beyond, _ := ceremonyRotation(t, aid, 3, said, d.pub(t, 2))
 	for name, c := range map[string]struct {
 		w    *httptest.ResponseRecorder
 		want int
 	}{
-		"a rotation that does not reveal the key":  {ask("tok", 0, rotation("EORGAID", pub(5))), http.StatusConflict},
-		"a rotation of some other identity":        {ask("tok", 0, rotation("EOTHERAID", pub(0))), http.StatusBadRequest},
-		"a key beyond the one committed to":        {ask("tok", 2, rotation("EORGAID", pub(2))), http.StatusBadRequest},
-		"an invitation this device never accepted": {ask("other", 0, raw), http.StatusNotFound},
-		"bytes that are not an event":              {ask("tok", 0, []byte("sign me")), http.StatusBadRequest},
+		"a rotation that does not reveal the key":  {d.ask("tok", 0, notMine), http.StatusConflict},
+		"a rotation of some other identity":        {d.ask("tok", 0, other), http.StatusBadRequest},
+		"a key beyond the one committed to":        {d.ask("tok", 2, beyond), http.StatusBadRequest},
+		"an invitation this device never accepted": {d.ask("other", 0, raw), http.StatusNotFound},
+		"bytes that are not an event":              {d.ask("tok", 0, []byte("sign me")), http.StatusBadRequest},
 	} {
 		if c.w.Code != c.want {
 			t.Errorf("%s: answered %d (%s), want %d", name, c.w.Code, c.w.Body, c.want)
 		}
+	}
+}
+
+// Once a device has signed an event at a place in the organisation's key
+// history, it signs that event again (an answer lost on the way back) and no
+// other there: two signed events at one place are two histories.
+func TestADeviceSignsOneEventAtEachPlaceOfTheOrganisationsLog(t *testing.T) {
+	d := aCeremonyDeviceOf(t)
+	raw, _ := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 7))
+	if w := d.ask("tok", 0, raw); w.Code != http.StatusOK {
+		t.Fatalf("the first rotation was not signed: %d %s", w.Code, w.Body)
+	}
+	if w := d.ask("tok", 0, raw); !signedBy(w, d.pub(t, 0), raw) {
+		t.Fatalf("the same rotation, asked again, was not signed again: %d %s", w.Code, w.Body)
+	}
+	fork, _ := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 8))
+	if w := d.ask("tok", 0, fork); w.Code != http.StatusConflict {
+		t.Fatalf("a second, different rotation at the same place was answered %d (%s), want 409", w.Code, w.Body)
+	}
+}
+
+// A first rotation goes where the organisation's key history ends, as this
+// device reads it and the history's witness holds it, not where the
+// organisation says it does.
+func TestADeviceSignsOnlyARotationThatFollowsTheOrganisationsLog(t *testing.T) {
+	d := aCeremonyDeviceOf(t)
+	_, elsewhere := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 9))
+	afterUnheld, _ := ceremonyRotation(t, d.org.aid, 1, elsewhere, d.pub(t, 0))
+	pastTheEnd, _ := ceremonyRotation(t, d.org.aid, 2, d.org.icpSAID, d.pub(t, 0))
+	for name, raw := range map[string][]byte{
+		"after an event the history does not hold": afterUnheld,
+		"past the end of the history":              pastTheEnd,
+	} {
+		if w := d.ask("tok", 0, raw); w.Code != http.StatusConflict {
+			t.Errorf("%s: answered %d (%s), want 409", name, w.Code, w.Body)
+		}
+	}
+}
+
+// An organisation that shows its owners a shortened history (an event its
+// witness holds, left out) is caught by the witness, and nothing is signed.
+func TestADeviceIsNotShownAShortenedHistory(t *testing.T) {
+	d := aCeremonyDeviceOf(t)
+	p1, _ := d.org.signers[1].PublicKey()
+	p2, _ := d.org.signers[2].PublicKey()
+	rot, err := d.org.eng.Rotate(drivers.RotationRequest{Name: d.org.name, NewPublicKey: p1, NewNextPublicKey: p2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, _ := base64.StdEncoding.DecodeString(rot.RawBytesB64)
+	if err := d.witness.takes(t, d.org.aid, held, sign(t, d.org.signers[1], held)); err != nil {
+		t.Fatal(err)
+	}
+	// The organisation's address still serves only the inception.
+	raw, _ := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0))
+	if w := d.ask("tok", 0, raw); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "witnesses") {
+		t.Fatalf("a rotation on a shortened history was answered %d (%s), want a 409 from the witness", w.Code, w.Body)
 	}
 }
 
@@ -113,40 +222,27 @@ func TestAnInviteThatIsNotACeremonyIsNotSignedFor(t *testing.T) {
 	}
 }
 
-// A phone's agent that restarts between the two signatures of a hand-over can
-// still make the second: the invitation was kept on disk. Without that the first
-// rotation would be in the log and nothing could sign the next.
+// A phone's Identity Agent that restarts between the two signatures of a
+// hand-over can still make the second: the invitation, and the first rotation
+// it signed, were kept on disk. Without that the first rotation would be in the
+// log and nothing could sign the next.
 func TestAnAgentThatRestartedStillSignsTheSecondRotation(t *testing.T) {
-	app := newInvitingApp(t)
-	s := redeemedAgent(t, app)
-	rel, _ := s.loginHandler.Store.Get("EORGAID")
-	root, _ := secureenclave.LoadRootSeed(s.DataDir)
-	sd, _ := backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 1)
-	pub := ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey)
-	d, _ := keri.NextDigest(iacrypto.VerkeyQB64(pub))
-	raw, err := keri.BuildRotation(keri.RotationInput{Prefix: "EORGAID", Keys: []string{iacrypto.VerkeyQB64(pub)},
-		PriorSAID: "EORGAID", SN: 2, NextDigests: []string{d}})
-	if err != nil {
-		t.Fatal(err)
+	d := aCeremonyDeviceOf(t)
+	raw1, said := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0))
+	if w := d.ask("tok", 0, raw1); w.Code != http.StatusOK {
+		t.Fatalf("the first rotation was not signed: %d %s", w.Code, w.Body)
 	}
+	raw, _ := ceremonyRotation(t, d.org.aid, 2, said, d.pub(t, 1))
 
-	s.redeemedInvites = redeemedInviteBook{} // the agent was restarted
-	r := chi.NewRouter()
-	s.mountCeremonySigningRoutes(r)
-	b, _ := json.Marshal(map[string]any{"invite_token": "tok", "generation": 1, "raw_b64": base64.StdEncoding.EncodeToString(raw)})
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/redeemed-invites/ceremony-signature", strings.NewReader(string(b))))
-	if w.Code != http.StatusOK {
+	d.s.redeemedInvites = redeemedInviteBook{} // the Identity Agent was restarted
+	if w := d.ask("tok", 1, raw); !signedBy(w, d.pub(t, 1), raw) {
 		t.Fatalf("after a restart the second rotation was not signed: %d %s", w.Code, w.Body)
 	}
 
 	// An invitation that was never into a ceremony is not kept, so it is not
 	// there to be signed for after a restart either.
-	s.redeemedInvites = redeemedInviteBook{}
-	b, _ = json.Marshal(map[string]any{"invite_token": "never", "generation": 1, "raw_b64": base64.StdEncoding.EncodeToString(raw)})
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/redeemed-invites/ceremony-signature", strings.NewReader(string(b))))
-	if w.Code != http.StatusNotFound {
+	d.s.redeemedInvites = redeemedInviteBook{}
+	if w := d.ask("never", 1, raw); w.Code != http.StatusNotFound {
 		t.Fatalf("an invitation nobody redeemed was signed for: %d", w.Code)
 	}
 }

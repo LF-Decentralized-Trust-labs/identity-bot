@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 
 import 'key_math.dart';
@@ -32,18 +31,9 @@ class CeremonyEventRefused implements Exception {
   String toString() => 'this rotation was not signed: $reason';
 }
 
-/// Makes the signature a device's key owes over the exact bytes of a rotation.
+/// Makes the signature a device's key owes over the exact bytes of a rotation:
+/// on a phone, its own core, which holds the key (CeremonyDevice).
 typedef CeremonySigner = Future<List<int>> Function(Uint8List raw);
-
-/// A [CeremonySigner] for a key whose seed this app holds.
-CeremonySigner signingWithSeed(Uint8List seed) => (raw) async {
-      final key = ed.newKeyFromSeed(seed);
-      try {
-        return ed.sign(key, raw);
-      } finally {
-        key.bytes.fillRange(0, key.bytes.length, 0);
-      }
-    };
 
 /// Fetches the rotation an ownership ceremony is waiting on from the core at
 /// [baseUrl] (the one the invite named), checks it against [expected], signs it

@@ -145,7 +145,11 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	total := len(existing) + len(names)
+	// The keys the rotation puts in force (ceremonyRotation): this Identity
+	// Agent's own and each invited owner's, or the owners' alone in a
+	// hand-over. The existing owners are anchored, not given keys, so they are
+	// not counted: a threshold over them could never be met.
+	total := 1 + len(names)
 	if req.HandOver {
 		// Only the invited owners' keys control it afterwards.
 		total = len(names)
@@ -245,7 +249,7 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 	}
 	if c.Status == ceremonySigning && c.Stage == stageSecond {
 		// The first rotation is already in the log: the owners hold control with
-		// this agent's key beside them, and what is left is for them to finish.
+		// this Identity Agent's key beside them, and what is left is for them to finish.
 		writeError(w, http.StatusConflict, "The hand-over is half way",
 			"the first rotation is already in the log, so it cannot be dropped now: the owners' devices still have to sign the second")
 		return

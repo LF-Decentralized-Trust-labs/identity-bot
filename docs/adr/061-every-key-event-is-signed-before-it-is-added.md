@@ -593,6 +593,17 @@ checks `k` and `n` whole, rather than taking any of it from the core:
 
 Every signer checks the same bytes and signs the same digest.
 
+Where the event goes (`s` and `p`) is not taken from the core either, as
+section 9 says of any signer outside it. An owner's device invited into an
+organisation's ceremony reads the organisation's log from the address the
+invitation named, verifies it (`drivers.VerifiedLogOf`), and has the witnesses
+that log names, found in its own registry, confirm it holds the whole history
+(`witness.Corroborate`); it signs a first rotation only at the place after that
+log's last event. A log that names no witnesses has nobody else to ask, and its
+verified copy places the event. The device keeps the event it signed at each
+place and signs no other there, and a hand-over's second rotation is placed by
+the first one the device signed.
+
 An identity founded earlier, whose `n` names only the classical key, gains its
 post-quantum commitment at its next rotation.
 

@@ -11,6 +11,7 @@ import 'package:test/test.dart';
 
 import 'support/a_witness.dart' show qb64;
 import 'support/kel_events.dart';
+import 'support/signing_with_seed.dart';
 import 'support/the_core.dart';
 
 // An invited owner's device signs the rotation an ownership ceremony prepared

@@ -122,7 +122,9 @@ class CeremonyTerms {
       return 'it changes the organisation\u2019s witnesses';
     }
     if (stage == CeremonyStage.second) {
-      return anchors.isEmpty ? null : 'it anchors something the change should not';
+      return anchors.isEmpty
+          ? null
+          : 'it anchors something the change should not';
     }
     final sealed = <String>{};
     for (final a in anchors) {
@@ -136,7 +138,8 @@ class CeremonyTerms {
       sealed.add('${a['i']}');
     }
     for (final o in owners) {
-      if (!sealed.contains(o.aid)) return 'it does not anchor ${o.name.isEmpty ? 'an owner' : o.name}';
+      if (!sealed.contains(o.aid))
+        return 'it does not anchor ${o.name.isEmpty ? 'an owner' : o.name}';
     }
     return null;
   }
@@ -211,6 +214,16 @@ class CeremonyAgreement {
     return differenceFrom(second);
   }
 
+  /// Why [first], offered as the first rotation again, is not the one this
+  /// device already signed, or null when it is. One first rotation is signed
+  /// for a change: another, even with the same owners, would be a second
+  /// history of the organisation at that place (its core refuses it too).
+  String? isNotTheFirstSigned(CeremonyTerms first) => '${_j['first_d']}' ==
+              first.digest &&
+          '${_j['first_sn']}' == '${first.sn}'
+      ? null
+      : 'this device already signed a different first rotation for this change';
+
   /// What differs between this and [t], in words, or null when nothing does.
   /// Only the people, their keys and the terms: where the event sits is for
   /// [whatIsWrongWithFollowingWith].
@@ -219,7 +232,8 @@ class CeremonyAgreement {
     for (final k in ['aid', 'hand_over', 'threshold', 'own_key']) {
       if ('${_j[k]}' != '${now[k]}') return 'the $k of the ceremony changed';
     }
-    if (jsonEncode(_sorted(_j['owners'])) != jsonEncode(_sorted(now['owners']))) {
+    if (jsonEncode(_sorted(_j['owners'])) !=
+        jsonEncode(_sorted(now['owners']))) {
       return 'the owners, or their keys, are not the ones you agreed to';
     }
     return null;
@@ -353,7 +367,8 @@ class CeremonyDevice {
     if (terms.stage == CeremonyStage.first) {
       // Offered again, it must be the change already agreed to: a first
       // rotation with other owners is not a second look at the same change.
-      final why = agreed?.differenceFrom(terms);
+      final why =
+          agreed?.differenceFrom(terms) ?? agreed?.isNotTheFirstSigned(terms);
       if (why != null) throw CeremonyNotSigned(why);
       await agreements.write(token, CeremonyAgreement.of(terms));
     } else {
