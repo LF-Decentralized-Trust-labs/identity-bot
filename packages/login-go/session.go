@@ -59,13 +59,17 @@ type Started struct {
 // Status is the Identity Agent's own word on a sign-in, as it said it, before
 // ConfirmSession judges it.
 type Status struct {
-	State            string
-	AppSessionToken  string
-	Disclosures      map[string]any
-	MemberInfo       *MemberInfo
-	Reason           string
-	BrowserKey       string
-	FrontEnd         string
+	State           string
+	AppSessionToken string
+	Disclosures     map[string]any
+	MemberInfo      *MemberInfo
+	Reason          string
+	BrowserKey      string
+	FrontEnd        string
+	// AppleAppID is, for a verified installed_app sign-in, the application
+	// identifier the owner named for the app's Apple builds: what an App Attest
+	// assertion by the key is checked for (VerifyAppleAssertion).
+	AppleAppID       string
 	IdentityWithheld bool
 }
 
@@ -155,6 +159,8 @@ type Confirmed struct {
 	BrowserKey string
 	// FrontEnd is the front-end kind the verified assertion repeated (ADR-072).
 	FrontEnd string
+	// AppleAppID is Status.AppleAppID, passed on.
+	AppleAppID string
 	// Reason is why a sign-in was declined.
 	Reason string
 }
@@ -194,7 +200,7 @@ func ConfirmSession(ctx context.Context, a Agent, o ConfirmOptions) (Confirmed, 
 			}
 		}
 		return Confirmed{State: Verified, PairwiseAID: body.AppSessionToken, Disclosures: body.Disclosures,
-			MemberInfo: body.MemberInfo, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd}, nil
+			MemberInfo: body.MemberInfo, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd, AppleAppID: body.AppleAppID}, nil
 	}
 	if body.State == "declined" {
 		return Confirmed{State: Declined, Reason: body.Reason}, nil
