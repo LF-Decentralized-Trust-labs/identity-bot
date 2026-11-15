@@ -96,6 +96,10 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		// produce it.
 		OwnPublicKey     string `json:"own_public_key"`
 		OwnNextPublicKey string `json:"own_next_public_key"`
+		// HandOver ends the ceremony with the identity's own key out of
+		// control: see OwnerCeremony.HandOver. The threshold is then of the
+		// invited owners alone, and the identity's own next key is not used.
+		HandOver bool `json:"hand_over"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad request", err.Error())
@@ -142,6 +146,10 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 	}
 
 	total := len(existing) + len(names)
+	if req.HandOver {
+		// Only the invited owners' keys control it afterwards.
+		total = len(names)
+	}
 	threshold := req.Threshold
 	if threshold <= 0 {
 		threshold = total
@@ -190,6 +198,7 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		Threshold:        threshold,
 		OwnPublicKey:     ownPublic,
 		OwnNextPublicKey: ownNext,
+		HandOver:         req.HandOver,
 		Status:           ceremonyCollecting,
 		StartedAt:        time.Now().UTC(),
 	}
@@ -301,74 +310,17 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 		_ = s.finishCeremony(ceremonyFailed, err.Error(), "")
 		return
 	}
-
-	existing, err := s.ownersOfOwnIdentity(identity.AID)
-	if err != nil {
-		_ = s.finishCeremony(ceremonyFailed, "could not read the current owners: "+err.Error(), "")
-		return
+	// The rotation is prepared here and signed by each owner's device, which
+	// fetches it and answers with its signature (owner_ceremony_rotation.go).
+	// The ceremony stays "signing" until the event is in the log: signing the
+	// rotation here and adding it would need keys only the devices hold.
+	ceremonyMu.Lock()
+	defer ceremonyMu.Unlock()
+	first := stageFirst
+	if err := s.prepareCeremonyStage(c, first); err != nil {
+		c.Status, c.Detail = ceremonyFailed, err.Error()
+		_ = s.saveCeremony(c)
 	}
-
-	// The owner seals: everyone who owned it before, plus everyone who just
-	// accepted. Written in the same event as the keys, which is the only way the
-	// two cannot disagree about who owns this.
-	seals := make([]interface{}, 0, len(existing)+len(c.Invited))
-	for _, aid := range existing {
-		seal, err := ownerAnchorSeal(aid)
-		if err != nil {
-			_ = s.finishCeremony(ceremonyFailed,
-				"an existing owner cannot be anchored: "+err.Error(), "")
-			return
-		}
-		seals = append(seals, seal)
-	}
-	// The keys the identity will be controlled by afterwards.
-	//
-	// The identity's own PRE-ROTATED key leads, because a rotation has to
-	// carry a key the previous event committed to — without it no verifier would
-	// accept the event, whatever else it said. The incoming owners' keys join
-	// it, which is what a verifier does accept: the prior commitment is
-	// satisfied and new keys ride along. Checked against a real Kevery rather
-	// than assumed.
-	keys := []string{c.OwnPublicKey}
-	nextKeys := []string{c.OwnNextPublicKey}
-	for _, invitee := range c.Invited {
-		inviteeSeal, err := ownerAnchorSeal(invitee.PairwiseAID)
-		if err != nil {
-			_ = s.finishCeremony(ceremonyFailed,
-				"an incoming owner cannot be anchored: "+err.Error(), "")
-			return
-		}
-		seals = append(seals, inviteeSeal)
-		keys = append(keys, invitee.PublicKey)
-		nextKeys = append(nextKeys, invitee.NextPublicKey)
-	}
-
-	// Committed as digests of the SUCCESSOR keys, each supplied by the owner it
-	// belongs to. Committing digests of the current set instead would pre-commit
-	// to keys already in use, which defeats the point of pre-rotation entirely.
-	nextDigests, err := digestsOf(nextKeys)
-	if err != nil {
-		_ = s.finishCeremony(ceremonyFailed, "could not commit next keys: "+err.Error(), "")
-		return
-	}
-
-	resp, err := s.KeriDriver.RotateToMultisig(identity.AID, keys, nextDigests,
-		fmt.Sprintf("%d", c.Threshold), fmt.Sprintf("%d", c.Threshold), seals)
-	if err != nil {
-		_ = s.finishCeremony(ceremonyFailed, "the rotation failed: "+err.Error(), "")
-		return
-	}
-	// Recorded only now that the rotation was accepted. Advancing first and
-	// failing would leave the identity believing it had moved on while its log
-	// said otherwise, and every later rotation would derive a key its own events
-	// do not commit to.
-	if aerr := s.advanceKeyGeneration(resp.NewPublicKey, resp.NewNextKeyDigest); aerr != nil {
-		_ = s.finishCeremony(ceremonyFailed,
-			"the ownership changed but this agent could not record where its keys moved to, "+
-				"so it will not be able to rotate again: "+aerr.Error(), resp.Said)
-		return
-	}
-	_ = s.finishCeremony(ceremonyApplied, "", resp.Said)
 }
 
 // digestsOf turns a set of next public keys into the digests a rotation commits

@@ -15,7 +15,7 @@ import 'key_math.dart';
 /// signed is the bytes, so the bytes are what is checked.
 class ExpectedEvent {
   ExpectedEvent._(this.t, this.aid, this.sn, this.prior, this.fields,
-      {this.layout, this.digest});
+      {this.layout, this.digest, this.place});
 
   /// A founding: the signing keys, their next-key commitments (classical
   /// first, then post-quantum), the witnesses and their threshold, and its
@@ -208,7 +208,101 @@ class ExpectedEvent {
         layout: layout);
   }
 
+  /// A rotation of an ownership ceremony, as one of the invited owners checks
+  /// it (the core prepares it, each owner's device signs: identity-agent-core
+  /// `owner_ceremony_rotation.go`).
+  ///
+  /// Two shapes. [CeremonyStage.first] reveals [ownKey], the key the identity
+  /// committed to, then each owner's key by identifier; in a [handOver] it
+  /// commits only to the owners' next digests, and otherwise also to
+  /// [ownNextDigest], which leads. [CeremonyStage.second], only in a hand-over,
+  /// reveals each owner's next key and commits to the keys each named for after
+  /// that. [owners] is every invited owner as this device recorded the
+  /// ceremony, never as the core says; [anchors] the seals it expects.
+  ///
+  /// `k`, `n`, both thresholds and every other field must be exactly these:
+  /// checking only this owner's places would let a core replace an owner who
+  /// is not signing.
+  factory ExpectedEvent.asAnOwnerInACeremony({
+    required CeremonyStage stage,
+    required bool handOver,
+    required String aid,
+    required int sn,
+    required String prior,
+    required String ownKey,
+    String? ownNextDigest,
+    required Map<String, CeremonyOwner> owners,
+    required String me,
+    required int threshold,
+    List<Object?> anchors = const [],
+    int toad = 0,
+    List<String> cuts = const [],
+    List<String> adds = const [],
+  }) {
+    if (stage == CeremonyStage.second && !handOver) {
+      throw ArgumentError('only a hand-over has a second rotation');
+    }
+    if (!handOver && stage == CeremonyStage.first && ownNextDigest == null) {
+      throw ArgumentError(
+          'a ceremony that keeps the identity\'s own key commits to its next key');
+    }
+    final layout = OwnerLayout(owners.keys.toList(), me);
+    if (threshold < 1 || threshold > owners.length) {
+      throw ArgumentError.value(
+          threshold, 'threshold', 'not satisfiable by ${owners.length} owners');
+    }
+    final ordered = [for (final o in layout.owners) owners[o]!];
+    List<List<String>> firstGroups() => [
+          if (!handOver) [ownNextDigest!],
+          for (final o in ordered) o.next,
+        ];
+    final List<String> k;
+    final List<List<String>> groups;
+    final Object kt;
+    final CeremonyPlace place;
+    if (stage == CeremonyStage.first) {
+      k = [ownKey, for (final o in ordered) o.key];
+      groups = firstGroups();
+      kt = k.length.toRadixString(16);
+      // A key the last event did not commit to signs current-only, at its place.
+      place = CeremonyPlace(layout.keyIndex + 1, 0, currentOnly: true);
+    } else {
+      for (final o in ordered) {
+        if (o.nextKey.isEmpty || o.after.isEmpty) {
+          throw ArgumentError(
+              'the second rotation needs each owner\'s next key and what it commits to after');
+        }
+      }
+      k = [for (final o in ordered) o.nextKey];
+      groups = [for (final o in ordered) o.after];
+      kt = threshold.toRadixString(16);
+      // Each owner's signature opens its classical digest of the first rotation.
+      var before = 0;
+      for (final g in firstGroups()) {
+        if (identical(g, ordered[layout.keyIndex].next)) break;
+        before += g.length;
+      }
+      place = CeremonyPlace(layout.keyIndex, before);
+    }
+    if ({...k}.length != k.length) {
+      throw ArgumentError.value(owners, 'owners', 'names one key more than once');
+    }
+    return ExpectedEvent._('rot', aid, sn, prior, {
+      'kt': kt,
+      'k': k,
+      'nt': ceremonyNextThreshold(threshold, groups),
+      'n': [for (final g in groups) ...g],
+      'bt': toad.toRadixString(16),
+      'br': cuts,
+      'ba': adds,
+      'a': anchors,
+    }, layout: layout, place: place);
+  }
+
   final String t;
+
+  /// For an event of an ownership ceremony, where this signer's signature goes.
+  final CeremonyPlace? place;
 
   /// The identifier, or null for a founding, whose identifier is its digest.
   final String? aid;
@@ -321,6 +415,51 @@ Object? _sorted(Object? v) => v is Map
     : v is List
         ? [for (final e in v) _sorted(e)]
         : v;
+
+/// Which rotation of an ownership ceremony.
+enum CeremonyStage {
+  first('rot1'),
+  second('rot2');
+
+  const CeremonyStage(this.wire);
+
+  /// How the core names it.
+  final String wire;
+}
+
+/// One invited owner as the ceremony recorded it on this device: the key it
+/// signs with, the digests it commits to in the first rotation (classical
+/// first, post-quantum if it made one), and, in a hand-over, the key those
+/// digests commit to and what it commits to after.
+class CeremonyOwner {
+  const CeremonyOwner(this.key, this.next,
+      {this.nextKey = '', this.after = const []});
+  final String key;
+  final List<String> next;
+  final String nextKey;
+  final List<String> after;
+}
+
+/// Where a signature goes: the place of the key in the event's `k` and, unless
+/// [currentOnly], of the digest it opens in the prior event's `n`.
+class CeremonyPlace {
+  const CeremonyPlace(this.index, this.ondex, {this.currentOnly = false});
+  final int index;
+  final int ondex;
+  final bool currentOnly;
+}
+
+/// The next-keys threshold of an ownership ceremony over each owner's group of
+/// digests: a count of owners when each commits to one digest, otherwise each
+/// owner is one share of 1/[threshold] that any one of its digests stands for.
+/// The same rule as the core's, so the two are compared byte for byte.
+Object ceremonyNextThreshold(int threshold, List<List<String>> groups) {
+  if (groups.every((g) => g.length == 1)) return threshold.toRadixString(16);
+  final w = threshold <= 1 ? '1' : '1/$threshold';
+  return [
+    for (final g in groups) {w: [for (final _ in g) '1']}
+  ];
+}
 
 /// The places one owner holds in an event with several (ADR-061 section 6),
 /// in stage one; stage two's layout (`k[2i]`, `k[2i+1]`) comes with stage two.

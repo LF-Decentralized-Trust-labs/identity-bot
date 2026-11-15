@@ -37,9 +37,12 @@ import (
 // ceremonyState is where a ceremony has got to.
 const (
 	ceremonyCollecting = "collecting"
-	ceremonyApplied    = "applied"
-	ceremonyFailed     = "failed"
-	ceremonyAbandoned  = "abandoned"
+	// ceremonySigning is every invited owner accepted and the rotation is
+	// prepared and waiting for the signatures only their devices can make.
+	ceremonySigning   = "signing"
+	ceremonyApplied   = "applied"
+	ceremonyFailed    = "failed"
+	ceremonyAbandoned = "abandoned"
 )
 
 // OwnerCeremony is one attempt to change who controls an identity.
@@ -57,6 +60,17 @@ type OwnerCeremony struct {
 	// the pre-rotated key and its successor.
 	OwnPublicKey     string `json:"org_public_key,omitempty"`
 	OwnNextPublicKey string `json:"org_next_public_key,omitempty"`
+	// HandOver is a ceremony that ends with this identity's own key out of
+	// control: the first rotation commits only to the invited owners' next keys,
+	// and a second, signed by them alone, reveals those keys, after which this
+	// Identity Agent holds no key of the identity and derives none.
+	HandOver bool `json:"hand_over,omitempty"`
+	// Stage, PendingRawB64 and PendingSAID are the rotation being signed now:
+	// "rot1" or "rot2", the event's bytes as the invited owners' devices are
+	// shown them, and its digest. Empty until everybody has accepted.
+	Stage         string `json:"stage,omitempty"`
+	PendingRawB64 string `json:"pending_raw_b64,omitempty"`
+	PendingSAID   string `json:"pending_said,omitempty"`
 	// Invited is one entry per party being brought in, in the order they were
 	// named, so a half-finished ceremony can say who is still missing rather
 	// than only how many.
@@ -103,6 +117,15 @@ type CeremonyInvitee struct {
 	PublicKey     string    `json:"public_key,omitempty"`
 	NextPublicKey string    `json:"next_public_key,omitempty"`
 	AcceptedAt    time.Time `json:"accepted_at,omitempty"`
+	// NextPostQuantumDigest is the post-quantum commitment that goes beside the
+	// classical one in the owner's next keys, when their device makes one.
+	NextPostQuantumDigest string `json:"next_post_quantum_digest,omitempty"`
+	// AfterNextPublicKey is the key the owner will commit to in the second
+	// rotation of a hand-over, so that rotation is fully known before anybody
+	// signs it; AfterNextPostQuantumDigest is its post-quantum partner. Both
+	// are asked for only in a hand-over.
+	AfterNextPublicKey         string `json:"after_next_public_key,omitempty"`
+	AfterNextPostQuantumDigest string `json:"after_next_post_quantum_digest,omitempty"`
 }
 
 // Accepted reports whether this person has taken part yet.
@@ -110,11 +133,17 @@ func (c CeremonyInvitee) Accepted() bool {
 	return c.PairwiseAID != "" && c.PublicKey != "" && c.NextPublicKey != ""
 }
 
+// accepted is Accepted, and in a hand-over also the key the owner commits to
+// in the second rotation, which that rotation cannot be built without.
+func (c *OwnerCeremony) accepted(i CeremonyInvitee) bool {
+	return i.Accepted() && (!c.HandOver || i.AfterNextPublicKey != "")
+}
+
 // Outstanding lists who has not accepted yet.
 func (c *OwnerCeremony) Outstanding() []string {
 	var waiting []string
 	for _, invitee := range c.Invited {
-		if !invitee.Accepted() {
+		if !c.accepted(invitee) {
 			name := invitee.Name
 			if name == "" {
 				name = "an unnamed invitee"
@@ -210,12 +239,25 @@ func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
 	return nil
 }
 
+// CeremonyExtras are what an owner's device sends beside its keys: a
+// post-quantum commitment, and in a hand-over the key it will commit to in
+// the second rotation. Public halves only.
+type CeremonyExtras struct {
+	NextPostQuantumDigest      string `json:"next_post_quantum_digest,omitempty"`
+	AfterNextPublicKey         string `json:"after_next_public_key,omitempty"`
+	AfterNextPostQuantumDigest string `json:"after_next_post_quantum_digest,omitempty"`
+}
+
 // recordAcceptance stores one invitee's key against their token.
 //
 // Returns the ceremony when this acceptance completed it, so the caller knows
 // to rotate. Returns nil when the token belongs to no ceremony, which is the
 // ordinary case for an invite that is not part of one and is not an error.
-func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicKey string) (*OwnerCeremony, bool, error) {
+func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicKey string, extra ...CeremonyExtras) (*OwnerCeremony, bool, error) {
+	var more CeremonyExtras
+	if len(extra) > 0 {
+		more = extra[0]
+	}
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
 
@@ -240,12 +282,19 @@ func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicK
 			continue
 		}
 		found = true
-		if c.Invited[i].Accepted() {
+		if c.accepted(c.Invited[i]) {
 			// Already done. Not an error — a second scan of the same code is a
 			// person checking it worked, and it must not overwrite the key they
 			// already committed to.
 			return nil, false, nil
 		}
+		if c.HandOver && more.AfterNextPublicKey == "" {
+			return nil, false, fmt.Errorf("this ceremony hands the identity over, so the key you will " +
+				"commit to after this rotation is needed too, and was not sent")
+		}
+		c.Invited[i].NextPostQuantumDigest = more.NextPostQuantumDigest
+		c.Invited[i].AfterNextPublicKey = more.AfterNextPublicKey
+		c.Invited[i].AfterNextPostQuantumDigest = more.AfterNextPostQuantumDigest
 		c.Invited[i].PairwiseAID = pairwiseAID
 		c.Invited[i].PublicKey = publicKey
 		c.Invited[i].NextPublicKey = nextPublicKey

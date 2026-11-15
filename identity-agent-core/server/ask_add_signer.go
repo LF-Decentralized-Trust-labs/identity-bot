@@ -156,6 +156,16 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		return nil, fmt.Errorf("derive the rotation key this owner commits to: %w", nerr)
 	}
 	nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
+	// The key after that, which an ownership ceremony that hands an identity
+	// over commits to in its second rotation. Sent always and used only by such
+	// a ceremony, so an owner never has to be asked again; a public half, as
+	// the other two are.
+	afterNextPub := ""
+	if root, rerr := secureenclave.LoadRootSeed(s.DataDir); rerr == nil {
+		if sd, derr := backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 2); derr == nil {
+			afterNextPub = iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey))
+		}
+	}
 
 	// What this organisation will seal its backups and its disk to.
 	//
@@ -207,6 +217,7 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		"vouch_payload":              string(vouchPayload),
 		"public_key":                 iacrypto.VerkeyQB64(pub),
 		"next_public_key":            iacrypto.VerkeyQB64(nextPub),
+		"after_next_public_key":      afterNextPub,
 		"backup_seal_public_key_b64": sealKey,
 	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/signer/invites/" + p.InviteToken + "/redeem"
