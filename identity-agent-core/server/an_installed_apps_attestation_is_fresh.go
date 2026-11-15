@@ -75,6 +75,12 @@ func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset,
 	if aPageAsked(r) {
 		return nil, &SignInRefused{http.StatusForbidden, "a request that came from a web page cannot ask for an installed-app credential"}
 	}
+	// A TPM key the owner has not allowed is refused before the TPM is asked to do anything.
+	if s.assetHandler != nil {
+		if asset, found, err := s.assetHandler.Store.GetAsset(assetID); err == nil && found && !asset.InstalledApp.TPMKeys {
+			return nil, &SignInRefused{http.StatusForbidden, errTPMKeysNotAllowed.Error()}
+		}
+	}
 	s.installedAppAskMu.Lock()
 	a, ok := s.installedAppAsks[askID]
 	if !ok || a.asset != assetID || time.Now().After(a.until) {
@@ -91,7 +97,7 @@ func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset,
 	s.installedAppAskMu.Unlock()
 	cred, err := makeTPMCredentialFor(req, key)
 	if err != nil {
-		return nil, &SignInRefused{http.StatusForbidden, err.Error()}
+		return nil, &SignInRefused{http.StatusForbidden, inWordsForPerson(err).Error()}
 	}
 	return cred, nil
 }

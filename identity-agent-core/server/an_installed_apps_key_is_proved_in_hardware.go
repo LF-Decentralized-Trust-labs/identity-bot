@@ -99,6 +99,17 @@ func (s *CoreServer) takeInstalledAppFact(token string) (installedAppFact, bool)
 // same words wherever the refusal is passed on.
 var errTPMKeysNotAllowed = errors.New("This app's owner has not allowed sign-in from a Windows computer's security chip. Ask them to allow it, or sign in from a phone.")
 
+// errVirtualTPM is what a person is told when the computer's TPM is a virtual or cloud one.
+var errVirtualTPM = errors.New("This computer's security chip is a virtual one (a virtual machine's), which this app does not accept. Sign in from a physical computer or a phone.")
+
+// inWordsForPerson gives the plain sentence for the refusals of a TPM key a person can act on.
+func inWordsForPerson(err error) error {
+	if errors.Is(err, secureenclave.ErrVirtualTPM) {
+		return errVirtualTPM
+	}
+	return err
+}
+
 var errNoProof = errors.New("an installed-app sign-in needs a hardware attestation of the installed app's key, and this request has none")
 
 // verifyInstalledAppKey is whether the proof shows that key (a P-256 thumbprint,
@@ -148,6 +159,9 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 		return installedAppFact{}, fmt.Errorf("a key is proved on 'android', 'apple' or 'tpm', not '%s'", proof.Platform)
 	}
 	if err != nil {
+		if errors.Is(err, secureenclave.ErrVirtualTPM) {
+			return installedAppFact{}, errVirtualTPM
+		}
 		return installedAppFact{}, fmt.Errorf("the installed app's key is not proved: %w", err)
 	}
 	if facts == nil || facts.Platform != proof.Platform {

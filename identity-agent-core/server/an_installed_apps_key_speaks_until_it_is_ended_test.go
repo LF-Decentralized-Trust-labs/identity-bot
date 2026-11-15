@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -978,6 +979,9 @@ func TestEndingASignInTheOwnerAlreadyEndedDropsItFromTheListAndSaysSo(t *testing
 // for the evidence, and the credential is made from the core's own secret for it.
 func TestTheCoreMakesATPMCredentialOnlyForAnAsksOwnApp(t *testing.T) {
 	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
 	var madeWith []byte
 	inner := makeTPMCredentialFor
 	t.Cleanup(func() { makeTPMCredentialFor = inner })
@@ -1080,5 +1084,31 @@ func TestATPMKeyTheOwnerHasNotAllowedIsRefusedInPlainWordsAndAnAcceptedOneNamesI
 	}
 	if f.EKIssuer != "CN=IFX-KEYID-1" || f.EKClass != "physical" {
 		t.Fatalf("the proof does not say which chip's issuer certified it: %+v", f)
+	}
+}
+
+// Before the TPM is asked to open anything, an owner who has not allowed TPM keys gets the
+// person their sentence, and a virtual TPM's refusal is said as one, not as a certificate fault.
+func TestACredentialIsRefusedInPlainWordsWhenTPMKeysAreNotAllowedOrTheTPMIsVirtual(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	made := 0
+	inner := makeTPMCredentialFor
+	t.Cleanup(func() { makeTPMCredentialFor = inner })
+	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte) (*secureenclave.TPMCredential, error) {
+		made++
+		return nil, fmt.Errorf("%w: %w: certified by MSFT-KEYID-1", secureenclave.ErrNotAttested, secureenclave.ErrVirtualTPM)
+	}
+	ask, _ := iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	_, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, TPMCredentialRequest{})
+	var refused *SignInRefused
+	if !errors.As(err, &refused) || refused.Reason != errTPMKeysNotAllowed.Error() || made != 0 {
+		t.Fatalf("not allowed: %v (the TPM was asked %d times)", err, made)
+	}
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	_, err = iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, TPMCredentialRequest{})
+	if !errors.As(err, &refused) || refused.Reason != errVirtualTPM.Error() || strings.Contains(refused.Reason, "MSFT") {
+		t.Fatalf("virtual: %v", err)
 	}
 }

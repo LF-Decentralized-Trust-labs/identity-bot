@@ -105,6 +105,8 @@ import (
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math/big"
 	"time"
 )
@@ -302,6 +304,10 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 	return leaf, err
 }
 
+// ErrVirtualTPM is the refusal of an endorsement key certified by an issuer of a virtual or
+// cloud TPM (errors.Is), so a caller can tell the person in plain words.
+var ErrVirtualTPM = errors.New("the TPM is a virtual or cloud one")
+
 // TPMClassPhysical is the class of a chip whose endorsement key a pinned physical
 // issuer certified: a discrete chip, a firmware TPM in the CPU, or Pluton. It is the only
 // class accepted. A virtual or cloud TPM (a key the hypervisor operator can read) is refused.
@@ -400,7 +406,7 @@ func physicalIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate) (*E
 		}
 		for _, c := range ch[1:] {
 			if virtual[sha256Hex(c)] {
-				refusal = notAttested("the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", c.Subject.CommonName)
+				refusal = fmt.Errorf("%w: %w: the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", ErrNotAttested, ErrVirtualTPM, c.Subject.CommonName)
 			}
 		}
 		if refusal != nil {
