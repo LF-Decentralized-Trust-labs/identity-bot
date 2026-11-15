@@ -1179,6 +1179,143 @@
         "events": 2
       },
       {
+        "name": "signatures at the witness's own place that do not decode use up none of the allowance",
+        "rid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+        "answers": [
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+                    "cesr_signature": "AACCsulKBrfX3ipujUuYmrq62uT8Z3t-oH4buSfCPPlLKUKkNnOa12nEdBFLMIpG7VgiMCnfzpCkRZtu2fRyI14N"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+                    "cesr_signature": "AAB_MowYBRJJsd8weoUW75yXzvekGNDe-ST8xD-DM6E_FrDS80VRJ83jkcLA-C_qOJhswWXTDCQKCjijBiR5XzAI"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "aid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
+            "kel": [
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiN18iLCJ0IjoiaWNwIiwiZCI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjAiLCJrdCI6IjEiLCJrIjpbIkRJaG0xTTVxcU16OUJzR0tiZHQyY2xwMlBRMlJOYko3X2N3ZlBzNUszWGs3Il0sIm50IjoiMSIsIm4iOlsiRUtMVG9acXRpWE1nZEpycFFreHZXcHktc1MtdXdjdGY3U2p4NkZfVGNYa2giXSwiYnQiOiIyIiwiYiI6WyJCRVJnQlgzUEs4TmdzeTQ2b25lQlo5OE9vZTVBMmJvSk85VmI3XzNuLUZNbiIsIkJKN0pKVmRiV3lObjNETWROckZoQ1l4b3ExUzBpUU53XzF5U1pBVnFISWR4IiwiQkVRODV2WDNCMVhIV2tvZkZRU2tJamVuSE9iM3g2TWdxRlhlQk9mQ1NhX1QiXSwiYyI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACCEvMPvZus8pDQKP0a_UD3YYuXS9cTFv9ZF5goIlUMDRsdifGg4DqiYGS0rVue5JokiH9BlZqg4QVci-YplDAD",
+                "witness_receipts": [
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "ABD7aDiwCTuSypOQcejXt6SE8Sn5pzirsQkbjHgfE1W2BrRcHdoS6hchm1gRyBAp8vLvEoRpS3OdfprXIPmdoykO"
+                  }
+                ]
+              },
+              {
+                "raw_bytes_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDE2MF8iLCJ0Ijoicm90IiwiZCI6IkVNQVFuS1Q3V1d5YnRWazlUcEstWTRGWEFyeFBYSkttbEQxelpkNmlaNGVVIiwiaSI6IkVNbHd6d2tnU1kxdm5GM3ZxU2tkNkMzNnQ2MTFGNTAxaTNKWEdXQTBJR09rIiwicyI6IjEiLCJwIjoiRU1sd3p3a2dTWTF2bkYzdnFTa2Q2QzM2dDYxMUY1MDFpM0pYR1dBMElHT2siLCJrdCI6IjEiLCJrIjpbIkRJTWtEM1hsdGVlYnp5bmF6dkJVNGZvOVJWX2tPN3Q0akNYZUNPY0VDV05rIl0sIm50IjoiMSIsIm4iOlsiRUZQdmlvdkJzV1hzMk9qWmF2S2tWenQtYUJReEdEXzV2VTR6cWI3cm1ZVy0iXSwiYnQiOiIyIiwiYnIiOltdLCJiYSI6W10sImEiOltdfQ==",
+                "cesr_signature": "AACJh5AyWD_dHJ634GGK8LFoC7RyFW_4f7QtY7O2RfyVweLzD__lz3sJz9ZfpcK3E3_87OotHHcL5SmOMvxsrFII",
+                "witness_receipts": [
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "AB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  },
+                  {
+                    "witness": "BJ7JJVdbWyNn3DMdNrFhCYxoq1S0iQNw_1ySZAVqHIdx",
+                    "cesr_signature": "ABB0IesIWXVZS7Ibfuxt4VEsa9dm8KTP8sjgZJnB5TlLp9yDLRGjbRO-TKEr1tQzK3GGk5RrNd1peB7lDu1fzlUJ"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "events": 2
+      },
+      {
         "name": "exactly a threshold of witnesses answers",
         "rid": "EMlwzwkgSY1vnF3vqSkd6C36t611F501i3JXGWA0IGOk",
         "answers": [

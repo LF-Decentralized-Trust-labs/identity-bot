@@ -185,6 +185,8 @@ export async function make() {
   const withReceipts = (chain, fs) => witnessAnswer(chain, chain.events.length, (i, e) => fs.map((f) => f(i, e)));
   const own = (w, index) => (i, e) => w.receipt(e.text, index);
   const notReceipts = (w, index, n) => Array.from({ length: n }, (_, k) => (i, e) => (k % 2 ? { witness: w.aid, cesr_signature: "junk" } : w.receipt(e.text, index === 0 ? 1 : 0)));
+  // A signature at the witness's own index that is not canonical qb64, so it does not decode.
+  const undecodable = (w, index) => (i, e) => ({ witness: w.aid, cesr_signature: "A" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[index] + "!".repeat(86) });
   const case_ = (name, answers, expect, over = {}) => ({ name, rid: over.rid ?? chainW.aid, answers, ...(expect === null ? { refuse: true, ...(over.proven ? { proven: true } : {}) } : { events: expect }) });
   const swapReceipt = (a, i, r) => ({ ...a, kel: a.kel.map((e, j) => (j === i ? { ...e, witness_receipts: [r] } : e)) });
   const rewrite = (a) => ({ ...a, kel: a.kel.map((e, j) => (j === 1 ? { ...e, raw_bytes_b64: Buffer.from(Buffer.from(e.raw_bytes_b64, "base64").toString().replace(/"k":\["D/, '"k":["E')).toString("base64") } : e)) });
@@ -216,6 +218,7 @@ export async function make() {
       case_("a witness that buries its own receipt behind more forged ones than one answer is checked for is not counted", [ans(W[0], 0), withReceipts(chainW, [...forgedOf(W[1], 1, 4), own(W[1], 1)])], null),
       case_("a witness that gives fewer forged ones than that before its own is counted", [ans(W[0], 0), withReceipts(chainW, [...forgedOf(W[1], 1, 3), own(W[1], 1)])], 2),
       case_("receipts that are not worth a check use up none of the allowance", [ans(W[0], 0), withReceipts(chainW, [...notReceipts(W[1], 1, 20), own(W[1], 1)])], 2),
+      case_("signatures at the witness's own place that do not decode use up none of the allowance", [ans(W[0], 0), withReceipts(chainW, [...Array.from({ length: 10 }, () => undecodable(W[1], 1)), own(W[1], 1)])], 2),
       case_("exactly a threshold of witnesses answers", [ans(W[0], 0), ans(W[1], 1)], 2),
       case_("one receipt too few", [ans(W[0], 0)], null),
       case_("a witness that is behind does not hold the others back", [ans(W[0], 0), ans(W[1], 1), ans(W[2], 2, 1)], 2),

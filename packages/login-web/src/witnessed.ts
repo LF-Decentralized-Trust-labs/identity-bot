@@ -157,11 +157,13 @@ async function receiptedThrough(texts: string[], receipts: Map<string, { witness
       const idx = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(r.sig[1]);
       if (idx !== at) continue;
       if (keys.has(r.witness)) continue;
+      // A signature that does not decode has not the shape of a genuine one: it costs nothing and uses up nothing.
+      const raw = decodeMatterRaw(r.sig, r.sig.slice(0, 2), 64);
+      if (!raw) continue;
       const spender = r.src + ":" + r.witness;
       if ((tried.get(spender) ?? 0) >= MAX_RECEIPT_CHECKS_PER_WITNESS) continue;
       tried.set(spender, (tried.get(spender) ?? 0) + 1);
-      const raw = decodeMatterRaw(r.sig, r.sig.slice(0, 2), 64);
-      if (!raw || !(await verifyEd25519(raw, utf8.encode(texts[i]), key))) continue;
+      if (!(await verifyEd25519(raw, utf8.encode(texts[i]), key))) continue;
       keys.add(r.witness);
     }
     if (keys.size < toad) return { through: i, named: designated.length, toad };

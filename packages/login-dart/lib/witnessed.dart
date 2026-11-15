@@ -159,11 +159,14 @@ const _maxReceiptChecksPerWitness = 4;
         continue; // only an indexed receipt counts, as login-web's isIndexedReceipt
       if (_alphabet.indexOf(sig[1]) != at) continue;
       if (keys.contains(witness)) continue;
+      // A signature that does not decode has not the shape of a genuine one: it
+      // costs nothing and uses up nothing.
+      final raw = decodeMatter(sig, sig.substring(0, 2), 64);
+      if (raw == null) continue;
       final spender = '$src:$witness';
       if ((tried[spender] ?? 0) >= _maxReceiptChecksPerWitness) continue;
       tried[spender] = (tried[spender] ?? 0) + 1;
-      final raw = decodeMatter(sig, sig.substring(0, 2), 64);
-      if (raw == null || !ed25519Verify(key, utf8.encode(texts[i]), raw)) {
+      if (!ed25519Verify(key, utf8.encode(texts[i]), raw)) {
         continue;
       }
       keys.add(witness);
