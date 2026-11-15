@@ -288,6 +288,11 @@ class ContactResponse {
   final JCardResponse? jcard;
   final String photo;
 
+  /// What the contact published about itself, unverified: "individual" (a
+  /// person) or "organization". Empty when the contact never said, which is
+  /// neither kind.
+  final String entityType;
+
   ContactResponse({
     required this.aid,
     required this.alias,
@@ -300,7 +305,12 @@ class ContactResponse {
     this.isWitness = false,
     this.jcard,
     this.photo = '',
+    this.entityType = '',
   });
+
+  /// True only for a contact that said it is an organisation; a contact that
+  /// said nothing is not assumed to be either.
+  bool get isOrganisation => entityType == 'organization';
 
   bool get isAccepted => status == 'accepted';
   bool get isPendingInbound => status == 'pending_inbound';
@@ -326,6 +336,7 @@ class ContactResponse {
       isWitness: json['is_witness'] ?? false,
       jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
       photo: json['photo'] ?? '',
+      entityType: json['entity_type'] ?? '',
     );
   }
 }

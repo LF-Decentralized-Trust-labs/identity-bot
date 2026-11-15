@@ -3985,7 +3985,7 @@ func (s *CoreServer) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
-		"contacts": contacts,
+		"contacts": s.viewsOfContacts(contacts),
 		"count":    len(contacts),
 	})
 }
@@ -4007,7 +4007,7 @@ func (s *CoreServer) handleGetContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonreply.Write(w, http.StatusOK, contact)
+	jsonreply.Write(w, http.StatusOK, s.viewOfContact(*contact))
 }
 
 func (s *CoreServer) handleGetContactKEL(w http.ResponseWriter, r *http.Request) {
@@ -4500,7 +4500,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	jsonreply.Write(w, http.StatusCreated, contact)
+	jsonreply.Write(w, http.StatusCreated, s.viewOfContact(contact))
 }
 
 func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
@@ -4658,7 +4658,7 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_category=%s", contact.Alias, aid, contact.ContactCategory)
 
-	jsonreply.Write(w, http.StatusOK, contact)
+	jsonreply.Write(w, http.StatusOK, s.viewOfContact(*contact))
 }
 
 func (s *CoreServer) countWitnesses() int {
@@ -4735,7 +4735,7 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 	notifications := s.unreadNotifications()
 
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
-		"alerts":              contacts,
+		"alerts":              s.viewsOfContacts(contacts),
 		"count":               len(contacts),
 		"pending_requests":    pendingReqs,
 		"pending_count":       len(pendingReqs),
