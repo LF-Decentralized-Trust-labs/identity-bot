@@ -65,7 +65,7 @@ func makeTPMCredential(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, cred
 	if len(credentialKey) < TPMCredentialKeyLen {
 		return nil, notAttested("the attestation was not issued a secret credential key by the core")
 	}
-	if len(ekPublic) > tpmMaxEvidence || len(akPublic) > tpmMaxEvidence {
+	if len(ekPublic) > tpmMaxEvidence || len(akPublic) > tpmMaxEvidence || len(ekCert) > tpmMaxEvidence || len(ekChain) > 8 {
 		return nil, notAttested("a public area is too large")
 	}
 	cert, err := verifyEKCertificate(ekCert, ekChain, roots, now)

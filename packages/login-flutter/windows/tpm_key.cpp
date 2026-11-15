@@ -55,12 +55,15 @@ std::wstring Dir() {
   return dir;
 }
 
+// The file for a name: the hex of its SHA-256, so two names never share one, none is a device
+// name, and nothing the app passes can reach another folder. Empty when there is no folder.
 std::wstring Path(const std::string& name) {
-  std::wstring w;
-  for (char c : name) {  // a label is made of the app's own characters: keep to a safe set
-    w += (isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-') ? static_cast<wchar_t>(c) : L'_';
-  }
-  return Dir() + L"\\" + w + L".blob";
+  std::wstring dir = Dir();
+  if (dir.empty()) return L"";
+  static const wchar_t* hex = L"0123456789abcdef";
+  std::wstring file;
+  for (uint8_t b : tpm2::Sha256(Bytes(name.begin(), name.end()))) { file += hex[b >> 4]; file += hex[b & 15]; }
+  return dir + L"\\" + file + L".blob";
 }
 
 // The key blob is the TPM's (its private part opens only in this TPM, under this storage
@@ -69,15 +72,23 @@ struct DpapiFiles : tpm2::BlobStore {
   bool Put(const std::string& name, const Bytes& v) override {
     DATA_BLOB in{static_cast<DWORD>(v.size()), const_cast<BYTE*>(v.data())}, out{};
     if (!CryptProtectData(&in, L"identity-agent login_flutter key", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return false;
-    HANDLE f = CreateFileW(Path(name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    DWORD wrote = 0;
-    bool ok = f != INVALID_HANDLE_VALUE && WriteFile(f, out.pbData, out.cbData, &wrote, nullptr) && wrote == out.cbData;
-    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    // Written beside and moved over, so a failed write leaves the key already held.
+    std::wstring path = Path(name), tmp = path + L".new";
+    bool ok = !path.empty();
+    if (ok) {
+      HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+      DWORD wrote = 0;
+      ok = f != INVALID_HANDLE_VALUE && WriteFile(f, out.pbData, out.cbData, &wrote, nullptr) && wrote == out.cbData;
+      if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+      ok = ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    }
     LocalFree(out.pbData);
     return ok;
   }
   std::optional<Bytes> Get(const std::string& name) override {
-    HANDLE f = CreateFileW(Path(name).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    std::wstring path = Path(name);
+    if (path.empty()) return std::nullopt;
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return std::nullopt;
     DWORD size = GetFileSize(f, nullptr), got = 0;
     Bytes raw(size == INVALID_FILE_SIZE || size > (1u << 20) ? 0 : size);

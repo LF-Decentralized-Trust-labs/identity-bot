@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -100,7 +101,7 @@ func main() {
 	ek, err := client.EndorsementKeyRSA(sim)
 	must(err, "EK")
 	ekWire, _ := ek.PublicArea().Encode()
-	ekDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "tpmsim EK"},
+	ekDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "tpmsim EK"}, UnknownExtKeyUsage: []asn1.ObjectIdentifier{{2, 23, 133, 8, 1}},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour)}, root, ek.PublicKey(), rootKey)
 	must(err, "EK certificate")
 	ek.Close()

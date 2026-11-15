@@ -102,6 +102,7 @@ import (
 	"crypto/sha512"
 	"crypto/subtle"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/json"
 	"math/big"
 	"time"
@@ -325,8 +326,26 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
 		return nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
 	}
+	// A manufacturer's CA signs other things too (vTPM and device certificates), so a
+	// chain is not enough: the leaf must be an endorsement key certificate, which the TCG
+	// profile marks with its own extended key usage, and it must not be a CA.
+	if leaf.IsCA {
+		return nil, notAttested("the endorsement key certificate is a CA certificate")
+	}
+	hasEKU := false
+	for _, o := range leaf.UnknownExtKeyUsage {
+		if o.Equal(tpmEKCertificateEKU) {
+			hasEKU = true
+		}
+	}
+	if !hasEKU {
+		return nil, notAttested("the certificate is not marked as a TPM endorsement key certificate (2.23.133.8.1)")
+	}
 	return leaf, nil
 }
+
+// tpmEKCertificateEKU is the TCG extended key usage of an endorsement key certificate.
+var tpmEKCertificateEKU = asn1.ObjectIdentifier{2, 23, 133, 8, 1}
 
 // ---- TPM structure parsing (TCG TPM 2.0 Part 2, big-endian) ----
 

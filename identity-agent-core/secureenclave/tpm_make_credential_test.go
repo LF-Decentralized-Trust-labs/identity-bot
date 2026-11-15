@@ -1,9 +1,15 @@
 package secureenclave
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -148,4 +154,39 @@ func mustParse(t *testing.T, der []byte) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// A certificate a manufacturer's CA signed that is not an endorsement key certificate
+// (no TCG usage, or a CA) is refused, though it chains to a pinned root.
+func TestACertificateThatIsNotAnEndorsementKeyCertificateIsRefused(t *testing.T) {
+	v, roots := loadTPMExchange(t, "tpm_credential_exchange_rsa.json")
+	var ev tpmKeyCertifyEvidence
+	if err := json.Unmarshal(v.Evidence, &ev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyEKCertificate(ev.EKCert, nil, roots, v.Now); err != nil {
+		t.Fatalf("a real EK certificate was refused: %v", err)
+	}
+	ca, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rootT := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "r"}, NotBefore: v.Now.Add(-time.Hour),
+		NotAfter: v.Now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	rootDER, _ := x509.CreateCertificate(rand.Reader, rootT, rootT, &ca.PublicKey, ca)
+	root := mustParse(t, rootDER)
+	leaf := func(tmpl *x509.Certificate) []byte {
+		tmpl.SerialNumber, tmpl.Subject = big.NewInt(2), pkix.Name{CommonName: "l"}
+		tmpl.NotBefore, tmpl.NotAfter = v.Now.Add(-time.Hour), v.Now.Add(time.Hour)
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, root, &ca.PublicKey, ca)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return der
+	}
+	for name, der := range map[string][]byte{
+		"no TCG usage": leaf(&x509.Certificate{}),
+		"a CA":         leaf(&x509.Certificate{IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, UnknownExtKeyUsage: []asn1.ObjectIdentifier{{2, 23, 133, 8, 1}}}),
+	} {
+		if _, err := verifyEKCertificate(der, nil, []*x509.Certificate{root}, v.Now); err == nil {
+			t.Errorf("%s: a certificate under a pinned root was taken as an endorsement key's", name)
+		}
+	}
 }

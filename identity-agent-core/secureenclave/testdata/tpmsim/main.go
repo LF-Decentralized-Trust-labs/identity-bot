@@ -27,6 +27,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -74,7 +75,7 @@ func main() {
 	ak, err := client.AttestationKeyRSA(sim)
 	must(err, "AK")
 	defer ak.Close()
-	ekCertTmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "tpmsim endorsement key"},
+	ekCertTmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "tpmsim endorsement key"}, UnknownExtKeyUsage: []asn1.ObjectIdentifier{{2, 23, 133, 8, 1}},
 		NotBefore: now.Add(-24 * time.Hour), NotAfter: now.Add(24 * 365 * time.Hour)}
 	ekDER, err := x509.CreateCertificate(rand.Reader, ekCertTmpl, root, ek.PublicKey(), rootKey)
 	must(err, "EK certificate")

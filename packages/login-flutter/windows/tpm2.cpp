@@ -1,5 +1,6 @@
 #include "tpm2.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -109,7 +110,7 @@ Bytes Sha256(const Bytes& data) {
   auto rotr = [](uint32_t x, int n) { return (x >> n) | (x << (32 - n)); };
   for (size_t off = 0; off < m.size(); off += 64) {
     uint32_t w[64];
-    for (int i = 0; i < 16; i++) w[i] = (m[off + 4 * i] << 24) | (m[off + 4 * i + 1] << 16) | (m[off + 4 * i + 2] << 8) | m[off + 4 * i + 3];
+    for (int i = 0; i < 16; i++) w[i] = (static_cast<uint32_t>(m[off + 4 * i]) << 24) | (static_cast<uint32_t>(m[off + 4 * i + 1]) << 16) | (static_cast<uint32_t>(m[off + 4 * i + 2]) << 8) | m[off + 4 * i + 3];
     for (int i = 16; i < 64; i++) {
       uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
       uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
