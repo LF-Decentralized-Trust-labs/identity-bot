@@ -187,12 +187,8 @@ the asker's nonce, so the answer is fresh and the witness's own. A controller as
 before sending, and sends only what the witness lacks; a witness that has confirmed holding
 the log as far as it goes, by its tip or its receipts, is not asked again until there is
 more to send, or until an hour has passed, so a witness that has fallen behind is noticed
-and filled again; a witness's signed tip is believed as it stands, lower than before too. `GET /witness/ksn/{aid}` answers the same question as KERI asks it: a key state notice, keripy's
-reply `/ksn/{witness}`, naming the witness that signs it (not the identifier asked about) and
-carrying the full key state record of the identifier after its newest event (`vn`, `i`, `s`, `p`, `d`, `f`, `dt`,
-`et`, `kt`, `k`, `nt`, `n`, `bt`, `b`, `c`, `ee`, `di`, with keripy's names), dated and
-signed over its bytes by the witness's own key. For a log that is not held, or that the asker may
-not read, the record names only the identifier, so the two cannot be told apart.
+and filled again; a witness's signed tip is believed as it stands, lower than before too. 
+`GET /witness/ksn/{aid}` answers the same question as KERI asks it: a key state notice, in the form fixed under "The key state notice and a witness's location" below, naming the witness that signs it (not the identifier asked about). For a log that is not held, or that the asker may not read, the record names only the identifier, so the two cannot be told apart. `GET /witness/loc/{witness_aid}` is the witness's own signed statement of where it is reached.
 
 **Which freshness answer is used where.** There are two, and each is used for what it is good for.
 - *The key state notice* is what `witness.Corroborate` asks, because a claim is checked by
@@ -249,17 +245,6 @@ receipts are counted against. A role reply would state again what a signed event
 could only agree with it or disagree, so reading one adds a second source and no authority the
 events do not already have. The location, which an event cannot state, is read.
 
-Where this still departs from keripy, so nobody takes it for more: the notice has keripy's
-envelope, its `/ksn/{witness}` route and its key state record, but it is carried as JSON
-with a detached signature at our own route, not as a CESR-attached reply, so keripy's own
-reactor will not ingest it as it stands. Where keripy gives no reply for an identifier it does
-not hold, the notice is signed all the same with a record naming only the identifier, so a
-stranger cannot tell held from not held. Its freshness is its date within five minutes of now,
-with no nonce from the asker, so a notice recorded just before a rotation can be replayed for
-up to that long (which is why a measurement list is checked with the tip and a nonce). A witness
-that does not serve `/witness/ksn/{aid}` counts as not answering, so a log whose witnesses are
-such services is not corroborated until they do. The witnesses asked are those in force at the
-end of the log, following `br` and `ba`.
 `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
 exactly as its controller published and signed it; the asker checks it extends its own
 key log and is signed by the identity's key before believing it. An event is sent to
@@ -270,8 +255,11 @@ by its caller returning.
 
 Two signed statements a witness makes about itself are defined in the `witnessproto`
 module, so that a witness or watcher outside this core and the core itself build and
-check them with one implementation. No route in the core serves or asks for them yet;
-this fixes their form.
+check them with one implementation. The core serves them (`GET /witness/ksn/{aid}`,
+`GET /witness/loc/{witness_aid}`) and `witness.Corroborate` asks for them: the witnesses it
+asks are those in force at the end of the log, following `br` and `ba`, each found at the
+address its own signed location states, with the registry's address only a hint for where to
+fetch it.
 
 **The key state notice** is KERI's reply `/ksn/{witness}`: the route names the witness
 that signs it, not the identifier it is about, as keripy's does, and the reply carries
@@ -306,6 +294,8 @@ Where this departs from keripy, so nobody takes it for more:
   does this: a notice recorded just before a rotation can be replayed for up to five
   minutes. Where an answer must be made for one question and no other, the nonce-signed
   tip above is the one to ask.
+- **A witness that does not serve `/witness/ksn/{aid}` counts as not answering**, so a log
+  whose witnesses are all such services is not corroborated until they do.
 - **`f` is written equal to `s`.** keripy's `f` is the first-seen ordinal, which differs
   from `s` only after a recovery rotation has superseded events; the record here follows
   one chain.

@@ -759,7 +759,16 @@ func TestALocationIsReadOnlyAsWhatItIs(t *testing.T) {
 	if _, err := witnessproto.VerifyWitnessLocation(reply(w.keys[1], "https://w.example", seed), key); err == nil {
 		t.Fatal("a location for another witness was taken")
 	}
-	if _, err := witnessproto.VerifyWitnessLocation(reply(key, "ftp://w.example", seed), key); err == nil {
+	// The builder will not write an address of another scheme, so a witness that did is written by hand.
+	if _, err := witnessproto.BuildWitnessLocation(key, "ftp://w.example", time.Now()); err == nil {
+		t.Fatal("an address that is not http or https was signed")
+	}
+	ftp, err := keri.EndpointLocation(key, "ftp", "ftp://w.example", witnessproto.ReplyDate(time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ftpSig, _ := login.SignString(string(ftp), seed)
+	if _, err := witnessproto.VerifyWitnessLocation(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(ftp), Signature: ftpSig}, key); err == nil {
 		t.Fatal("an address that is not http or https was taken")
 	}
 	notice, _ := buildNoticeOf(key, "EAid", 1, "ESaid0000000000000000000000000000000000000", time.Now())

@@ -168,7 +168,8 @@ func TestARedirectIsNotFollowed(t *testing.T) {
 func TestASignedLocationThatIsInternalIsNotWentTo(t *testing.T) {
 	w := witnessesOf(1)
 	key, seed := w.keys[0], w.seeds[w.keys[0]]
-	locatedAt := ""
+	// Anything public until the loop below says otherwise: the probe of the hint is answered too.
+	locatedAt := "http://203.0.113.7:8080"
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		raw, err := witnessproto.BuildWitnessLocation(key, locatedAt, time.Now())
 		if err != nil {
