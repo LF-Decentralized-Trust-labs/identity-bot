@@ -83,24 +83,39 @@ class OwnershipChangesInProgress {
   static const _key = 'ownership_changes_in_progress';
   static const _upgraded = 'ownership_changes_readable_after_first_unlock';
   static const _lockKey = 'ownership_changes_lock';
+  static const _beforeUpgrade = 'ownership_changes_before_upgrade';
 
-  /// Rewrites what an earlier version kept under the old setting, once. A read
-  /// that fails (the phone is locked and has not been unlocked since it started)
-  /// leaves it for the next.
+  /// Rewrites what an earlier version kept under the old setting, once, under the
+  /// lease (so a change added at the same moment is not overwritten by the old
+  /// list) and without a moment at which the list exists nowhere: it is written
+  /// to a second key first, and a list found there with none in its place is put
+  /// back. A read that fails (the phone is locked and has not been unlocked since
+  /// it started) leaves it for the next.
   Future<void> _upgradeOnce() async {
     try {
       if (await _storage.read(key: _upgraded) == '1') return;
-      final raw = await _storage.read(key: _key);
-      if (raw != null) {
-        await _storage.delete(key: _key);
-        await _storage.write(key: _key, value: raw);
-      }
-      await _storage.write(key: _upgraded, value: '1');
+      await _exclusively(() async {
+        if (await _storage.read(key: _upgraded) == '1') return;
+        var raw = await _storage.read(key: _key);
+        raw ??= await _storage.read(key: _beforeUpgrade);
+        if (raw != null) {
+          await _storage.write(key: _beforeUpgrade, value: raw);
+          await _storage.delete(key: _key);
+          await _storage.write(key: _key, value: raw);
+          await _storage.delete(key: _beforeUpgrade);
+        }
+        await _storage.write(key: _upgraded, value: '1');
+      });
     } catch (_) {/* looked at again the next time */}
   }
 
   Future<List<AnOwnershipChange>> all() async {
     await _upgradeOnce();
+    return _read();
+  }
+
+  /// The list as it is kept, without the upgrade (callers have made it).
+  Future<List<AnOwnershipChange>> _read() async {
     final raw = await _storage.read(key: _key);
     if (raw == null || raw.isEmpty) return const [];
     try {
@@ -113,11 +128,16 @@ class OwnershipChangesInProgress {
     }
   }
 
-  Future<void> add(AnOwnershipChange change) => _exclusively(() => _change(
-      (all) => [for (final c in all) if (c.token != change.token) c, change]));
+  Future<void> add(AnOwnershipChange change) async {
+    await _upgradeOnce();
+    await _exclusively(() => _change(
+        (all) => [for (final c in all) if (c.token != change.token) c, change]));
+  }
 
-  Future<void> remove(String token) =>
-      _exclusively(() => _change((all) => [for (final c in all) if (c.token != token) c]));
+  Future<void> remove(String token) async {
+    await _upgradeOnce();
+    await _exclusively(() => _change((all) => [for (final c in all) if (c.token != token) c]));
+  }
 
   /// Reads the list, makes [edit] of it, writes it, and reads it back: if what is
   /// there is not what was written, somebody wrote at the same moment (the lease
@@ -125,7 +145,7 @@ class OwnershipChangesInProgress {
   /// to the list that is there now.
   Future<void> _change(List<AnOwnershipChange> Function(List<AnOwnershipChange> all) edit) async {
     for (var i = 0; i < 4; i++) {
-      final written = jsonEncode([for (final c in edit(await all())) c.toJson()]);
+      final written = jsonEncode([for (final c in edit(await _read())) c.toJson()]);
       await _storage.write(key: _key, value: written);
       if (await _storage.read(key: _key) == written) return;
     }
@@ -157,7 +177,11 @@ class OwnershipChangesInProgress {
     } finally {
       if (held) {
         try {
-          await _storage.delete(key: _lockKey);
+          // Only if it is still ours: a lease that ran out and was taken by
+          // another must not be deleted from under them.
+          if ((await _storage.read(key: _lockKey))?.startsWith('$me|') ?? false) {
+            await _storage.delete(key: _lockKey);
+          }
         } catch (_) {/* it expires */}
       }
     }
