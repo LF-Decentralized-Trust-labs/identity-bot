@@ -314,9 +314,9 @@ private-use range or inside an implementation.
   or whose signer has since rotated, names nobody.
 
 ### `t = 6` · `sign_statement`
-- **Summary:** an app asks a person to sign a statement with their own Identity
-  Agent's root key, after reading exactly what it says, so the app can prove the
-  person said it. (Code 5 stays reserved as `issue`; see ADR-021.)
+- **Summary:** a utility app asks a person to sign a statement with their own
+  Identity Agent's root key, after reading exactly what it says, so the utility app
+  can prove the person said it. (Code 5 stays reserved as `issue`; see ADR-021.)
 - **Who mints:** a relying party (a page's organisation Identity Agent, with the
   app's website asset).
 - **Request schema:** `site_aid`, `site_oobi`, `signer_oobi`, `audience`, `nonce`,

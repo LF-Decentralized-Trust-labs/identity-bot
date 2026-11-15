@@ -31,7 +31,7 @@ export function statementWords(v: StatementView): StatementWords {
     case "pointer":
       return {
         title: "Sign on your own device.",
-        body: "Scan this code with the Identity Agent on your phone, or open the Identity Agent app on this computer and paste the link. The statement you are asked to sign is shown below, so you can compare it with what your device shows.",
+        body: "Scan this code with the Identity Agent on your phone, or press Copy link instead and paste the link into the Identity Agent app on this computer. The statement you are asked to sign is shown below, so you can compare it with what your device shows.",
         actions: ["cancel"],
         labels: LABELS,
       };

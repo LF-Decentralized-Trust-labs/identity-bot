@@ -130,11 +130,11 @@ func (signStatementAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, 
 	}, nil
 }
 
-// askerStanding says what this person's own agent knows of whoever asks, in plain words. The name a
+// askerStanding says what this person's own Identity Agent knows of whoever asks, in plain words. The name a
 // page gives is its own, and the signature names the asker's identifier, not the name.
 func askerStanding(known bool) string {
 	if known {
-		return "You have dealt with this asker before."
+		return "You have dealt with this asker before; the name it gives is still its own word."
 	}
 	return "You have never dealt with this asker: the name it gives is its own word."
 }

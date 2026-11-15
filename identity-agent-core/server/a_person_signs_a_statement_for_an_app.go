@@ -358,6 +358,9 @@ func (s *CoreServer) checkStatementAnswer(siteAID, statement string, in statemen
 	if err != nil {
 		return fmt.Errorf("not an Ed25519 signature: %w", err)
 	}
+	// The key in force now, not the key at kel_sn: a rotation between the person's signing and this check
+	// refuses a genuine answer, and the person asks again. The utility app's own check, against the key at
+	// kel_sn in the key history it holds, is the one that decides what the signature is worth.
 	pub, err := s.resolveSignerKey(in.SignerOOBI)
 	if err != nil {
 		return fmt.Errorf("the signer's key: %w", err)

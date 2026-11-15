@@ -1,6 +1,6 @@
 {
  "format": "statement-signature/1",
- "note": "Byte-exact vectors. Statements are UTF-8; line breaks are LF; no trailing newline. Built by the Python task-console and read by the Go core: both must agree on every byte.",
+ "note": "Byte-exact vectors. Statements are UTF-8; line breaks are LF; no trailing newline. Built by a consumer written in Python and read by the Go core: both must agree on every byte.",
  "envelope_header": "statement-signature/1",
  "decision_approvals": [
   {
@@ -22,15 +22,15 @@
    "decision": {
     "id": 1203,
     "title": "Rotate the relay key now, not at the next window",
-    "decided_by": "po-1",
+    "decided_by": "agent-c",
     "impact": "architectural",
     "undo_minutes": 240
    },
-   "statement": "decision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=po-1\nimpact=architectural\nundo-minutes=240\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=agent-c\nimpact=architectural\nundo-minutes=240\nverdict=approve",
    "title_hash": "EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho",
    "envelope_for_asker": {
     "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
-    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=po-1\nimpact=architectural\nundo-minutes=240\nverdict=approve"
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=agent-c\nimpact=architectural\nundo-minutes=240\nverdict=approve"
    }
   },
   {
@@ -51,7 +51,7 @@
  ],
  "disagreements": [
   {
-   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,po-1\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
+   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,agent-c\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
    "subject": {
     "kind": "decision",
     "ref": "7",
@@ -60,7 +60,7 @@
    "correction": "Use the dead-letter queue",
    "addressed": [
     "agent-a",
-    "po-1"
+    "agent-c"
    ]
   }
  ],
@@ -72,7 +72,7 @@
   },
   {
    "name": "disagreement",
-   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,po-1\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
+   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,agent-c\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
    "header": "disagreement/1"
   },
   {

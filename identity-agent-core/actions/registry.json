@@ -106,7 +106,7 @@
       "code": 6,
       "key": "sign_statement",
       "name": "Sign a statement",
-      "summary": "An app asks a person to sign a statement with their own Identity Agent's root key, after reading exactly what it says, so the app can prove the person said it. Code 5 stays reserved as issue (ADR-021).",
+      "summary": "A utility app asks a person to sign a statement with their own Identity Agent's root key, after reading exactly what it says, so the utility app can prove the person said it. Code 5 stays reserved as issue (ADR-021).",
       "who_mints": "relying_party",
       "status": "active",
       "version": "1.0",

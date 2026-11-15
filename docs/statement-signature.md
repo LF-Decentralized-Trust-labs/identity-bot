@@ -1,6 +1,6 @@
 # Statement signature (v1)
 
-An app's signed-in page can ask a person to sign a statement with their own Identity Agent (Ask action 6, `sign_statement`, see
+A utility app's signed-in page can ask a person to sign a statement with their own Identity Agent (Ask action 6, `sign_statement`, see
 [action-code-registry.md](action-code-registry.md) and [ADR-080](adr/080-a-person-signs-a-statement-an-app-hands-them-with-their-own-identity-agent.md)).
 This is the format of the statement, of the bytes that are signed, and of the rules the person's Identity Agent
 applies before it shows or signs anything. Anyone who builds such a statement or verifies such a signature needs it,
@@ -30,7 +30,7 @@ ends with a line break, one whose first line is not a header.
 
 The asker's identifier is the site identifier of the Ask the person answered, so a signature made for one verifier is
 refused by another. The signature is Ed25519 over those bytes by the signer's root key in force, written as a CESR
-indexed signature (code `AA`, 88 characters).
+indexed signature (derivation code `A`, index 0, so it begins `AA`; 88 characters).
 
 A verifier holding the signer's key history takes the key at the sequence number `kel_sn` that came with the signature
 (the sequence number of the latest establishment event, interaction events counted), requires it to be at or after the
