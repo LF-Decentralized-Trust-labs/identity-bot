@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"identity-agent-core/limits"
 	"sync"
 
@@ -251,3 +253,19 @@ func (h hostWrapper) ResolveBearerToken(r *http.Request, token string, cc permis
 	return h.s.resolveBearerToken(r, token, cc)
 }
 func (hostWrapper) BearerFrom(r *http.Request) string { return bearerFrom(r) }
+
+// ReviveAssetIdentity revives the stored asset's identity, read from the store so
+// an add-on cannot revive one under a name or state the store does not hold.
+func (h hostWrapper) ReviveAssetIdentity(assetID string) error {
+	if h.s.assetHandler == nil {
+		return errors.New("assets are unavailable")
+	}
+	a, ok, err := h.s.assetHandler.Store.GetAsset(assetID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no asset %s", assetID)
+	}
+	return h.s.reviveAssetIdentity(a)
+}
