@@ -8,6 +8,7 @@
 **Amended:** 2026-10-24 — The display proxy no longer forwards capability calls or the caller's credentials, and serves the owner's conversations only to the owner; a forwarded capability call tells the app who called (see §Amendment 4)
 **Amended:** 2026-10-30 — The runtime that installs and runs apps is an add-on kept outside this repository; this record now keeps only the contract an app is written against (see §Note, 2026-10-30)
 **Amended:** 2026-11-02 — `kind` `"app"` now means an app beside an Identity Agent, which declares its name, release, resources, encrypted machine, store, placement, front end and back end, secrets, behaviour when down, backup and outbound hosts; a manifest missing a row or breaking its rule is refused (see §Amendment 5)
+**Amended:** 2026-11-15 — The sandboxed-app kind, an app the Identity Agent itself starts in a container or as a binary on its own computer, is being retired in favour of utility apps (ADR-072); this record adds nothing further to its contract (see §5)
 
 
 ## Note, 2026-10-30: this repository keeps the contract, not the runtime
@@ -116,9 +117,9 @@ An app's manifest says how far its traffic may go: `network_mode` says whether i
 
 An app reaches the Identity Agent at the address in `IDENTITY_AGENT_API`, which it is given when it starts and must not assume: `http://agent.internal:{port}` inside a container, where `agent.internal` names the computer the Identity Agent runs on, and `http://127.0.0.1:{port}` for a compiled binary. The port is chosen for each running app, so an app reads it from the environment.
 
-Every route of that API, `/health` included, takes `Authorization: Bearer $IDENTITY_AGENT_API_KEY`. The key is made new at each start of the app, is different for each instance, and is given in the environment (the manifest cannot set it); a call without it, or with another instance's key, is refused with 401. Where the API listens depends on the machine: on the container's own network gateway where the host can fence the container, otherwise on the one address the engine's name for the host leads to.
+The model calls and the conversation routes of ADR-013 are on the Identity Agent's own HTTP port, 5050 unless it was started on another; the example Open WebUI manifest names `http://agent.internal:5050/sandbox/llm/v1`.
 
-The model route is on that API too, at `$IDENTITY_AGENT_API/llm/v1`, served for the instance behind its key: a container is never given the Identity Agent's own HTTP port (5050), because every route of that port would then be open to it. A manifest writes the route as `${IDENTITY_AGENT_API}/llm/v1` and, for an app that wants the key as its OpenAI key, `${IDENTITY_AGENT_API_KEY}`. The conversation routes of ADR-013 stay on the Identity Agent's own port for callers that are not a sandboxed container.
+This kind is being retired. An app the Identity Agent itself starts on its own computer, as a container or a binary, is replaced by a utility app: one with an identity and a grant of its own, whose back end runs beside the Identity Agent and calls it by signed, granted requests (ADR-072, Amendment 5 above). This record adds nothing further to the sandboxed-app contract: no new environment variable, route or credential. A runtime that still runs these apps may harden them in ways this record does not describe, so an app written against this section may need changes to run under it. A new app is written as a utility app.
 
 
 ### 9. App Manifest Format

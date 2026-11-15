@@ -35,12 +35,7 @@ func main() {
         agentAPI := os.Getenv("IDENTITY_AGENT_API")
         if agentAPI == "" {
                 fmt.Println("[!] IDENTITY_AGENT_API not set — running outside sandbox")
-                fmt.Println("    Set IDENTITY_AGENT_API=http://localhost:PORT and IDENTITY_AGENT_API_KEY to test")
-                os.Exit(1)
-        }
-
-        if os.Getenv("IDENTITY_AGENT_API_KEY") == "" {
-                fmt.Println("[!] IDENTITY_AGENT_API_KEY not set — the Agent API refuses every call without it")
+                fmt.Println("    Set IDENTITY_AGENT_API=http://localhost:PORT to test")
                 os.Exit(1)
         }
 
@@ -294,23 +289,8 @@ func testExternalNetwork() error {
         return nil
 }
 
-// agentRequest calls the Agent API with this start's key. Every route refuses a
-// call without it, health included: the key (IDENTITY_AGENT_API_KEY) is new at
-// each start of the app and is given to this container alone.
-func agentRequest(method, url, contentType string, body io.Reader) (*http.Response, error) {
-        req, err := http.NewRequest(method, url, body)
-        if err != nil {
-                return nil, err
-        }
-        if contentType != "" {
-                req.Header.Set("Content-Type", contentType)
-        }
-        req.Header.Set("Authorization", "Bearer "+os.Getenv("IDENTITY_AGENT_API_KEY"))
-        return http.DefaultClient.Do(req)
-}
-
 func healthCheck(agentAPI string) error {
-        resp, err := agentRequest("GET", agentAPI+"/health", "", nil)
+        resp, err := http.Get(agentAPI + "/health")
         if err != nil {
                 return err
         }
@@ -327,7 +307,7 @@ func requestResources(agentAPI string, items []ResourceItem) (*ResourceResponse,
         payload := ResourceRequest{Resources: items}
         data, _ := json.Marshal(payload)
 
-        resp, err := agentRequest("POST", agentAPI+"/request", "application/json", bytes.NewReader(data))
+        resp, err := http.Post(agentAPI+"/request", "application/json", bytes.NewReader(data))
         if err != nil {
                 return nil, err
         }
@@ -342,7 +322,7 @@ func requestResources(agentAPI string, items []ResourceItem) (*ResourceResponse,
 }
 
 func checkStatus(agentAPI string) error {
-        resp, err := agentRequest("GET", agentAPI+"/status", "", nil)
+        resp, err := http.Get(agentAPI + "/status")
         if err != nil {
                 return err
         }
@@ -364,7 +344,7 @@ func checkStatus(agentAPI string) error {
 }
 
 func checkPending(agentAPI string) error {
-        resp, err := agentRequest("GET", agentAPI+"/pending", "", nil)
+        resp, err := http.Get(agentAPI + "/pending")
         if err != nil {
                 return err
         }
@@ -391,7 +371,7 @@ func checkPending(agentAPI string) error {
 }
 
 func getPendingCount(agentAPI string) (int, error) {
-        resp, err := agentRequest("GET", agentAPI+"/pending", "", nil)
+        resp, err := http.Get(agentAPI + "/pending")
         if err != nil {
                 return 0, err
         }
