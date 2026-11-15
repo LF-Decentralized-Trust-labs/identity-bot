@@ -15,6 +15,15 @@ import (
 )
 
 func (s *CoreServer) initAssetHandler() error {
+	// One handler, so one asset store, for the life of the server. The routes
+	// are mounted on the handler made at start; a second handler would hold its
+	// own copy of assets.json, invisible to those routes, and each save of
+	// either would write its stale list over the other's. The handler keeps the
+	// key engine it was made with, so anything that replaces s.KeriDriver later
+	// must set the handler's too.
+	if s.assetHandler != nil {
+		return nil
+	}
 	h, err := asset.NewHandler(s.DataDir, s.KeriDriver)
 	if err != nil {
 		// No handler is made over a store that could not be read, and the
