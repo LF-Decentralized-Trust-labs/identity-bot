@@ -121,7 +121,7 @@ func TestAPresentedLogWithoutBytesIsNotCorroborated(t *testing.T) {
 // A witness that cannot name the event it holds, only a copy with no digest,
 // cannot sign a notice that says it, so it is not asked successfully and holds
 // nothing.
-func TestAWitnessCopyWithNoDigestIsBehindNotHeld(t *testing.T) {
+func TestAWitnessThatCannotNameTheEventItHoldsIsNotHeld(t *testing.T) {
 	w := newStandInWitness(t)
 	w.held["EFresh"] = []map[string]interface{}{{"t": "icp", "i": "EFresh", "s": "0", "b": []interface{}{w.key}}}
 	got := agentWithNoIdentity(t).askTheWitnesses("EFresh", freshClaim(w))

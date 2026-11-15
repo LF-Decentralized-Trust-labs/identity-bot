@@ -11,8 +11,8 @@ func TestAnEventWithoutADigestHasNoIdentifier(t *testing.T) {
 	if got := eventSAID(a); got != "" {
 		t.Fatalf("an event with no d was given the identifier %q", got)
 	}
-	if eventSAID(a) != eventSAID(b) || eventSAID(a) != "" {
-		t.Fatal("same-length events without d must both be unidentified, not share an invented one")
+	if got := eventSAID(b); got != "" {
+		t.Fatalf("a same-length event with no d was given the identifier %q", got)
 	}
 	if got := eventSAID(map[string]interface{}{"d": "EReal"}); got != "EReal" {
 		t.Fatalf("an event's own digest was not used: %q", got)

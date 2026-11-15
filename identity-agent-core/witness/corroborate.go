@@ -157,8 +157,7 @@ func WitnessKeysIn(kel []map[string]interface{}) []string {
 	return out
 }
 
-// Corroborate checks a presented log against the witnesses its inception
-// designates, each found by its designated key (pool is the registry of
+// Corroborate checks a presented log against the witnesses in force at its end, each found by its designated key (pool is the registry of
 // witness operators: BootstrapPool() in the Identity Agent, or the registry a
 // verifier loads, and gives only a place to start looking). client may be nil.
 //
@@ -167,7 +166,32 @@ func WitnessKeysIn(kel []map[string]interface{}) []string {
 // which is a different answer from refuted; the caller decides what to do about
 // it. Conflating the two would make every network fault look like an attack.
 func Corroborate(client *http.Client, pool []BootstrapWitness, ownerAID string, presented []map[string]interface{}) Corroboration {
-	return CorroborateThrough(client, pool, ownerAID, presented, WitnessKeysIn(presented))
+	return CorroborateThrough(client, pool, ownerAID, presented, WitnessKeysInForce(presented))
+}
+
+// WitnessKeysInForce reads the witness keys in force at the end of a presented
+// log: the inception's, changed by each rotation's cuts and adds (br, ba). These
+// are the witnesses to ask now, and the ones whose answers the threshold of the
+// last establishment event counts. A log whose witness list cannot be followed
+// to its end falls back to the inception's.
+func WitnessKeysInForce(presented []map[string]interface{}) []string {
+	rebuilt, ok := drivers.RecordsFromVerifiedBytes(presented)
+	if !ok || len(rebuilt) == 0 {
+		return WitnessKeysIn(presented)
+	}
+	in, ok := drivers.ValidateKELInputFromRecords("", rebuilt)
+	if !ok {
+		return WitnessKeysIn(presented)
+	}
+	var held []string
+	for _, raw := range in.RawEvents {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return WitnessKeysIn(presented)
+		}
+		held, _ = drivers.WitnessesAfter(held, ev)
+	}
+	return held
 }
 
 // CorroborateThrough is Corroborate for a caller that has worked out which

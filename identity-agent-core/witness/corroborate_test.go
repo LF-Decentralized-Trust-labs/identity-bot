@@ -593,3 +593,58 @@ func TestTheNoticeAWitnessServesIsTheOneTheCheckerReads(t *testing.T) {
 		t.Fatalf("the served location was not read as served: %v %+v", err, got)
 	}
 }
+
+// After a rotation that cuts a witness and adds another, the witnesses to ask
+// are the ones in force at the end, not the inception's: the cut one holds
+// less, and must not stand in the way of a log its replacement and the other
+// witness hold.
+func TestAfterARotationTheWitnessesInForceAreTheOnesAsked(t *testing.T) {
+	w := witnessesOf(3) // 0 and 1 at inception; the rotation cuts 1 and adds 2
+	toad := 2
+	gen := func() keri.Signer { s, _ := keri.GenerateSigner(true); return s }
+	k0, k1, k2 := gen(), gen(), gen()
+	icp, err := keri.BuildInception(keri.InceptionInput{Keys: []string{pub(t, k0)},
+		NextDigests: []string{digest(t, k1)}, Witnesses: w.keys[:2], Toad: &toad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ie := parsed(t, icp)
+	rot, err := keri.BuildRotation(keri.RotationInput{Prefix: ie.Identifier, PriorSAID: ie.SAID, SN: 1,
+		Keys: []string{pub(t, k1)}, NextDigests: []string{digest(t, k2)},
+		PriorWitnesses: w.keys[:2], Cuts: []string{w.keys[1]}, Adds: []string{w.keys[2]}, Toad: &toad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &witnessedLog{w: w, toad: toad}
+	l.prefix = ie.Identifier
+	l.saids = []string{ie.SAID, parsed(t, rot).SAID}
+	l.records = []map[string]interface{}{
+		record(icp, signAt(t, k0, icp, keri.SamePlace(0))),
+		record(rot, signAt(t, k1, rot, keri.SamePlace(0))),
+	}
+	// Inception: witnesses 0 and 1 (places 0, 1). Rotation: 0 and 2 (places 0, 1).
+	l.receipt(t, 0, 0)
+	l.receipt(t, 0, 1)
+	for i, at := range []int{0, 2} {
+		key := w.keys[at]
+		sig, err := drivers.SignEventReceipt(mustRawOf(l.records[1]), w.seeds[key], i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.records[1]["witness_receipts"] = append(asList(l.records[1]["witness_receipts"]),
+			map[string]interface{}{"witness": key, "cesr_signature": sig})
+	}
+	if got := WitnessKeysInForce(l.records); len(got) != 2 || got[0] != w.keys[0] || got[1] != w.keys[2] {
+		t.Fatalf("the witnesses in force at the end were read as %v", got)
+	}
+	ws := l.witnessesHolding(t)
+	pool := []BootstrapWitness{
+		{AID: w.keys[0], WitnessKey: w.keys[0], URL: ws[0].srv.URL},
+		{AID: w.keys[2], WitnessKey: w.keys[2], URL: ws[2].srv.URL},
+	}
+	ws[1].sn, ws[1].said = 0, l.saids[0] // the cut witness holds less, and is not asked
+	got := Corroborate(nil, pool, l.prefix, l.records)
+	if !got.Corroborated() || got.Designated != 2 {
+		t.Fatalf("a rotated log held by the witnesses in force did not corroborate: %+v", got)
+	}
+}
