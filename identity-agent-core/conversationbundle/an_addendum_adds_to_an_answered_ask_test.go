@@ -67,4 +67,26 @@ func TestAnAddendumAddsToAnAnsweredAsk(t *testing.T) {
 			t.Errorf("%s: want one fault containing %q, got %v", name, c.want, f)
 		}
 	}
+
+	// Nothing answers an addendum: a reply, a failure or a progress note
+	// naming one is refused. A receipt may acknowledge it, and the one it went
+	// to may act on it as on any message given to them, by asking something new.
+	answeredAdded := append(append([]agentmessage.Record{}, answeredAI...), addendum("m-add", "m-ask", "agent-b", "agent-a"))
+	for name, rec := range map[string]agentmessage.Record{
+		"a reply":         {MessageID: "m-x", Kind: agentmessage.KindReply, From: "agent-a", To: "agent-b", InReplyTo: "m-add"},
+		"a failure":       {MessageID: "m-x", Kind: agentmessage.KindFailure, From: "agent-a", To: "agent-b", InReplyTo: "m-add"},
+		"a progress note": {MessageID: "m-x", Kind: agentmessage.KindProgress, From: "agent-a", To: "agent-b", InReplyTo: "m-add"},
+	} {
+		if f := run(answeredAdded, rec, false); len(f) != 1 {
+			t.Errorf("%s naming an addendum: want it refused with one fault, got %v", name, f)
+		}
+	}
+	for name, rec := range map[string]agentmessage.Record{
+		"a receipt": {MessageID: "m-r", Kind: agentmessage.KindReceipt, From: "agent-a", To: "agent-b", InReplyTo: "m-add"},
+		"a new ask": {MessageID: "m-n", Kind: agentmessage.KindAsk, From: "agent-a", To: "agent-c", InReplyTo: "m-add"},
+	} {
+		if f := run(answeredAdded, rec, false); len(f) != 0 {
+			t.Errorf("%s acting on an addendum was refused: %v", name, f)
+		}
+	}
 }
