@@ -223,6 +223,27 @@ func TestAnEndorsementKeyUnderAnIssuerGoCannotReadIsAccepted(t *testing.T) {
 	}
 }
 
+// A front end sends the issuers its TPM carries, the one crypto/x509 will not read among them.
+// That certificate is passed over, and the chain is still accepted through the pinned copy.
+func TestAnUnreadableIssuerTheFrontEndSendsIsPassedOver(t *testing.T) {
+	c := newLenientChain(t)
+	withIssuers(t, nil, nil)
+	withLenient(t, c.issuer)
+	leaf := c.leaf(t, c.issuerKey, c.now.Add(time.Hour), true)
+	_, iss, err := verifyEKCertificateIssuer(leaf, [][]byte{c.issuer.Raw}, []*x509.Certificate{c.root}, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iss.Class != TPMClassPhysical {
+		t.Fatalf("issuer = %+v", iss)
+	}
+	// Sent but not pinned, it is still not trusted.
+	withLenient(t)
+	if _, _, err := verifyEKCertificateIssuer(leaf, [][]byte{c.issuer.Raw}, []*x509.Certificate{c.root}, c.now); err == nil {
+		t.Fatal("an unpinned issuer the front end sent was trusted")
+	}
+}
+
 // Each thing the chain check rests on, taken away in turn, is refused.
 func TestAnIssuerGoCannotReadIsHeldToTheSameChainRules(t *testing.T) {
 	c := newLenientChain(t)

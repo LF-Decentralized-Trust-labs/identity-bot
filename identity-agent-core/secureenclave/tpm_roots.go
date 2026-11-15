@@ -67,7 +67,10 @@ func pinnedTPMCerts(fsys fs.FS, dir string) []*x509.Certificate {
 
 func pinnedLenientTPMCerts(fsys fs.FS, dir string) []*tpmcert.Certificate {
 	var out []*tpmcert.Certificate
-	entries, _ := fs.ReadDir(fsys, dir)
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		panic(dir + ": " + err.Error())
+	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pem") {
 			continue

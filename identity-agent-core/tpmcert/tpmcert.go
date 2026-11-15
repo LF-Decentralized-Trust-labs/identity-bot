@@ -9,7 +9,9 @@
 // Parse accepts that one irregularity and nothing else: the serial is taken as the
 // opaque INTEGER it is (this package never uses it), and every other field is read as
 // strictly as crypto/x509 would, or refused. It is for certificates that are pinned by
-// the SHA-256 of their bytes: the pin is what makes one trusted, never the parse.
+// the SHA-256 of their bytes: the pin is what makes one trusted, never the parse. It does
+// not check what building a chain would (key usage, name constraints, path length), so a
+// caller checks the pin before calling Parse and never passes it a certificate it received.
 package tpmcert
 
 import (

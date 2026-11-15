@@ -340,7 +340,10 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 	for _, c := range chain {
 		ic, err := x509.ParseCertificate(c)
 		if err != nil {
-			return nil, nil, notAttested("an issuer certificate: %v", err)
+			// A front end sends the issuers its TPM carries, among them the ones crypto/x509
+			// will not read. Such a certificate cannot help build a chain and is trusted only
+			// if it is pinned (tpm_lenient.go), so it is passed over, not refused.
+			continue
 		}
 		inter.AddCert(ic)
 	}
