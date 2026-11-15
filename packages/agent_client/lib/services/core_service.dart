@@ -3492,6 +3492,10 @@ class OwnerCeremony {
   /// or "rot2".
   final String stage;
 
+  /// When the rotation being signed was prepared, so a screen can say how long it
+  /// has been waiting. Null before there is one.
+  final DateTime? stageSince;
+
   const OwnerCeremony({
     required this.id,
     this.threshold = 0,
@@ -3501,6 +3505,7 @@ class OwnerCeremony {
     this.rotationSaid = '',
     this.handOver = false,
     this.stage = '',
+    this.stageSince,
   });
 
   bool get isCollecting => status == 'collecting';
@@ -3529,8 +3534,14 @@ class OwnerCeremony {
         rotationSaid: json['rotation_said'] ?? '',
         handOver: json['hand_over'] == true,
         stage: json['stage'] ?? '',
+        stageSince: _timeOrNull(json['stage_since']),
       );
 }
+
+/// A time the Identity Agent wrote, or null where it wrote none (or something
+/// that is not one): an unset time is left out of its answers, not written as
+/// the year 1.
+DateTime? _timeOrNull(Object? v) => v is String && v.isNotEmpty ? DateTime.tryParse(v) : null;
 
 /// One person being brought in as an owner.
 class CeremonyInvitee {
@@ -3549,6 +3560,13 @@ class CeremonyInvitee {
   /// The rotation ("rot1" or "rot2") this person's device last signed.
   final String signedStage;
 
+  /// When their invite's code was last used to read the ceremony, or null if it
+  /// has not been. It shows the code was used, which is not the same as the
+  /// person having opened the Identity Agent app and seen anything: the routes are reached by
+  /// the code alone, which travels in the invite link. Say "a look was recorded",
+  /// never "they saw it".
+  final DateTime? lastSeenAt;
+
   const CeremonyInvitee({
     this.name = '',
     this.inviteUrl = '',
@@ -3556,6 +3574,7 @@ class CeremonyInvitee {
     this.publicKey = '',
     this.acceptedAt = '',
     this.signedStage = '',
+    this.lastSeenAt,
   });
 
   bool get accepted => pairwiseAid.isNotEmpty && publicKey.isNotEmpty;
@@ -3567,6 +3586,7 @@ class CeremonyInvitee {
         publicKey: json['public_key'] ?? '',
         acceptedAt: json['accepted_at'] ?? '',
         signedStage: json['signed_stage'] ?? '',
+        lastSeenAt: _timeOrNull(json['last_seen_at']),
       );
 }
 

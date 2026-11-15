@@ -70,6 +70,10 @@ type OwnerCeremony struct {
 	// and a second, signed by them alone, reveals those keys, after which this
 	// Identity Agent holds no key of the identity and derives none.
 	HandOver bool `json:"hand_over,omitempty"`
+	// StageSince is when the rotation being signed now was prepared, so the person
+	// who started the ceremony can be told how long it has been waiting for
+	// signatures. Empty before there is one.
+	StageSince *time.Time `json:"stage_since,omitempty"`
 	// Stage, PendingRawB64 and PendingSAID are the rotation being signed now:
 	// "rot1" or "rot2", the event's bytes as the invited owners' devices are
 	// shown them, and its digest. Empty until everybody has accepted.
@@ -131,6 +135,15 @@ type CeremonyInvitee struct {
 	// are asked for only in a hand-over.
 	AfterNextPublicKey         string `json:"after_next_public_key,omitempty"`
 	AfterNextPostQuantumDigest string `json:"after_next_post_quantum_digest,omitempty"`
+	// LastSeenAt is when this owner's invite code was last used on the routes a
+	// device reads the ceremony from. It is proof the code was used, not that the
+	// person opened the Identity Agent app and saw anything: those routes are public and reached
+	// by the code alone, and the code travels in the invite link, so whoever has
+	// the link can make it move. The screen says "a look was recorded" and no
+	// more. It is kept only while the ceremony is under way (saveCeremony drops it
+	// when the ceremony is made, stopped or has failed), so it is never a lasting
+	// log of when a person used their phone.
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 	// SignedStage is the rotation ("rot1" or "rot2") this owner's device last
 	// signed, so who is still to sign can be shown.
 	SignedStage string `json:"signed_stage,omitempty"`
@@ -232,6 +245,13 @@ func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
 		if t := stored.Invited[i].Token; t != "" {
 			stored.Invited[i].TokenDigest = enrolsecret.Digest(t)
 			stored.Invited[i].Token = ""
+		}
+	}
+	// A ceremony that is over keeps no record of when anybody looked at it.
+	switch stored.Status {
+	case ceremonyApplied, ceremonyFailed, ceremonyAbandoned:
+		for i := range stored.Invited {
+			stored.Invited[i].LastSeenAt = nil
 		}
 	}
 	raw, err := json.MarshalIndent(&stored, "", "  ")
@@ -341,4 +361,38 @@ func (s *CoreServer) finishCeremony(status, detail, rotationSAID string) error {
 		c.AppliedAt = time.Now().UTC()
 	}
 	return s.saveCeremony(c)
+}
+
+// ceremonyNow is the time the ceremony reads, a variable so a test can move it.
+var ceremonyNow = time.Now
+
+// aLookIsRecordedAfter is how long a recorded look stands before the next is
+// written, so a phone that asks every few seconds does not rewrite the record
+// every few seconds.
+const aLookIsRecordedAfter = time.Minute
+
+// noteALook records that the invite code token was used to read the ceremony,
+// against the person it belongs to, if it belongs to one and the ceremony is
+// under way. It never fails the read it is part of. Callers hold ceremonyMu.
+func (s *CoreServer) noteALook(token string) {
+	if token == "" {
+		return
+	}
+	c, err := s.loadCeremony()
+	if err != nil || c == nil || (c.Status != ceremonyCollecting && c.Status != ceremonySigning) {
+		return
+	}
+	for i := range c.Invited {
+		inv := &c.Invited[i]
+		if inv.TokenDigest == "" || !enrolsecret.Equal(token, inv.TokenDigest) {
+			continue
+		}
+		now := ceremonyNow().UTC()
+		if inv.LastSeenAt != nil && now.Sub(*inv.LastSeenAt) < aLookIsRecordedAfter {
+			return
+		}
+		inv.LastSeenAt = &now
+		_ = s.saveCeremony(c)
+		return
+	}
 }

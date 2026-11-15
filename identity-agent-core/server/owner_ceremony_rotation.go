@@ -275,6 +275,8 @@ func (s *CoreServer) prepareCeremonyStage(c *OwnerCeremony, stage string) error 
 		return fmt.Errorf("the rotation could not be prepared: %w", err)
 	}
 	c.Stage, c.PendingRawB64, c.PendingSAID, c.Status = stage, base64.StdEncoding.EncodeToString(p.Raw), p.Hint.D, ceremonySigning
+	since := ceremonyNow().UTC()
+	c.StageSince = &since
 	if stage == stageFirst {
 		// The first rotation is signed by the identity's own key too, which is
 		// held here or the ceremony does not start (mayRotateHere).
@@ -330,6 +332,7 @@ func (s *CoreServer) ceremonyForToken(token string) (*OwnerCeremony, *CeremonyIn
 func (s *CoreServer) handleCeremonyEvent(w http.ResponseWriter, r *http.Request) {
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
+	s.noteALook(chi.URLParam(r, "token"))
 	c, _, code, err := s.ceremonyForToken(chi.URLParam(r, "token"))
 	if err != nil {
 		writeError(w, code, "Nothing to sign", err.Error())
@@ -366,6 +369,7 @@ func (s *CoreServer) handleCeremonyTerms(w http.ResponseWriter, r *http.Request)
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
 	token := chi.URLParam(r, "token")
+	s.noteALook(token)
 	c, _, code, err := s.ceremonyForToken(token)
 	if err != nil {
 		// Not signing yet, or over: an owner's device that is waiting needs to tell
