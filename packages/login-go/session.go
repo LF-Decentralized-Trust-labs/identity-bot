@@ -32,6 +32,10 @@ type StartRequest struct {
 	// FrontEnd is FrontEndBrowser or FrontEndInstalledApp, for a utility app's
 	// sign-in. Left empty for a website asset.
 	FrontEnd string
+	// InstalledAppKey is the hardware's evidence for the key, for an installed
+	// front end's sign-in (FrontEndInstalledApp). The Identity Agent verifies it;
+	// a back end carries it on unread.
+	InstalledAppKey *InstalledKeyProof
 }
 
 // Started is a sign-in the Identity Agent has begun.

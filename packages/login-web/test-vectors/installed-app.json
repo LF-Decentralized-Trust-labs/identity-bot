@@ -1,0 +1,66 @@
+{
+ "statement": [
+  {
+   "name": "one",
+   "asset_id": "Eapp0123456789",
+   "challenge_b64u": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+   "thumbprint": "t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo",
+   "text": "identity-agent installed-app sign-in v1\nEapp0123456789\nZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM\nt1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo",
+   "sha256_hex": "c22ed02f031f1c41cb3c753df6f9d8d22106b290b0b3326d0d68f7f44ec51c96"
+  }
+ ],
+ "thumbprint": [
+  {
+   "x": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+   "y": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+   "thumbprint": "t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo"
+  }
+ ],
+ "starts": [
+  {
+   "name": "an installed app with its proof",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "expect": "installed_app"
+  },
+  {
+   "name": "a browser without a proof",
+   "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"}}",
+   "expect": "browser"
+  },
+  {
+   "name": "an installed app without a proof",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"}}",
+   "refuse": "needs the hardware"
+  },
+  {
+   "name": "a browser with a proof",
+   "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "carries no hardware proof"
+  },
+  {
+   "name": "a platform that cannot vouch",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"linux\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "cannot vouch"
+  },
+  {
+   "name": "a key that is not the one named",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "not the key given"
+  },
+  {
+   "name": "a kind that is neither",
+   "body": "{\"frontEnd\":\"desktop\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "does not say which front end"
+  },
+  {
+   "name": "a field it should not have",
+   "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"extra\":1}",
+   "refuse": "not readable"
+  },
+  {
+   "name": "a proof with no evidence",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "needs the hardware"
+  }
+ ]
+}
