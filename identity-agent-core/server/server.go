@@ -101,6 +101,8 @@ type CoreServer struct {
 	// grantPushClient, when set, sends grant-ended notices instead of the client that
 	// dials public addresses only (a test reaches a relay on this machine).
 	grantPushClient *http.Client
+	// grantBackoff, when set, is the wait before each notice attempt instead of grantEndedBackoff.
+	grantBackoff []time.Duration
 	// relayGen counts relay starts. A start that a newer one has overtaken
 	// (the settings changed while it was enrolling) installs nothing.
 	relayGen int

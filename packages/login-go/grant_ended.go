@@ -88,7 +88,9 @@ func VerifyGrantEnded(body []byte, asset string, siteKey ed25519.PublicKey, now 
 
 // GrantEndedHandler serves GrantEndedPath for a back end. end is told each
 // verified notice and ends every session and app-key grant held for that person
-// at that key, answering how many it ended; it must be safe to call twice for the
+// at that key that was begun at or before GrantEnded.Issued (never one begun after
+// it: a repeated or late notice must not end the session of a person who signed
+// in again), answering how many it ended; it must be safe to call twice for the
 // same notice. siteKey gives the app's current asset key. A notice that does not
 // check is answered 403 and ends nothing.
 func GrantEndedHandler(asset string, siteKey func(context.Context) (ed25519.PublicKey, error),

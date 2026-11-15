@@ -43,8 +43,15 @@ import (
 
 const grantEndedPath = "/identity-agent/grant-ended"
 
-// grantEndedBackoff is the wait before each attempt. A variable so a test need not wait.
+// grantEndedBackoff is the wait before each attempt; a CoreServer's own list stands in for it in a test.
 var grantEndedBackoff = []time.Duration{0, 2 * time.Second, 10 * time.Second, 60 * time.Second}
+
+// grantEndedAtOnce bounds how many back ends are being told at once, so an owner
+// switching a front end off for many grants, or an app with many, cannot start
+// that many outbound calls to addresses the app chose.
+const grantEndedAtOnce = 16
+
+var grantEndedSlots = make(chan struct{}, grantEndedAtOnce)
 
 // grantEndedNotice is the wire body, held to login-go's GrantEnded.
 type grantEndedNotice struct {
@@ -89,12 +96,41 @@ func refusePrivate(_, address string, _ syscall.RawConn) error {
 		return err
 	}
 	ip := net.ParseIP(host)
-	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+	if ip == nil {
+		return fmt.Errorf("%s is not an address", host)
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsUnspecified() || ip.IsMulticast() {
 		return fmt.Errorf("%s is not a public address", host)
 	}
+	for _, n := range notPublic {
+		if n.Contains(ip) {
+			return fmt.Errorf("%s is not a public address", host)
+		}
+	}
 	return nil
 }
+
+// notPublic are the ranges the standard library's predicates leave out: the
+// "this network" block, carrier-grade NAT, the protocol and benchmarking blocks,
+// the reserved block, and the IPv6 forms that carry an IPv4 address inside
+// (NAT64, 6to4, the compatible and mapped-in-6 forms), any of which can reach a
+// private network behind a translator.
+var notPublic = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15",
+		"198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "::/96", "100::/64", "2001:db8::/32"} {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, n)
+	}
+	return out
+}()
 
 // grantPushHTTP is the client a notice is sent with: the one a test gives, or one
 // that dials public addresses only, follows no redirect and gives up in ten seconds.
@@ -116,7 +152,11 @@ func (s *CoreServer) tellBackEndsGrantsEnded(gone []browserKeyRecord) {
 		if r.Push == "" {
 			continue
 		}
-		go s.tellBackEnd(r)
+		go func(r browserKeyRecord) {
+			grantEndedSlots <- struct{}{}
+			defer func() { <-grantEndedSlots }()
+			s.tellBackEnd(r)
+		}(r)
 	}
 }
 
@@ -131,6 +171,7 @@ func (s *CoreServer) tellBackEnd(r browserKeyRecord) {
 	}
 	a, found, err := s.assetHandler.Store.GetAsset(r.Asset)
 	if err != nil || !found || a.PairwiseAID == "" {
+		log.Printf("[identity-agent-core] not telling the back end of %s its grant ended: the app is gone or has no identifier", r.Asset)
 		return
 	}
 	seed, err := asset.AssetSigningSeed(s.DataDir, a.SigningIndex)
@@ -143,11 +184,22 @@ func (s *CoreServer) tellBackEnd(r browserKeyRecord) {
 		ctx = context.Background()
 	}
 	var last error
-	for _, wait := range grantEndedBackoff {
+	backoff := s.grantBackoff
+	if backoff == nil {
+		backoff = grantEndedBackoff
+	}
+	for i, wait := range backoff {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
+		}
+		// A key that has been given a grant again since is not ended: a retry made
+		// after the person signed in again must not end the new session.
+		if i > 0 {
+			if _, speaks := s.browserKeys().Get(r.Asset, r.Thumbprint, time.Now()); speaks {
+				return
+			}
 		}
 		// Signed afresh each time, so a late attempt is not refused as stale.
 		body, _ := json.Marshal(signGrantEnded(seed, a.PairwiseAID, r.Thumbprint, r.Person, time.Now()))

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -44,7 +45,9 @@ type aBackEnd struct {
 	refused  atomic.Int32
 	// unavailable is how many notices the back end answers 503 before it takes one: a back end mid-restart.
 	unavailable atomic.Int32
-	m           *relay.Manager
+	// refuse answers every notice 403, as a back end that will not take it does.
+	refuse atomic.Bool
+	m      *relay.Manager
 }
 
 func (b *aBackEnd) sessionFor(key string) (string, bool) {
@@ -62,6 +65,10 @@ func (b *aBackEnd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	b.got.Add(1)
 	if b.unavailable.Add(-1) >= 0 {
 		http.Error(w, "restarting", http.StatusServiceUnavailable)
+		return
+	}
+	if b.refuse.Load() {
+		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
 	raw, _ := io.ReadAll(io.LimitReader(r.Body, 4097))
@@ -261,9 +268,7 @@ func TestOnlyTheEndedKeysSessionEnds(t *testing.T) {
 
 func TestABackEndThatCannotTakeTheNoticeYetIsToldAgain(t *testing.T) {
 	w := aPushedWorld(t)
-	old := grantEndedBackoff
-	grantEndedBackoff = []time.Duration{0, 50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
-	t.Cleanup(func() { grantEndedBackoff = old })
+	w.org.grantBackoff = []time.Duration{0, 50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
 	addr := startBackEnd(t, w.rl, w.be)
 	w.signIn(t, addr)
 	w.be.unavailable.Store(2) // the first two attempts meet a back end that is restarting
@@ -276,22 +281,78 @@ func TestABackEndThatCannotTakeTheNoticeYetIsToldAgain(t *testing.T) {
 	}
 }
 
-func TestABrowsersEndingAndAGrantRecordedWithNoAddressSendNothing(t *testing.T) {
+func TestAGrantWithNoAddressAndAFrontEndThatIsNotInstalledSendNothing(t *testing.T) {
 	w := aPushedWorld(t)
-	addr := startBackEnd(t, w.rl, w.be)
-	// An installed grant recorded without an address (as one made before this existed).
-	if err := w.org.browserKeys().RecordAppKey("the-website", "Eperson", w.key, time.Now(), nil, installedAppFact{}); err != nil {
+	startBackEnd(t, w.rl, w.be)
+	bk := w.org.browserKeys()
+	// An installed grant recorded without an address, as one made before this existed.
+	if err := bk.RecordAppKey("the-website", "Eperson", w.key, time.Now(), nil, installedAppFact{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.org.browserKeys().Record("the-website", "Eperson", aBrowserKey, time.Now().Add(time.Hour), time.Now(), nil); err != nil {
+	// A browser's record that somehow carries an address: only an installed app's grant is pushed.
+	if err := bk.recordWith("the-website", "Eperson", aBrowserKey, login.FrontEndBrowser, time.Now().Add(time.Hour), time.Now(), nil, nil, w.be.m.URL()); err != nil {
 		t.Fatal(err)
 	}
-	_ = addr
-	w.org.browserKeys().End("the-website", w.key, "")
-	w.org.browserKeys().End("the-website", aBrowserKey, "")
+	bk.End("the-website", w.key, "")
+	bk.End("the-website", aBrowserKey, "")
 	time.Sleep(300 * time.Millisecond)
 	if w.be.got.Load() != 0 {
-		t.Fatalf("%d notices were sent for grants with no address to send to", w.be.got.Load())
+		t.Fatalf("%d notices were sent for grants that are not an installed app's with an address", w.be.got.Load())
+	}
+}
+
+func TestARetryDoesNotEndAGrantThePersonHasSinceSignedInAgain(t *testing.T) {
+	w := aPushedWorld(t)
+	w.org.grantBackoff = []time.Duration{0, 400 * time.Millisecond}
+	addr := startBackEnd(t, w.rl, w.be)
+	w.signIn(t, addr)
+	w.be.unavailable.Store(1) // the first attempt fails, so a retry is waiting
+	if _, err := w.org.browserKeys().End("the-website", w.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the first attempt", func() bool { return w.be.got.Load() >= 1 })
+	w.signIn(t, addr) // the same key signs in again and the back end has a new session
+	time.Sleep(900 * time.Millisecond)
+	if w.be.got.Load() != 1 {
+		t.Fatalf("the retry was sent after the key spoke again (%d attempts)", w.be.got.Load())
+	}
+	if _, ok := w.be.sessionFor(w.key); !ok {
+		t.Fatal("a late retry ended the new session")
+	}
+}
+
+func TestANoticeTheBackEndRefusesIsNotRepeated(t *testing.T) {
+	w := aPushedWorld(t)
+	w.org.grantBackoff = []time.Duration{0, 50 * time.Millisecond, 50 * time.Millisecond}
+	addr := startBackEnd(t, w.rl, w.be)
+	w.signIn(t, addr)
+	w.be.refuse.Store(true)
+	if _, err := w.org.browserKeys().End("the-website", w.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the notice", func() bool { return w.be.got.Load() >= 1 })
+	time.Sleep(400 * time.Millisecond)
+	if w.be.got.Load() != 1 {
+		t.Fatalf("a 403 was answered with %d attempts", w.be.got.Load())
+	}
+}
+
+// The client the core uses unless a test gives one: it will not dial a machine
+// of this host's, and it does not follow a redirect to one.
+func TestTheCoreOwnClientDoesNotReachThisMachineOrFollowARedirect(t *testing.T) {
+	var hit atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit.Add(1) }))
+	defer srv.Close()
+	s := &CoreServer{}
+	c := s.grantPushHTTP()
+	if _, err := c.Post(srv.URL+"/identity-agent/grant-ended", "application/json", strings.NewReader("{}")); err == nil {
+		t.Fatal("the core dialled a loopback address")
+	}
+	if hit.Load() != 0 {
+		t.Fatal("a request reached a loopback server")
+	}
+	if err := c.CheckRedirect(nil, nil); err != http.ErrUseLastResponse {
+		t.Fatalf("a redirect would be followed: %v", err)
 	}
 }
 
@@ -351,7 +412,8 @@ func TestTheCoreCallsOnlyAPublicHttpsOrigin(t *testing.T) {
 	if o, err := pushOrigin("https://app.example:8443/"); err != nil || o != "https://app.example:8443" {
 		t.Errorf("a good origin: %q %v", o, err)
 	}
-	for _, bad := range []string{"127.0.0.1:443", "10.0.0.5:443", "192.168.1.1:443", "169.254.169.254:80", "[::1]:443", "0.0.0.0:80", "[fe80::1]:443"} {
+	for _, bad := range []string{"127.0.0.1:443", "10.0.0.5:443", "192.168.1.1:443", "169.254.169.254:80", "[::1]:443", "0.0.0.0:80", "[fe80::1]:443",
+		"100.64.0.1:443", "198.18.0.1:443", "240.0.0.1:443", "[64:ff9b::a00:5]:443", "[2002:a00:5::]:443", "[::ffff:10.0.0.5]:443", "example.com:443"} {
 		if refusePrivate("tcp", bad, nil) == nil {
 			t.Errorf("a dial to %s was allowed", bad)
 		}
