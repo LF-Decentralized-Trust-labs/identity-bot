@@ -26,7 +26,7 @@ class LoginFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val (point, evidence) = HardwareKey.attestNewKey(label, call.argument<ByteArray>("challenge")!!)
                     result.success(mapOf("point" to point, "evidence" to evidence))
                 }
-                "signCall" -> result.success(HardwareKey.sign(label, call.argument<ByteArray>("message")!!))
+                "signCall" -> result.success(HardwareKey.signCall(label, call.argument<ByteArray>("message")!!))
                 "signStatement" -> result.success(HardwareKey.signStatement(label, call.argument<ByteArray>("digest")!!))
                 else -> result.notImplemented()
             }
