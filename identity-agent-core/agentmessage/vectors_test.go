@@ -333,6 +333,8 @@ func writeMessageVectors(t *testing.T) {
 		HostNonce: "nonce-receipt-00000001", HostTime: "2026-10-20T12:00:02Z", BodyCredential: "EBODYCRED"}
 	progress := Statement{Conversation: "c_vector", Kind: KindProgress, From: "EAGENT_B", To: "EAGENT_A", InReplyTo: "m_ask",
 		Brain: brain, HostNonce: "nonce-progress-000001", HostTime: "2026-10-20T11:59:50Z", BodyCredential: "EBODYCRED"}
+	addendum := Statement{Conversation: "c_vector", Kind: KindAddendum, From: "EAGENT_B", To: "EAGENT_A", InReplyTo: "m_ask",
+		Brain: brain, HostNonce: "nonce-addendum-00001", HostTime: "2026-10-20T12:05:00Z", BodyCredential: "EBODYCRED"}
 	// The one who opened a conversation closes it, reopens it, or raises its
 	// limit. These address nobody and act on no message; the limit's words are
 	// the new limit.
@@ -353,6 +355,7 @@ func writeMessageVectors(t *testing.T) {
 		{Name: "an ask", Statement: ask, Body: "Which operating system are you on?"},
 		{Name: "a receipt, with no brain", Statement: receipt, Body: ""},
 		{Name: "a progress note, which is not the answer", Statement: progress, Body: "Half the files read; no problems so far."},
+		{Name: "an addendum to an answer already given, which owes no answer", Statement: addendum, Body: "The last file has finished reading; still no problems."},
 		{Name: "a close, by the one who opened the conversation, addressed to nobody", Statement: closeNote, Body: ""},
 		{Name: "a reopen", Statement: reopenNote, Body: ""},
 		{Name: "a raise of the turn limit, whose words are the new limit", Statement: limitNote, Body: "80"},

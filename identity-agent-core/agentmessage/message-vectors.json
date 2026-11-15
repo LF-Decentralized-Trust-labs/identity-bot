@@ -141,6 +141,30 @@
       "signature": "0BBAiZKmcMx6g6M_gc3lPjK4lt8DAxsvVnnTvsTrD0eQn212ImHCex2OMm6LNM4Urw1zA77B6fCk0SMvc0GYl-gB"
     },
     {
+      "name": "an addendum to an answer already given, which owes no answer",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "addendum",
+        "from": "EAGENT_B",
+        "to": "EAGENT_A",
+        "in_reply_to": "m_ask",
+        "body_hash": "EAWQY8CStJ363gr4H5uxdgdwjuTPhNzBUuhVZN8sE5tb",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-1",
+          "run_hash": "Erun"
+        },
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-addendum-00001",
+        "host_time": "2026-10-20T12:05:00Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "The last file has finished reading; still no problems.",
+      "signed": "IA-AGENT-MSG-V1\nc_vector\naddendum\nEAGENT_B\nEAGENT_A\nm_ask\nEAWQY8CStJ363gr4H5uxdgdwjuTPhNzBUuhVZN8sE5tb\nexample-harness\nexample-model\ns-1\nErun\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-addendum-00001\n2026-10-20T12:05:00Z\nEBODYCRED",
+      "signature": "0BAdg1_VcszQVzHxJ93gJv8HTQMwbCMogUXymtfpejbNCAXFcTXaBnBflEhiLQsAtbKtB7FZh3Y77fcUCtD71rUO"
+    },
+    {
       "name": "a close, by the one who opened the conversation, addressed to nobody",
       "statement": {
         "conversation": "c_vector",
