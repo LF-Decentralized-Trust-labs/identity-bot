@@ -77,44 +77,6 @@ type statementAsk struct {
 	result      statementResult
 }
 
-// maxStatementBody bounds what a page sends to start a statement Ask.
-const maxStatementBody = 16 << 10
-
-// startStatementAsk is the public create route's answer to {action: 6, statement, title}: a page of the
-// asset's own origin asks, and is given a pointer and the secret that releases the answer.
-func (s *CoreServer) startStatementAsk(w http.ResponseWriter, r *http.Request, assetID, statement, title string) {
-	askedFrom := r.Header.Get("Origin")
-	if askedFrom == "" {
-		http.Error(w, "a statement is asked for from a web page", http.StatusBadRequest)
-		return
-	}
-	found, audience, code, msg := s.assetThatMaySign(assetID, "", askedFrom)
-	if code != 0 {
-		http.Error(w, msg, code)
-		return
-	}
-	if _, code, why := refuseFrontEnd(*found, "", "", true, false); code != 0 {
-		http.Error(w, why, code)
-		return
-	}
-	started, err := s.mintStatementAsk(found, audience, statement, title, s.getPublicURL(r))
-	if err != nil {
-		var refused *SignInRefused
-		if errors.As(err, &refused) {
-			http.Error(w, refused.Reason, refused.Code)
-			return
-		}
-		http.Error(w, "could not start a statement", http.StatusInternalServerError)
-		return
-	}
-	jsonreply.Write(w, http.StatusOK, map[string]string{
-		"session_token":   started.Session,
-		"relay_or_qr_url": started.Pointer,
-		// Held by the page that started this and by nothing else; required to read the answer.
-		"collector_secret": started.Collector,
-	})
-}
-
 // StatementAsk is a statement asked of a person, as whoever started it is given it.
 type StatementAsk struct {
 	// Pointer is what the person's Identity Agent opens to fetch the Ask.
@@ -248,7 +210,7 @@ type StatementAskResult struct {
 // the same secret as the signature: anybody who photographs the screen holds the token and may learn
 // the state, and only the holder of the collector secret is given the signature, once. ok is false for
 // an Ask that is not there or is not the asset's.
-func (s *CoreServer) readStatementAsk(siteOrAssetOK func(*statementAsk) bool, token, offered string) (StatementAskResult, bool) {
+func (s *CoreServer) readStatementAsk(siteOrAssetOK func(*statementAsk) bool, token, offered string, needSecret bool) (StatementAskResult, bool) {
 	s.statementMu.Lock()
 	defer s.statementMu.Unlock()
 	a, ok := s.statementAsks[token]
@@ -257,6 +219,9 @@ func (s *CoreServer) readStatementAsk(siteOrAssetOK func(*statementAsk) bool, to
 	}
 	sum := sha256.Sum256([]byte(offered))
 	held := offered != "" && subtle.ConstantTimeCompare(sum[:], a.collector[:]) == 1
+	if needSecret && !held {
+		return StatementAskResult{}, false
+	}
 	out := StatementAskResult{State: "pending"}
 	switch {
 	case a.done && (a.released || !held):
@@ -279,45 +244,17 @@ func (s *CoreServer) readStatementAsk(siteOrAssetOK func(*statementAsk) bool, to
 }
 
 // StatementAskResultFor is readStatementAsk for an add-on: only the asset the Ask was started as may
-// read it, and a wrong secret reads as the same answer as no such Ask, so a guess learns nothing. The
-// state of an Ask is told only with the secret.
+// read it, and a wrong secret reads as the same answer as no such Ask, so a guess learns nothing. Nothing
+// is released, and nothing marked released, unless the secret is the collector's.
 func (s *CoreServer) StatementAskResultFor(siteAID, session, collector string) (StatementAskResult, error) {
-	res, ok := s.readStatementAsk(func(a *statementAsk) bool { return a.siteAID == siteAID }, session, collector)
-	if !ok || collector == "" {
+	if collector == "" {
 		return StatementAskResult{}, errors.New("no such statement")
 	}
-	s.statementMu.Lock()
-	a := s.statementAsks[session]
-	sum := sha256.Sum256([]byte(collector))
-	held := subtle.ConstantTimeCompare(sum[:], a.collector[:]) == 1
-	s.statementMu.Unlock()
-	if !held {
+	res, ok := s.readStatementAsk(func(a *statementAsk) bool { return a.siteAID == siteAID }, session, collector, true)
+	if !ok {
 		return StatementAskResult{}, errors.New("no such statement")
 	}
 	return res, nil
-}
-
-// writeStatementStatus answers a page's poll for a statement Ask (the SDK's session read).
-func (s *CoreServer) writeStatementStatus(w http.ResponseWriter, r *http.Request, assetID, token string) bool {
-	res, ok := s.readStatementAsk(func(a *statementAsk) bool { return a.assetID == assetID }, token, r.Header.Get("X-Collector-Secret"))
-	if !ok {
-		return false
-	}
-	resp := map[string]interface{}{"state": res.State}
-	if res.State == "pending" {
-		resp["state"] = "connecting"
-	}
-	if res.Withheld {
-		resp["identity_withheld"] = true
-	}
-	if res.Signature != "" {
-		resp["signature"], resp["signer_aid"], resp["kel_sn"] = res.Signature, res.SignerAID, res.KelSN
-	}
-	if res.LastRefusal != "" {
-		resp["last_refusal"] = res.LastRefusal
-	}
-	jsonreply.Write(w, http.StatusOK, resp)
-	return true
 }
 
 type statementAnswer struct {

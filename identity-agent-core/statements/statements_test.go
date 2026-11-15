@@ -1,7 +1,11 @@
 package statements
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
+
 	"encoding/json"
+	"identity-agent-core/iacrypto"
 	"os"
 	"strings"
 	"testing"
@@ -33,6 +37,13 @@ type vectors struct {
 		Because   string `json:"refused_because"`
 	} `json:"refused"`
 	TitleOK []struct{ Statement, Title string } `json:"title_ok"`
+	Sig     struct {
+		Seed, Asker, Statement string
+		SeedHex                string `json:"seed_hex"`
+		PublicKeyHex           string `json:"public_key_hex"`
+		SignatureHex           string `json:"signature_hex"`
+		SignatureQB64          string `json:"signature_qb64"`
+	} `json:"signature_vector"`
 }
 
 func load(t *testing.T) vectors {
@@ -120,5 +131,28 @@ func TestTheEnvelopeNamesTheAskerSoASignatureForOneVerifierIsNotAnothers(t *test
 	}
 	if !strings.HasPrefix(string(a), "statement-signature/1\nasker: EAAAA\n\nmy-note/1") || strings.HasPrefix(string(a), "{") {
 		t.Fatalf("%q", a)
+	}
+}
+
+// The signature the Identity Agent makes is the bytes in the vector, so a verifier in any language that
+// rebuilds the envelope checks the same signature (the console's Python does, from the same file).
+func TestTheSignatureOfTheEnvelopeIsTheVectorsByteForByte(t *testing.T) {
+	v := load(t).Sig
+	seed, _ := hex.DecodeString(v.SeedHex)
+	env, err := Envelope(v.Asker, v.Statement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := ed25519.NewKeyFromSeed(seed)
+	if hex.EncodeToString(key.Public().(ed25519.PublicKey)) != v.PublicKeyHex {
+		t.Fatal("the vector's key is not its seed's")
+	}
+	raw := ed25519.Sign(key, env)
+	if hex.EncodeToString(raw) != v.SignatureHex {
+		t.Fatalf("signature %x, vector says %s", raw, v.SignatureHex)
+	}
+	q, err := iacrypto.MatterIndexedSigQB64("A", 0, raw, 88)
+	if err != nil || q != v.SignatureQB64 {
+		t.Fatalf("spelling %q (%v), vector says %q", q, err, v.SignatureQB64)
 	}
 }

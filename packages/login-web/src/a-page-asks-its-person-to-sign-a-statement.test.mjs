@@ -82,18 +82,18 @@ const statement = "grape-decision-approval/1\ndecision=7";
   assert.equal(w("error").body, "why");
 }
 
-// declined: said so, offers Try again; a late approval on the same code still signs
+// declined: said so, offers Try again, which asks for a new code that can be signed
 {
-  let polls = 0;
+  let started = 0;
   const fn = backEnd((m, p) => {
-    if (m === "POST") return { status: 200, json: { id: "s1", pointer: "https://org.example/i/abc" } };
-    polls++;
-    return { status: 200, json: polls === 1 ? { state: "declined" } : { state: "verified", ...TRIPLE } };
+    if (m === "POST") return { status: 200, json: { id: "s" + ++started, pointer: "https://org.example/i/" + started } };
+    return { status: 200, json: p.endsWith("s1") ? { state: "declined" } : { state: "verified", ...TRIPLE } };
   });
   const sc = screen();
-  const open1 = open(fn, sc, { sleep: async () => { if (sc.views.at(-1)?.state === "declined" && sc.views.length < 10) sc.press("again"); } });
-  assert.deepEqual(await open1.signStatement(statement), TRIPLE);
-  assert.deepEqual(sc.views.map((v) => v.state), ["pointer", "declined", "waiting", "signed"]);
+  const s = open(fn, sc, { sleep: async () => { if (sc.views.at(-1)?.state === "declined") sc.press("again"); } });
+  assert.deepEqual(await s.signStatement(statement), TRIPLE);
+  assert.equal(started, 2, "Try again made a new request");
+  assert.deepEqual(sc.views.map((v) => v.state), ["pointer", "declined", "pointer", "signed"]);
 }
 
 // declined and then closed: nothing signed, rejected with the reason
@@ -161,21 +161,3 @@ for (const [status, json, want] of [[403, {}, /not been given the right/], [400,
 }
 
 console.log("a page asks its person to sign a statement");
-
-// A page with no back end asks at the Identity Agent's own session route (action 6) and reads the same three fields.
-{
-  const { startPageSession, readPageSession } = await import("../dist/pageSession.js");
-  const seen = [];
-  const fetchFn = async (url, init) => {
-    seen.push({ url: String(url), init });
-    return init?.method === "POST"
-      ? Response.json({ session_token: "t", relay_or_qr_url: "https://org/i/t", collector_secret: "sec" })
-      : Response.json({ state: "verified", signature: "AAsig", signer_aid: "EOwner", kel_sn: 5 });
-  };
-  const s = await startPageSession({ sessionEndpoint: "https://org/api/login/session/site", body: { action: 6, statement: "n/1\nx" }, fetchFn });
-  assert.deepEqual(JSON.parse(seen[0].init.body), { action: 6, statement: "n/1\nx" });
-  const r = await readPageSession({ sessionEndpoint: "https://org/api/login/session/site", sessionToken: s.sessionToken, collectorSecret: s.collectorSecret, fetchFn });
-  assert.deepEqual([r.state, r.signature, r.signerAid, r.kelSn], ["verified", "AAsig", "EOwner", 5]);
-  assert.equal(seen[1].init.headers["X-Collector-Secret"], "sec");
-}
-console.log("and a page with no back end reads the signature");

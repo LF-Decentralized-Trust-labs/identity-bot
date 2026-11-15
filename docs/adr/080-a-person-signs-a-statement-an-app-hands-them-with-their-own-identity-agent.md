@@ -16,18 +16,14 @@ made with the key that is theirs, after they read the exact words on their own d
 
 ## Decision
 
-1. **A new action, 6 (`sign_statement`).** Code 5 stays reserved as `issue` (ADR-021). The app's page starts the Ask on
-   its website asset (`POST /api/login/session/{asset_id}` with `{action: 6, statement, title?}`), is shown a pointer to
-   put in front of the person, and reads the answer with the secret only it was given, once. The page is given
-   `{signature, signer_aid, kel_sn}` and nothing else.
+1. **A new action, 6 (`sign_statement`).** Code 5 stays reserved as `issue` (ADR-021). A signed-in page calls `session.signStatement(text, {title?})` on the login SDK's session. The SDK asks the app's own back end (`POST /session/statement`, with the session and the browser key's proof, like every call), which has the organisation's Identity Agent start the Ask as the app. The back end keeps the secret that releases the answer; the page is shown a pointer and a wait screen the SDK owns, reads the state (`GET /session/statement/{id}`), and is handed `{signature, signer_aid, kel_sn}` once, only by the session that asked. The Identity Agent's public sign-in route does not start a statement: there a page's `Origin` header is the only proof of who asks, and a script can set it.
 2. **The person's Identity Agent signs.** Scanned or pasted, the Ask is fetched, the asker is verified from its key
    log, the statement is checked, and the person sees it exactly, who is asking, and chooses. On yes the device signs the
    envelope in [statement-signature.md](../statement-signature.md) with the root key in force and posts it to the asker.
    A device that does not hold the root key says so in plain words and offers nothing to sign.
 3. **The format is open** with byte-exact vectors, so anyone who builds a statement or checks a signature gets the same
    bytes (`identity-agent-core/statements`).
-4. **Who may start one:** only a website asset whose organisation Identity Agent has granted it
-   the capability `app.statement.ask`, held to that one app, on a page of the asset's own origin.
+4. **Who may start one:** only an app whose grant holds the capability `app.statement.ask` (held to that one app, approved by the owner on their device), through its back end for a signed-in session. The person's own Identity Agent cannot check the grant (it is the asker's), so it treats every asker as unproven beyond its identifier.
 
 ## Trust model
 
@@ -59,6 +55,8 @@ after their Identity Agent showed them the statement and they chose to.
 - Replays are bounded by the app, not the envelope: a statement says what it is for, and an app counts an identical
   re-posted signature once.
 - The asker's half is in memory only. An Identity Agent that restarts forgets an open request, and the page offers to ask again.
+- Anyone who can fetch the pointer (it is public at `/i/{token}`) can post an answer with a valid signature of their own key, and so end the wait with a signature the app will refuse; the person then asks again. The asker cannot tell whose signature is whose, so this is a limit, not a defence.
+- Any signed-in session of an app may start one; whether it should be only the owner's is the app's to decide (a follow-up).
 - A decline is advisory: it is told to the page so it can say so, and only a signature settles the request.
 - A person with their root key on a phone, and an Ask opened on a computer that does not hold it, must open it on the phone.
-  A queue the phone fulfils later (`signing_requests`) is separate work.
+  The phone signs too (the core's handler is in every build, not an add-on), by the supervisor's ruling of 2026-11-15 under the rule that a capability lands on every platform it applies to; Rob's question stays open. A queue the phone fulfils later (`signing_requests`) is separate work.

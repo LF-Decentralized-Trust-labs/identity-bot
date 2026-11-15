@@ -1105,8 +1105,9 @@ async function askStatement(
         throw new StatementNotSigned("cancelled", "You closed the request. Nothing was signed.");
       }
       if (action === "again") {
-        // Try again with the same code while it is open: the device may still approve it.
         action = null;
+        // After a no, Try again asks for a new code: the old one would only be declined again.
+        if (shown === "declined") break;
         say({ state: "waiting", pointer: ask.pointer, statement: text }, actions);
         shown = "waiting";
       }

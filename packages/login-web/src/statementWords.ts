@@ -54,7 +54,7 @@ export function statementWords(v: StatementView): StatementWords {
     case "declined":
       return {
         title: "You declined on your device.",
-        body: "Nothing was signed.",
+        body: "Nothing was signed. Try again to get a new code.",
         actions: ["again", "cancel"],
         labels: { ...LABELS, cancel: "Close" },
       };

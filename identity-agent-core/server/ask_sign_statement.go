@@ -71,6 +71,12 @@ func (s *CoreServer) readSignStatement(ctx AskContext) (signStatementPayload, st
 	if signerAID != p.SiteAID {
 		return p, statements.Shown{}, "", errors.New("this request was not signed by the site it names")
 	}
+	// The signature goes where the Ask was served from, and the Ask is public at its pointer: it is
+	// answered only at the host of the site that signed it, so a genuine Ask served again from
+	// somewhere else collects nothing.
+	if !sameOOBIHost(ctx.Base, p.SiteOOBI) {
+		return p, statements.Shown{}, "", errors.New("this request was not served from the site that signed it")
+	}
 	if err := login.CheckExpiry(p.Expiry, time.Now()); err != nil {
 		return p, statements.Shown{}, "", err
 	}
@@ -113,7 +119,7 @@ func (signStatementAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, 
 	}
 	return GenericPreview{
 		T: ActionSignStatement, Action: "sign_statement", Title: "Sign a statement",
-		Subtitle:         "Asked by " + origin,
+		Subtitle:         "Asked by " + origin + ", identifier " + shortSAID(p.SiteAID),
 		Counterparty:     p.SiteAID,
 		CounterpartyName: origin,
 		Statement: &PreviewStatement{

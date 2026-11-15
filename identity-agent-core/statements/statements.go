@@ -102,6 +102,13 @@ func hidden(r rune) bool {
 		return true
 	case r == 0x200E || r == 0x200F || r == 0x061C:
 		return true
+	// Format, private-use and unassigned characters, and those that take no space or fill one with
+	// nothing: a person cannot see them, so they could carry what they do not read.
+	case unicode.In(r, unicode.Cf, unicode.Co, unicode.Cs, unicode.Variation_Selector), !unicode.IsPrint(r) && r != ' ':
+		return true
+	case r == 0x034F, r >= 0x180B && r <= 0x180E, r == 0x115F, r == 0x1160, r == 0x3164, r == 0xFFA0,
+		r == 0x2800, r == 0xFFFC, r == 0x17B4, r == 0x17B5, r >= 0xE0100 && r <= 0xE01EF:
+		return true
 	case r >= 0x200B && r <= 0x200D, r == 0x2060, r == 0xFEFF, r >= 0xFFF9 && r <= 0xFFFB:
 		return true
 	}

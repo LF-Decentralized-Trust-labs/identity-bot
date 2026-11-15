@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -65,51 +66,39 @@ type startedStatement struct {
 	Body                   string
 }
 
-func (w *aStatementWorld) start(t *testing.T, origin, statement, title string) startedStatement {
+func (w *aStatementWorld) start(t *testing.T, audience, statement, title string) startedStatement {
 	t.Helper()
-	body, _ := json.Marshal(map[string]any{"action": 6, "statement": statement, "title": title})
-	req, _ := http.NewRequest("POST", w.askerURL+"/api/login/session/the-website", bytes.NewReader(body))
-	if origin != "" {
-		req.Header.Set("Origin", origin)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	a, err := w.asker.org.StartStatementAsk("the-website", audience, statement, title, w.askerURL)
 	if err != nil {
-		t.Fatal(err)
+		var refused *SignInRefused
+		code := http.StatusInternalServerError
+		if errors.As(err, &refused) {
+			code = refused.Code
+		}
+		return startedStatement{Code: code, Body: err.Error()}
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	out := startedStatement{Code: resp.StatusCode, Body: string(raw)}
-	var m struct {
-		Token   string `json:"session_token"`
-		Pointer string `json:"relay_or_qr_url"`
-		Secret  string `json:"collector_secret"`
-	}
-	_ = json.Unmarshal(raw, &m)
-	out.Token, out.Pointer, out.Secret = m.Token, m.Pointer, m.Secret
-	if out.Token != "" {
-		// Each side has the other as a contact the owner recorded, which is what lets a local address
-		// in these tests be reached (as in use the addresses are public).
-		site := w.asker.org.statementSite(t, out.Token)
-		_ = w.person.DataStore.SaveContact(store.ContactRecord{AID: site, OobiURL: w.askerURL, Status: "accepted"})
-		pid, _ := w.person.DataStore.GetIdentity()
-		_ = w.asker.org.DataStore.SaveContact(store.ContactRecord{AID: pid.AID, OobiURL: w.personAt, Status: "accepted"})
-	}
-	return out
+	// Each side has the other as a contact the owner recorded, which is what lets a local address
+	// in these tests be reached (as in use the addresses are public).
+	_ = w.person.DataStore.SaveContact(store.ContactRecord{AID: a.SiteAID, OobiURL: w.askerURL, Status: "accepted"})
+	pid, _ := w.person.DataStore.GetIdentity()
+	_ = w.asker.org.DataStore.SaveContact(store.ContactRecord{AID: pid.AID, OobiURL: w.personAt, Status: "accepted"})
+	return startedStatement{Token: a.Session, Pointer: a.Pointer, Secret: a.Collector, Code: http.StatusOK}
 }
 
 func (w *aStatementWorld) read(t *testing.T, s startedStatement, secret string) map[string]any {
 	t.Helper()
-	req, _ := http.NewRequest("GET", w.askerURL+"/api/login/session/the-website/"+s.Token, nil)
-	if secret != "" {
-		req.Header.Set("X-Collector-Secret", secret)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	site := w.asker.org.statementSite(t, s.Token)
+	r, err := w.asker.org.StatementAskResultFor(site, s.Token, secret)
 	if err != nil {
-		t.Fatal(err)
+		return map[string]any{"error": err.Error()}
 	}
-	defer resp.Body.Close()
-	var out map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&out)
+	out := map[string]any{"state": r.State}
+	if r.Withheld {
+		out["identity_withheld"] = true
+	}
+	if r.Signature != "" {
+		out["signature"], out["signer_aid"], out["kel_sn"] = r.Signature, r.SignerAID, r.KelSN
+	}
 	return out
 }
 
@@ -147,11 +136,11 @@ func TestAPersonSignsAStatementAPageHandsThemAndThePageIsHandedTheSignatureOnce(
 	w := aStatementWorldWith(t, true)
 	title := "Use the existing queue for retries"
 	st := aRealApproval(t, title)
-	s := w.start(t, aPagesOrigin, st, title)
+	s := w.start(t, "Task console", st, title)
 	if s.Code != http.StatusOK || s.Token == "" || s.Secret == "" {
 		t.Fatalf("a granted app's page was not given a pointer: %d %s", s.Code, s.Body)
 	}
-	if got := w.read(t, s, s.Secret); got["state"] != "connecting" {
+	if got := w.read(t, s, s.Secret); got["state"] != "pending" {
 		t.Fatalf("signed before anybody answered: %v", got)
 	}
 
@@ -160,7 +149,7 @@ func TestAPersonSignsAStatementAPageHandsThemAndThePageIsHandedTheSignatureOnce(
 		t.Fatalf("the person's agent refused the page's statement: %d %s", code, raw)
 	}
 	// What is shown: the exact statement and the page, never under "data you are sharing" (b).
-	if pv.Statement == nil || pv.Statement.Verbatim != st || len(pv.Details) != 0 || pv.CounterpartyName != aPagesOrigin {
+	if pv.Statement == nil || pv.Statement.Verbatim != st || len(pv.Details) != 0 || pv.CounterpartyName != "Task console" {
 		t.Fatalf("the screen does not show the checked statement and the page and nothing else: %+v", pv)
 	}
 	if !strings.Contains(pv.Statement.Rows[0].Value, title) || pv.Statement.Form != statements.DecisionApprovalForm {
@@ -178,13 +167,15 @@ func TestAPersonSignsAStatementAPageHandsThemAndThePageIsHandedTheSignatureOnce(
 		t.Fatalf("approved, and not signed: %d %s", code, body)
 	}
 
-	// Somebody holding only the token learns that it was signed, not the signature.
-	if got := w.read(t, s, ""); got["signature"] != nil || got["state"] != "verified" {
-		t.Fatalf("somebody without the secret was given the signature: %v", got)
+	// Somebody without the secret learns nothing, not even that it was signed.
+	if got := w.read(t, s, "guess"); got["signature"] != nil || got["error"] == nil {
+		t.Fatalf("somebody without the secret was told something: %v", got)
 	}
 	got := w.read(t, s, s.Secret)
 	id, _ := w.person.DataStore.GetIdentity()
-	if got["state"] != "verified" || got["signer_aid"] != id.AID {
+	events, _ := w.person.DataStore.GetEvents(id.AID)
+	wantSN, _ := latestEstablishmentSN(events)
+	if got["state"] != "verified" || got["signer_aid"] != id.AID || got["kel_sn"] != wantSN {
 		t.Fatalf("the page was not handed who signed: %v", got)
 	}
 	// The signature is the person's root key's, over the envelope naming the asker.
@@ -218,12 +209,31 @@ func TestAPersonSignsAStatementAPageHandsThemAndThePageIsHandedTheSignatureOnce(
 
 func TestAnAppThatWasNotGrantedTheRightCannotAskAPersonToSign(t *testing.T) {
 	w := aStatementWorldWith(t, false)
-	if s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", ""); s.Code != http.StatusForbidden {
+	if s := w.start(t, "Task console", "my-note/1\nI agree.", ""); s.Code != http.StatusForbidden {
 		t.Fatalf("an app with no grant started a statement: %d %s", s.Code, s.Body)
 	}
-	g := aStatementWorldWith(t, true)
-	if s := g.start(t, "", "my-note/1\nI agree.", ""); s.Code != http.StatusBadRequest {
-		t.Fatalf("a statement was asked for with no page: %d", s.Code)
+}
+
+// The public session route is for sign-ins. Asking a person to sign is started only by the add-on that
+// fronts the app, for a signed-in session of its own, so a page cannot make the app's key sign an Ask
+// by setting an Origin header.
+func TestThePublicSessionRouteDoesNotStartAStatement(t *testing.T) {
+	w := aStatementWorldWith(t, true)
+	body := `{"action":6,"statement":"my-note/1\nI agree."}`
+	req, _ := http.NewRequest("POST", w.askerURL+"/api/login/session/the-website", strings.NewReader(body))
+	req.Header.Set("Origin", aPagesOrigin)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	_ = raw
+	w.asker.org.statementMu.Lock()
+	n := len(w.asker.org.statementAsks)
+	w.asker.org.statementMu.Unlock()
+	if n != 0 {
+		t.Fatalf("the public route started a statement Ask")
 	}
 }
 
@@ -239,7 +249,7 @@ func TestAStatementThatBreaksTheRulesIsRefusedBeforeAPointerExists(t *testing.T)
 		"too big":          {"my-note/1\n" + strings.Repeat("x", 3000), ""},
 		"a key event body": {`{"v":"KERI10JSON","t":"icp"}`, ""},
 	} {
-		if s := w.start(t, aPagesOrigin, c[0], c[1]); s.Code != http.StatusBadRequest {
+		if s := w.start(t, "Task console", c[0], c[1]); s.Code != http.StatusBadRequest {
 			t.Errorf("%s: asked for anyway (%d)", name, s.Code)
 		}
 	}
@@ -248,7 +258,7 @@ func TestAStatementThatBreaksTheRulesIsRefusedBeforeAPointerExists(t *testing.T)
 // (a) again, at the person's agent: an Ask built by hand with a bad statement is refused before a screen.
 func TestThePersonsAgentRefusesABadStatementBeforeAnyScreen(t *testing.T) {
 	w := aStatementWorldWith(t, true)
-	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	s := w.start(t, "Task console", "my-note/1\nI agree.", "")
 	// Another asker serves a request for the same token with bad text, correctly signed: the person's
 	// agent applies the rules itself and does not rely on the asker having applied them.
 	w.asker.org.statementMu.Lock()
@@ -289,9 +299,9 @@ func TestADeviceWithoutTheRootKeyOffersNothingToSign(t *testing.T) {
 	id, _ := w.person.DataStore.GetIdentity()
 	id.PublicKey = "DsomeOtherDevicesKeyXXXXXXXXXXXXXXXXXXXXXXXXXX"
 	if err := w.person.DataStore.SaveIdentity(*id); err != nil {
-		t.Skip("cannot change the stored key here: ", err)
+		t.Fatal("cannot change the stored key: ", err)
 	}
-	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	s := w.start(t, "Task console", "my-note/1\nI agree.", "")
 	code, _, body := w.decode(t, s.Pointer)
 	if code == http.StatusOK || !strings.Contains(body, "does not hold your root key") {
 		t.Fatalf("a device without the key offered to sign: %d %s", code, body)
@@ -300,7 +310,7 @@ func TestADeviceWithoutTheRootKeyOffersNothingToSign(t *testing.T) {
 
 func TestAnAnswerThatIsNotTheSignersIsRefusedAndTheStatementStaysOpen(t *testing.T) {
 	w := aStatementWorldWith(t, true)
-	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	s := w.start(t, "Task console", "my-note/1\nI agree.", "")
 	w.asker.org.statementMu.Lock()
 	nonce := w.asker.org.statementAsks[s.Token].nonce
 	w.asker.org.statementMu.Unlock()
@@ -330,7 +340,7 @@ func TestAnAnswerThatIsNotTheSignersIsRefusedAndTheStatementStaysOpen(t *testing
 
 func TestADeclinedStatementIsSaidSoAndCanStillBeSigned(t *testing.T) {
 	w := aStatementWorldWith(t, true)
-	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	s := w.start(t, "Task console", "my-note/1\nI agree.", "")
 	_, pv, _ := w.decode(t, s.Pointer)
 	if code, _ := w.execute(t, s.Pointer, pv.AskDigest, false); code != http.StatusOK {
 		t.Fatal("declining failed")
@@ -363,7 +373,7 @@ func TestKelSNIsTheSequenceNumberOfTheLatestEstablishmentEvent(t *testing.T) {
 
 func TestAnExpiredStatementIsNotShown(t *testing.T) {
 	w := aStatementWorldWith(t, true)
-	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	s := w.start(t, "Task console", "my-note/1\nI agree.", "")
 	w.asker.org.statementMu.Lock()
 	rec := w.asker.org.statementAsks[s.Token]
 	var ask map[string]any
@@ -433,7 +443,7 @@ func TestTheScreenSaysWhetherThePersonHasDealtWithTheAskerBefore(t *testing.T) {
 		t.Fatal(askerStanding(false), askerStanding(true))
 	}
 	w := aStatementWorldWith(t, true)
-	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	s := w.start(t, "Task console", "my-note/1\nI agree.", "")
 	_, pv, _ := w.decode(t, s.Pointer)
 	if !strings.Contains(pv.Warning, "You have dealt with this asker before.") {
 		t.Fatalf("a recorded contact was not said to be known: %q", pv.Warning)

@@ -143,6 +143,36 @@
    "refused_because": "cannot be shown as it is"
   },
   {
+   "name": "soft hyphen",
+   "statement": "my-note/1\nap­prove",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "tag character",
+   "statement": "my-note/1\nx󠁁",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "variation selector",
+   "statement": "my-note/1\nx️",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "braille blank",
+   "statement": "my-note/1\nx⠀",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "hangul filler",
+   "statement": "my-note/1\nxㅤ",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "object replacement",
+   "statement": "my-note/1\nx￼",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
    "name": "line separator",
    "statement": "my-note/1\nx y",
    "refused_because": "cannot be shown as it is"
@@ -205,5 +235,13 @@
    "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
    "title": "Use the existing queue for retries"
   }
- ]
+ ],
+ "signature_vector": {
+  "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "public_key_hex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+  "asker": "EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z",
+  "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+  "signature_hex": "ce3ce91054f1f2946dcff98a49f25c91f60ba1f7d673324e6881e2cf1207b0e08e8af834b0b3369c60721733d5a262a9213a044227e523f047498cda2c138602",
+  "signature_qb64": "AADOPOkQVPHylG3P-YpJ8lyR9guh99ZzMk5ogeLPEgew4I6K-DSwszacYHIXM9WiYqkhOgRCJ-Uj8EdJjNosE4YC"
+ }
 }

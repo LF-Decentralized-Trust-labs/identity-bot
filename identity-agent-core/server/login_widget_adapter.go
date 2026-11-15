@@ -219,17 +219,8 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		Audience           string   `json:"audience"`
 		BrowserKey         string   `json:"browserKey"`
 		FrontEnd           string   `json:"frontEnd"`
-		// Action 6 asks a person to sign Statement (and, for a decision approval, the Title that
-		// the statement carries only the hash of); anything else is a sign-in.
-		Action    int    `json:"action"`
-		Statement string `json:"statement"`
-		Title     string `json:"title"`
 	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStatementBody)).Decode(&body) // tolerate empty body
-	if body.Action == ActionSignStatement {
-		s.startStatementAsk(w, r, assetID, body.Statement, body.Title)
-		return
-	}
+	_ = json.NewDecoder(r.Body).Decode(&body) // tolerate empty body
 	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, body.FrontEnd, s.getPublicURL(r), false)
 	if code != 0 {
 		http.Error(w, msg, code)
@@ -262,10 +253,6 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Request) {
 	corsHeaders(w)
 	token := chi.URLParam(r, "token")
-	if s.writeStatementStatus(w, r, chi.URLParam(r, "asset_id"), token) {
-		return
-	}
-
 	offered := r.Header.Get("X-Collector-Secret")
 	if offered == "" {
 		offered = r.URL.Query().Get("collector")

@@ -1,6 +1,6 @@
 # Statement signature (v1)
 
-An app can ask a person to sign a statement with their own Identity Agent (Ask action 6, `sign_statement`, see
+An app's signed-in page can ask a person to sign a statement with their own Identity Agent (Ask action 6, `sign_statement`, see
 [action-code-registry.md](action-code-registry.md) and [ADR-080](adr/080-a-person-signs-a-statement-an-app-hands-them-with-their-own-identity-agent.md)).
 This is the format of the statement, of the bytes that are signed, and of the rules the person's Identity Agent
 applies before it shows or signs anything. Anyone who builds such a statement or verifies such a signature needs it,
