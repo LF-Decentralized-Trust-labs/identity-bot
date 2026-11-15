@@ -63,6 +63,12 @@ func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, err
 func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
 	return h.s.endBrowserKeys(r, thumbprint, person)
 }
+func (h hostWrapper) AppKeyStillSpeaks(callerAsset, thumbprint, person string) bool {
+	return h.s.appKeyStillSpeaks(callerAsset, thumbprint, person)
+}
+func (h hostWrapper) EndAppKey(r *http.Request, callerAsset, thumbprint string) (int, error) {
+	return h.s.endAppKey(r, callerAsset, thumbprint)
+}
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
 }

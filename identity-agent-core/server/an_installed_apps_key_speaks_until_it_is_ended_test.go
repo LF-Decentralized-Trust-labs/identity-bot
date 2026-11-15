@@ -1024,3 +1024,35 @@ func TestTheCoreMakesATPMCredentialOnlyForAnAsksOwnApp(t *testing.T) {
 		t.Fatal("one ask has no limit on the credentials made for it")
 	}
 }
+
+// An add-on that has authenticated the app's machine ends that app's key (a person signed out of an
+// installed app), and no other app's: callerAsset is the app the add-on found, held to its own asset.
+func TestAnAppsMachineEndsItsOwnKeysGrantAndNoOneElses(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.signedIn(t)
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); !ok {
+		t.Fatal("the key does not speak after its sign-in")
+	}
+	person, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now())
+	if !iw.org.appKeyStillSpeaks("the-website", iw.key, person) || iw.org.appKeyStillSpeaks("some-other-app", iw.key, person) || iw.org.appKeyStillSpeaks("the-website", iw.key, "another") {
+		t.Fatal("a key speaks for its own person at its own app, and for no other")
+	}
+	if _, err := iw.org.endAppKey(anAppsRequest("some-other-app", nil), "some-other-app", iw.key); err != nil {
+		t.Fatal(err) // another app's own asset has nothing under this key: it ends nothing
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); !ok {
+		t.Fatal("another app ended this app's key")
+	}
+	if _, err := iw.org.endAppKey(anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"}), "the-website", iw.key); err == nil {
+		t.Fatal("a web page's request ended an app's key")
+	}
+	if n, err := iw.org.endAppKey(anAppsRequest("the-website", nil), "the-website", iw.key); err != nil || n != 1 {
+		t.Fatalf("the app ending its own key: %d %v", n, err)
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok || iw.org.appKeyStillSpeaks("the-website", iw.key, person) {
+		t.Fatal("the grant spoke after the app ended it")
+	}
+	if _, err := iw.org.endAppKey(anAppsRequest("the-website", nil), "the-website", ""); err == nil {
+		t.Fatal("an end that names no key was taken")
+	}
+}

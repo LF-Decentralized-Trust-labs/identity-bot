@@ -115,6 +115,15 @@ type Host interface {
 	// never one the caller names. It returns how many
 	// records ended. An app calls it when it signs a person out.
 	EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error)
+	// AppKeyStillSpeaks is whether the key with this thumbprint still speaks for the
+	// person at the app's own asset (callerAsset, found by the add-on as for EndAppKey):
+	// not ended, not lapsed, its front-end kind not switched off, the person still admitted.
+	AppKeyStillSpeaks(callerAsset, thumbprint, person string) bool
+	// EndAppKey is EndBrowserKeys for an add-on that has authenticated the app's
+	// machine itself: callerAsset is the app it found asking (never from the request
+	// body), the same rules as StartFrontEndKeySignIn hold, and only the named key of
+	// that app's own asset ends. How many records ended is returned.
+	EndAppKey(r *http.Request, callerAsset, thumbprint string) (int, error)
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error
 	EngineSigns()

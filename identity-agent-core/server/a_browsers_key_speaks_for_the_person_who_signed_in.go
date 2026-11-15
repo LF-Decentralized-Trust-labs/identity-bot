@@ -376,6 +376,40 @@ func (s *CoreServer) endBrowserKeys(r *http.Request, thumbprint, person string) 
 	return s.browserKeys().End(app.Asset, thumbprint, person)
 }
 
+// endAppKey ends one key's records at the app's own asset, for a call an add-on
+// has authenticated itself (the app's machine, sealed to this Identity Agent): callerAsset
+// is the app the add-on found asking, as for startFrontEndKeySignIn, and the rules are
+// those of theAppAsking. Ending only takes power away, so the app that signed the person in may.
+func (s *CoreServer) endAppKey(r *http.Request, callerAsset, thumbprint string) (int, error) {
+	if thumbprint == "" {
+		return 0, errors.New("ending an app key names the key")
+	}
+	if err := s.theAppAsking(r, callerAsset, callerAsset); err != nil {
+		return 0, err
+	}
+	if aPageAsked(r) {
+		return 0, errors.New("a request that came from a web page cannot end an app's key")
+	}
+	if err := login.CheckBrowserKeyThumbprint(thumbprint); err != nil {
+		return 0, err
+	}
+	return s.browserKeys().End(callerAsset, thumbprint, "")
+}
+
+// appKeyStillSpeaks is whether the key still speaks for the person at the app's own
+// asset, by the same rule every use of it is held to: a live record, not ended by the
+// person, the owner or the app, whose front-end kind the owner has not switched off, and
+// whose person the asset still admits. For an app's back end, which holds its own session
+// for the key and asks this now and then (an add-on that has authenticated the machine:
+// callerAsset is the app it found asking).
+func (s *CoreServer) appKeyStillSpeaks(callerAsset, thumbprint, person string) bool {
+	rec, ok := s.browserKeys().Get(callerAsset, thumbprint, time.Now())
+	if !ok || rec.Person != person {
+		return false
+	}
+	return s.assetStillStands(rec)
+}
+
 // assetIDOfSite is the id of the asset whose pairwise identifier is siteAID.
 func (s *CoreServer) assetIDOfSite(siteAID string) (string, bool) {
 	if s.assetHandler == nil || siteAID == "" {
