@@ -58,6 +58,7 @@ void main() {
   testWidgets(
       'says which device it is and what to check on the phone, then waits, then hands over the session',
       (t) async {
+    final semantics = t.ensureSemantics(); // the QR code's label is read from the semantics tree
     final app = FakeApp(clock: DateTime.now().toUtc())..pendingAsks = 3;
     final hw = FakeHardware();
     AppSession? got;
@@ -77,6 +78,7 @@ void main() {
     expect(find.text('Copy link instead'), findsOneWidget);
     expect(find.bySemanticsLabel('QR code to approve this sign-in in your Identity Agent'),
         findsOneWidget);
+    semantics.dispose();
     expect(find.text('Sign in with Identity Agent'), findsNothing,
         reason: 'the button says it is connecting while a sign-in is under way');
     expect(got, isNull, reason: 'not signed in until the person approves');

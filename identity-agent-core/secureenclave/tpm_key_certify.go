@@ -399,17 +399,23 @@ func physicalIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate) (*E
 	for _, c := range tpmManufacturerIssuers {
 		pinned[sha256Hex(c)] = true
 	}
-	var refusal error
+	// A virtual or cloud TPM's issuer anywhere in any chain refuses the key outright.
 	for _, ch := range chains {
 		if len(ch) < 2 {
 			continue
 		}
 		for _, c := range ch[1:] {
 			if virtual[sha256Hex(c)] {
-				refusal = fmt.Errorf("%w: %w: the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", ErrNotAttested, ErrVirtualTPM, c.Subject.CommonName)
+				return nil, fmt.Errorf("%w: %w: the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", ErrNotAttested, ErrVirtualTPM, c.Subject.CommonName)
 			}
 		}
-		if refusal != nil {
+	}
+	// Otherwise each chain is judged on its own: one through an issuer that is not
+	// pinned (say, a copy the front end sent) does not hide another through the
+	// pinned issuer, since x509 returns the chains in no set order.
+	var refusal error
+	for _, ch := range chains {
+		if len(ch) < 2 {
 			continue
 		}
 		iss := ch[1]
@@ -423,7 +429,9 @@ func physicalIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate) (*E
 			}
 		}
 		if !ok {
-			refusal = notAttested("the endorsement key was certified by %q, which is not pinned as a physical TPM chip's issuer", iss.Subject.CommonName)
+			if refusal == nil {
+				refusal = notAttested("the endorsement key was certified by %q, which is not pinned as a physical TPM chip's issuer", iss.Subject.CommonName)
+			}
 			continue
 		}
 		return &EKIssuer{Subject: iss.Subject.String(), SHA256: id, Class: TPMClassPhysical}, nil

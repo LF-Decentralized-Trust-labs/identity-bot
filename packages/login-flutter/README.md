@@ -36,9 +36,8 @@ Nothing has run on a device or a real TPM. Android needs a real device (an emula
 An App Attest key signs only assertions, so on Apple the proof of each call is an
 assertion over the SHA-256 of the proof text (`login-go`: `IsAssertionProof`,
 `VerifyAppleAssertion`), not the plain 64-byte signature of the other platforms. A
-back end that checks only plain proofs (identity-agent-addons `appserve`, `checkProof`)
-must also take assertions before an Apple front end can call it: not done here, in
-another repository.
+back end that checks only plain 64-byte proofs must also accept these assertions
+before an Apple front end can call it. That is the back end's work, not this SDK's.
 
 A Windows front end signs in as an installed app, with its TPM key, where the owner has accepted `tpm_keys` for the app (ADR-072 Amendment 7). Its evidence takes one more call to the app's back end than the other
 platforms': the front end sends its endorsement key and attestation key

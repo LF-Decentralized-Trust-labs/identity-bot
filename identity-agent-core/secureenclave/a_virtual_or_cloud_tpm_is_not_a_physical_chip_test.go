@@ -142,3 +142,23 @@ func TestThePinnedPackageKeepsVirtualIssuersApartFromPhysicalOnes(t *testing.T) 
 		}
 	}
 }
+
+// x509 may build more than one chain for one key, in no set order: one through a copy of the
+// issuer the front end sent (same name and key, not the pinned bytes) and one through the
+// pinned issuer. The copy's chain must not hide the pinned one, whichever comes first.
+func TestAChainThroughAnUnpinnedCopyDoesNotHideOneThroughThePinnedIssuer(t *testing.T) {
+	c := newEKChain(t, "IFX-KEYID-1")
+	unpinned := &x509.Certificate{Raw: []byte("not pinned"), Subject: c.issuer.Subject}
+	pinnedChain := []*x509.Certificate{{}, c.issuer, c.root}
+	copyChain := []*x509.Certificate{{}, unpinned, c.root}
+	withIssuers(t, []*x509.Certificate{c.issuer}, nil)
+	for _, chains := range [][][]*x509.Certificate{{copyChain, pinnedChain}, {pinnedChain, copyChain}} {
+		iss, err := physicalIssuer(chains, []*x509.Certificate{c.root})
+		if err != nil || iss.SHA256 != sha256Hex(c.issuer) {
+			t.Fatalf("the pinned issuer's chain was not accepted: %v", err)
+		}
+	}
+	if _, err := physicalIssuer([][]*x509.Certificate{copyChain}, []*x509.Certificate{c.root}); err == nil {
+		t.Fatal("a chain only through an unpinned copy was accepted")
+	}
+}

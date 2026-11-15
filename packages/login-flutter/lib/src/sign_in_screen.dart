@@ -287,6 +287,7 @@ class _State extends State<UtilityAppSignInScreen> {
                     const SizedBox(height: 8),
                     Center(
                         child: Semantics(
+                            container: true, // its own node, not merged into the live region's text
                             label:
                                 'QR code to approve this sign-in in your Identity Agent',
                             image: true,

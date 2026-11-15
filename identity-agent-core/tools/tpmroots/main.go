@@ -104,7 +104,10 @@ const classNote = `Classes (what tpm_keys trusts is class physical only):
 
 `
 
-var vendorToken = regexp.MustCompile(`(?i)^(?:(?:EUS|WUS|NCU)-)?([A-Z]+)-(?:KEYID|NAMEID)-`)
+// vendorToken reads the vendor id from an issuer's name: an optional region (EUS-, WUS-,
+// NCU- today; any word, so a region Microsoft adds later still classifies), the vendor id,
+// then KEYID or NAMEID. The class rests on the vendor id, never on the region.
+var vendorToken = regexp.MustCompile(`(?i)^(?:([A-Z]+)-)?([A-Z]+)-(?:KEYID|NAMEID)-`)
 
 // physicalVendorIDs are the TCG vendor ids of chip makers whose endorsement keys Microsoft's
 // issuers re-issue.
@@ -122,7 +125,10 @@ func classify(maker, subjectCN string, isRoot bool) string {
 	if m == nil {
 		return classUnclassified
 	}
-	id := strings.ToUpper(m[1])
+	region, id := strings.ToUpper(m[1]), strings.ToUpper(m[2])
+	if region == "MSFT" || physicalVendorIDs[region] {
+		return classUnclassified // two vendor ids in one name: not a form Microsoft uses, so not read
+	}
 	switch {
 	case id == "MSFT":
 		return classVirtual

@@ -17,6 +17,9 @@ func TestClassify(t *testing.T) {
 		{"Microsoft", "EUS-msft-keyid-1565", false, classVirtual},
 		{"Microsoft", "MSFT-KEYID-1565-V2", false, classVirtual},
 		{"Microsoft", "WUS-WEC-NAMEID-19BC", false, classUnclassified}, // a vendor id not known: not trusted
+		{"Microsoft", "SEA-IFX-KEYID-1", false, classPhysical},         // a region not seen yet still reads its vendor id
+		{"Microsoft", "SEA-MSFT-KEYID-1", false, classVirtual},
+		{"Microsoft", "MSFT-IFX-KEYID-1", false, classUnclassified}, // two vendor ids: not a name Microsoft uses
 		{"Microsoft", "Something Else CA", false, classUnclassified},
 		{"Microsoft", "", false, classUnclassified},
 	} {
