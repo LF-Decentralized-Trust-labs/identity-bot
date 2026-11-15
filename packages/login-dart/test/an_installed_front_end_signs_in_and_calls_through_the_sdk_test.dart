@@ -28,7 +28,12 @@ void main() {
     expect(key.kind, FrontEndKind.installedApp);
     expect(key.isNonExtractable, isTrue);
     final s = open(app, key);
+    final before = key.thumbprint;
     final started = await s.start();
+    expect(key.thumbprint, isNot(before),
+        reason:
+            'a hardware key is made for the ask, so the sign-in names the new key');
+    expect(hw.made, 1);
     expect(started.pointer, 'https://ia.example/i/tok');
     expect(started.fingerprint, keyFingerprint(key.thumbprint));
     final sent = app.startedWith!;

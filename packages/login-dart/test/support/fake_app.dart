@@ -185,27 +185,37 @@ class FakeApp {
 /// A [HardwareKeyPlatform] standing in for the device: a key held in memory that
 /// records what it was asked to attest.
 class FakeHardware implements HardwareKeyPlatform {
-  final SoftwareFrontEndKey key = SoftwareFrontEndKey.generate();
+  SoftwareFrontEndKey key = SoftwareFrontEndKey.generate();
   Uint8List? lastChallenge, lastDigest;
+  int made = 0;
   @override
   String get platform => InstalledPlatform.android;
-  @override
-  Future<Uint8List> publicPoint(String label) async =>
+  Uint8List get _point =>
       Uint8List.fromList([4, ...b64uDecode(key.x)!, ...b64uDecode(key.y)!]);
+  @override
+  Future<Uint8List> publicPoint(String label) async => _point;
   @override
   Future<Uint8List> signDer(String label, Uint8List message) async =>
       rawToDer(b64uDecode(await key.sign(utf8.decode(message)))!);
   @override
-  Future<({Uint8List evidence, Uint8List keySignature})> attest(
-      String label, Uint8List challenge, Uint8List statementDigest) async {
+  Future<({Uint8List point, Uint8List evidence})> attestNewKey(
+      String label, Uint8List challenge) async {
+    // Android fixes the attestation challenge when the key is generated: a new key per ask.
+    key = SoftwareFrontEndKey.generate();
+    made++;
     lastChallenge = challenge;
-    lastDigest = statementDigest;
     return (
+      point: _point,
       evidence:
-          Uint8List.fromList(utf8.encode('chain-for-${b64uEncode(challenge)}')),
-      keySignature:
-          rawToDer(b64uDecode(await key.sign(b64uEncode(statementDigest)))!)
+          Uint8List.fromList(utf8.encode('chain-for-${b64uEncode(challenge)}'))
     );
+  }
+
+  @override
+  Future<Uint8List> signStatement(
+      String label, Uint8List statementDigest) async {
+    lastDigest = statementDigest;
+    return rawToDer(b64uDecode(await key.sign(b64uEncode(statementDigest)))!);
   }
 }
 

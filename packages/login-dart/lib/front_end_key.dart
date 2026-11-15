@@ -19,9 +19,12 @@ import 'installed_app.dart';
 ///    is a browser's (which the Identity Agent takes only as a browser's).
 ///  - the browser's own key, which a page holds: its SDK is login-web, not this.
 abstract class FrontEndKey {
-  /// The public point's coordinates, unpadded base64url, 32 bytes each.
-  final String x, y;
-  const FrontEndKey(this.x, this.y);
+  const FrontEndKey();
+
+  /// The public point's coordinates, unpadded base64url, 32 bytes each. A hardware
+  /// key's change when [prove] makes it a new key for an ask (see there).
+  String get x;
+  String get y;
 
   /// Whether this key's private half can never be read out of the platform.
   bool get isNonExtractable;
@@ -39,7 +42,9 @@ abstract class FrontEndKey {
   Future<String> sign(String message);
 
   /// The hardware's evidence for this key, made for [ask] at [assetId]; null for
-  /// a key that has none to give.
+  /// a key that has none to give. A hardware key is made FOR the ask (Android's
+  /// key attestation fixes its challenge when the key is generated), so proving
+  /// replaces the key: read [jwk] and [thumbprint] after, never before.
   Future<InstalledKeyProof?> prove(String assetId, InstalledAsk ask) async =>
       null;
 
@@ -78,7 +83,9 @@ Uint8List _fixed32(BigInt v) {
 /// A [FrontEndKey] held in memory.
 class SoftwareFrontEndKey extends FrontEndKey {
   final ECPrivateKey _private;
-  SoftwareFrontEndKey._(this._private, super.x, super.y);
+  @override
+  final String x, y;
+  SoftwareFrontEndKey._(this._private, this.x, this.y);
   static final _curve = ECCurve_secp256r1();
 
   /// A fresh key from the platform's secure random source.
@@ -131,34 +138,47 @@ abstract class HardwareKeyPlatform {
   Future<Uint8List> publicPoint(String label);
 
   /// ECDSA P-256 over SHA-256 of [message] by the key, ASN.1 DER as the hardware
-  /// gives it.
+  /// gives it. This is what signs every call after sign-in.
   Future<Uint8List> signDer(String label, Uint8List message);
 
-  /// The hardware's evidence that the key is its own, made for [challenge], and
-  /// the key's signature over [statementDigest] (the SHA-256 of the sign-in
+  /// Makes a NEW key under [label] in hardware for [challenge] (replacing any
+  /// held) and gives its public point and the hardware's evidence that it is the
+  /// hardware's own, made for that challenge.
+  Future<({Uint8List point, Uint8List evidence})> attestNewKey(
+      String label, Uint8List challenge);
+
+  /// The key [label] names signing [statementDigest] (the SHA-256 of the sign-in
   /// statement): ASN.1 DER ECDSA for Android and a TPM, an App Attest assertion
   /// for Apple.
-  Future<({Uint8List evidence, Uint8List keySignature})> attest(
-      String label, Uint8List challenge, Uint8List statementDigest);
+  Future<Uint8List> signStatement(String label, Uint8List statementDigest);
 }
 
 /// An installed front end's key, in its device's secure hardware.
 class HardwareFrontEndKey extends FrontEndKey {
   final HardwareKeyPlatform hardware;
   final String label;
-  HardwareFrontEndKey._(this.hardware, this.label, super.x, super.y);
+  String _x, _y;
+  HardwareFrontEndKey._(this.hardware, this.label, this._x, this._y);
+
+  @override
+  String get x => _x;
+  @override
+  String get y => _y;
+
+  static (String, String) _coordinates(Uint8List p) {
+    if (p.length != 65 || p[0] != 4) {
+      throw const TrustRefused(
+          'the device\'s hardware did not give an uncompressed P-256 key');
+    }
+    return (b64uEncode(p.sublist(1, 33)), b64uEncode(p.sublist(33)));
+  }
 
   /// The key [label] names, made on first use. A refusal from the hardware (no
   /// secure hardware, a key that is not P-256) is the platform's to throw.
   static Future<HardwareFrontEndKey> open(
       HardwareKeyPlatform hardware, String label) async {
-    final p = await hardware.publicPoint(label);
-    if (p.length != 65 || p[0] != 4) {
-      throw const TrustRefused(
-          'the device\'s hardware did not give an uncompressed P-256 key');
-    }
-    return HardwareFrontEndKey._(hardware, label, b64uEncode(p.sublist(1, 33)),
-        b64uEncode(p.sublist(33)));
+    final (x, y) = _coordinates(await hardware.publicPoint(label));
+    return HardwareFrontEndKey._(hardware, label, x, y);
   }
 
   @override
@@ -177,13 +197,16 @@ class HardwareFrontEndKey extends FrontEndKey {
     if (challenge == null) {
       throw const TrustRefused('the ask\'s challenge is not readable');
     }
+    final made = await hardware.attestNewKey(label, challenge);
+    final (x, y) = _coordinates(made.point);
+    _x = x;
+    _y = y;
     final digest = installedAppStatementDigest(assetId, challenge, thumbprint);
-    final a = await hardware.attest(label, challenge, digest);
     return InstalledKeyProof(
         platform: hardware.platform,
-        evidence: a.evidence,
+        evidence: made.evidence,
         ask: ask.ask,
-        keySignature: a.keySignature);
+        keySignature: await hardware.signStatement(label, digest));
   }
 }
 
