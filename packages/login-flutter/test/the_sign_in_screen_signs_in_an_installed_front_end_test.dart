@@ -287,6 +287,26 @@ void main() {
     expect(used, [linkOf(app)]);
   });
 
+  testWidgets('a last link that is read after the screen is up fills the field, unless the person has typed one',
+      (t) async {
+    final app = FakeApp(clock: DateTime.now().toUtc());
+    Widget screen(String? initial) => MaterialApp(
+        home: Scaffold(
+            body: UtilityAppSignInScreen(
+                appName: 'Task console',
+                initialLink: initial,
+                makeClient: () => app.client,
+                keyFor: (_) => HardwareFrontEndKey.open(FakeHardware(), 'k'),
+                storeFor: (_) => MemoryGrantStore(),
+                onSignedIn: (_) {})));
+    await t.pumpWidget(screen(null));
+    await t.pumpWidget(screen('https://a.example/#x'));
+    expect(find.widgetWithText(TextField, 'https://a.example/#x'), findsOneWidget);
+    await t.enterText(find.byKey(const Key('field-link')), 'https://typed.example/#y');
+    await t.pumpWidget(screen('https://b.example/#z'));
+    expect(find.widgetWithText(TextField, 'https://typed.example/#y'), findsOneWidget);
+  });
+
   testWidgets('a link that is not the app\'s is not reported as used', (t) async {
     final app = FakeApp();
     final used = <String>[];

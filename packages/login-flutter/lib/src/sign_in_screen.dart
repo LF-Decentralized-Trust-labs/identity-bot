@@ -195,6 +195,18 @@ class _State extends State<UtilityAppSignInScreen> {
   }
 
   @override
+  void didUpdateWidget(UtilityAppSignInScreen old) {
+    super.didUpdateWidget(old);
+    // The last link may be read from storage after the screen is up: fill the field with it
+    // unless the person has already typed or pasted one.
+    if (old.initialLink != widget.initialLink &&
+        widget.pinnedLink == null &&
+        _link.text.isEmpty) {
+      _link.text = widget.initialLink ?? '';
+    }
+  }
+
+  @override
   void dispose() {
     _link.dispose();
     super.dispose();
