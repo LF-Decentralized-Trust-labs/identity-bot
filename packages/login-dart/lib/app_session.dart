@@ -280,7 +280,10 @@ class AppSession {
     final token = await store.read();
     if (token == null) throw const SessionEnded();
     // A restart has lost the app's clock: ask for it first, so the proof is dated as the app counts.
-    if (!_synced && path != '/session/whoami') await whoami();
+    // (Signing out does not wait on it: a front end that cannot be told the clock still ends its grant.)
+    if (!_synced && path != '/session/whoami' && path != '/session/signout') {
+      await whoami();
+    }
     final r =
         await _send(method, path, method == 'GET' ? '' : body, (skew) async {
       final ts = _stamp(skew);
