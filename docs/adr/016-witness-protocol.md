@@ -200,6 +200,16 @@ from at least `bt` of the witnesses in force at every establishment event, count
 `/loc/scheme` reply, signed with the same key, for the address the agent knows itself by
 and never the one a request names; the registry of witness operators is only where to
 look for it.
+
+Where this departs from keripy, so nobody takes it for more: the notice has keripy's
+envelope and its `/ksn/{aid}` route but states only `i`, `s` and `d`, not a full key state
+record, and it is carried as JSON with a detached signature at our own route, so keripy's
+own reactor will not ingest it. Its freshness is its date within five minutes of now, with
+no nonce from the asker (KERI's reply has none), so a notice recorded just before a
+rotation can be replayed for up to that long. A witness that does not serve
+`/witness/ksn/{aid}` counts as not answering, so a log whose witnesses are such services
+is not corroborated until they do. The witnesses asked are those in force at the end of
+the log, following `br` and `ba`.
 `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
 exactly as its controller published and signed it; the asker checks it extends its own
 key log and is signed by the identity's key before believing it. An event is sent to
