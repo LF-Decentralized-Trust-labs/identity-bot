@@ -59,7 +59,7 @@ class CeremonyTerms {
     required this.prior,
     required this.digest,
     required this.ownKey,
-    required this.ownNextDigest,
+    required this.ownNextDigests,
     required this.toad,
     required this.cuts,
     required this.adds,
@@ -75,7 +75,9 @@ class CeremonyTerms {
   final String prior;
   final String digest;
   final String ownKey;
-  final String ownNextDigest;
+  /// What the identity's own share commits to in a ceremony that keeps its key:
+  /// the classical next digest, then the post-quantum one. Empty in a hand-over.
+  final List<String> ownNextDigests;
   final int toad;
   final List<String> cuts;
   final List<String> adds;
@@ -94,7 +96,7 @@ class CeremonyTerms {
       prior: '${j['prior']}',
       digest: '${j['d']}',
       ownKey: '${j['own_key']}',
-      ownNextDigest: '${j['own_next_digest'] ?? ''}',
+      ownNextDigests: [for (final d in (j['own_next_digests'] as List? ?? const [])) '$d'],
       toad: int.tryParse('${j['toad'] ?? '0'}', radix: 16) ?? 0,
       cuts: [for (final c in (j['cuts'] as List? ?? const [])) '$c'],
       adds: [for (final c in (j['adds'] as List? ?? const [])) '$c'],
@@ -174,7 +176,7 @@ class CeremonyTerms {
         sn: sn,
         prior: prior,
         ownKey: ownKey,
-        ownNextDigest: ownNextDigest.isEmpty ? null : ownNextDigest,
+        ownNextDigests: ownNextDigests.isEmpty ? null : ownNextDigests,
         owners: ownerMap,
         me: me,
         threshold: threshold,

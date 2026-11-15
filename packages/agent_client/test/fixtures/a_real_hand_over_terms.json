@@ -27,7 +27,7 @@
   "d": "EMXxSRE9p00RRPj8bAt6iWjDwXpyXmxKd3h2SJsoSxra",
   "hand_over": true,
   "own_key": "DJg-V3UIEjWnwtoDzYoeGzUMKEq1Syqgf9rs0MpA70Nx",
-  "own_next_digest": "",
+  "own_next_digests": [],
   "owners": [
    {
     "after": [
@@ -78,7 +78,7 @@
   "d": "EPfetLd6VJyLvevirSWlB8LNZQa8xY42bRV5c8mBC-PQ",
   "hand_over": true,
   "own_key": "DJg-V3UIEjWnwtoDzYoeGzUMKEq1Syqgf9rs0MpA70Nx",
-  "own_next_digest": "",
+  "own_next_digests": [],
   "owners": [
    {
     "after": [

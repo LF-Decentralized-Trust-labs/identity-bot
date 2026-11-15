@@ -60,6 +60,11 @@ type OwnerCeremony struct {
 	// the pre-rotated key and its successor.
 	OwnPublicKey     string `json:"org_public_key,omitempty"`
 	OwnNextPublicKey string `json:"org_next_public_key,omitempty"`
+	// OwnNextDigests is what the identity's own share of the first rotation
+	// committed to: its classical next digest, then its post-quantum one.
+	// Fixed when the rotation is prepared, so the terms say what the event
+	// holds. Empty in a ceremony recorded before it was kept.
+	OwnNextDigests []string `json:"own_next_digests,omitempty"`
 	// HandOver is a ceremony that ends with this identity's own key out of
 	// control: the first rotation commits only to the invited owners' next keys,
 	// and a second, signed by them alone, reveals those keys, after which this

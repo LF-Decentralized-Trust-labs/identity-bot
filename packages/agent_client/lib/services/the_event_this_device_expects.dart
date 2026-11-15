@@ -215,7 +215,7 @@ class ExpectedEvent {
   /// Two shapes. [CeremonyStage.first] reveals [ownKey], the key the identity
   /// committed to, then each owner's key by identifier; in a [handOver] it
   /// commits only to the owners' next digests, and otherwise also to
-  /// [ownNextDigest], which leads. [CeremonyStage.second], only in a hand-over,
+  /// [ownNextDigests], which lead as one owner's group. [CeremonyStage.second], only in a hand-over,
   /// reveals each owner's next key and commits to the keys each named for after
   /// that. [owners] is every invited owner as this device recorded the
   /// ceremony, never as the core says; [anchors] the seals it expects.
@@ -230,7 +230,7 @@ class ExpectedEvent {
     required int sn,
     required String prior,
     required String ownKey,
-    String? ownNextDigest,
+    List<String>? ownNextDigests,
     required Map<String, CeremonyOwner> owners,
     required String me,
     required int threshold,
@@ -242,18 +242,24 @@ class ExpectedEvent {
     if (stage == CeremonyStage.second && !handOver) {
       throw ArgumentError('only a hand-over has a second rotation');
     }
-    if (!handOver && stage == CeremonyStage.first && ownNextDigest == null) {
+    if (!handOver && stage == CeremonyStage.first && (ownNextDigests == null || ownNextDigests.isEmpty)) {
       throw ArgumentError(
           'a ceremony that keeps the identity\'s own key commits to its next key');
     }
+    if (!handOver && stage == CeremonyStage.first && ownNextDigests!.length > 2) {
+      throw ArgumentError.value(ownNextDigests, 'ownNextDigests',
+          'the identity commits to its next classical key and, at most, one post-quantum key');
+    }
     final layout = OwnerLayout(owners.keys.toList(), me);
-    if (threshold < 1 || threshold > owners.length) {
+    // Where the identity keeps its own key, it is one more owner of the next keys.
+    final holders = owners.length + (handOver ? 0 : 1);
+    if (threshold < 1 || threshold > holders) {
       throw ArgumentError.value(
-          threshold, 'threshold', 'not satisfiable by ${owners.length} owners');
+          threshold, 'threshold', 'not satisfiable by $holders owners');
     }
     final ordered = [for (final o in layout.owners) owners[o]!];
     List<List<String>> firstGroups() => [
-          if (!handOver) [ownNextDigest!],
+          if (!handOver) ownNextDigests!,
           for (final o in ordered) o.next,
         ];
     final List<String> k;
@@ -286,6 +292,13 @@ class ExpectedEvent {
     }
     if ({...k}.length != k.length) {
       throw ArgumentError.value(owners, 'owners', 'names one key more than once');
+    }
+    // One digest names one share: a digest repeated, within the identity's group or
+    // copied from an owner's, would give somebody a share nobody agreed to.
+    final flatN = [for (final g in groups) ...g];
+    if ({...flatN}.length != flatN.length) {
+      throw ArgumentError.value(
+          groups, 'groups', 'names one next digest more than once');
     }
     return ExpectedEvent._('rot', aid, sn, prior, {
       'kt': kt,

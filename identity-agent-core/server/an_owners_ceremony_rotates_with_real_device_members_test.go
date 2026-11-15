@@ -334,8 +334,8 @@ func TestACeremonyAlongsideTheBoxIsOneRotationAndIsApplied(t *testing.T) {
 		t.Fatalf("%d", code)
 	}
 	ev, _ := keri.ParseEvent(raw)
-	if len(ev.NextDigest) != 3 {
-		t.Fatalf("next digests %v: the box's own next key and each device's", ev.NextDigest)
+	if len(ev.NextDigest) != 4 {
+		t.Fatalf("next digests %v: the box's own next key and its post-quantum partner, and each device's", ev.NextDigest)
 	}
 	w.sign(t, "tok-a", d, w.a[0].at(t, raw, 1, -1))
 	if code, out := w.sign(t, "tok-c", d, w.c[0].at(t, raw, 2, -1)); code != http.StatusCreated || out["applied"] != true {
@@ -580,5 +580,93 @@ func TestTheTermsHaveTheFieldsThePhoneReads(t *testing.T) {
 	wantOwner := want["rot1_terms"]["owners"].([]any)[0].(map[string]any)
 	if !reflect.DeepEqual(keys(gotOwner), keys(wantOwner)) {
 		t.Errorf("an owner in the terms says %v, the phone's fixture has %v", keys(gotOwner), keys(wantOwner))
+	}
+}
+
+// The identity's own share is not the one share without a post-quantum
+// commitment: a ceremony that keeps its key commits both digests for it, at the
+// generation the rotation goes into, and tells every owner's device both.
+func TestACeremonyThatKeepsTheBoxesKeyCommitsItsPostQuantumDigestToo(t *testing.T) {
+	w := aCeremonyOfTwoDevices(t, false, true)
+	raw, d, code := w.fetch(t, "tok-a")
+	if code != http.StatusOK {
+		t.Fatalf("%d", code)
+	}
+	ev, _ := keri.ParseEvent(raw)
+	c := w.ceremony(t)
+	gen := 1
+	if own, _ := w.s.DataStore.GetIdentity(); own != nil {
+		gen = own.KeyGeneration + 1
+	}
+	want, pq := w.s.postQuantumPreRotationAt(c.OwnNextPublicKey, gen)
+	if pq == nil || len(want) != 2 {
+		t.Fatalf("this core derives no post-quantum digest for the test: %v", want)
+	}
+	// Two digests for the box, then two for each device, in the owners' order.
+	if len(ev.NextDigest) != 6 || ev.NextDigest[0] != want[0] || ev.NextDigest[1] != want[1] {
+		t.Fatalf("n is %v, and the identity's own share should lead with %v", ev.NextDigest, want)
+	}
+	if !reflect.DeepEqual(c.OwnNextDigests, want) {
+		t.Fatalf("the ceremony kept %v, the event holds %v", c.OwnNextDigests, want)
+	}
+	// Both of the box's digests are in one group, so one of them stands for the
+	// box, as each device's do.
+	var body struct {
+		Nt json.RawMessage `json:"nt"`
+	}
+	_ = json.Unmarshal(raw, &body)
+	if string(body.Nt) != `[{"1/2":["1","1"]},{"1/2":["1","1"]},{"1/2":["1","1"]}]` {
+		t.Fatalf("nt is %s", body.Nt)
+	}
+	// What each device is told is what the event holds.
+	rec := httptest.NewRecorder()
+	w.r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/signer/invites/tok-a/ceremony-terms", nil))
+	var terms struct {
+		Own []string `json:"own_next_digests"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &terms)
+	if !reflect.DeepEqual(terms.Own, want) {
+		t.Fatalf("the terms say %v, the event holds %v", terms.Own, want)
+	}
+	w.sign(t, "tok-a", d, w.a[0].at(t, raw, 1, -1))
+	if code, out := w.sign(t, "tok-c", d, w.c[0].at(t, raw, 2, -1)); code != http.StatusCreated || out["applied"] != true {
+		t.Fatalf("%d %v", code, out)
+	}
+	// The commitment is a different secret from the box's classical keys.
+	if want[1] == want[0] {
+		t.Fatal("the post-quantum digest is the classical one")
+	}
+}
+
+// A hand-over keeps no key, so it names no digest for one.
+func TestAHandOverTellsTheOwnersNoDigestsForTheBoxsShare(t *testing.T) {
+	w := aCeremonyOfTwoDevices(t, true, true)
+	rec := httptest.NewRecorder()
+	w.r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/signer/invites/tok-a/ceremony-terms", nil))
+	var terms struct {
+		Own []string `json:"own_next_digests"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &terms)
+	if rec.Code != http.StatusOK || terms.Own == nil || len(terms.Own) != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A ceremony saved before the digests were kept still says what its event holds.
+func TestACeremonyRecordedWithoutTheDigestsSaysTheClassicalOne(t *testing.T) {
+	c := &OwnerCeremony{OwnNextPublicKey: signerSeeds(1, 5)[0].key()}
+	got := ownNextDigestsOf(c)
+	want, _ := keri.NextDigest(c.OwnNextPublicKey)
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("%v", got)
+	}
+}
+
+// Whatever key the record holds for the box, a hand-over names no digest for it.
+func TestAHandOverNamesNoOwnDigestEvenWhereTheRecordHoldsANextKey(t *testing.T) {
+	c := &OwnerCeremony{HandOver: true, OwnNextPublicKey: signerSeeds(1, 5)[0].key(),
+		OwnNextDigests: []string{"Ea", "Eb"}}
+	if got := ownNextDigestsOf(c); got == nil || len(got) != 0 {
+		t.Fatalf("%v", got)
 	}
 }

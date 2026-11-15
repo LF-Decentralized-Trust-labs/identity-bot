@@ -190,16 +190,16 @@ func (s *CoreServer) ceremonyRotation(c *OwnerCeremony, stage string) (keriengin
 	req.Keys = []string{c.OwnPublicKey}
 	var next [][]string
 	if !c.HandOver {
-		// The identity's own share commits its classical next key only, so in
-		// a ceremony that keeps it, it is the one share with no post-quantum
-		// commitment until this core's next ordinary rotation renews one
-		// (rotateCarryingTheCommitment). Carrying it here needs the owners'
-		// devices to be told the identity's two digests, which the ceremony's
-		// terms do not yet say.
-		own, err := digestsFor(c.OwnNextPublicKey, "")
+		// The identity's own share commits its classical next key and its
+		// post-quantum partner at the generation this rotation goes into, as
+		// rotateCarryingTheCommitment does, so no share of the next-keys
+		// threshold is left without one. The owners' devices are told both
+		// digests in the terms (ownNextDigestsOf) and check the whole of n.
+		own, err := s.ownNextDigests(c)
 		if err != nil {
-			return keriengine.PrepareRequest{}, fmt.Errorf("the identity's own next key: %w", err)
+			return keriengine.PrepareRequest{}, err
 		}
+		c.OwnNextDigests = own
 		next = append(next, own)
 		req.Next = append(req.Next, own...)
 	}
@@ -218,6 +218,44 @@ func (s *CoreServer) ceremonyRotation(c *OwnerCeremony, stage string) (keriengin
 	req.Kt = countThreshold(len(req.Keys))
 	req.Nt = weightedNext(c.Threshold, next)
 	return req, nil
+}
+
+// ownNextDigests is what the identity's own share of the first rotation
+// commits to: the digest of its classical next key, then the post-quantum
+// digest derived for the generation the rotation goes into (the identity's
+// KeyGeneration + 1, which is what rotateCarryingTheCommitment uses). Where the
+// post-quantum digest cannot be derived the share commits its classical key
+// alone, as an ordinary rotation does: a ceremony that cannot be made is a
+// larger harm than the option lost.
+func (s *CoreServer) ownNextDigests(c *OwnerCeremony) ([]string, error) {
+	classical, err := digestsFor(c.OwnNextPublicKey, "")
+	if err != nil {
+		return nil, fmt.Errorf("the identity's own next key: %w", err)
+	}
+	generation := 1
+	if identity, gerr := s.DataStore.GetIdentity(); gerr == nil && identity != nil {
+		generation = identity.KeyGeneration + 1
+	}
+	if digests, _ := s.postQuantumPreRotationAt(c.OwnNextPublicKey, generation); len(digests) == 2 && digests[0] == classical[0] {
+		return digests, nil
+	}
+	return classical, nil
+}
+
+// ownNextDigestsOf is what the terms say the identity's own share commits to:
+// what was put in the rotation waiting, and for a ceremony recorded before
+// that was kept, its classical digest.
+func ownNextDigestsOf(c *OwnerCeremony) []string {
+	if c.HandOver {
+		return []string{}
+	}
+	if len(c.OwnNextDigests) > 0 {
+		return c.OwnNextDigests
+	}
+	if d, err := keri.NextDigest(c.OwnNextPublicKey); err == nil {
+		return []string{d}
+	}
+	return []string{}
 }
 
 // prepareCeremonyStage builds the stage's rotation, adds this Identity
@@ -383,17 +421,11 @@ func (s *CoreServer) handleCeremonyTerms(w http.ResponseWriter, r *http.Request)
 			Signed: m.Invitee.SignedStage == c.Stage,
 		})
 	}
-	ownNext := ""
-	if !c.HandOver {
-		if d, err := keri.NextDigest(c.OwnNextPublicKey); err == nil {
-			ownNext = d
-		}
-	}
 	jsonreply.Write(w, http.StatusOK, map[string]any{
 		"status": c.Status,
 		"stage":  c.Stage, "hand_over": c.HandOver, "threshold": c.Threshold,
 		"aid": ev.I, "sn": ev.S, "prior": ev.P, "d": c.PendingSAID,
-		"own_key": c.OwnPublicKey, "own_next_digest": ownNext,
+		"own_key": c.OwnPublicKey, "own_next_digests": ownNextDigestsOf(c),
 		"toad": ev.Bt, "cuts": ev.Br, "adds": ev.Ba, "anchors": ev.A,
 		"owners": owners,
 	})

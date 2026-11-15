@@ -157,6 +157,75 @@ void main() {
         throwsA(isA<NotTheEventExpected>()));
   });
 
+  group('a ceremony that keeps the box\'s key', () {
+    // The box's own share commits its classical digest and its post-quantum one.
+    final ownDigests = [id('boxclassic'), id('boxpq')];
+
+    Future<ExpectedEvent> keeping(List<String>? own) async =>
+        ExpectedEvent.asAnOwnerInACeremony(
+            stage: CeremonyStage.first,
+            handOver: false,
+            aid: aid,
+            sn: 1,
+            prior: prior,
+            ownKey: keyOf('box1'),
+            ownNextDigests: own,
+            owners: await owners(pq: true),
+            me: alice,
+            threshold: 3);
+
+    Future<Map<String, Object?>> kept(List<String> own) async {
+      final o = await owners(pq: true);
+      final groups = [own, o[alice]!.next, o[bob]!.next];
+      return {
+        't': 'rot', 'd': '', 'i': aid, 's': '1', 'p': prior,
+        'kt': '3',
+        'k': [keyOf('box1'), o[alice]!.key, o[bob]!.key],
+        'nt': ceremonyNextThreshold(3, groups),
+        'n': [for (final g in groups) ...g],
+        'bt': '0', 'br': [], 'ba': [], 'a': [],
+      };
+    }
+
+    test('is signed when n carries both of the box\'s digests, then the owners\'', () async {
+      await (await keeping(ownDigests)).requireIn(km, saidified(await kept(ownDigests)));
+    });
+
+    test('is not expected from badly formed own digests: three, a repeat, or one an owner already holds', () async {
+      final bobsDigest = (await owners(pq: true))[bob]!.next.first;
+      for (final bad in [
+        [id('boxclassic'), id('boxpq'), id('boxextra')],
+        [id('boxclassic'), id('boxclassic')],
+        [id('boxclassic'), bobsDigest],
+      ]) {
+        expect(() => keeping(bad), throwsA(isA<ArgumentError>()));
+      }
+    });
+
+    test('is not signed when the core drops the box\'s post-quantum digest', () async {
+      await expectLater(
+          (await keeping(ownDigests)).requireIn(km, saidified(await kept([ownDigests[0]]))),
+          throwsA(isA<NotTheEventExpected>()));
+    });
+
+    test('is not signed when the core swaps in a post-quantum digest the terms did not name', () async {
+      await expectLater(
+          (await keeping(ownDigests))
+              .requireIn(km, saidified(await kept([ownDigests[0], id('mallorypq')]))),
+          throwsA(isA<NotTheEventExpected>()));
+    });
+
+    test('cannot be expected with no digest for the box at all', () async {
+      await expectLater(keeping(null), throwsA(isA<ArgumentError>()));
+      await expectLater(keeping(const []), throwsA(isA<ArgumentError>()));
+    });
+
+    test('each owner still signs at its own place after the box\'s two digests', () async {
+      final e = await keeping(ownDigests);
+      expect([e.place!.index, e.place!.currentOnly], [1, true]);
+    });
+  });
+
   group('the step a device takes', () {
     Future<(MockClient, List<http.Request>)> core(Map<String, Object?> fields,
         {String stage = 'rot1'}) async {

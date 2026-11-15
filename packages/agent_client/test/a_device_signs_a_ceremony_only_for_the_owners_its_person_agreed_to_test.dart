@@ -94,7 +94,7 @@ void main() {
     return ({
       'status': 'signing', 'stage': stage, 'hand_over': true, 'threshold': 2, 'aid': aid,
       'sn': first ? '1' : '2', 'prior': priorOf ?? prior, 'd': said,
-      'own_key': keyOf('box1'), 'own_next_digest': '', 'toad': '0',
+      'own_key': keyOf('box1'), 'own_next_digests': <String>[], 'toad': '0',
       'cuts': cuts, 'adds': [], 'anchors': seals, 'owners': o,
     }, raw);
   }

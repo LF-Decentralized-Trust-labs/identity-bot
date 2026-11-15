@@ -641,15 +641,35 @@ owner's post-quantum commitment or swap in one of its own. The post-quantum
 key of an owner is a different secret from its classical key and from the
 identity's own post-quantum key.
 
+*A ceremony that keeps the identity's own key* gives the identity's own share
+the same two commitments. Its group in `n` leads, ahead of the owners': the
+digest of its classical next key and the post-quantum digest derived for the
+generation the rotation goes into (the identity's key generation plus one, as
+an ordinary rotation derives it). The ceremony's terms name both digests, as
+`own_next_digests`, and each owner's device builds the whole of `n` from them
+and from what it recorded of the owners, so an event whose `n` differs from
+the terms is refused. The same core writes the terms and the event, and only
+the identity can derive its own digests, so nobody else can check that these
+are the identity's real ones; the share is the identity's own, and a wrong
+digest there costs only the identity. A device does refuse own digests that
+number more than two, or that repeat a digest anywhere in `n`, so none can
+give an owner a second share. In a hand-over there is no such
+share, so the terms name none. Where the post-quantum digest cannot be derived
+the share commits its classical digest alone, as an ordinary rotation does.
+
 *The layout is fixed, so every signer can check it.* The owners are ordered by
 their identifiers, compared as ASCII strings, ascending. Owner *i* (from 0)
-then has:
+then has, in a hand-over (where the identity's own key is not kept):
 
 - in stage one, `k[i]` = their current classical key, and `n[2i]`, `n[2i+1]` =
   their next classical and next post-quantum digests. They sign at index *i*,
   ondex *2i* (code `A` for owner 0, `2A` for the others);
 - in stage two, `k[2i]`, `k[2i+1]` = their classical and post-quantum keys, with
   `n` laid out as in stage one, so index and ondex are equal (code `A`).
+
+Where the identity keeps its own key, its key leads `k` and its group of one
+or two digests leads `n`, so owner *i* is at `k[i+1]`, its digests in `n` come
+after the identity's group, and it signs current-only at index *i*+1.
 
 *The thresholds*, exactly as keripy 1.3.6 serialises them (generated with its
 `Tholder` and checked against which signers satisfy them):
