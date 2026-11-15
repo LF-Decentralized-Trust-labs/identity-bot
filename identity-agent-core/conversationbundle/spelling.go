@@ -23,17 +23,26 @@ import (
 func checkSpelling(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	tree, err := readOnce(dec, "")
+	tree, err := readOnce(dec, "", 0)
 	if err != nil {
 		return err
 	}
 	return checkKeys(tree, reflect.TypeOf(v), "")
 }
 
+// maxNesting is the deepest a bundle's JSON may nest. A genuine bundle nests a
+// handful of levels; the token reader has no limit of its own (Decode stops at
+// 10000), so without one a file of nested brackets would exhaust the reader
+// before anything was checked.
+const maxNesting = 64
+
 // readOnce reads one JSON value into a tree, failing on a repeated key. A key is
 // repeated when it matches another of the same object exactly or ignoring case,
 // since Go would fold the two into one field.
-func readOnce(dec *json.Decoder, at string) (any, error) {
+func readOnce(dec *json.Decoder, at string, depth int) (any, error) {
+	if depth > maxNesting {
+		return nil, fmt.Errorf("%s: the bundle nests deeper than %d levels", where(at), maxNesting)
+	}
 	tok, err := dec.Token()
 	if err != nil {
 		return nil, err
@@ -59,7 +68,7 @@ func readOnce(dec *json.Decoder, at string) (any, error) {
 				return nil, fmt.Errorf("%s: the keys %q and %q are one field spelled twice", where(at), first, k)
 			}
 			seen[strings.ToLower(k)] = k
-			child, err := readOnce(dec, at+"/"+k)
+			child, err := readOnce(dec, at+"/"+k, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -72,7 +81,7 @@ func readOnce(dec *json.Decoder, at string) (any, error) {
 	case '[':
 		var arr []any
 		for i := 0; dec.More(); i++ {
-			child, err := readOnce(dec, fmt.Sprintf("%s/%d", at, i))
+			child, err := readOnce(dec, fmt.Sprintf("%s/%d", at, i), depth+1)
 			if err != nil {
 				return nil, err
 			}

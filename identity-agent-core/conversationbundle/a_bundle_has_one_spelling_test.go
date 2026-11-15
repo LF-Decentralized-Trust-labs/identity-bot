@@ -77,6 +77,17 @@ func TestAFileTwoParsersWouldReadDifferentlyIsRefused(t *testing.T) {
 	}
 }
 
+// A file of nested brackets is refused quickly, before anything is checked: the
+// token reader that finds a repeated key has no depth limit of its own.
+func TestADeeplyNestedFileIsRefused(t *testing.T) {
+	for _, depth := range []int{maxNesting + 2, 3_000_000} {
+		deep := `{"format": ` + strings.Repeat("[", depth) + strings.Repeat("]", depth) + `}`
+		if _, err := Read([]byte(deep)); err == nil || !strings.Contains(err.Error(), "nests deeper") {
+			t.Fatalf("a file nested %d deep was read as %v", depth, err)
+		}
+	}
+}
+
 // The published head-bearing vector: a genuine export of a conversation whose
 // export carries the Identity Agent's signed head statement.
 const headVectorFile = "../contracts/conversation-bundle/genuine-bundle-with-head.json"
