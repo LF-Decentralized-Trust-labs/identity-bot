@@ -34,6 +34,13 @@ import (
 // log left beside the path by one that was removed. Anything else is written
 // as a file.
 func RestoreFile(dataDir, rel string, raw []byte) error {
+	// An archive's sandbox.db is the activity log under its old name, and
+	// where it goes depends on what else the archive carries, which only
+	// FilesToRestore sees. Written here as given, it would sit beside the log
+	// unread.
+	if isTheLegacyLog(rel) {
+		return fmt.Errorf("%s is restored through FilesToRestore, which decides where it goes", rel)
+	}
 	dest := filepath.Join(dataDir, rel)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("make room for %s: %w", rel, err)

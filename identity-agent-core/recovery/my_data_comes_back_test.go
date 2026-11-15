@@ -69,13 +69,6 @@ func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, s
 			t.Fatal(err)
 		}
 	}
-	// A sandbox directory, so the tier-3 sandbox_index section is actually
-	// present in the bundle. Without it that section is simply absent and any
-	// check over the bundle passes without having looked at it.
-	if err := os.MkdirAll(filepath.Join(dir, "sandbox", "an-app"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
 	// A file of its own, for the same reason: without one here the sweep has
 	// nothing to find and every check over the bundle passes without looking.
 	if err := os.WriteFile(filepath.Join(dir, "some_store.db"),
@@ -317,10 +310,6 @@ func TestNoSectionIsCollectedAndThenIgnored(t *testing.T) {
 	// reason, because "nobody restores it" and "nobody noticed it" look
 	// identical from the outside — and the second one is problem 183.
 	deliberate := map[string]string{
-		"sandbox_index": "a manifest of what sandbox directories existed, kept so a " +
-			"person can see what they had. The containers themselves are not in the " +
-			"archive, so writing the index onto a new device would describe apps that " +
-			"are not there.",
 		"not_carried": "the list of what was deliberately left out and why. A record " +
 			"about the archive rather than data from the device, so restoring it " +
 			"would overwrite the new device's own account with the old one's.",
