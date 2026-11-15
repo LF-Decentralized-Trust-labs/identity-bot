@@ -315,6 +315,10 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 		}
 		inter.AddCert(ic)
 	}
+	// The issuers the pinned package carries need not be sent by the front end.
+	for _, ic := range tpmManufacturerIssuers {
+		inter.AddCert(ic)
+	}
 	pool := x509.NewCertPool()
 	for _, r := range roots {
 		pool.AddCert(r)

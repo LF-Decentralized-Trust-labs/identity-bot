@@ -160,7 +160,7 @@ sequenceDiagram
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
-- an installed front end's hardware key proved on **Windows**: the credential round trip is built (Amendment 7) and no manufacturer's root is pinned, so the core still refuses every TPM key
+- an installed front end's hardware key proved on **Windows**: the credential round trip is built (Amendment 7) and Microsoft's trusted TPM root list is pinned (Amendment 7, 2026-11-14); no real TPM has been tried
 - an app claiming its own relay name
 - the back end carrying a front end's signed request to the core
 - an app's approval request for one action
@@ -322,7 +322,7 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 
 **How it was checked.** The credential, and the evidence built on what a TPM released, were made with a software TPM, the reference implementation of the TPM 2.0 library, which opened the core's credential with `TPM2_ActivateCredential` and refused one that had been altered (`secureenclave/testdata/tpmsim`), for an RSA and for an ECC endorsement key. The Windows front end's TPM commands (`packages/login-flutter/windows/tpm2.cpp`) were run the same way, and what they make is accepted by `VerifyTPMKeyCertify`. The simulator's endorsement certificate is signed by a root made for the test: **no real manufacturer's certificate chain, and no real TPM, has been seen by this code.**
 
-**No manufacturer's root is pinned, so a Windows installed app still signs in as `browser`.** The roots are the PEM files in `identity-agent-core/secureenclave/tpmroots`, and there are none. Whom to trust to say a TPM is real is the owner's decision; Microsoft publishes the makers' roots and issuers together (`tools/tpmroots` makes the files from that package, and records where they came from). Whichever are pinned, an endorsement certificate needs its issuers: the front end sends none yet (`ek_chain`), so for a maker whose certificates carry intermediates, either they are pinned too or the front end must fetch them from the certificate's authority information. Until then Amendment 2's accepted case stands.
+**Microsoft's trusted TPM root list is pinned (Rob, 2026-11-14).** The roots are the PEM files in `identity-agent-core/secureenclave/tpmroots` and the issuers the same package carries, which a chain may pass through, are in `tpmintermediates`, so a front end need not send them. `tpmroots/SOURCE.txt` records the package's URL, its SHA-256 and the date, and `tpmroots/update.sh` fetches the current list and rewrites both; the diff is read before it is committed. Trusting it means trusting a chain to one of its roots and a leaf marked as a TCG endorsement key certificate. The list also holds Microsoft's virtual and cloud TPMs, which therefore chain too, and 6 STMicroelectronics issuers Go's X.509 reader refuses (a malformed serial number) are not pinned, so chains through those fail. Nothing has seen a real TPM's certificate. With roots pinned, a Windows installed app signs in as `installed_app`, for an app whose owner has accepted `tpm_keys`; for another, its sign-in is refused in words.
 
 **A TPM proves the key and not the program.** As Amendment 3 says, the owner must have accepted `tpm_keys` for the asset. On Windows the key's blob is kept under the person's profile, encrypted to them with DPAPI, and a program running as the same person can ask the TPM to sign with it.
 

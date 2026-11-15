@@ -62,10 +62,13 @@ func TestTheCoreAcceptsWhatARealTPMImplementationMade(t *testing.T) {
 			if facts.Platform != "tpm" || facts.Public == nil {
 				t.Fatalf("facts = %+v", facts)
 			}
-			// The hardware key's evidence is the TPM's, and a core whose pinned
-			// roots are empty (as this build's are) takes none of it.
-			if _, err := VerifyTPMKeyCertify(v.Evidence, v.Challenge, v.CredentialKey, v.Now); err == nil || !strings.Contains(err.Error(), "no TPM manufacturer roots") {
-				t.Fatalf("with no pinned roots the evidence must be refused in words, got %v", err)
+			// The evidence of a test root's EK is not a manufacturer's: the pinned roots
+			// (Microsoft's list) refuse it, in words.
+			if len(tpmManufacturerRoots) == 0 {
+				t.Fatal("no manufacturer root is pinned")
+			}
+			if _, err := VerifyTPMKeyCertify(v.Evidence, v.Challenge, v.CredentialKey, v.Now); err == nil || !strings.Contains(err.Error(), "does not chain to a pinned TPM manufacturer root") {
+				t.Fatalf("an EK certificate under a test root must be refused against the pinned roots, got %v", err)
 			}
 		})
 	}
@@ -188,5 +191,31 @@ func TestACertificateThatIsNotAnEndorsementKeyCertificateIsRefused(t *testing.T)
 		if _, err := verifyEKCertificate(der, nil, []*x509.Certificate{root}, v.Now); err == nil {
 			t.Errorf("%s: a certificate under a pinned root was taken as an endorsement key's", name)
 		}
+	}
+}
+
+// The pinned package is internally consistent: its issuers chain, through each other, to its
+// roots (a real manufacturer chain, not a test root), though not every maker's do, and some
+// are expired. The count below is what the package of 2026-10-23 gave; a different package is
+// a different number, to be read when it is pinned.
+func TestThePinnedIssuersChainToThePinnedRoots(t *testing.T) {
+	roots := x509.NewCertPool()
+	for _, r := range tpmManufacturerRoots {
+		roots.AddCert(r)
+	}
+	inter := x509.NewCertPool()
+	for _, c := range tpmManufacturerIssuers {
+		inter.AddCert(c)
+	}
+	ok := 0
+	for _, c := range tpmManufacturerIssuers {
+		if _, err := c.Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter, CurrentTime: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC),
+			KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err == nil {
+			ok++
+		}
+	}
+	t.Logf("%d of %d pinned issuers chain to a pinned root", ok, len(tpmManufacturerIssuers))
+	if ok < len(tpmManufacturerIssuers)/2 {
+		t.Fatalf("only %d of %d pinned issuers chain to a pinned root: the pin is not what a chain needs", ok, len(tpmManufacturerIssuers))
 	}
 }
