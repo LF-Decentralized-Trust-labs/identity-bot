@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"embed"
 	"encoding/pem"
+	"identity-agent-core/tpmcert"
 	"io/fs"
 	"strings"
 )
@@ -12,7 +13,7 @@ import (
 // of which tools/tpmroots keeps only what it can classify as a physical TPM chip's
 // (tpmroots/README.md). The list is read once.
 //
-//go:embed tpmroots tpmintermediates tpmvirtual
+//go:embed tpmroots tpmintermediates tpmvirtual tpmlenient
 var tpmRootFiles embed.FS
 
 // tpmManufacturerIssuers are the issuers of the same package: certificates a chain
@@ -24,7 +25,13 @@ var tpmManufacturerIssuers []*x509.Certificate
 // TPM (Hyper-V, Azure). They are never trusted: a chain through one is refused by name.
 var tpmVirtualIssuers []*x509.Certificate
 
+// tpmLenientIssuers are issuers of the same package, physical ones, that crypto/x509 refuses to
+// read (a serial number with redundant leading zeros), kept as bytes and read by tpmcert. They
+// are never trust anchors, and are used only where tpm_lenient.go says.
+var tpmLenientIssuers []*tpmcert.Certificate
+
 func init() {
+	tpmLenientIssuers = pinnedLenientTPMCerts(tpmRootFiles, "tpmlenient")
 	tpmVirtualIssuers = pinnedTPMCerts(tpmRootFiles, "tpmvirtual")
 	tpmManufacturerRoots = pinnedTPMCerts(tpmRootFiles, "tpmroots")
 	tpmManufacturerIssuers = pinnedTPMCerts(tpmRootFiles, "tpmintermediates")
@@ -54,4 +61,28 @@ func pinnedTPMCerts(fsys fs.FS, dir string) []*x509.Certificate {
 		roots = append(roots, c)
 	}
 	return roots
+}
+
+func pinnedLenientTPMCerts(fsys fs.FS, dir string) []*tpmcert.Certificate {
+	var out []*tpmcert.Certificate
+	entries, _ := fs.ReadDir(fsys, dir)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pem") {
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, dir+"/"+e.Name())
+		if err != nil {
+			panic(dir + "/" + e.Name() + ": " + err.Error())
+		}
+		b, _ := pem.Decode(raw)
+		if b == nil {
+			panic(dir + "/" + e.Name() + " is not PEM")
+		}
+		c, err := tpmcert.Parse(b.Bytes)
+		if err != nil {
+			panic(dir + "/" + e.Name() + ": " + err.Error())
+		}
+		out = append(out, c)
+	}
+	return out
 }

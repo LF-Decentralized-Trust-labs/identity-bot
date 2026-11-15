@@ -357,11 +357,14 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 	// root is the claim being checked.
 	chains, err := leaf.Verify(x509.VerifyOptions{Roots: pool, Intermediates: inter, CurrentTime: now,
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+	var issuer *EKIssuer
 	if err != nil {
-		return nil, nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
-	}
-	issuer, err := physicalIssuer(chains, roots)
-	if err != nil {
+		// An issuer crypto/x509 cannot read is checked directly (tpm_lenient.go).
+		issuer = lenientIssuer(leaf, roots, now)
+		if issuer == nil {
+			return nil, nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
+		}
+	} else if issuer, err = physicalIssuer(chains, roots); err != nil {
 		return nil, nil, err
 	}
 	// A manufacturer's CA signs other things too (vTPM and device certificates), so a

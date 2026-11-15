@@ -1,4 +1,4 @@
-Made by tools/tpmroots on 2026-11-14 from https://go.microsoft.com/fwlink/?linkid=2097925
+Made by tools/tpmroots on 2026-11-15 from https://go.microsoft.com/fwlink/?linkid=2097925
 SHA-256 of the package as fetched: 6cd97a6c90d2b4be594a47ffb6d95792169c5cef6498eb1c82dfebcf53da0e51
 Roots (trust anchors) and issuers (certificates a chain may pass through) are listed with their maker and class; version.txt of the package said: 23-October-2026
 
@@ -2576,22 +2576,22 @@ IntermediateCA  5b1382dd54da24a4661d49a202e0e856e4e2a59dffa0c95046e6b2fbf9b03408
 IntermediateCA  c689da43ec7e38ebaa89cc3963253910733693b61f07c93ba95f5688e5330d76  class=physical  CN=Microsoft TPM Endorsement Key Service,O=Microsoft Corporation,L=Redmond,ST=Washington,C=US  expires 2036-06-24  (QC)
 IntermediateCA  c521df76f8136a498fa6997526df08b79a25897654bbf4ffbc3efe8dc0c1a7e7  class=physical  CN=Qualcomm WES EK Provisioning SubCA 3 (Kenai family),OU=Qualcomm Cryptographic Operations,O=Qualcomm Technologies\, Inc.  expires 2036-01-29  (QC)
 IntermediateCA  d400d2eb8e868af1e92102afe70e5c1dea74c713e43ca5488890f8eb6be1a3a1  class=physical  CN=Qualcomm WES EK Provisioning SubCA,OU=Qualcomm Cryptographic Operations,O=Qualcomm Technologies\, Inc.  expires 2033-02-14  (QC)
-IntermediateCA  SKIPPED qwes_prod_ek_provisioning_intermediate_glymur_mahua_kalombo.crt (x509: malformed certificate)
-IntermediateCA  SKIPPED STM TPM ECC Intermediate CA 01.crt (x509: malformed serial number)
+IntermediateCA  da6b3df727f506a3ec9ce2556eb565f0d0f06debe8335d413535ecb5c131fcb0  class=physical  CN=Qualcomm WES EK Provisioning SubCA 2 (Glymur family),OU=Qualcomm Cryptographic Operations,O=Qualcomm Technologies\, Inc.  expires 2035-04-25  (QC)
+IntermediateCA  0df3b459c9e675272ff7611f768abbbc3e30a343d391f6acb711a0d0aabab113  class=physical  CN=STM TPM ECC Intermediate CA 01,O=STMicroelectronics NV,C=CH  expires 2035-12-31  (STMicro)  (read by tpmcert: crypto/x509 refuses it)
 IntermediateCA  015bcfc3943540d18691bf95c939b0e560b293a835b1c32ff1dced975376ac42  class=physical  CN=STM TPM ECC Intermediate CA 01,O=STMicroelectronics NV,C=CH  expires 2035-12-31  (STMicro)
 IntermediateCA  695ad0f0236f047c2ccc9abacaf4d07a3e91251912cf4ac65aa49c8fff352bc5  class=physical  CN=STM TPM ECC Intermediate CA 02,O=STMicroelectronics NV,C=CH  expires 2038-11-22  (STMicro)
 IntermediateCA  a4b4895991223ea2b957152e0ff0b126e8ba8ee1a563d93bc600dc86dff41095  class=physical  CN=STM TPM ECC Intermediate CA 03,O=STMicroelectronics NV,C=CH  expires 2038-11-22  (STMicro)
 IntermediateCA  4a13dd436b11d705ecfbea7d7027b7a45dee1afcb53a0ed8640e13578c64bc69  class=physical  CN=STM TPM ECC384 Intermediate CA 01,O=STMicroelectronics NV,C=CH  expires 2038-11-22  (STMicro)
 IntermediateCA  97a13b81a111ad41658664263bc1ca450a9245cb0bfb15717f230eacad02c0bd  class=physical  CN=STM TPM ECC384 Intermediate CA 02,O=STMicroelectronics NV,C=CH  expires 2038-11-22  (STMicro)
-IntermediateCA  SKIPPED STM TPM EK Intermediate CA 01.crt (x509: malformed serial number)
+IntermediateCA  f29c461aaf0e64c8b3b99761c81653ed241f57087e420a313e7e076c7ec047c3  class=physical  CN=STM TPM EK Intermediate CA 01,O=STMicroelectronics NV,C=CH  expires 2029-12-31  (STMicro)  (read by tpmcert: crypto/x509 refuses it)
 IntermediateCA  6c3ba9f3ce8f095179e42b015fa1e81cf6e260e140fc5ffcb0dd418da5acafd7  class=physical  CN=STM TPM EK Intermediate CA 01,O=STMicroelectronics NV,C=CH  expires 2029-12-31  (STMicro)
-IntermediateCA  SKIPPED STM TPM EK Intermediate CA 02.crt (x509: malformed serial number)
+IntermediateCA  9c84ecf27fba4e86538a34e3a1e60cd7853ef921cbcf28f95d9a63122a5cf5e8  class=physical  CN=STM TPM EK Intermediate CA 02,O=STMicroelectronics NV,C=CH  expires 2029-12-31  (STMicro)  (read by tpmcert: crypto/x509 refuses it)
 IntermediateCA  dc62a3b996414573df20bcaf013f0aae47b102e599f63b23c9bf0b6448a60b53  class=physical  CN=STM TPM EK Intermediate CA 02,O=STMicroelectronics NV,C=CH  expires 2029-12-31  (STMicro)
-IntermediateCA  SKIPPED STM TPM EK Intermediate CA 03.crt (x509: malformed serial number)
+IntermediateCA  9ca3a6c02f4073ac9518ee5f46d1916c945d4fad381447064addf2a5c634f93e  class=physical  CN=STM TPM EK Intermediate CA 03,O=STMicroelectronics NV,C=CH  expires 2029-12-31  (STMicro)  (read by tpmcert: crypto/x509 refuses it)
 IntermediateCA  6b26c20162a9de2d0f69dbc8c04b95c127f5ca5b153d7a01a7a6cf9ab88ad834  class=physical  CN=STM TPM EK Intermediate CA 03,O=STMicroelectronics NV,C=CH  expires 2029-12-31  (STMicro)
-IntermediateCA  SKIPPED STM TPM EK Intermediate CA 04.crt (x509: malformed serial number)
+IntermediateCA  5cfcd07e257a99bace95b5805ba5363997b3fb5d5cfaff5a58d36c1db767d42a  class=physical  CN=STM TPM EK Intermediate CA 04,O=STMicroelectronics NV,C=CH  expires 2039-12-31  (STMicro)  (read by tpmcert: crypto/x509 refuses it)
 IntermediateCA  25e87e5f9d8215e78b1a916d5d529b5ad9b3bfb52dbbf2d8c3ab211f6124caca  class=physical  CN=STM TPM EK Intermediate CA 04,O=STMicroelectronics NV,C=CH  expires 2039-12-31  (STMicro)
-IntermediateCA  SKIPPED STM TPM EK Intermediate CA 05.crt (x509: malformed serial number)
+IntermediateCA  2fe2ef243480b4b1d78639a4d9822e80c01781edde1ea36040a946e77c37497d  class=physical  CN=STM TPM EK Intermediate CA 05,O=STMicroelectronics NV,C=CH  expires 2035-12-31  (STMicro)  (read by tpmcert: crypto/x509 refuses it)
 IntermediateCA  870fc181411d24c81e84ec45cd9bcc87b41253342ed688eee6d9139b31b44002  class=physical  CN=STM TPM EK Intermediate CA 05,O=STMicroelectronics NV,C=CH  expires 2035-12-31  (STMicro)
 IntermediateCA  9343d2d7f3c8708526e6f224563bebda23f534c518f2a1a421ebcce01557247c  class=physical  CN=STM TPM EK Intermediate CA 06,O=STMicroelectronics NV,C=CH  expires 2038-01-01  (STMicro)
 IntermediateCA  19bbcef93fc0877ae66eba97ade4e15c3d77054f39cd1183486f12b8fa5c42b2  class=physical  CN=STM TPM EK Intermediate CA 07,O=STMicroelectronics NV,C=CH  expires 2038-01-01  (STMicro)

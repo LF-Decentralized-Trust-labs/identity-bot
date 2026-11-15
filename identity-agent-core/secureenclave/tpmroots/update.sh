@@ -50,6 +50,6 @@ if [ "$got" != "$listed" ] || [ "$got" -lt 100 ]; then
   exit 1
 fi
 
-mkdir -p secureenclave/tpmvirtual
-rm -f secureenclave/tpmroots/*.pem secureenclave/tpmintermediates/*.pem secureenclave/tpmvirtual/*.pem
-go run ./tools/tpmroots -in "$work/x" -out secureenclave/tpmroots -intermediates secureenclave/tpmintermediates -virtual secureenclave/tpmvirtual -source "$url" -sha256 "$sum"
+mkdir -p secureenclave/tpmvirtual secureenclave/tpmlenient
+rm -f secureenclave/tpmroots/*.pem secureenclave/tpmintermediates/*.pem secureenclave/tpmvirtual/*.pem secureenclave/tpmlenient/*.pem
+go run ./tools/tpmroots -in "$work/x" -out secureenclave/tpmroots -intermediates secureenclave/tpmintermediates -virtual secureenclave/tpmvirtual -lenient secureenclave/tpmlenient -source "$url" -sha256 "$sum"

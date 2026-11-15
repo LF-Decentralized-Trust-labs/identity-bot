@@ -31,8 +31,6 @@ Nothing has run on a device or a real TPM. Android needs a real device (an emula
 | iOS, macOS | `darwin/` | App Attest: the attestation for `SHA-256(challenge)`, and an assertion for each statement and **each call's proof** |
 | Windows | `windows/` | A TPM key certify by an attestation key, a `TPM2_ActivateCredential` result of the Identity Agent's credential, and the EK certificate. Only a **physical TPM chip** counts: a virtual or cloud TPM is refused. Microsoft's trusted TPM root list is pinned for physical chips (`identity-agent-core/secureenclave/tpmroots/README.md`) |
 
-**A limit a person will meet:** a Windows PC whose TPM is an STMicroelectronics chip cannot sign in yet, because six of that maker's issuer certificates cannot be read and are not pinned. Such a PC can sign in from a phone.
-
 An App Attest key signs only assertions, so on Apple the proof of each call is an
 assertion over the SHA-256 of the proof text (`login-go`: `IsAssertionProof`,
 `VerifyAppleAssertion`), not the plain 64-byte signature of the other platforms. A

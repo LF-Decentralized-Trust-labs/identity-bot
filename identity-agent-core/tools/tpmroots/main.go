@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
@@ -31,12 +32,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"identity-agent-core/tpmcert"
 )
 
 func main() {
 	in := flag.String("in", "", "the extracted TrustedTpm package")
 	out := flag.String("out", "", "where to write the roots' PEM files")
 	inter := flag.String("intermediates", "", "where to write the issuers' PEM files (each maker's IntermediateCA folder)")
+	lenient := flag.String("lenient", "", "where to write the issuers crypto/x509 refuses to read but tpmcert reads (physical ones only; each is pinned by its bytes)")
 	virt := flag.String("virtual", "", "where to write the virtual and cloud TPM issuers' PEM files (never trusted; kept so a chain through one is refused by name)")
 	source := flag.String("source", "https://go.microsoft.com/fwlink/?linkid=2097925", "where the package was fetched")
 	sum := flag.String("sha256", "", "the SHA-256 of the package file, as fetched")
@@ -46,7 +50,7 @@ func main() {
 		os.Exit(2)
 	}
 	var lines []string
-	dirs := dirsFor{physical: *out, virtual: *virt}
+	dirs := dirsFor{physical: *out, virtual: *virt, lenient: *lenient}
 	lines = append(lines, write(*in, "RootCA", dirs)...)
 	if *inter != "" {
 		dirs.physical = *inter
@@ -138,7 +142,7 @@ func classify(maker, subjectCN string, isRoot bool) string {
 	return classUnclassified
 }
 
-type dirsFor struct{ physical, virtual string }
+type dirsFor struct{ physical, virtual, lenient string }
 
 // write writes the PEM of every certificate in each maker's folder of this name, to the
 // directory of its class.
@@ -152,13 +156,11 @@ func write(in, folder string, dirs dirsFor) []string {
 		if err != nil {
 			continue
 		}
-		if b, _ := pem.Decode(raw); b != nil {
-			raw = b.Bytes
-		}
-		c, err := x509.ParseCertificate(raw)
+		raw = derOf(raw)
+		c, lenientRead, err := readCertificate(raw, folder)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "skipped %s: %v\n", f, err)
-			// A certificate Go's X.509 reader refuses (a malformed serial, say) cannot be pinned;
+			// A file that is no certificate, or one neither reader accepts, cannot be pinned;
 			// it is listed so what is missing is known.
 			lines = append(lines, fmt.Sprintf("%s  SKIPPED %s (%v)", folder, filepath.Base(f), err))
 			continue
@@ -170,11 +172,14 @@ func write(in, folder string, dirs dirsFor) []string {
 		}
 		seen[id] = true
 		maker := filepath.Base(filepath.Dir(filepath.Dir(f)))
-		class := classify(maker, c.Subject.CommonName, folder == "RootCA")
+		class := classify(maker, c.CN, folder == "RootCA")
 		dir := ""
 		switch class {
 		case classPhysical:
 			dir = dirs.physical
+			if lenientRead {
+				dir = dirs.lenient
+			}
 		case classVirtual:
 			dir = dirs.virtual
 		}
@@ -184,7 +189,52 @@ func write(in, folder string, dirs dirsFor) []string {
 				os.Exit(1)
 			}
 		}
-		lines = append(lines, fmt.Sprintf("%s  %s  class=%s  %s  expires %s  (%s)", folder, id, class, c.Subject, c.NotAfter.Format("2006-01-02"), maker))
+		note := ""
+		if lenientRead {
+			note = "  (read by tpmcert: crypto/x509 refuses it)"
+		}
+		lines = append(lines, fmt.Sprintf("%s  %s  class=%s  %s  expires %s  (%s)%s", folder, id, class, c.Subject, c.NotAfter.Format("2006-01-02"), maker, note))
 	}
 	return lines
+}
+
+// certificate is what write needs of either reader's result.
+type certificate struct {
+	Raw      []byte
+	Subject  fmt.Stringer
+	CN       string
+	NotAfter time.Time
+}
+
+// derOf returns the DER of a certificate file that is DER or PEM. A PEM file whose lines end
+// in a bare carriage return (one in the package does) is read as PEM too.
+func derOf(raw []byte) []byte {
+	if b, _ := pem.Decode(raw); b != nil {
+		return b.Bytes
+	}
+	if bytes.Contains(raw, []byte("-----BEGIN")) {
+		if b, _ := pem.Decode(bytes.ReplaceAll(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")), []byte("\r"), []byte("\n"))); b != nil {
+			return b.Bytes
+		}
+	}
+	return raw
+}
+
+// readCertificate reads a certificate with crypto/x509, and failing that, in an
+// IntermediateCA folder, with tpmcert (whose reading is the same but for the serial number).
+// The second result says which read it. A root is always read strictly: a trust anchor
+// is a pinned crypto/x509 certificate.
+func readCertificate(der []byte, folder string) (*certificate, bool, error) {
+	c, err := x509.ParseCertificate(der)
+	if err == nil {
+		return &certificate{c.Raw, c.Subject, c.Subject.CommonName, c.NotAfter}, false, nil
+	}
+	if folder == "RootCA" {
+		return nil, false, err
+	}
+	lc, lerr := tpmcert.Parse(der)
+	if lerr != nil {
+		return nil, false, err
+	}
+	return &certificate{lc.Raw, lc.Subject, lc.Subject.CommonName, lc.NotAfter}, true, nil
 }
