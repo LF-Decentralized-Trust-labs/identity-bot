@@ -27,10 +27,12 @@ import (
 //     package and signing certificates are the owner's.
 //   - iOS and macOS: Apple App Attest, to Apple's pinned root, for the
 //     owner's "<team id>.<bundle id>".
-//   - Windows: a TPM key certify, to pinned TPM manufacturer roots. A TPM
-//     proves the key is in the computer's TPM and not which program holds it,
-//     so it is accepted only where the owner has said they accept that
-//     (InstalledAppIdentity.TPMKeys).
+//   - Windows: a TPM key certify, to pinned TPM manufacturer roots. Only a
+//     physical TPM chip counts (a discrete chip, a firmware TPM in the CPU, or
+//     Pluton): a virtual or cloud TPM, whose key the hypervisor's operator can
+//     read, is refused. A TPM proves the key is in the computer's chip and not
+//     which program holds it, so it is accepted only where the owner has said
+//     they accept that (InstalledAppIdentity.TPMKeys).
 //
 // The attested public key must be the key the sign-in names.
 
@@ -65,6 +67,10 @@ type installedAppFact struct {
 	Platform string    `json:"platform"`
 	Level    string    `json:"level"`
 	Proved   time.Time `json:"proved"`
+	// For a TPM key: who certified the endorsement key of the chip that signed, and its
+	// class (only "physical" is accepted), so an owner or auditor can see which chip it was.
+	EKIssuer string `json:"ek_issuer,omitempty"`
+	EKClass  string `json:"ek_class,omitempty"`
 }
 
 func (s *CoreServer) holdInstalledAppFact(token string, f installedAppFact) {
@@ -88,6 +94,10 @@ func (s *CoreServer) takeInstalledAppFact(token string) (installedAppFact, bool)
 	delete(s.installedAppFacts, token)
 	return f, ok
 }
+
+// errTPMKeysNotAllowed is shown to the person as it stands: it says what to do, and it is the
+// same words wherever the refusal is passed on.
+var errTPMKeysNotAllowed = errors.New("This app's owner has not allowed sign-in from a Windows computer's security chip. Ask them to allow it, or sign in from a phone.")
 
 var errNoProof = errors.New("an installed-app sign-in needs a hardware attestation of the installed app's key, and this request has none")
 
@@ -131,7 +141,7 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 		facts, err = verifyAppleInstalledKey(proof.Evidence, challenge, a.InstalledApp.AppleAppID, now)
 	case "tpm":
 		if !a.InstalledApp.TPMKeys {
-			return installedAppFact{}, errors.New("the owner has not accepted a TPM key for this app: a TPM proves the key is in the computer, not which program holds it")
+			return installedAppFact{}, errTPMKeysNotAllowed
 		}
 		facts, err = verifyTPMInstalledKey(proof.Evidence, challenge, ask.credentialKey, now)
 	default:
@@ -152,7 +162,11 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 	if err := verifyKeyPossession(facts.Platform, facts.Public, proof.KeySignature, a.ID, ask, key, a.InstalledApp.AppleAppID); err != nil {
 		return installedAppFact{}, err
 	}
-	return installedAppFact{Platform: facts.Platform, Level: facts.Level, Proved: now.UTC()}, nil
+	f := installedAppFact{Platform: facts.Platform, Level: facts.Level, Proved: now.UTC()}
+	if facts.EKIssuer != nil {
+		f.EKIssuer, f.EKClass = facts.EKIssuer.Subject, facts.EKIssuer.Class
+	}
+	return f, nil
 }
 
 // holdsToAndroidProgram: the attestation states the package and the signing

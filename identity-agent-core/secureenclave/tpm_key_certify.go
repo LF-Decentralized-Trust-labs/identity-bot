@@ -103,6 +103,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/hex"
 	"encoding/json"
 	"math/big"
 	"time"
@@ -279,7 +280,7 @@ func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 	}
 
 	// The EK certificate, and the AK's binding to that EK.
-	ekCert, err := verifyEKCertificate(ev.EKCert, ev.EKChain, roots, now)
+	ekCert, ekIssuer, err := verifyEKCertificateIssuer(ev.EKCert, ev.EKChain, roots, now)
 	if err != nil {
 		return nil, err
 	}
@@ -293,25 +294,47 @@ func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 	}
 
 	// AppIDPresent stays false: a TPM does not say which app asked for a key.
-	return &InstalledAppKeyFacts{Public: pub, Platform: "tpm", Level: "tpm"}, nil
+	return &InstalledAppKeyFacts{Public: pub, Platform: "tpm", Level: "tpm", EKIssuer: ekIssuer}, nil
 }
 
 func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time) (*x509.Certificate, error) {
+	leaf, _, err := verifyEKCertificateIssuer(der, chain, roots, now)
+	return leaf, err
+}
+
+// TPMClassPhysical is the class of a chip whose endorsement key a pinned physical
+// issuer certified: a discrete chip, a firmware TPM in the CPU, or Pluton. It is the only
+// class accepted. A virtual or cloud TPM (a key the hypervisor operator can read) is refused.
+const TPMClassPhysical = "physical"
+
+// EKIssuer says who certified a proved TPM's endorsement key.
+type EKIssuer struct {
+	Subject string // the issuer's subject, as the certificate gives it
+	SHA256  string // hex SHA-256 of the issuer certificate
+	Class   string // TPMClassPhysical: the only class a proof can carry
+}
+
+func sha256Hex(c *x509.Certificate) string {
+	h := sha256.Sum256(c.Raw)
+	return hex.EncodeToString(h[:])
+}
+
+func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time) (*x509.Certificate, *EKIssuer, error) {
 	if len(der) == 0 {
-		return nil, notAttested("no endorsement key certificate")
+		return nil, nil, notAttested("no endorsement key certificate")
 	}
 	leaf, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, notAttested("the endorsement key certificate: %v", err)
+		return nil, nil, notAttested("the endorsement key certificate: %v", err)
 	}
 	if len(chain) > 8 {
-		return nil, notAttested("the endorsement key certificate chain is too long")
+		return nil, nil, notAttested("the endorsement key certificate chain is too long")
 	}
 	inter := x509.NewCertPool()
 	for _, c := range chain {
 		ic, err := x509.ParseCertificate(c)
 		if err != nil {
-			return nil, notAttested("an issuer certificate: %v", err)
+			return nil, nil, notAttested("an issuer certificate: %v", err)
 		}
 		inter.AddCert(ic)
 	}
@@ -326,15 +349,20 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 	// EK certificates carry the TCG EK-certificate extended key usage, not
 	// server or client auth, so any usage is accepted; the chain to a pinned
 	// root is the claim being checked.
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, Intermediates: inter, CurrentTime: now,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
-		return nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
+	chains, err := leaf.Verify(x509.VerifyOptions{Roots: pool, Intermediates: inter, CurrentTime: now,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+	if err != nil {
+		return nil, nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
+	}
+	issuer, err := physicalIssuer(chains, roots)
+	if err != nil {
+		return nil, nil, err
 	}
 	// A manufacturer's CA signs other things too (vTPM and device certificates), so a
 	// chain is not enough: the leaf must be an endorsement key certificate, which the TCG
 	// profile marks with its own extended key usage, and it must not be a CA.
 	if leaf.IsCA {
-		return nil, notAttested("the endorsement key certificate is a CA certificate")
+		return nil, nil, notAttested("the endorsement key certificate is a CA certificate")
 	}
 	hasEKU := false
 	for _, o := range leaf.UnknownExtKeyUsage {
@@ -343,9 +371,70 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 		}
 	}
 	if !hasEKU {
-		return nil, notAttested("the certificate is not marked as a TPM endorsement key certificate (2.23.133.8.1)")
+		return nil, nil, notAttested("the certificate is not marked as a TPM endorsement key certificate (2.23.133.8.1)")
 	}
-	return leaf, nil
+	return leaf, issuer, nil
+}
+
+// physicalIssuer picks, among the chains that verified, one whose every certificate above
+// the leaf is positively a physical TPM's, and says who issued the leaf. The Microsoft
+// root anchors issuers of firmware TPMs and Microsoft's own software TPM alike, and a front
+// end may send issuers of its own, so chaining to a pinned root is not enough:
+//   - no certificate of the chain may be one the package marks as a virtual or cloud TPM's;
+//   - the leaf's direct issuer must itself be pinned as physical (a pinned issuer, or a pinned
+//     root that has no pinned issuers under it), so an issuer the front end sent is not trusted
+//     for being sent, and a root that issues through pinned issuers is trusted only through them.
+func physicalIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate) (*EKIssuer, error) {
+	virtual := map[string]bool{}
+	for _, c := range tpmVirtualIssuers {
+		virtual[sha256Hex(c)] = true
+	}
+	pinned := map[string]bool{}
+	for _, c := range tpmManufacturerIssuers {
+		pinned[sha256Hex(c)] = true
+	}
+	var refusal error
+	for _, ch := range chains {
+		if len(ch) < 2 {
+			continue
+		}
+		for _, c := range ch[1:] {
+			if virtual[sha256Hex(c)] {
+				refusal = notAttested("the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", c.Subject.CommonName)
+			}
+		}
+		if refusal != nil {
+			continue
+		}
+		iss := ch[1]
+		id := sha256Hex(iss)
+		ok := pinned[id]
+		if !ok { // a pinned root issues directly only if nothing pinned sits beneath it
+			for _, r := range roots {
+				if r.Equal(iss) && !hasPinnedIssuerUnder(iss) {
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			refusal = notAttested("the endorsement key was certified by %q, which is not pinned as a physical TPM chip's issuer", iss.Subject.CommonName)
+			continue
+		}
+		return &EKIssuer{Subject: iss.Subject.String(), SHA256: id, Class: TPMClassPhysical}, nil
+	}
+	if refusal == nil {
+		refusal = notAttested("the endorsement key certificate is issued by no pinned issuer")
+	}
+	return nil, refusal
+}
+
+func hasPinnedIssuerUnder(root *x509.Certificate) bool {
+	for _, c := range tpmManufacturerIssuers {
+		if bytes.Equal(c.AuthorityKeyId, root.SubjectKeyId) && len(root.SubjectKeyId) > 0 && c.CheckSignatureFrom(root) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // tpmEKCertificateEKU is the TCG extended key usage of an endorsement key certificate.

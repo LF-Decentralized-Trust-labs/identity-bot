@@ -8,10 +8,11 @@ import (
 	"strings"
 )
 
-// The roots are the PEM files committed in tpmroots, and none is pinned until the
-// owner says whom to trust (tpmroots/README.md). The list is read once.
+// The roots are the PEM files committed in tpmroots: Microsoft's trusted TPM root list,
+// of which tools/tpmroots keeps only what it can classify as a physical TPM chip's
+// (tpmroots/README.md). The list is read once.
 //
-//go:embed tpmroots tpmintermediates
+//go:embed tpmroots tpmintermediates tpmvirtual
 var tpmRootFiles embed.FS
 
 // tpmManufacturerIssuers are the issuers of the same package: certificates a chain
@@ -19,7 +20,12 @@ var tpmRootFiles embed.FS
 // They are never trust anchors.
 var tpmManufacturerIssuers []*x509.Certificate
 
+// tpmVirtualIssuers are issuers of the same package that stand for Microsoft's own software
+// TPM (Hyper-V, Azure). They are never trusted: a chain through one is refused by name.
+var tpmVirtualIssuers []*x509.Certificate
+
 func init() {
+	tpmVirtualIssuers = pinnedTPMCerts(tpmRootFiles, "tpmvirtual")
 	tpmManufacturerRoots = pinnedTPMCerts(tpmRootFiles, "tpmroots")
 	tpmManufacturerIssuers = pinnedTPMCerts(tpmRootFiles, "tpmintermediates")
 }

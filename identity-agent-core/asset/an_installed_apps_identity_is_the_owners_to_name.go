@@ -24,9 +24,12 @@ type InstalledAppIdentity struct {
 	AndroidSigners []string `json:"android_signers,omitempty"`
 	// AppleAppID is the App Attest application identifier, "<team id>.<bundle id>".
 	AppleAppID string `json:"apple_app_id,omitempty"`
-	// TPMKeys: the owner accepts that a TPM proves a key is in the computer's
-	// TPM and NOT which program holds it, so any program of the person's on a
-	// computer with a TPM could present such a key. Without it a TPM key is refused.
+	// TPMKeys: the owner accepts a key in a physical TPM chip (a discrete chip, a
+	// firmware TPM in the CPU, or Pluton), which proves the key is in the
+	// computer's chip and NOT which program holds it, so any program of the
+	// person's on a computer with such a TPM could present it. A virtual or
+	// cloud TPM, whose key the hypervisor's operator can read, is never accepted.
+	// Without it a TPM key is refused.
 	TPMKeys bool `json:"tpm_keys,omitempty"`
 }
 

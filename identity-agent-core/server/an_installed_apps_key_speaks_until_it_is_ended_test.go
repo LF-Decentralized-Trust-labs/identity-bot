@@ -249,7 +249,7 @@ func TestAnInstalledAppSignInRestsOnProofAndNotOnTheCallersWord(t *testing.T) {
 		"no signing certificate stated": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppSigners = nil },
 			why: "names no signing certificate"},
 		"a TPM key the owner did not accept": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.Platform = "tpm" },
-			why: "not accepted a TPM key"},
+			why: "has not allowed sign-in from a Windows computer's security chip"},
 		"a platform that vouches as another": {req: app, asset: "the-website", proof: func() *InstalledAppKeyProof {
 			p := good()
 			p.Platform = "apple" // the stand-in attests android
@@ -1054,5 +1054,31 @@ func TestAnAppsMachineEndsItsOwnKeysGrantAndNoOneElses(t *testing.T) {
 	}
 	if _, err := iw.org.endAppKey(anAppsRequest("the-website", nil), "the-website", ""); err == nil {
 		t.Fatal("an end that names no key was taken")
+	}
+}
+
+// A TPM key the owner has not accepted is refused with a sentence the person can act on,
+// not the technical reason; and a key the owner has accepted records which chip's issuer
+// certified it and that it is a physical one, on the proof an auditor reads.
+func TestATPMKeyTheOwnerHasNotAllowedIsRefusedInPlainWordsAndAnAcceptedOneNamesItsIssuer(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.said.Platform = "tpm"
+	iw.said.EKIssuer = &secureenclave.EKIssuer{Subject: "CN=IFX-KEYID-1", SHA256: "ab", Class: secureenclave.TPMClassPhysical}
+	_, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	const sentence = "This app's owner has not allowed sign-in from a Windows computer's security chip. Ask them to allow it, or sign in from a phone."
+	var refused *SignInRefused
+	if !errors.As(err, &refused) || refused.Reason != sentence {
+		t.Fatalf("refusal = %v", err)
+	}
+
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	f, err := iw.org.verifyInstalledAppKey("the-website", iw.key, iw.proof(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.EKIssuer != "CN=IFX-KEYID-1" || f.EKClass != "physical" {
+		t.Fatalf("the proof does not say which chip's issuer certified it: %+v", f)
 	}
 }
