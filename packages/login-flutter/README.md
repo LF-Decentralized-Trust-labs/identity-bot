@@ -12,15 +12,26 @@ Run the tests with `flutter test` in this folder. They run the screen against
 
 ## What runs where, and what has been tried
 
-Every platform has its native code; **none of it has been compiled or run on a
-device**, because none was available. The Dart half is tested (`flutter test`)
-against a fake channel and the shared vectors; the native code is not.
+Every platform has its native code. What has been **compiled**, and what has only been **written**:
 
-| Platform | Where | Evidence the Identity Agent accepts | State |
-|---|---|---|---|
-| Android | `android/` | Android Key Attestation, a key made for the ask's challenge | Written, untested. Needs `compileSdk 34`, a real device (an emulator's keys are software) |
-| iOS, macOS | `darwin/` | App Attest: the attestation for `SHA-256(challenge)`, and an assertion for each statement and **each call's proof** | Written, untested. App Attest does not run in a simulator |
-| Windows | `windows/` | A TPM key certify by an attestation key, a `TPM2_ActivateCredential` result of the Identity Agent's credential, and the EK certificate | Written. The TPM commands (`tpm2.cpp`) run against a software TPM and are accepted by the Identity Agent's verifier (`windows/test/run.sh`); the Windows calls (TBS, DPAPI, the EK certificate fetch) compile with mingw-w64 and **have not run on Windows**. Microsoft's trusted TPM root list is pinned (`identity-agent-core/secureenclave/tpmroots/README.md`); no real TPM has been tried |
+| Half | Compiled? | How |
+|---|---|---|
+| Dart (all platforms) | Yes, and tested | `flutter test` here and in `../login-dart`, against a fake channel and the shared vectors |
+| Android Kotlin (`android/src`) | Yes, on Linux; never run | `android/compilecheck/compile.sh` (Gradle `compileDebugKotlin` against the Android SDK and Flutter's embedding, no Flutter app around it). A real call that does not exist (the plugin once called `HardwareKey.sign`, which is `signCall`) fails it |
+| Windows TPM commands (`windows/tpm2.cpp`) | Yes, and run against a software TPM | `windows/test/run.sh`: the endorsement key is the standard one, the software TPM opens the Identity Agent's credential and refuses a tampered one, and the Identity Agent's verifier accepts the evidence |
+| Windows TBS, DPAPI and EK-certificate calls (`windows/tpm_key.cpp`, with `tpm2.cpp`) | Yes, with mingw-w64 (syntax and types); never run on Windows | `x86_64-w64-mingw32-g++ -std=c++17 -fsyntax-only` |
+| Windows plugin glue (`windows/login_flutter_plugin.cpp`) | **No: written only.** It needs Flutter's Windows C++ wrapper headers, which are not here | |
+| Swift (`darwin/`, iOS and macOS) | **No: written only.** Swift cannot be built on Linux | Needs a Mac and Xcode; App Attest does not run in a simulator |
+
+Nothing has run on a device or a real TPM. Android needs a real device (an emulator's keys are software).
+
+| Platform | Where | Evidence the Identity Agent accepts |
+|---|---|---|
+| Android | `android/` | Android Key Attestation, a key made for the ask's challenge |
+| iOS, macOS | `darwin/` | App Attest: the attestation for `SHA-256(challenge)`, and an assertion for each statement and **each call's proof** |
+| Windows | `windows/` | A TPM key certify by an attestation key, a `TPM2_ActivateCredential` result of the Identity Agent's credential, and the EK certificate. Only a **physical TPM chip** counts: a virtual or cloud TPM is refused. Microsoft's trusted TPM root list is pinned for physical chips (`identity-agent-core/secureenclave/tpmroots/README.md`) |
+
+**A limit a person will meet:** a Windows PC whose TPM is an STMicroelectronics chip cannot sign in yet, because six of that maker's issuer certificates cannot be read and are not pinned. Such a PC can sign in from a phone.
 
 An App Attest key signs only assertions, so on Apple the proof of each call is an
 assertion over the SHA-256 of the proof text (`login-go`: `IsAssertionProof`,

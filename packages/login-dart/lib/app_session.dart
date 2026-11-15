@@ -49,6 +49,18 @@ class SignInFailed implements Exception {
   String toString() => message;
 }
 
+/// Where [AppSession.start] is, for a screen that tells the person what it is waiting on.
+enum SignInPhase {
+  /// Asking the app for an ask and having the device's secure hardware prove the key.
+  proveKey,
+
+  /// A TPM only: asking the app for a credential the device's TPM opens.
+  credential,
+
+  /// Starting the sign-in itself.
+  start,
+}
+
 /// A sign-in the app's back end started for this front end's key.
 class SignInStarted {
   /// What to open in the person's Identity Agent to approve it: shown only after
@@ -159,7 +171,10 @@ class AppSession {
           '$what failed: the app could not reach your Identity Agent just now. Try again in a minute.');
     }
     final e = r.json()['error'];
-    throw SignInFailed(e is String ? e : '$what failed (HTTP ${r.status}).');
+    // The status is for logs, not the person: say what to do instead.
+    throw SignInFailed(e is String && e.isNotEmpty
+        ? e
+        : 'The app had a problem signing you in. Try again in a minute; if it keeps happening, ask the app\'s owner.');
   }
 
   /// Starts a sign-in for [key]. An installed front end first asks its back end
@@ -167,15 +182,17 @@ class AppSession {
   /// that to the Identity Agent, which checks it. The challenge that comes back
   /// is shown only after it is checked to be the app's, naming this key and this
   /// kind of front end.
-  Future<SignInStarted> start() async {
+  Future<SignInStarted> start({void Function(SignInPhase phase)? onPhase}) async {
     final appKey = _guard(() => checkKeyLog(link.aid, link.kel));
     InstalledKeyProof? proof;
     if (key.kind == FrontEndKind.installedApp) {
+      onPhase?.call(SignInPhase.proveKey);
       final asked = _ok(
           await _send('POST', installedAskPath, '{}', (_) async => {}),
           'Asking the app for evidence of this device\'s key');
       final ask = _guard(() => InstalledAsk.fromJson(asked));
       proof = await key.prove(ask, exchange: (enrolment) async {
+        onPhase?.call(SignInPhase.credential);
         final j = _ok(
             await _send(
                 'POST',
@@ -190,6 +207,7 @@ class AppSession {
             'This device cannot prove its key to the app, so it cannot sign in as the app\'s installed front end.');
       }
     }
+    onPhase?.call(SignInPhase.start);
     final j = _ok(
         await _send(
             'POST',

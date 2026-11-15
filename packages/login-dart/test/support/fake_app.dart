@@ -61,6 +61,14 @@ class FakeApp {
   Map<String, dynamic>? credentialAskedWith;
   bool refuseCredential = false;
 
+  /// When set, starting the sign-in is refused with this status, and with [startRefusal] as
+  /// the reason when it is not null (a refusal with no reason is the HTTP fallback's case).
+  int? startStatus;
+  String? startRefusal;
+
+  /// How long the challenge it signs lasts.
+  Duration challengeLife = const Duration(minutes: 10);
+
   /// When set, the challenge the back end signs names this key, not the one asked for.
   String? challengeKey;
   int status401After = -1;
@@ -136,6 +144,12 @@ class FakeApp {
         startedWith = j;
         thumbprintSeen = j['browserKey'] as String;
         final kind = j['frontEnd'] as String;
+        if (startStatus != null) {
+          return (
+            status: startStatus!,
+            body: {if (startRefusal != null) 'error': startRefusal}
+          );
+        }
         if (installedOnly && kind == 'installed_app' && (j['proof'] == null)) {
           return (
             status: 403,
@@ -152,7 +166,7 @@ class FakeApp {
           'browser_key': challengeKey ?? j['browserKey'],
           'front_end': kind,
           'expiry':
-              '${clock.add(const Duration(minutes: 10)).toUtc().toIso8601String().split('.').first}Z',
+              '${clock.add(challengeLife).toUtc().toIso8601String().split('.').first}Z',
           'session_token': 'tok',
         });
         final sig = ed.sign(appKey, Uint8List.fromList(utf8.encode(c)));

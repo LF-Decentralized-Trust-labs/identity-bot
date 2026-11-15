@@ -1,7 +1,9 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, PlatformException;
 import 'package:http/http.dart' as http;
 import 'package:login_dart/app_checks.dart';
 import 'package:login_dart/app_session.dart';
@@ -55,10 +57,39 @@ class UtilityAppSignInScreen extends StatefulWidget {
   State<UtilityAppSignInScreen> createState() => _State();
 }
 
+/// What a person is told when the device's secure hardware cannot make or prove the
+/// key, by the platform code's error [code]. The code's own message is for developers
+/// and goes to the log, never to the screen.
+String hardwareProblem(PlatformException e, String appName) {
+  switch (e.code) {
+    case 'unsupported':
+      return 'This device does not support the secure hardware ${_name(appName)} signs in with. '
+          'Try a different device.';
+    case 'no_key':
+    case 'no_enrolment':
+      return 'This device\'s sign-in key is not there any more. Press the button to sign in again.';
+    case 'no_tpm':
+      return 'This computer has no security chip (TPM) that ${_name(appName)} can sign in with, or it is switched off. '
+          'Turn it on in the computer\'s settings, or sign in from a phone.';
+    case 'no_ek_certificate':
+      return 'This computer\'s security chip did not give the proof ${_name(appName)} needs. '
+          'Sign in from a phone, or ask ${_name(appName)}\'s owner.';
+    default:
+      return 'This device\'s secure hardware could not make or prove the sign-in key. '
+          'Press the button to try again; if it keeps happening, restart the device or ask ${_name(appName)}\'s owner.';
+  }
+}
+
+/// The app's name as the screen says it; the same fallback as login-web's `signInProblem`.
+String _name(String appName) =>
+    appName.trim().isEmpty ? 'this utility app' : appName.trim();
+
 class _State extends State<UtilityAppSignInScreen> {
   late final _link = TextEditingController(text: widget.pinnedLink ?? '');
-  String? _pointer, _fingerprint, _error;
-  bool _busy = false;
+  String? _pointer, _fingerprint, _error, _progress;
+  bool _busy = false, _copied = false;
+
+  String get _n => _name(widget.appName);
 
   Future<void> _scan() async {
     final text = await widget.scan!(context);
@@ -67,47 +98,71 @@ class _State extends State<UtilityAppSignInScreen> {
     await _go();
   }
 
+  /// Ends the attempt with [message]: nothing that says it is still waiting stays beside it.
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _pointer = null;
+      _fingerprint = null;
+      _progress = null;
+      _copied = false;
+    });
+  }
+
+  void _phase(SignInPhase p) {
+    if (!mounted) return;
+    setState(() => _progress = switch (p) {
+          SignInPhase.proveKey => 'Checking this device\'s secure hardware…',
+          SignInPhase.credential =>
+            'Getting this device a credential from the app…',
+          SignInPhase.start => 'Starting the sign-in…',
+        });
+  }
+
   Future<void> _go() async {
     final AppLink link;
     try {
       link = AppLink.parse(_link.text.trim());
     } on TrustRefused catch (e) {
-      setState(() => _error = e.message);
+      _fail(e.message);
       return;
     }
     setState(() {
       _busy = true;
       _error = null;
       _pointer = null;
+      _fingerprint = null;
+      _copied = false;
+      _progress = 'Checking this device\'s secure hardware…';
     });
     final client = widget.makeClient();
     try {
       final session = AppSession(client, link, await widget.keyFor(link),
           store: widget.storeFor(link));
-      final started = await session.start();
+      final started = await session.start(onPhase: _phase);
       if (!mounted) return;
       setState(() {
         _pointer = started.pointer;
         _fingerprint = started.fingerprint;
+        _progress = null;
       });
       await session.wait(started, every: widget.every);
       if (!mounted) return;
       widget.onSignedIn(session);
     } on SignInFailed catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      _fail(e.message);
     } on TrustRefused catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      _fail(e.message);
+    } on UnsupportedError {
+      _fail('This device has no secure hardware this app can sign in with.');
     } on PlatformException catch (e) {
-      // The device's hardware said why it cannot make or prove the key: say that, not that the app is down.
-      if (mounted) {
-        setState(() => _error = e.message ??
-            'This device\'s secure hardware could not make the key.');
-      }
+      developer.log('hardware key: ${e.code}: ${e.message}',
+          name: 'login_flutter');
+      _fail(hardwareProblem(e, widget.appName));
     } catch (e) {
-      if (mounted) {
-        setState(() => _error =
-            '${widget.appName} could not be reached just now. Check the connection and try again.');
-      }
+      developer.log('sign-in: $e', name: 'login_flutter');
+      _fail('$_n could not be reached just now. Check the connection and try again.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -137,7 +192,7 @@ class _State extends State<UtilityAppSignInScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final n = widget.appName;
+    final n = _n;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 460),
@@ -176,33 +231,64 @@ class _State extends State<UtilityAppSignInScreen> {
               FilledButton(
                   key: const Key('sign-in'),
                   onPressed: _busy ? null : _go,
-                  child: const Text('Sign in with my Identity Agent')),
-              if (_pointer != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                    'Now approve this sign-in in your Identity Agent, on your phone. '
-                    'It will ask whether to let ${_device()} into $n. '
-                    'Check that the request shows this code, and approve only if it does; '
-                    'if the code is different, decline.'),
-                const SizedBox(height: 8),
-                SelectableText(_fingerprint ?? '',
-                    key: const Key('fingerprint'),
-                    style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 8),
-                const Text(
-                    'In your Identity Agent, scan this code or open this address:'),
-                SelectableText(_pointer!, key: const Key('pointer')),
-                const SizedBox(height: 8),
-                Center(child: QrImageView(data: _pointer!, size: 180)),
-                const Text('Waiting for your approval…', key: Key('waiting')),
-              ],
-              if (_error != null)
-                Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(_error!,
-                        key: const Key('sign-in-error'),
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error))),
+                  child: Text(_busy ? 'Connecting…' : 'Sign in with Identity Agent')),
+              Semantics(
+                liveRegion: true,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  if (_progress != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: Row(children: [
+                          const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  key: Key('progress'), strokeWidth: 2)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child:
+                                  Text(_progress!, key: const Key('progress-text'))),
+                        ])),
+                  if (_pointer != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                        'Now approve this sign-in in your Identity Agent, on your phone. '
+                        'It will ask whether to let ${_device()} into $n. '
+                        'Check that the request shows this code, and approve only if it does; '
+                        'if the code is different, decline.'),
+                    const SizedBox(height: 8),
+                    SelectableText(_fingerprint ?? '',
+                        key: const Key('fingerprint'),
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    const Text('In your Identity Agent, scan this code:'),
+                    const SizedBox(height: 8),
+                    Center(
+                        child: Semantics(
+                            label:
+                                'QR code to approve this sign-in in your Identity Agent',
+                            image: true,
+                            child: ExcludeSemantics(
+                                child: QrImageView(data: _pointer!, size: 180)))),
+                    Center(
+                        child: TextButton(
+                            key: const Key('copy-link'),
+                            onPressed: () async {
+                              await Clipboard.setData(ClipboardData(text: _pointer!));
+                              if (mounted) setState(() => _copied = true);
+                            },
+                            child: Text(_copied ? 'Link copied' : 'Copy link instead'))),
+                    const Text('Waiting for your approval…', key: Key('waiting')),
+                  ],
+                  if (_error != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(_error!,
+                            key: const Key('sign-in-error'),
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error))),
+                ]),
+              ),
             ]),
       ),
     );

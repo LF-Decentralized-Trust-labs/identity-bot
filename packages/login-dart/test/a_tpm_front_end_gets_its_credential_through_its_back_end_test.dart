@@ -99,6 +99,39 @@ void main() {
     expect(app.startedWith, isNull);
   });
 
+  test('a start reports its phases in order, and a TPM has the credential phase in between',
+      () async {
+    final tpm = <SignInPhase>[];
+    await open(FakeApp(), await HardwareFrontEndKey.open(_FakeTpm(), 'k'))
+        .start(onPhase: tpm.add);
+    expect(tpm, [SignInPhase.proveKey, SignInPhase.credential, SignInPhase.start]);
+    final other = <SignInPhase>[];
+    await open(FakeApp(), await HardwareFrontEndKey.open(FakeHardware(), 'k'))
+        .start(onPhase: other.add);
+    expect(other, [SignInPhase.proveKey, SignInPhase.start],
+        reason: 'only a TPM asks the app for a credential');
+  });
+
+  test('a refusal with a reason says it; one with none says what to do, never an HTTP status',
+      () async {
+    const sentence =
+        'This app\'s owner has not allowed sign-in from a Windows computer\'s security chip. Ask them to allow it, or sign in from a phone.';
+    final refused = FakeApp()
+      ..startStatus = 403
+      ..startRefusal = sentence;
+    await expectLater(
+        open(refused, await HardwareFrontEndKey.open(_FakeTpm(), 'k')).start(),
+        throwsA(isA<SignInFailed>().having((e) => e.message, 'message', sentence)));
+    final bare = FakeApp()..startStatus = 500;
+    await expectLater(
+        open(bare, await HardwareFrontEndKey.open(FakeHardware(), 'k')).start(),
+        throwsA(isA<SignInFailed>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('The app had a problem signing you in'),
+                isNot(contains('500')), isNot(contains('HTTP'))))));
+  });
+
   test('the evidence is the document the core reads', () {
     // identity-agent-core/secureenclave/testdata/tpm_credential_exchange_rsa.json
     // is what a software TPM made and the core accepts; rebuilt from its parts,
