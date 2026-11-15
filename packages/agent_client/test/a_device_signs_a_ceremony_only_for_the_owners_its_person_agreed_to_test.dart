@@ -48,16 +48,23 @@ void main() {
 
   /// The terms and the rotation the org's agent would offer at a stage.
   Future<(Map<String, Object?>, List<int>)> offer(String stage,
-      {String second = 'bob'}) async {
+      {String second = 'bob',
+      String? priorOf,
+      List<Object?>? anchors,
+      List<String> cuts = const []}) async {
     final first = stage == 'rot1';
     final o = [await owner('alice', 'Alice'), await owner(second, 'Bob')];
     final groups = [for (final x in o) (first ? x['next'] : x['after']) as List];
+    final seals = anchors ??
+        (first
+            ? [for (final x in o) {'i': x['aid'], 's': '0', 'd': x['aid']}]
+            : <Object?>[]);
     final raw = saidified({
       't': 'rot',
       'd': '',
       'i': aid,
       's': first ? '1' : '2',
-      'p': prior,
+      'p': priorOf ?? prior,
       'kt': first ? '3' : '2',
       'k': first
           ? [keyOf('box1'), for (final x in o) x['key']]
@@ -65,16 +72,16 @@ void main() {
       'nt': ceremonyNextThreshold(2, [for (final g in groups) g.cast<String>()]),
       'n': [for (final g in groups) ...g],
       'bt': '0',
-      'br': [],
+      'br': cuts,
       'ba': [],
-      'a': [],
+      'a': seals,
     });
     final said = (jsonDecode(utf8.decode(raw)) as Map)['d'];
     return ({
       'status': 'signing', 'stage': stage, 'hand_over': true, 'threshold': 2, 'aid': aid,
-      'sn': first ? '1' : '2', 'prior': prior, 'd': said,
+      'sn': first ? '1' : '2', 'prior': priorOf ?? prior, 'd': said,
       'own_key': keyOf('box1'), 'own_next_digest': '', 'toad': '0',
-      'cuts': [], 'adds': [], 'anchors': [], 'owners': o,
+      'cuts': cuts, 'adds': [], 'anchors': seals, 'owners': o,
     }, raw);
   }
 
@@ -134,8 +141,11 @@ void main() {
   test('signs both rotations of the same owners, with the key of each generation', () async {
     final agreements = InMemoryCeremonyAgreements();
     final generations = <int>[];
+    String? firstDigest;
     for (final stage in ['rot1', 'rot2']) {
-      final (t, raw) = await offer(stage);
+      // The second rotation follows the first: its prior is the first's digest.
+      final (t, raw) = await offer(stage, priorOf: firstDigest);
+      firstDigest ??= '${t['d']}';
       final (client, seen) = org(t, raw);
       final device = deviceOver(client, agreements, signed: generations);
       final out = await device.sign(
@@ -151,7 +161,7 @@ void main() {
     final (t1, raw1) = await offer('rot1');
     await deviceOver(org(t1, raw1).$1, agreements)
         .sign('http://org', 'tok', CeremonyTerms.fromJson(t1), me: alice);
-    final (t2, raw2) = await offer('rot2', second: 'mallory');
+    final (t2, raw2) = await offer('rot2', second: 'mallory', priorOf: '${t1['d']}');
     final (client, seen) = org(t2, raw2);
     final signed = <int>[];
     await expectLater(
@@ -191,5 +201,68 @@ void main() {
         throwsA(isA<CeremonyEventRefused>()));
     expect(seen.where((r) => r.method == 'POST'), isEmpty);
     expect(bob, isNotEmpty);
+  });
+
+  /// A first rotation signed, then [second] offered: whether it is signed.
+  Future<(bool, List<http.Request>)> secondIsSigned(
+      Future<(Map<String, Object?>, List<int>)> Function(String firstDigest) second,
+      {Map<String, Object?>? firstTerms}) async {
+    final agreements = InMemoryCeremonyAgreements();
+    final (t1, raw1) = await offer('rot1');
+    await deviceOver(org(t1, raw1).$1, agreements)
+        .sign('http://org', 'tok', CeremonyTerms.fromJson(t1), me: alice);
+    final (t2, raw2) = await second('${t1['d']}');
+    final (client, seen) = org(t2, raw2);
+    try {
+      await deviceOver(client, agreements)
+          .sign('http://org', 'tok', CeremonyTerms.fromJson(t2), me: alice);
+      return (true, seen);
+    } on CeremonyNotSigned {
+      return (false, seen);
+    }
+  }
+
+  test('the second rotation must follow the first, and nothing else about it may differ',
+      () async {
+    final ok = await secondIsSigned((d) => offer('rot2', priorOf: d));
+    expect(ok.$1, isTrue);
+    final unrelated = await secondIsSigned((d) => offer('rot2', priorOf: 'EElsewhere0000000000000000000000000000000000'));
+    expect(unrelated.$1, isFalse);
+    expect(unrelated.$2.where((r) => r.method == 'POST'), isEmpty);
+    final anchoring = await secondIsSigned((d) => offer('rot2', priorOf: d, anchors: [{'i': alice, 's': '0', 'd': alice}]));
+    expect(anchoring.$1, isFalse);
+    final cutting = await secondIsSigned((d) => offer('rot2', priorOf: d, cuts: [id('witness')]));
+    expect(cutting.$1, isFalse);
+  });
+
+  test('a first rotation is refused if it anchors something that is not an owner, leaves an owner out, or cuts a witness', () async {
+    for (final (name, anchors, cuts) in [
+      ('a stray seal', <Object?>[{'i': id('alice'), 's': '0', 'd': id('alice')}, {'i': id('bob'), 's': '0', 'd': id('bob')}, {'x': 1}], <String>[]),
+      ('a missing owner', <Object?>[{'i': id('alice'), 's': '0', 'd': id('alice')}], <String>[]),
+      ('a cut witness', null, [id('witness')]),
+    ]) {
+      final (t, raw) = await offer('rot1', anchors: anchors, cuts: cuts);
+      final (client, seen) = org(t, raw);
+      await expectLater(
+          deviceOver(client, InMemoryCeremonyAgreements())
+              .sign('http://org', 'tok', CeremonyTerms.fromJson(t), me: alice),
+          throwsA(isA<CeremonyNotSigned>()),
+          reason: name);
+      expect(seen.where((r) => r.method == 'POST'), isEmpty, reason: name);
+    }
+  });
+
+  test('a first rotation offered again with other owners is not signed', () async {
+    final agreements = InMemoryCeremonyAgreements();
+    final (t1, raw1) = await offer('rot1');
+    await deviceOver(org(t1, raw1).$1, agreements)
+        .sign('http://org', 'tok', CeremonyTerms.fromJson(t1), me: alice);
+    final (t1b, raw1b) = await offer('rot1', second: 'mallory');
+    final (client, seen) = org(t1b, raw1b);
+    await expectLater(
+        deviceOver(client, agreements)
+            .sign('http://org', 'tok', CeremonyTerms.fromJson(t1b), me: alice),
+        throwsA(isA<CeremonyNotSigned>()));
+    expect(seen.where((r) => r.method == 'POST'), isEmpty);
   });
 }

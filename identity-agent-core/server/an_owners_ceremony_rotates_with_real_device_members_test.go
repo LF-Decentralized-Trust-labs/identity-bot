@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -420,5 +423,88 @@ func TestADeviceIsToldWhereTheCeremonyHasGotTo(t *testing.T) {
 	}
 	if code, _ := read("somebody-elses"); code != http.StatusNotFound {
 		t.Fatalf("a stranger was told how the ceremony stands: %d", code)
+	}
+}
+
+// A ceremony the owner abandons while its last acceptance is being handled stays
+// abandoned: the stale record that acceptance carries is not saved over it.
+func TestAnAbandonmentIsNotUndoneByALateAcceptance(t *testing.T) {
+	s := foundOnDerivedKeys(t, []string{iacrypto.NonTransferableAIDQB64(signerSeeds(1, 90)[0].pub())})
+	s.localOwnerSecret = testOwnerSecret
+	keys, err := s.ownRotationKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, c := signerSeeds(3, 10), signerSeeds(3, 20)
+	stale := &OwnerCeremony{ID: "c1", Threshold: 2, Status: ceremonyCollecting,
+		OwnPublicKey: keys.Current, OwnNextPublicKey: keys.Next,
+		Invited: []CeremonyInvitee{
+			{Name: "C", TokenDigest: enrolsecret.Digest("tok-c"), PairwiseAID: deviceC, PublicKey: c[0].key(), NextPublicKey: c[1].key()},
+			{Name: "A", TokenDigest: enrolsecret.Digest("tok-a"), PairwiseAID: deviceA, PublicKey: a[0].key(), NextPublicKey: a[1].key()},
+		}}
+	ceremonyMu.Lock()
+	if err := s.saveCeremony(stale); err != nil {
+		t.Fatal(err)
+	}
+	ceremonyMu.Unlock()
+
+	rec := httptest.NewRecorder()
+	s.handleAbandonCeremony(rec, httptest.NewRequest(http.MethodDelete, "/api/owners/ceremony", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("abandon: %d", rec.Code)
+	}
+	copyOfWhatTheAcceptanceHeld := *stale
+	s.completeCeremonyIfReady(&copyOfWhatTheAcceptanceHeld)
+
+	ceremonyMu.Lock()
+	got, _ := s.loadCeremony()
+	ceremonyMu.Unlock()
+	if got.Status != ceremonyAbandoned || got.PendingRawB64 != "" {
+		t.Fatalf("the abandoned ceremony is %q with a rotation prepared: %q", got.Status, got.PendingRawB64)
+	}
+}
+
+// The fields the phone reads (packages/agent_client, the_ceremony_this_device_agreed_to.dart)
+// are the ones the organisation's agent says: a field renamed here breaks a phone
+// that is not in this repository to be tested, so this holds the two together
+// with what a real hand-over answered, which the phone's own test reads too.
+func TestTheTermsHaveTheFieldsThePhoneReads(t *testing.T) {
+	fixture, err := os.ReadFile("../../packages/agent_client/test/fixtures/a_real_hand_over_terms.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]map[string]any
+	var all map[string]any
+	if err := json.Unmarshal(fixture, &all); err != nil {
+		t.Fatal(err)
+	}
+	want = map[string]map[string]any{}
+	for _, k := range []string{"rot1_terms", "rot2_terms"} {
+		want[k] = all[k].(map[string]any)
+	}
+	w := aCeremonyOfTwoDevices(t, true, false)
+	get := func() map[string]any {
+		rec := httptest.NewRecorder()
+		w.r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/signer/invites/tok-a/ceremony-terms", nil))
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	keys := func(m map[string]any) []string {
+		var ks []string
+		for k := range m {
+			ks = append(ks, k)
+		}
+		sort.Strings(ks)
+		return ks
+	}
+	got := get()
+	if !reflect.DeepEqual(keys(got), keys(want["rot1_terms"])) {
+		t.Errorf("the terms say %v, the phone's fixture has %v", keys(got), keys(want["rot1_terms"]))
+	}
+	gotOwner := got["owners"].([]any)[0].(map[string]any)
+	wantOwner := want["rot1_terms"]["owners"].([]any)[0].(map[string]any)
+	if !reflect.DeepEqual(keys(gotOwner), keys(wantOwner)) {
+		t.Errorf("an owner in the terms says %v, the phone's fixture has %v", keys(gotOwner), keys(wantOwner))
 	}
 }

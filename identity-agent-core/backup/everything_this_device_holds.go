@@ -152,6 +152,15 @@ func skipReason(rel string) string {
 		return "not carried: this machine's own key, usable only in this processor"
 	}
 
+	if slashed == "redeemed_ceremony_invites.json" || slashed == "redeemed_ceremony_invites.json.tmp" {
+		// An ownership change this device is part of, kept so a restart does not
+		// strand it. The codes in it open one ceremony of one organisation, for a
+		// few days; an archive that carried them would hand that to whoever holds
+		// the archive, and a restore onto another device would resurrect a change
+		// that device never agreed to.
+		return "not carried: an ownership change in progress belongs to the device that agreed to it"
+	}
+
 	if slashed == "backup_config.json" || strings.HasPrefix(slashed, "backup_config.json.") ||
 		slashed == "backup_history.json" || slashed == "backup_newest_seen.json" || slashed == "backup_delta_state.json" ||
 		strings.HasPrefix(slashed, "backup/credentials_") {

@@ -71,8 +71,10 @@ const (
 	redeemedInviteMemory = 15 * time.Minute
 
 	// redeemedCeremonyMemory is how long an invite to an ownership ceremony is
-	// remembered: the other owners take as long as people take.
-	redeemedCeremonyMemory = 48 * time.Hour
+	// remembered: the other owners take as long as people take, and the invite is kept on disk
+	// as well (a_redeemed_ceremony_invite_signs_its_rotation.go) so a restart
+	// does not strand a hand-over half way.
+	redeemedCeremonyMemory = 7 * 24 * time.Hour
 
 	// publishedBodyLimit bounds what is read back from the inviting app.
 	publishedBodyLimit = 16 << 10

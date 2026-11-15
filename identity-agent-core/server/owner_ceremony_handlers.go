@@ -326,6 +326,14 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	// rotation here and adding it would need keys only the devices hold.
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
+	// The record handed in was read before the checks above, and the owner may
+	// have abandoned in the meantime: preparing from it would save the stale
+	// record over the abandonment and bring the ceremony back to life.
+	if fresh, err := s.loadCeremony(); err != nil || fresh == nil || fresh.ID != c.ID || fresh.Status != ceremonyCollecting {
+		return
+	} else {
+		c = fresh
+	}
 	first := stageFirst
 	if err := s.prepareCeremonyStage(c, first); err != nil {
 		c.Status, c.Detail = ceremonyFailed, err.Error()

@@ -285,17 +285,17 @@ func (s *CoreServer) handleCeremonyEvent(w http.ResponseWriter, r *http.Request)
 
 // ceremonyStatusForToken is where the ceremony the invite code belongs to has
 // got to, in any state. Callers hold ceremonyMu.
-func (s *CoreServer) ceremonyStatusForToken(token string) (string, bool) {
+func (s *CoreServer) ceremonyStatusForToken(token string) (status, detail string, ok bool) {
 	c, err := s.loadCeremony()
 	if err != nil || c == nil || token == "" {
-		return "", false
+		return "", "", false
 	}
 	for i := range c.Invited {
 		if c.Invited[i].TokenDigest != "" && enrolsecret.Equal(token, c.Invited[i].TokenDigest) {
-			return c.Status, true
+			return c.Status, c.Detail, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // handleCeremonyTerms tells an invited owner's device who is taking part and on
@@ -314,8 +314,10 @@ func (s *CoreServer) handleCeremonyTerms(w http.ResponseWriter, r *http.Request)
 		// "the others have not all accepted" from "it was made" from "it was
 		// dropped", so the state is said to the one holding a code of the
 		// ceremony and to nobody else.
-		if status, ok := s.ceremonyStatusForToken(token); ok {
-			jsonreply.Write(w, http.StatusOK, map[string]any{"status": status})
+		if status, detail, ok := s.ceremonyStatusForToken(token); ok {
+			// The detail is the agent's own words about why it failed, and says
+			// when a hand-over stopped after its first rotation was made.
+			jsonreply.Write(w, http.StatusOK, map[string]any{"status": status, "detail": detail})
 			return
 		}
 		writeError(w, code, "Nothing to sign", err.Error())

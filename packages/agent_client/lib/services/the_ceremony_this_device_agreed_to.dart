@@ -110,6 +110,37 @@ class CeremonyTerms {
   Map<String, CeremonyOwner> get ownerMap =>
       {for (final o in owners) o.aid: o.asOwner};
 
+  /// What is wrong with the rotation's shape, in words, or null when it has
+  /// the shape an ownership change has. An ownership change never touches the
+  /// organisation's witnesses; its first rotation anchors only the seals of the
+  /// owners (every incoming owner among them) and its second anchors nothing.
+  /// The owners, keys and thresholds are held to what the person agreed to
+  /// elsewhere; this is what no agreement mentions and nobody should be
+  /// able to slip in.
+  String? get unexpectedShape {
+    if (cuts.isNotEmpty || adds.isNotEmpty) {
+      return 'it changes the organisation\u2019s witnesses';
+    }
+    if (stage == CeremonyStage.second) {
+      return anchors.isEmpty ? null : 'it anchors something the change should not';
+    }
+    final sealed = <String>{};
+    for (final a in anchors) {
+      if (a is! Map ||
+          a.length != 3 ||
+          a['i'] == null ||
+          a['s'] == null ||
+          a['i'] != a['d']) {
+        return 'it anchors something that is not an owner';
+      }
+      sealed.add('${a['i']}');
+    }
+    for (final o in owners) {
+      if (!sealed.contains(o.aid)) return 'it does not anchor ${o.name.isEmpty ? 'an owner' : o.name}';
+    }
+    return null;
+  }
+
   /// How many owners' devices have signed the rotation waiting.
   int get signedCount => owners.where((o) => o.signed).length;
 
@@ -146,6 +177,10 @@ class CeremonyAgreement {
         'hand_over': t.handOver,
         'threshold': t.threshold,
         'own_key': t.ownKey,
+        // Where the first rotation sits, so the second can be held to follow it.
+        'first_d': t.digest,
+        'first_sn': t.sn,
+        'toad': t.toad,
         'owners': {
           for (final o in t.owners)
             o.aid: {
@@ -161,7 +196,24 @@ class CeremonyAgreement {
       CeremonyAgreement(Map<String, dynamic>.from(jsonDecode(s) as Map));
   String toJson() => jsonEncode(_j);
 
+  /// What is wrong with [second] as the rotation to follow the first one this
+  /// agreement was made for, in words, or null when nothing is.
+  String? whatIsWrongWithFollowingWith(CeremonyTerms second) {
+    if ('${_j['first_d']}' != second.prior) {
+      return 'it does not follow the rotation you signed';
+    }
+    if ((_j['first_sn'] as num).toInt() + 1 != second.sn) {
+      return 'it is not the next event after the rotation you signed';
+    }
+    if ('${_j['toad']}' != '${second.toad}') {
+      return 'it changes how many witnesses must agree';
+    }
+    return differenceFrom(second);
+  }
+
   /// What differs between this and [t], in words, or null when nothing does.
+  /// Only the people, their keys and the terms: where the event sits is for
+  /// [whatIsWrongWithFollowingWith].
   String? differenceFrom(CeremonyTerms t) {
     final now = CeremonyAgreement.of(t)._j;
     for (final k in ['aid', 'hand_over', 'threshold', 'own_key']) {
@@ -231,7 +283,10 @@ class CeremonyNotSigned implements Exception {
 
 /// What an ownership ceremony is doing, as an invited owner's device reads it.
 class CeremonyReading {
-  const CeremonyReading(this.status, this.terms);
+  const CeremonyReading(this.status, this.terms, {this.detail = ''});
+
+  /// Why it failed, in the organisation's words, when it did.
+  final String detail;
 
   /// collecting (others have still to accept), signing, applied, failed or
   /// abandoned.
@@ -279,7 +334,8 @@ class CeremonyDevice {
     final j = Map<String, dynamic>.from(jsonDecode(res.body) as Map);
     final status = '${j['status'] ?? ''}';
     return CeremonyReading(
-        status, status == 'signing' ? CeremonyTerms.fromJson(j) : null);
+        status, status == 'signing' ? CeremonyTerms.fromJson(j) : null,
+        detail: '${j['detail'] ?? ''}');
   }
 
   /// Signs the rotation in [terms], having the person's agreement to it.
@@ -291,15 +347,21 @@ class CeremonyDevice {
     if (terms.owners.every((o) => o.aid != me)) {
       throw CeremonyNotSigned('this device is not one of the owners named');
     }
+    final shape = terms.unexpectedShape;
+    if (shape != null) throw CeremonyNotSigned(shape);
+    final agreed = await agreements.read(token);
     if (terms.stage == CeremonyStage.first) {
+      // Offered again, it must be the change already agreed to: a first
+      // rotation with other owners is not a second look at the same change.
+      final why = agreed?.differenceFrom(terms);
+      if (why != null) throw CeremonyNotSigned(why);
       await agreements.write(token, CeremonyAgreement.of(terms));
     } else {
-      final agreed = await agreements.read(token);
       if (agreed == null) {
         throw CeremonyNotSigned(
             'this device was not shown the first rotation of this change, so it will not sign the second');
       }
-      final why = agreed.differenceFrom(terms);
+      final why = agreed.whatIsWrongWithFollowingWith(terms);
       if (why != null) throw CeremonyNotSigned(why);
     }
     return signTheCeremonyRotation(

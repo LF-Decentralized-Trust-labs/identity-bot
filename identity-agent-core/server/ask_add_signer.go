@@ -250,10 +250,21 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	}
 	_ = json.Unmarshal(answer, &said)
 	inCeremony := said.Status == "accepted"
-	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{
+	redeemed := redeemedInvite{
 		base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI,
 		publishedPath: publishedPathFrom(answer), ceremony: inCeremony,
-	})
+	}
+	s.redeemedInvites.remember(p.InviteToken, redeemed)
+	if inCeremony {
+		// The change goes on for as long as people take to sign it, and the second
+		// signature of a hand-over comes after this agent may have restarted:
+		// without the invite this phone could never sign it, and the first
+		// rotation is already in the log.
+		if err := s.keepCeremonyInvite(p.InviteToken, redeemed); err != nil {
+			log.Printf("[sign_org] could not keep the ownership change on disk, so a restart of this agent "+
+				"before it is finished would leave this phone unable to sign it: %v", err)
+		}
+	}
 
 	org := p.OrgName
 	if org == "" {

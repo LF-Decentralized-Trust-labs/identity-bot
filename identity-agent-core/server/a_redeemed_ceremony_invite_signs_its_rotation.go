@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
@@ -48,7 +52,7 @@ func (s *CoreServer) handleSignACeremonyRotation(w http.ResponseWriter, r *http.
 		http.Error(w, "only the key in force and the one it committed to sign a ceremony's rotations", http.StatusBadRequest)
 		return
 	}
-	in, ok := s.redeemedInvites.recall(body.InviteToken)
+	in, ok := s.recallRedeemedInvite(body.InviteToken)
 	if !ok || !in.ceremony || s.loginHandler == nil {
 		http.Error(w, "this agent has not accepted that invitation into an ownership ceremony, or it was too long ago", http.StatusNotFound)
 		return
@@ -99,4 +103,70 @@ func (s *CoreServer) handleSignACeremonyRotation(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, map[string]string{"signature_b64": base64.StdEncoding.EncodeToString(ed25519.Sign(key, raw))})
+}
+
+// ceremonyInvitesFile is where invitations into an ownership ceremony are kept,
+// beside the other things this agent keeps for itself.
+const ceremonyInvitesFile = "redeemed_ceremony_invites.json"
+
+type keptCeremonyInvite struct {
+	Base     string    `json:"base"`
+	SiteAID  string    `json:"site_aid"`
+	SiteOOBI string    `json:"site_oobi"`
+	At       time.Time `json:"at"`
+}
+
+var ceremonyInvitesMu sync.Mutex
+
+// keepCeremonyInvite writes [in] to disk under its code. The file is private to
+// this agent, and what is held is the code that lets this phone's agent sign for
+// that one ceremony, which is why entries are dropped when their time is up.
+func (s *CoreServer) keepCeremonyInvite(token string, in redeemedInvite) error {
+	ceremonyInvitesMu.Lock()
+	defer ceremonyInvitesMu.Unlock()
+	kept := s.readCeremonyInvites()
+	kept[token] = keptCeremonyInvite{Base: in.base, SiteAID: in.siteAID, SiteOOBI: in.siteOOBI, At: time.Now().UTC()}
+	b, err := json.Marshal(kept)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(s.DataDir, ceremonyInvitesFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// readCeremonyInvites is what is on disk and not yet out of time. Callers hold
+// ceremonyInvitesMu.
+func (s *CoreServer) readCeremonyInvites() map[string]keptCeremonyInvite {
+	kept := map[string]keptCeremonyInvite{}
+	b, err := os.ReadFile(filepath.Join(s.DataDir, ceremonyInvitesFile))
+	if err != nil || json.Unmarshal(b, &kept) != nil {
+		return map[string]keptCeremonyInvite{}
+	}
+	for t, k := range kept {
+		if time.Since(k.At) > redeemedCeremonyMemory {
+			delete(kept, t)
+		}
+	}
+	return kept
+}
+
+// recallRedeemedInvite is the invite this agent redeemed under [token]: from
+// memory, or, for an ownership ceremony, from disk after a restart.
+func (s *CoreServer) recallRedeemedInvite(token string) (redeemedInvite, bool) {
+	if in, ok := s.redeemedInvites.recall(token); ok {
+		return in, true
+	}
+	ceremonyInvitesMu.Lock()
+	k, ok := s.readCeremonyInvites()[token]
+	ceremonyInvitesMu.Unlock()
+	if !ok {
+		return redeemedInvite{}, false
+	}
+	in := redeemedInvite{base: k.Base, siteAID: k.SiteAID, siteOOBI: k.SiteOOBI, ceremony: true, at: k.At}
+	s.redeemedInvites.remember(token, in)
+	return in, true
 }

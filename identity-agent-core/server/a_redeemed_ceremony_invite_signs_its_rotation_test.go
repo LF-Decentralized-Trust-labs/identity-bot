@@ -112,3 +112,41 @@ func TestAnInviteThatIsNotACeremonyIsNotSignedFor(t *testing.T) {
 		t.Fatalf("a plain invite was signed for: %d", w.Code)
 	}
 }
+
+// A phone's agent that restarts between the two signatures of a hand-over can
+// still make the second: the invitation was kept on disk. Without that the first
+// rotation would be in the log and nothing could sign the next.
+func TestAnAgentThatRestartedStillSignsTheSecondRotation(t *testing.T) {
+	app := newInvitingApp(t)
+	s := redeemedAgent(t, app)
+	rel, _ := s.loginHandler.Store.Get("EORGAID")
+	root, _ := secureenclave.LoadRootSeed(s.DataDir)
+	sd, _ := backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 1)
+	pub := ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey)
+	d, _ := keri.NextDigest(iacrypto.VerkeyQB64(pub))
+	raw, err := keri.BuildRotation(keri.RotationInput{Prefix: "EORGAID", Keys: []string{iacrypto.VerkeyQB64(pub)},
+		PriorSAID: "EORGAID", SN: 2, NextDigests: []string{d}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.redeemedInvites = redeemedInviteBook{} // the agent was restarted
+	r := chi.NewRouter()
+	s.mountCeremonySigningRoutes(r)
+	b, _ := json.Marshal(map[string]any{"invite_token": "tok", "generation": 1, "raw_b64": base64.StdEncoding.EncodeToString(raw)})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/redeemed-invites/ceremony-signature", strings.NewReader(string(b))))
+	if w.Code != http.StatusOK {
+		t.Fatalf("after a restart the second rotation was not signed: %d %s", w.Code, w.Body)
+	}
+
+	// An invitation that was never into a ceremony is not kept, so it is not
+	// there to be signed for after a restart either.
+	s.redeemedInvites = redeemedInviteBook{}
+	b, _ = json.Marshal(map[string]any{"invite_token": "never", "generation": 1, "raw_b64": base64.StdEncoding.EncodeToString(raw)})
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/redeemed-invites/ceremony-signature", strings.NewReader(string(b))))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("an invitation nobody redeemed was signed for: %d", w.Code)
+	}
+}
