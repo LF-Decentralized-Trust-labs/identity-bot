@@ -102,6 +102,12 @@ type IdentityState struct {
 	// read together with the seed rather than trusted alone.
 	DerivationIndex int `json:"derivation_index,omitempty"`
 	KeyGeneration   int `json:"key_generation,omitempty"`
+
+	// HandedOver is set when an ownership change gave this identity's keys to
+	// its owners' own devices. From then on nothing here derives or signs a key
+	// of it: the PublicKey is an owner's, and DerivationIndex and KeyGeneration
+	// describe the key this Identity Agent held before, which is no longer in force.
+	HandedOver bool `json:"handed_over,omitempty"`
 }
 
 // ContactRecord stores a resolved contact in the Identity Agent.

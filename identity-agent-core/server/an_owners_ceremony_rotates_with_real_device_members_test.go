@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -208,9 +209,24 @@ func TestAHandOverCeremonyWithRealDevicesIsAppliedAndDropsTheBox(t *testing.T) {
 	if after.PublicKey == box0 || after.PublicKey != w.a[1].key() {
 		t.Errorf("the identity's current key is %q, want the first device's next key", after.PublicKey)
 	}
+	if !after.HandedOver {
+		t.Error("the identity is not marked as handed over to its owners")
+	}
 	if !w.s.keyIsElsewhere() {
 		t.Error("the box still reads the identity's key as its own")
 	}
+	// The mark holds on its own: with the record's key put back to the one the
+	// box derived, nothing here goes on to sign or rotate for the identity.
+	back := *after
+	back.PublicKey = box0
+	_ = w.s.DataStore.SaveIdentity(back)
+	if _, err := w.s.identitySigningSeed(); !errors.Is(err, errKeyElsewhere) {
+		t.Errorf("a handed-over identity whose record names the box's key derives its key again: %v", err)
+	}
+	if _, err := w.s.ownRotationKeys(); err == nil {
+		t.Error("a handed-over identity whose record names the box's key derives a rotation key")
+	}
+	_ = w.s.DataStore.SaveIdentity(*after)
 	if _, err := w.s.ownRotationKeys(); err == nil {
 		t.Error("the box still derives a rotation key for the identity")
 	}

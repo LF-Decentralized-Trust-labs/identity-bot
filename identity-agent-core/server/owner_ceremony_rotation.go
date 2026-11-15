@@ -456,6 +456,10 @@ func (s *CoreServer) handleCeremonySignature(w http.ResponseWriter, r *http.Requ
 		// record already names an owner's key as the current one, so the key
 		// is read as elsewhere; what is left is the signer a box installed.
 		s.eventSigners.Delete(ev.Identifier)
+		if err := s.markHandedOver(ev.Identifier); err != nil {
+			writeError(w, http.StatusInternalServerError, "The hand-over was made, and the record of it could not be kept", err.Error())
+			return
+		}
 	}
 	c.Status, c.Detail, c.RotationSAID = ceremonyApplied, "", res.SAID
 	c.AppliedAt = time.Now().UTC()
@@ -465,4 +469,19 @@ func (s *CoreServer) handleCeremonySignature(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	jsonreply.Write(w, http.StatusCreated, map[string]any{"status": res.Status, "applied": true})
+}
+
+// markHandedOver records on the identity that its keys now belong to its
+// owners' devices, so nothing here goes on to derive one of them from the
+// generation the record still holds. Saving it again is harmless.
+func (s *CoreServer) markHandedOver(aid string) error {
+	own, err := s.DataStore.GetIdentity()
+	if err != nil || own == nil || own.AID != aid {
+		return fmt.Errorf("no identity record for %s to mark", aid)
+	}
+	if own.HandedOver {
+		return nil
+	}
+	own.HandedOver = true
+	return s.DataStore.SaveIdentity(*own)
 }

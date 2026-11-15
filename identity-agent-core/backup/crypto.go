@@ -67,6 +67,22 @@ func DeriveVaultKEK(bip39Seed []byte) ([]byte, error) {
 	return out, nil
 }
 
+// DeriveCeremonyInvitesTagKey derives the key that tags the file of invitations
+// into ownership changes this device has accepted, from the root seed. Its own
+// domain, so a key that says "this file is as this device wrote it" is not a
+// key used for anything else.
+func DeriveCeremonyInvitesTagKey(bip39Seed []byte) ([]byte, error) {
+	if len(bip39Seed) < 32 {
+		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
+	}
+	r := hkdf.New(sha256.New, bip39Seed, []byte("identity-agent-ceremony-invites-salt-v1"), []byte("identity-agent/ceremony-invites-integrity/v1"))
+	out := make([]byte, 32)
+	if _, err := r.Read(out); err != nil {
+		return nil, fmt.Errorf("hkdf ceremony invites tag key: %w", err)
+	}
+	return out, nil
+}
+
 // The fixed branches of m/44'/0'/0'/branch'/n' an identity's other keys come
 // from, so the phrase alone finds them (ADR-061 section 1): the post-quantum
 // next key of generation j at PostQuantumBranch/j, the messaging keyset of

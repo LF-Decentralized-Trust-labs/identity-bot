@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/ed25519"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -278,12 +280,37 @@ type keptCeremonyInvite struct {
 	Signed map[string]string `json:"signed,omitempty"`
 }
 
+// keptCeremonyInvites is the file as written: the entries, and a tag over them
+// made with a key derived from this device's root seed. A file is only as
+// private as the folder it is in, and what it holds decides which identity this
+// device reveals a key for, so a write to that folder by anything else must not
+// be believed: it cannot make the tag.
+type keptCeremonyInvites struct {
+	Invites json.RawMessage `json:"invites"`
+	TagB64  string          `json:"tag_b64"`
+}
+
 var ceremonyInvitesMu sync.Mutex
 
-// keepCeremonyInvite writes [in] to disk under its code. The file is private to
-// this Identity Agent, and what is held is the code that lets this phone's
-// Identity Agent sign for
-// that one ceremony, which is why entries are dropped when their time is up.
+// ceremonyInvitesTag is the tag over the entries' exact bytes.
+func (s *CoreServer) ceremonyInvitesTag(invites []byte) ([]byte, error) {
+	root, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	key, err := backup.DeriveCeremonyInvitesTagKey(root)
+	if err != nil {
+		return nil, err
+	}
+	m := hmac.New(sha256.New, key)
+	m.Write(invites)
+	return m.Sum(nil), nil
+}
+
+// keepCeremonyInvite writes [in] to disk under its code. What is held is the
+// code that lets this phone's Identity Agent sign for that one ceremony, which
+// is why entries are dropped when their time is up, and why the file carries a
+// tag.
 func (s *CoreServer) keepCeremonyInvite(token string, in redeemedInvite) error {
 	ceremonyInvitesMu.Lock()
 	defer ceremonyInvitesMu.Unlock()
@@ -294,10 +321,18 @@ func (s *CoreServer) keepCeremonyInvite(token string, in redeemedInvite) error {
 	return s.writeCeremonyInvites(kept)
 }
 
-// writeCeremonyInvites replaces what is on disk with [kept]. Callers hold
-// ceremonyInvitesMu.
+// writeCeremonyInvites replaces what is on disk with [kept], tagged. Callers
+// hold ceremonyInvitesMu.
 func (s *CoreServer) writeCeremonyInvites(kept map[string]keptCeremonyInvite) error {
-	b, err := json.Marshal(kept)
+	inner, err := json.Marshal(kept)
+	if err != nil {
+		return err
+	}
+	tag, err := s.ceremonyInvitesTag(inner)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(keptCeremonyInvites{Invites: inner, TagB64: base64.StdEncoding.EncodeToString(tag)})
 	if err != nil {
 		return err
 	}
@@ -309,13 +344,32 @@ func (s *CoreServer) writeCeremonyInvites(kept map[string]keptCeremonyInvite) er
 	return os.Rename(tmp, path)
 }
 
-// readCeremonyInvites is what is on disk and not yet out of time. Callers hold
-// ceremonyInvitesMu.
+// readCeremonyInvites is what is on disk, tagged as this device wrote it, and
+// not yet out of time. A file whose tag does not hold, or that has none, or
+// that cannot be checked because the root seed cannot be read, holds nothing:
+// the ceremonies in it are not signed for, and the person is asked again.
+// Callers hold ceremonyInvitesMu.
 func (s *CoreServer) readCeremonyInvites() map[string]keptCeremonyInvite {
-	kept := map[string]keptCeremonyInvite{}
+	none := map[string]keptCeremonyInvite{}
 	b, err := os.ReadFile(filepath.Join(s.DataDir, ceremonyInvitesFile))
-	if err != nil || json.Unmarshal(b, &kept) != nil {
-		return map[string]keptCeremonyInvite{}
+	if err != nil {
+		return none
+	}
+	var file keptCeremonyInvites
+	if json.Unmarshal(b, &file) != nil || len(file.Invites) == 0 {
+		return none
+	}
+	got, err := base64.StdEncoding.DecodeString(file.TagB64)
+	if err != nil {
+		return none
+	}
+	want, err := s.ceremonyInvitesTag(file.Invites)
+	if err != nil || !hmac.Equal(got, want) {
+		return none
+	}
+	kept := map[string]keptCeremonyInvite{}
+	if json.Unmarshal(file.Invites, &kept) != nil {
+		return none
 	}
 	for t, k := range kept {
 		if time.Since(k.At) > redeemedCeremonyMemory {
