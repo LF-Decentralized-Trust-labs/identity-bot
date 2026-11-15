@@ -1,6 +1,7 @@
 package conversationbundle
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -38,3 +39,44 @@ func TestARespelledBundleFails(t *testing.T) {
 		})
 	}
 }
+
+// A file that two parsers read as two bundles is refused. Go keeps the last of a
+// key written twice and folds a key's case, where another language's parser
+// keeps the first or sees an unknown key, so a checker written there could be
+// shown one "head" and this one another. Nothing the entries prove changes, so
+// nothing else would notice.
+func TestAFileTwoParsersWouldReadDifferentlyIsRefused(t *testing.T) {
+	raw, err := os.ReadFile(headVectorFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(raw); err != nil {
+		t.Fatalf("the published head-bearing vector is refused: %v", err)
+	}
+	text := string(raw)
+	for _, c := range []struct {
+		name, from, to, says string
+	}{
+		{"the head written twice", "\n  \"head\": {", "\n  \"head\": {\"mode\": \"signed\"},\n  \"head\": {", "more than once"},
+		{"the format written twice", "\n  \"format\":", "\n  \"format\": \"x\",\n  \"format\":", "more than once"},
+		{"the head in another case", "\n  \"head\": {", "\n  \"Head\": {", "spelled"},
+		{"the root in capitals", "\n  \"root\":", "\n  \"ROOT\":", "spelled"},
+		{"the head spelled two ways", "\n  \"head\": {", "\n  \"Head\": {},\n  \"head\": {", "one field spelled twice"},
+		{"a signature written twice in an entry's envelope", "\"ed_sig\":", "\"ed_sig\": \"x\", \"ed_sig\":", "more than once"},
+		{"an envelope key in another case inside an entry", "\"plaintext\":", "\"Plaintext\":", "spelled"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if !strings.Contains(text, c.from) {
+				t.Fatalf("the vector has no %q to change", c.from)
+			}
+			_, err := Read([]byte(strings.Replace(text, c.from, c.to, 1)))
+			if err == nil || !strings.Contains(err.Error(), c.says) {
+				t.Fatalf("read as %v, want a refusal saying %q", err, c.says)
+			}
+		})
+	}
+}
+
+// The published head-bearing vector: a genuine export of a conversation whose
+// export carries the Identity Agent's signed head statement.
+const headVectorFile = "../contracts/conversation-bundle/genuine-bundle-with-head.json"

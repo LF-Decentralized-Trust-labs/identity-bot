@@ -159,9 +159,13 @@ type Anchor struct {
 }
 
 // Read reads a bundle, refusing anything an export does not write: a field it
-// does not have, or more than one bundle. Go's decoder would otherwise drop an
+// does not have, a key written twice or spelled in another case, or more than
+// one bundle. Go's decoder would otherwise drop an
 // unknown field quietly, and a bundle would carry something nobody checked.
 func Read(data []byte) (*Bundle, error) {
+	if err := checkSpelling(data, Bundle{}); err != nil {
+		return nil, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var b Bundle
