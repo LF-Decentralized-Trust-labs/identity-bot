@@ -178,6 +178,9 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 	// Authorship is established. Completeness is a different question, and this
 	// is where it is asked — see corroborate_the_claim.go.
 	c := s.askTheWitnesses(req.OwnerAID, req.OwnerKEL)
+	if c.Unverified != "" {
+		return fmt.Errorf("this history cannot be corroborated: %s", c.Unverified)
+	}
 	if c.Contradicted {
 		return fmt.Errorf("this history is not the whole history: %s", c.Why)
 	}

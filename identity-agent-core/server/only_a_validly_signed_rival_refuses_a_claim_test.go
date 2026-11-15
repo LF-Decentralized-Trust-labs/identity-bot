@@ -76,7 +76,7 @@ func TestOnlyAValidlySignedRivalRefusesAClaimInTheCore(t *testing.T) {
 			heldSAID := eventSAIDOf(t, heldIxn)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasPrefix(r.URL.Path, "/witness/ksn/") {
-					raw, _ := witness.BuildKeyStateNotice(c.aid, 2, heldSAID, time.Now())
+					raw, _ := buildNoticeOf(bob.witnessKey, c.aid, 2, heldSAID, time.Now())
 					key, sig, _ := bob.svc.SignReceipt(string(raw))
 					_ = json.NewEncoder(w).Encode(witness.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: key, Signature: sig})
 					return

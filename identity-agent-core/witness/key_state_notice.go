@@ -10,6 +10,7 @@ import (
 
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 )
 
@@ -20,7 +21,7 @@ import (
 // identifier stays valid for ever, so a log with its last rotation cut off is
 // still a log whose every receipt checks out. What catches it is asking a
 // witness NOW and believing the answer only if it can have come from nobody
-// but that witness: the KERI reply /ksn/{aid}, signed by the witness's own
+// but that witness: the KERI reply /ksn/{witness}, signed by the witness's own
 // non-transferable key and dated. An answer anybody could have typed (the
 // key log served over plain HTTP) is not that, so it is not evidence.
 //
@@ -29,11 +30,19 @@ import (
 // (or dated further ahead than that) is a replay, or a witness with the wrong
 // clock, and is not believed.
 
+// maxNoticeBytes bounds a key state notice. It carries the whole key state, whose
+// keys, next-key digests and witnesses each take 44 characters, so an identity
+// with many of them has a long one.
+const maxNoticeBytes = 64 * 1024
+
 // KeyStateFreshness is how far a notice's date may be from now.
 const KeyStateFreshness = 5 * time.Minute
 
-// KeyStateRoute is the reply route of a witness's key state notice for aid.
-func KeyStateRoute(aid string) string { return "/ksn/" + aid }
+// KeyStateRoute is the reply route of a key state notice given by the witness
+// whose key is witnessAID. KERI names the witness that signs the notice, not
+// the identifier the notice is about: keripy's reply is /ksn/{witness} and the
+// identifier is in the state the reply carries.
+func KeyStateRoute(witnessAID string) string { return "/ksn/" + witnessAID }
 
 // SignedReply is what a witness serves for a reply it makes about itself (a
 // key state notice, a location): the reply as published, and the witness's
@@ -62,38 +71,139 @@ type KeyState struct {
 	At time.Time
 }
 
-type keyStateData struct {
-	I string `json:"i"`
-	S string `json:"s"`
-	D string `json:"d"`
+// KeyStateRecord is keripy's key state record: the whole state of an
+// identifier's log after its newest event, which is what the `a` of a /ksn reply
+// carries. Field names and order are keripy's.
+type KeyStateRecord struct {
+	VN []int  `json:"vn"`
+	I  string `json:"i"`
+	S  string `json:"s"`
+	P  string `json:"p"`
+	D  string `json:"d"`
+	F  string `json:"f"`
+	DT string `json:"dt"`
+	ET string `json:"et"`
+	// KT and NT are the signing and next thresholds as the establishment event
+	// wrote them (a hex string, or a list for a weighted one).
+	KT interface{}      `json:"kt"`
+	K  []string         `json:"k"`
+	NT interface{}      `json:"nt"`
+	N  []string         `json:"n"`
+	BT string           `json:"bt"`
+	B  []string         `json:"b"`
+	C  []string         `json:"c"`
+	EE keyStateEstEvent `json:"ee"`
+	DI string           `json:"di"`
+}
+
+// keyStateEstEvent is the `ee` of a key state record: the last establishment
+// event.
+type keyStateEstEvent struct {
+	S  string   `json:"s"`
+	D  string   `json:"d"`
+	BR []string `json:"br"`
+	BA []string `json:"ba"`
 }
 
 func replyDate(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000000+00:00")
 }
 
-// BuildKeyStateNotice makes the reply for a witness holding the log of aid up
-// to sn (-1 for none) whose newest event is said. The sequence number is
-// written as KERI writes it, lowercase hex without leading zeros, and as
-// nothing at all when no event is held.
-func BuildKeyStateNotice(aid string, sn int, said string, at time.Time) ([]byte, error) {
-	if aid == "" {
-		return nil, fmt.Errorf("a key state notice names the identifier it is about")
+// BuildKeyStateNotice makes the reply in which the witness whose key is
+// witnessAID states the key state of an identifier: keripy's /ksn/{witness}
+// carrying the full state record. A witness that holds nothing for the
+// identifier states a record with only the identifier (nothing at s and d),
+// where keripy would not answer; the asker has to be told apart from "no
+// reply", and has to be unable to tell "not held" from "not allowed to read".
+func BuildKeyStateNotice(witnessAID string, rec KeyStateRecord, at time.Time) ([]byte, error) {
+	if witnessAID == "" || rec.I == "" {
+		return nil, fmt.Errorf("a key state notice names the witness giving it and the identifier it is about")
 	}
-	d := keyStateData{I: aid, D: said}
-	if sn >= 0 {
-		d.S = strconv.FormatInt(int64(sn), 16)
-	}
-	data, err := json.Marshal(d)
+	data, err := json.Marshal(rec)
 	if err != nil {
 		return nil, err
 	}
-	return keri.BuildReply(keri.ReplyInput{Route: KeyStateRoute(aid), DT: replyDate(at), Data: data})
+	return keri.BuildReply(keri.ReplyInput{Route: KeyStateRoute(witnessAID), DT: replyDate(at), Data: data})
+}
+
+// NoKeyState is the record of an identifier nothing is held for.
+func NoKeyState(aid string) KeyStateRecord {
+	return KeyStateRecord{VN: []int{1, 0}, I: aid, K: []string{}, N: []string{}, B: []string{}, C: []string{},
+		EE: keyStateEstEvent{BR: []string{}, BA: []string{}}}
+}
+
+// KeyStateRecordOf is the key state after the newest event of a key log a
+// witness holds, read from the events' own bytes (never from what the store
+// says beside them), following br and ba for the witnesses in force.
+func KeyStateRecordOf(aid string, kel []KelEvent) (KeyStateRecord, error) {
+	rec := NoKeyState(aid)
+	if len(kel) == 0 {
+		return rec, nil
+	}
+	var held []string
+	var prior string
+	for i, row := range kel {
+		raw, err := drivers.DecodeRawBytes(row.RawBytesB64)
+		if err != nil || len(raw) == 0 {
+			return KeyStateRecord{}, fmt.Errorf("event %d is held without its bytes, so the key state cannot be stated", row.SequenceNum)
+		}
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return KeyStateRecord{}, fmt.Errorf("event %d is not readable: %w", row.SequenceNum, err)
+		}
+		if ev.Identifier != aid || ev.SN != uint64(i) {
+			return KeyStateRecord{}, fmt.Errorf("event %d is not the next event of %s", row.SequenceNum, aid)
+		}
+		var f map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &f); err != nil {
+			return KeyStateRecord{}, err
+		}
+		field := func(name string) interface{} {
+			var v interface{}
+			_ = json.Unmarshal(f[name], &v)
+			return v
+		}
+		list := func(name string) []string {
+			var v []string
+			if json.Unmarshal(f[name], &v) != nil || v == nil {
+				return []string{}
+			}
+			return v
+		}
+		held, _ = drivers.WitnessesAfter(held, ev)
+		rec.P, rec.D, rec.ET = prior, ev.SAID, ev.Ilk
+		rec.S = strconv.FormatUint(ev.SN, 16)
+		rec.F = rec.S
+		if t, err := time.Parse(time.RFC3339Nano, row.StoredAt); err == nil {
+			rec.DT = replyDate(t)
+		}
+		if ev.Delegator != "" {
+			rec.DI = ev.Delegator
+		}
+		if ev.Establishment() {
+			rec.KT, rec.K, rec.NT, rec.N = field("kt"), ev.Keys, field("nt"), ev.NextDigest
+			rec.BT = strconv.FormatUint(ev.TOAD, 16)
+			if c := list("c"); len(c) > 0 || ev.Ilk == "icp" || ev.Ilk == "dip" {
+				rec.C = c
+			}
+			rec.EE = keyStateEstEvent{S: rec.S, D: ev.SAID, BR: list("br"), BA: list("ba")}
+		}
+		rec.B = append([]string{}, held...)
+		prior = ev.SAID
+	}
+	if rec.K == nil {
+		rec.K = []string{}
+	}
+	if rec.N == nil {
+		rec.N = []string{}
+	}
+	return rec, nil
 }
 
 // VerifyKeyStateNotice reads a witness's answer about aid and believes it only
-// if the reply is the message its own digest commits to, is the /ksn route for
-// this identifier, states this identifier, is dated within KeyStateFreshness
+// if the reply is the message its own digest commits to, is the /ksn route of
+// witnessKey (keripy's, naming the witness giving it), states the key state of
+// this identifier, is dated within KeyStateFreshness
 // of now, and carries witnessKey's signature over its bytes. witnessKey is the
 // key the asker is asking, from the log it is checking; never one the answer
 // names.
@@ -102,7 +212,7 @@ func VerifyKeyStateNotice(ans SignedReply, witnessKey, aid string, now time.Time
 		return KeyState{}, fmt.Errorf("%q is not a witness key: %w", witnessKey, err)
 	}
 	raw, err := base64.StdEncoding.DecodeString(ans.RpyB64)
-	if err != nil || len(raw) == 0 || len(raw) > 4096 {
+	if err != nil || len(raw) == 0 || len(raw) > maxNoticeBytes {
 		return KeyState{}, fmt.Errorf("the key state notice is not readable")
 	}
 	sig, err := iacrypto.DecodeEd25519SignatureQB64(ans.Signature)
@@ -116,8 +226,10 @@ func VerifyKeyStateNotice(ans SignedReply, witnessKey, aid string, now time.Time
 	if err != nil {
 		return KeyState{}, err
 	}
-	if rep.Route != KeyStateRoute(aid) {
-		return KeyState{}, fmt.Errorf("the notice is for %q, not %q", rep.Route, KeyStateRoute(aid))
+	// The route names the witness giving the notice. Checking it is what keeps
+	// a notice one witness gave from being replayed as another's.
+	if rep.Route != KeyStateRoute(witnessKey) {
+		return KeyState{}, fmt.Errorf("the notice is for %q, not %q", rep.Route, KeyStateRoute(witnessKey))
 	}
 	at, err := time.Parse("2006-01-02T15:04:05.000000-07:00", rep.DT)
 	if err != nil {
@@ -126,7 +238,7 @@ func VerifyKeyStateNotice(ans SignedReply, witnessKey, aid string, now time.Time
 	if d := now.Sub(at); d > KeyStateFreshness || d < -KeyStateFreshness {
 		return KeyState{}, fmt.Errorf("the notice is dated %s, which is not now", rep.DT)
 	}
-	var d keyStateData
+	var d KeyStateRecord
 	if err := json.Unmarshal(rep.Data, &d); err != nil || d.I != aid {
 		return KeyState{}, fmt.Errorf("the notice is not about %s", aid)
 	}
@@ -148,17 +260,22 @@ func VerifyKeyStateNotice(ans SignedReply, witnessKey, aid string, now time.Time
 // asker may not read the log (see MayRead) the notice is the one for a log that
 // is not held, signed all the same, so the two cannot be told apart.
 func (s *Service) KeyStateNotice(aid string, mayRead bool) (SignedReply, error) {
-	if s.SignReceipt == nil {
+	if s.SignReceipt == nil || s.OurWitnessAID == nil {
 		return SignedReply{}, fmt.Errorf("this agent has no witnessing key")
 	}
-	sn, said := -1, ""
+	ours, err := s.OurWitnessAID()
+	if err != nil {
+		return SignedReply{}, err
+	}
+	rec := NoKeyState(aid)
 	if mayRead {
 		if kel, err := s.Store.GetKelEvents(aid); err == nil && len(kel) > 0 {
-			last := kel[len(kel)-1]
-			sn, said = last.SequenceNum, last.EventSAID
+			if rec, err = KeyStateRecordOf(aid, kel); err != nil {
+				return SignedReply{}, err
+			}
 		}
 	}
-	raw, err := BuildKeyStateNotice(aid, sn, said, time.Now())
+	raw, err := BuildKeyStateNotice(ours, rec, time.Now())
 	if err != nil {
 		return SignedReply{}, err
 	}
@@ -167,6 +284,9 @@ func (s *Service) KeyStateNotice(aid string, mayRead bool) (SignedReply, error) 
 	wit, sig, err := s.SignReceipt(string(raw))
 	if err != nil {
 		return SignedReply{}, err
+	}
+	if wit != ours {
+		return SignedReply{}, fmt.Errorf("the key signing is not the witness key the notice names")
 	}
 	return SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: wit, Signature: sig}, nil
 }
@@ -226,8 +346,11 @@ func VerifyWitnessLocation(ans SignedReply, witnessKey string) (WitnessLocation,
 	if err := json.Unmarshal(rep.Data, &d); err != nil || d.EID != witnessKey {
 		return WitnessLocation{}, fmt.Errorf("the location is not this witness's own")
 	}
-	if !strings.HasPrefix(d.URL, d.Scheme+"://") || (d.Scheme != "https" && d.Scheme != "http") {
-		return WitnessLocation{}, fmt.Errorf("the location %q is not an address this will ask", d.URL)
+	if d.Scheme != "https" && d.Scheme != "http" {
+		return WitnessLocation{}, fmt.Errorf("the location's scheme %q is not http or https, which are the only ones this asks", d.Scheme)
+	}
+	if !strings.HasPrefix(d.URL, d.Scheme+"://") {
+		return WitnessLocation{}, fmt.Errorf("the location %q is not an address of its own scheme %q", d.URL, d.Scheme)
 	}
 	return WitnessLocation{URL: strings.TrimRight(d.URL, "/")}, nil
 }

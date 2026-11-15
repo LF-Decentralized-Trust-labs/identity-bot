@@ -225,7 +225,7 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 }
 
 // handleWitnessKeyState answers how far this witness holds an identity's key
-// log as a KERI key state notice (the reply /ksn/{aid}), dated and signed with
+// log as a KERI key state notice (the reply /ksn/{witness}), dated and signed with
 // the witness's own key, so whoever asks can tell the answer is this witness's
 // and is live. Asked of anybody, answered as for a log not held unless the
 // asker may read it (witness.MayRead), exactly as the tip is.

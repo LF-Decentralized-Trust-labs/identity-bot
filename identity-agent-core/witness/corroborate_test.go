@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -153,6 +155,16 @@ func (l *witnessedLog) receipt(t *testing.T, sn, at int) {
 	l.records[sn]["witness_receipts"] = append(cur, map[string]interface{}{"witness": key, "cesr_signature": sig})
 }
 
+// buildNoticeOf is a notice by witnessKey that states the log of aid as being at
+// place sn with digest said, for tests that have no whole log behind them.
+func buildNoticeOf(witnessKey, aid string, sn int, said string, at time.Time) ([]byte, error) {
+	rec := NoKeyState(aid)
+	if sn >= 0 {
+		rec.S, rec.D = strconv.FormatInt(int64(sn), 16), said
+	}
+	return BuildKeyStateNotice(witnessKey, rec, at)
+}
+
 // a witness is a server at a registered address that states what it holds, signed
 // by the key it signs as.
 type aWitness struct {
@@ -167,6 +179,18 @@ type aWitness struct {
 	signAs []byte
 	// replica and conflicting are what it serves, unsigned, as its copy.
 	replica, conflicting []map[string]interface{}
+	// events are the single events it hands over by place, as a controller
+	// published them.
+	events map[int]map[string]interface{}
+	// eventFails is how many reads of one event it refuses (429) before serving.
+	eventFails atomic.Int32
+	// hits counts the key state notices it was asked for.
+	hits atomic.Int32
+	// delay is how long it takes to answer a key state notice.
+	delay time.Duration
+	// redirectTo, when set, is where it sends a key state request instead of
+	// answering it.
+	redirectTo string
 	// location, when set, is the address it states for itself, signed.
 	location string
 	// noState serves no notice at all.
@@ -182,12 +206,24 @@ func (w *aWitness) serve(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/witness/ksn/", func(rw http.ResponseWriter, r *http.Request) {
+		w.hits.Add(1)
+		if w.redirectTo != "" {
+			http.Redirect(rw, r, w.redirectTo+r.URL.Path, http.StatusFound)
+			return
+		}
+		if w.delay > 0 {
+			select {
+			case <-time.After(w.delay):
+			case <-r.Context().Done():
+				return
+			}
+		}
 		if w.noState {
 			http.NotFound(rw, r)
 			return
 		}
 		aid := strings.TrimPrefix(r.URL.Path, "/witness/ksn/")
-		raw, err := BuildKeyStateNotice(aid, w.sn, w.said, w.at)
+		raw, err := buildNoticeOf(w.key, aid, w.sn, w.said, w.at)
 		if err != nil {
 			t.Error(err)
 			return
@@ -196,6 +232,20 @@ func (w *aWitness) serve(t *testing.T) {
 		_ = json.NewEncoder(rw).Encode(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
 	})
 	mux.HandleFunc("/witness/kel/", func(rw http.ResponseWriter, r *http.Request) {
+		if i := strings.LastIndex(r.URL.Path, "/event/"); i >= 0 {
+			if w.eventFails.Add(-1) >= 0 {
+				http.Error(rw, "slow down", http.StatusTooManyRequests)
+				return
+			}
+			sn, _ := strconv.Atoi(r.URL.Path[i+len("/event/"):])
+			ev, ok := w.events[sn]
+			if !ok {
+				http.NotFound(rw, r)
+				return
+			}
+			_ = json.NewEncoder(rw).Encode(ev)
+			return
+		}
 		_ = json.NewEncoder(rw).Encode(map[string]interface{}{"kel": w.replica, "conflicting": w.conflicting})
 	})
 	mux.HandleFunc("/witness/loc/", func(rw http.ResponseWriter, r *http.Request) {
@@ -222,7 +272,10 @@ func (l *witnessedLog) witnessesHolding(t *testing.T) []*aWitness {
 	var out []*aWitness
 	for _, key := range l.w.keys {
 		w := &aWitness{key: key, seed: l.w.seeds[key], sn: len(l.saids) - 1, said: l.saids[len(l.saids)-1],
-			at: time.Now(), replica: l.records}
+			at: time.Now(), replica: l.records, events: map[int]map[string]interface{}{}}
+		for i, rec := range l.records {
+			w.events[i] = rec
+		}
 		w.serve(t)
 		out = append(out, w)
 	}
@@ -310,13 +363,48 @@ func TestAWitnessStatingItHoldsALongerHistoryRefusesTheClaim(t *testing.T) {
 	}
 }
 
-// A different event at a place the claim shows one is a fork.
-func TestAWitnessStatingADifferentEventAtThePlaceRefusesTheClaim(t *testing.T) {
+// A different event at a place the claim shows one is a fork, when the witness
+// shows it validly signed.
+func TestAWitnessShowingADifferentSignedEventAtThePlaceRefusesTheClaim(t *testing.T) {
 	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
 	ws := l.witnessesHolding(t)
-	ws[0].said = "EADifferentEventSaid0000000000000000000000"
+	rival := l.ixn(t, l.saids[1], l.key1, "rival")
+	ws[0].said = parsed(t, mustRawOf(rival)).SAID
+	ws[0].events[2] = rival
 	if got := Corroborate(nil, registry(ws), l.prefix, l.records); !got.Contradicted {
-		t.Fatalf("%+v", got)
+		t.Fatalf("a witness showing a validly signed fork did not refuse the claim: %+v", got)
+	}
+}
+
+// One witness saying, and showing nothing, that it holds a different or a longer
+// history must not veto a genuine claim: any server can say so. It has not
+// answered; the witnesses that did decide.
+func TestAWitnessThatOnlySaysItHoldsSomethingElseCannotRefuseAGenuineClaim(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(3), 2, []int{0, 1, 2})
+	cases := map[string]func(w *aWitness){
+		"a different event": func(w *aWitness) { w.said = "EADifferentEventSaid0000000000000000000000" },
+		"a longer history":  func(w *aWitness) { w.sn, w.said = 9, "ELongerHistorySaid00000000000000000000000" },
+		"an event not signed by the identity": func(w *aWitness) {
+			w.said = parsed(t, mustRawOf(l.ixn(t, l.saids[1], l.key0, "x"))).SAID
+			w.events[2] = l.ixn(t, l.saids[1], l.key0, "x") // signed by a key already rotated away from
+		},
+		"an event that does not follow the log": func(w *aWitness) {
+			w.sn, w.said = 3, "ENotTheNextEventSaid00000000000000000000"
+			w.events[3] = l.ixn(t, l.saids[1], l.key1, "gap")
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			ws := l.witnessesHolding(t)
+			setup(ws[0])
+			got := Corroborate(nil, registry(ws), l.prefix, l.records)
+			if got.Contradicted {
+				t.Fatalf("one witness's unproven word refused a genuine claim: %+v", got)
+			}
+			if got.Failed != 1 || got.Held != 2 || !got.Corroborated() {
+				t.Fatalf("the two witnesses that confirmed did not carry it: %+v", got)
+			}
+		})
 	}
 }
 
@@ -527,7 +615,7 @@ func TestAKeyStateNoticeIsReadOnlyAsWhatItIs(t *testing.T) {
 	key, seed := w.keys[0], w.seeds[w.keys[0]]
 	now := time.Now()
 	make := func(aid string, sn int, at time.Time, as []byte) SignedReply {
-		raw, err := BuildKeyStateNotice(aid, sn, "ESaid00000000000000000000000000000000000000", at)
+		raw, err := buildNoticeOf(key, aid, sn, "ESaid00000000000000000000000000000000000000", at)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -563,10 +651,11 @@ func TestTheNoticeAWitnessServesIsTheOneTheCheckerReads(t *testing.T) {
 		sig, err := login.SignString(statement, w.seeds[key])
 		return key, sig, err
 	}
+	s.OurWitnessAID = func() (string, error) { return key, nil }
 	l := buildWitnessedLog(t, witnessesOf(1), 1, nil)
 	ev := parsed(t, mustRawOf(l.records[0]))
 	if err := s.Store.StoreKelEvent(KelEvent{SignerAID: l.prefix, SequenceNum: 0, EventSAID: ev.SAID,
-		EventJSON: "{}", StoredAt: NowRFC3339()}); err != nil {
+		EventJSON: "{}", StoredAt: NowRFC3339(), RawBytesB64: base64.StdEncoding.EncodeToString(mustRawOf(l.records[0]))}); err != nil {
 		t.Fatal(err)
 	}
 	ans, err := s.KeyStateNotice(l.prefix, true)
@@ -581,6 +670,7 @@ func TestTheNoticeAWitnessServesIsTheOneTheCheckerReads(t *testing.T) {
 	if st, err := VerifyKeyStateNotice(ans, key, l.prefix, time.Now()); err != nil || st.SN != -1 {
 		t.Fatalf("an asker who may not read was told what is held: %v %+v", err, st)
 	}
+	s.OurWitnessAID = nil
 	if _, err := s.WitnessLocationNotice("https://w.example/"); err == nil {
 		t.Fatal("a location was signed with no witnessing identity to say whose it is")
 	}
@@ -671,7 +761,7 @@ func TestALocationIsReadOnlyAsWhatItIs(t *testing.T) {
 	if _, err := VerifyWitnessLocation(reply(key, "ftp://w.example", seed), key); err == nil {
 		t.Fatal("an address that is not http or https was taken")
 	}
-	notice, _ := BuildKeyStateNotice("EAid", 1, "ESaid0000000000000000000000000000000000000", time.Now())
+	notice, _ := buildNoticeOf(key, "EAid", 1, "ESaid0000000000000000000000000000000000000", time.Now())
 	sig, _ := login.SignString(string(notice), seed)
 	if _, err := VerifyWitnessLocation(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(notice), Signature: sig}, key); err == nil {
 		t.Fatal("a key state notice was taken for a location")

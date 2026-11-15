@@ -1,10 +1,14 @@
 package witness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	keri "github.com/grapeid/keri-go"
@@ -34,7 +38,7 @@ import (
 //     valid for ever.
 //   - A LIVE ANSWER SIGNED BY THE WITNESS. A designated witness is asked now
 //     how far it holds the log, and the answer is believed only as a key state
-//     notice (the reply /ksn/{aid}, see KeyStateRoute) dated now and signed by
+//     notice (the reply /ksn/{witness}, see KeyStateRoute) dated now and signed by
 //     the witness's own key. A witness holding more than was presented, or a
 //     different event at a place, is the withheld rotation or a fork. An answer
 //     anybody could have typed (the key log over plain HTTP) is not evidence
@@ -94,6 +98,11 @@ type Corroboration struct {
 	Contradicted bool
 	// Why explains a contradiction, for the refusal message.
 	Why string
+	// Unverified is why the presented log was not even asked about: it is not a
+	// signed key log (an event whose signature does not verify, a chain that does
+	// not hold) or it is the log of an identifier other than ownerAID. Nothing a
+	// witness says can corroborate a log that is not a log of that identifier.
+	Unverified string
 	// Answers is one entry per designated witness that was asked, in the order
 	// the log designates them, so a caller can check what each one holds
 	// further than this does. A witness that could not be asked is not here
@@ -107,6 +116,11 @@ type WitnessAnswer struct {
 	Key, URL string
 	// State is the witness's signed key state notice.
 	State KeyState
+	// Shown is the event the witness handed over when its notice stated more
+	// than was presented, or another event at a place of it: what that notice is
+	// believed by (see corroborateThrough). Nil when the notice stated no such
+	// thing.
+	Shown map[string]interface{}
 	// Replica is the log the witness serves for the identifier. It is what the
 	// witness says, unsigned; it is read only for receipts (which prove
 	// themselves) and for the conflicting events below, never as a statement
@@ -131,7 +145,7 @@ type WitnessAnswer struct {
 // A witness that is reachable but holds nothing confirms nothing, so it is the
 // witnesses that hold the newest event that count, not the ones that answered.
 func (c Corroboration) Corroborated() bool {
-	return c.ReceiptsMet && c.Required > 0 && c.Held >= c.Required && !c.Contradicted
+	return c.Unverified == "" && c.ReceiptsMet && c.Required > 0 && c.Held >= c.Required && !c.Contradicted
 }
 
 // WitnessKeysIn reads the witness keys an inception event designates.
@@ -157,7 +171,7 @@ func WitnessKeysIn(kel []map[string]interface{}) []string {
 	return out
 }
 
-// Corroborate checks a presented log against the witnesses in force at its end, each found by its designated key (pool is the registry of
+// Corroborate checks a presented log, itself and as the log of ownerAID (Corroboration.Unverified says if it is not), against the witnesses in force at its end, each found by its designated key (pool is the registry of
 // witness operators: BootstrapPool() in the Identity Agent, or the registry a
 // verifier loads, and gives only a place to start looking). client may be nil.
 //
@@ -201,6 +215,83 @@ func CorroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 	return corroborateThrough(client, pool, ownerAID, presented, keys, time.Now())
 }
 
+// corroborationDeadline is how long all the witnesses together are given to
+// answer. They are asked at once, so a few that never answer cost this once, not
+// once each; a witness that has not answered by then has failed to answer.
+var corroborationDeadline = 20 * time.Second
+
+// maxWitnessesAsked bounds how many witnesses one check asks. A key log names its
+// own witnesses (and a caller of CorroborateThrough chooses them), so without a
+// bound a log naming thousands would make thousands of requests per claim. Real
+// logs name a handful; any beyond this are counted as not answering.
+const maxWitnessesAsked = 64
+
+// witnessTimeout is how long one request to one witness may take when the caller
+// gave no client of its own.
+const witnessTimeout = 8 * time.Second
+
+// oneWitnessAnswer is what asking one designated witness produced.
+type oneWitnessAnswer struct {
+	base        string
+	state       KeyState
+	shown       map[string]interface{}
+	replica     []map[string]interface{}
+	conflicting []map[string]interface{}
+	err         error
+}
+
+// A notice that states a longer history than was presented, or another event at a
+// place of it, is a claim and no more: any witness can type one. It becomes a
+// contradiction when the witness shows an event that is validly signed by the
+// identity's own keys, which a witness cannot make. departure is the place of the
+// event to ask for, or -1 when the notice departs from nothing.
+func departure(state KeyState, presented []map[string]interface{}) int {
+	tip := len(presented) - 1
+	switch {
+	case state.SN > tip:
+		return tip + 1
+	case state.SN >= 0 && state.SAID != eventDigestOf(presented[state.SN]):
+		return state.SN
+	}
+	return -1
+}
+
+// signedKeyLog is the presented log as a verified signed key log, and why it is not
+// one when it is not: it must verify, and be the log of ownerAID.
+func signedKeyLog(ownerAID string, presented []map[string]interface{}) (*keri.SignedKELResult, string) {
+	msgs, err := drivers.SignedMessagesFromRecords(presented)
+	if err != nil {
+		return nil, "the presented log cannot be checked as a signed key log: " + err.Error()
+	}
+	log, err := keri.ValidateSignedKEL(msgs)
+	if err != nil {
+		return nil, "the presented log is not a valid signed key log: " + err.Error()
+	}
+	if log.Identifier != ownerAID {
+		return nil, fmt.Sprintf("the presented log is the log of %s, not of %s", log.Identifier, ownerAID)
+	}
+	return log, ""
+}
+
+// showsLongerHistory is whether rec is a validly signed event that follows the
+// presented log's newest event: what a witness holding more of the log than was
+// presented can show, and what one that only says so cannot.
+func showsLongerHistory(log *keri.SignedKELResult, tip int, rec map[string]interface{}) bool {
+	if rec == nil {
+		return false
+	}
+	msgs, err := drivers.SignedMessagesFromRecords([]map[string]interface{}{rec})
+	if err != nil || len(msgs) != 1 {
+		return false
+	}
+	ev, err := keri.ParseEvent(msgs[0])
+	if err != nil || ev.Identifier != log.Identifier || ev.SN != uint64(tip+1) {
+		return false
+	}
+	_, err = keri.VerifyEvent(log.StateAt(uint64(tip)), msgs[0])
+	return err == nil
+}
+
 func corroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID string, presented []map[string]interface{}, keys []string, now time.Time) Corroboration {
 	carried := receiptsCarriedBy(presented)
 	// Rebuilt from the bytes the verdict on the claim covers, so nothing served
@@ -219,43 +310,67 @@ func corroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 	}
 	keys = distinct
 	out := Corroboration{Designated: len(keys)}
-	if len(keys) == 0 || !ok || len(rebuilt) == 0 {
+	if !ok || len(rebuilt) == 0 {
+		out.Unverified = "the presented log carries no signed bytes, so it cannot be checked"
 		return out
 	}
 	presented = rebuilt
-	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
+	// The log is checked here, not left to the caller: this is the function an
+	// outside verifier calls, and a witness's confirmation of a log nobody
+	// checked, or of another identifier's, confirms nothing.
+	log, why := signedKeyLog(ownerAID, presented)
+	if log == nil {
+		out.Unverified = why
+		return out
+	}
+	if len(keys) == 0 {
+		return out
 	}
 	tip := len(presented) - 1
 	tipSAID := eventDigestOf(presented[tip])
 	receipts := carried
 
-	for _, key := range keys {
-		hint := ""
-		for _, b := range pool {
-			if b.WitnessKey == key && b.URL != "" {
-				hint = strings.TrimRight(b.URL, "/")
-				break
-			}
+	// All the witnesses at once, under one deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), corroborationDeadline)
+	defer cancel()
+	answers := make([]oneWitnessAnswer, len(keys))
+	var wg sync.WaitGroup
+	for i, key := range keys {
+		if i >= maxWitnessesAsked {
+			answers[i] = oneWitnessAnswer{err: fmt.Errorf("more witnesses than are asked at once")}
+			continue
 		}
-		if hint == "" {
+		wg.Add(1)
+		go func(i int, key string) {
+			defer wg.Done()
+			answers[i] = askWitness(ctx, client, pool, key, ownerAID, presented, now)
+		}(i, key)
+	}
+	wg.Wait()
+
+	for i, key := range keys {
+		a := answers[i]
+		if a.err != nil {
 			out.Failed++
 			continue
 		}
-		base := LocateWitness(client, hint, key)
-		state, err := FetchKeyState(client, base, key, ownerAID, presented, now)
-		if err != nil {
+		state := a.state
+		rivals, ignored := SignedRivals(presented, a.conflicting)
+		// A notice stating more, or another event, counts only with the event it
+		// states. Without it the witness has said something and shown nothing, so
+		// it has not answered; it cannot refuse a claim by typing a number.
+		departs := departure(state, presented) >= 0
+		shownLonger := state.SN > tip && showsLongerHistory(log, tip, a.shown)
+		shownRival := state.SN >= 0 && state.SN <= tip && state.SAID != eventDigestOf(presented[state.SN]) &&
+			a.shown != nil && isSignedRival(log, a.shown)
+		if departs && rivals == 0 && !shownLonger && !shownRival {
 			out.Failed++
 			continue
 		}
-		// What the witness serves as its copy is not believed, but a receipt
-		// proves itself and a signed rival proves itself.
-		replica, conflicting, _ := FetchReplica(client, base, ownerAID, presented)
 		out.Asked++
-		rivals, ignored := SignedRivals(presented, conflicting)
-		out.Answers = append(out.Answers, WitnessAnswer{Key: key, URL: base, State: state, Replica: replica,
-			Conflicting: conflicting, Ignored: ignored})
-		for _, rec := range replica {
+		out.Answers = append(out.Answers, WitnessAnswer{Key: key, URL: a.base, State: state, Shown: a.shown,
+			Replica: a.replica, Conflicting: a.conflicting, Ignored: ignored})
+		for _, rec := range a.replica {
 			if said := eventDigestOf(rec); said != "" {
 				receipts[said] = append(receipts[said], receiptsOf(rec)...)
 			}
@@ -276,23 +391,23 @@ func corroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 				rivals, ownerAID)
 			return out
 		}
-		// A witness stating, signed, that it holds MORE of this identity's
-		// history than was presented is the withheld rotation: the claimant
-		// showed a prefix and signed with a key the identity has moved on from.
-		if state.SN > tip {
+		// A witness showing a validly signed event beyond the presented log is
+		// the withheld rotation: the claimant showed a prefix and signed with a
+		// key the identity has moved on from.
+		if shownLonger {
 			out.Contradicted = true
 			out.Why = fmt.Sprintf(
-				"a witness states it holds %d events for %s but the claim presented %d, so the claim "+
-					"is signed against a history that identity has already moved on from",
+				"a witness states it holds %d events for %s and shows the event after the %d the claim "+
+					"presented, validly signed, so the claim is signed against a history that identity has already moved on from",
 				state.SN+1, ownerAID, len(presented))
 			return out
 		}
-		// A different event where the claim shows one is a fork, not a
-		// confirmation.
-		if state.SN >= 0 && state.SAID != eventDigestOf(presented[state.SN]) {
+		// A validly signed different event where the claim shows one is a fork,
+		// not a confirmation.
+		if shownRival {
 			out.Contradicted = true
 			out.Why = fmt.Sprintf(
-				"a witness states a different event %d for %s than the claim presented", state.SN, ownerAID)
+				"a witness shows a validly signed different event %d for %s than the claim presented", state.SN, ownerAID)
 			return out
 		}
 		switch {
@@ -310,6 +425,66 @@ func corroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 		out.Required = 1
 	}
 	return out
+}
+
+// askWitness finds one witness and asks it, as one step so that all of them can
+// be asked at once: the registry hint, the witness's signed location, its signed
+// key state notice, the copy of the log it serves (read only for what proves
+// itself), and, when its notice departs from the presented log, the event it
+// states.
+func askWitness(ctx context.Context, client *http.Client, pool []BootstrapWitness, key, ownerAID string, presented []map[string]interface{}, now time.Time) oneWitnessAnswer {
+	hint := ""
+	for _, b := range pool {
+		if b.WitnessKey == key && b.URL != "" {
+			hint = strings.TrimRight(b.URL, "/")
+			break
+		}
+	}
+	if hint == "" {
+		return oneWitnessAnswer{err: fmt.Errorf("no address is known for %s", key)}
+	}
+	c, ours := witnessClient(client, hint)
+	if ours {
+		// A client made for this one question is not kept: its idle connections
+		// would otherwise outlive it, one set for every witness of every claim.
+		defer c.CloseIdleConnections()
+	}
+	base := LocateWitness(ctx, c, hint, key)
+	state, err := FetchKeyState(ctx, c, base, key, ownerAID, presented, now)
+	if err != nil {
+		return oneWitnessAnswer{err: err}
+	}
+	out := oneWitnessAnswer{base: base, state: state}
+	// What the witness serves as its copy is not believed, but a receipt proves
+	// itself and a signed rival proves itself.
+	out.replica, out.conflicting, _ = FetchReplica(ctx, c, base, ownerAID, presented)
+	if at := departure(state, presented); at >= 0 {
+		// Asked twice: a witness that states more and is then refused the read by
+		// a rate limit or a passing fault would otherwise count as having shown
+		// nothing, and a withheld rotation could be waved through on that.
+		for try := 0; try < 2 && out.shown == nil; try++ {
+			out.shown, _ = FetchEvent(ctx, c, base, ownerAID, at, presented)
+		}
+	}
+	return out
+}
+
+// witnessClient is the client to ask the witness registered at hint with. One the
+// caller gave is used as it is but follows no redirect. With none, the guarded
+// client: it dials no loopback, link-local, private or reserved address and uses
+// no proxy, unless the registry wrote the witness's own address as a local one.
+// A witness must be asked where the registry or its own signed location says, and
+// never be sent on somewhere by a redirect.
+//
+// ours is whether the client was made here, so that its idle connections can be
+// closed when the question is answered.
+func witnessClient(client *http.Client, hint string) (c *http.Client, ours bool) {
+	if client == nil {
+		return GuardedClient(witnessTimeout, LiteralIsLocal(hostOf(hint))), true
+	}
+	cp := *client
+	cp.CheckRedirect = refuseRedirects
+	return &cp, false
 }
 
 // receiptsCarriedBy reads the witness receipts a presented log's records carry,
@@ -447,14 +622,41 @@ func eventDigestOf(rec map[string]interface{}) string {
 // read carries the inception event of the log being checked, which the claimant
 // had to present and which this witness can compare with its own. That is the
 // sanctioned path for a verifier that is neither the identity nor its delegator.
-func FetchReplica(client *http.Client, base, aid string, presented []map[string]interface{}) (kel, conflicting []map[string]interface{}, err error) {
-	// Commercial witnesses serve at the root; an Identity Agent acting as a witness
-	// serves the same route under /api. Try both rather than guess, because
-	// guessing wrong reads as "witness unreachable" and silently weakens the
-	// check.
+func FetchReplica(ctx context.Context, client *http.Client, base, aid string, presented []map[string]interface{}) (kel, conflicting []map[string]interface{}, err error) {
+	var out struct {
+		KEL         []map[string]interface{} `json:"kel"`
+		Conflicting []map[string]interface{} `json:"conflicting"`
+	}
+	if err := getWitness(ctx, client, base, "/witness/kel/"+aid, presented, &out); err != nil {
+		return nil, nil, err
+	}
+	return out.KEL, out.Conflicting, nil
+}
+
+// FetchEvent reads the event at place sn of an identity's key log from one
+// witness, as its controller published and signed it. It is a candidate, to be
+// checked against the log it should extend.
+func FetchEvent(ctx context.Context, client *http.Client, base, aid string, sn int, presented []map[string]interface{}) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	if err := getWitness(ctx, client, base, "/witness/kel/"+aid+"/event/"+strconv.Itoa(sn), presented, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// witnessPrefixes are where a witness's routes are served: a commercial witness
+// at the root, an Identity Agent acting as a witness under /api. Both are tried
+// rather than guessed, because guessing wrong reads as "witness unreachable" and
+// silently weakens the check.
+var witnessPrefixes = []string{"", "/api"}
+
+// getWitness is the one GET to a witness: each prefix in turn, bounded, status
+// 200, decoded into out. presented, when it has an inception, is sent as the
+// proof that lets a verifier who is neither the identity nor its delegator read.
+func getWitness(ctx context.Context, client *http.Client, base, route string, presented []map[string]interface{}, out interface{}) error {
 	var lastErr error
-	for _, path := range []string{"/witness/kel/", "/api/witness/kel/"} {
-		req, err := http.NewRequest(http.MethodGet, base+path+aid, nil)
+	for _, prefix := range witnessPrefixes {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+prefix+route, nil)
 		if err != nil {
 			lastErr = err
 			continue
@@ -477,84 +679,61 @@ func FetchReplica(client *http.Client, base, aid string, presented []map[string]
 			lastErr = fmt.Errorf("status %d", resp.StatusCode)
 			continue
 		}
-		var out struct {
-			KEL         []map[string]interface{} `json:"kel"`
-			Conflicting []map[string]interface{} `json:"conflicting"`
-		}
-		if err := json.Unmarshal(body, &out); err != nil {
+		if err := json.Unmarshal(body, out); err != nil {
 			lastErr = err
 			continue
 		}
-		return out.KEL, out.Conflicting, nil
+		return nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no witness route answered")
 	}
-	return nil, nil, lastErr
-}
-
-// witnessPrefixes are where a witness's routes are served: a commercial witness
-// at the root, an Identity Agent acting as a witness under /api. Both are tried
-// rather than guessed, because guessing wrong reads as "witness unreachable" and
-// silently weakens the check.
-var witnessPrefixes = []string{"", "/api"}
-
-// getSigned fetches one signed reply from a witness, trying each prefix.
-func getSigned(client *http.Client, base, route string, headers map[string]string) (SignedReply, error) {
-	var lastErr error
-	for _, prefix := range witnessPrefixes {
-		req, err := http.NewRequest(http.MethodGet, base+prefix+route, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		body, rerr := boundedread.All(resp.Body, boundedread.Document)
-		resp.Body.Close()
-		if rerr != nil {
-			lastErr = rerr
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("status %d", resp.StatusCode)
-			continue
-		}
-		var ans SignedReply
-		if err := json.Unmarshal(body, &ans); err != nil {
-			lastErr = err
-			continue
-		}
-		return ans, nil
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no witness route answered")
-	}
-	return SignedReply{}, lastErr
+	return lastErr
 }
 
 // LocateWitness is the address to ask the witness whose key is key, given the
 // registry's hint for where to look. The witness's own signed /loc/scheme
 // reply, fetched from the hint, says where it is reached now, and is taken only
-// when it is signed by that key. When it is not served, or does not verify, the
-// hint itself is asked: that is safe, because what answers there is believed
-// only if it signs as the key (FetchKeyState), so a wrong address cannot lie.
-func LocateWitness(client *http.Client, hint, key string) string {
-	ans, err := getSigned(client, hint, "/witness/loc/"+key, nil)
-	if err != nil {
+// when it is signed by that key and is not an internal address. When it is not
+// served, does not verify, or is internal, the hint itself is asked: that is
+// safe, because what answers there is believed only if it signs as the key
+// (FetchKeyState), so a wrong address cannot lie.
+//
+// An internal address (loopback, link-local, private, shared, reserved, or a
+// name that resolves to one) is refused as a location because the witness, not
+// the registry, wrote it: a witness could otherwise aim this machine at its own
+// services. A registry that itself writes a local address as the hint is
+// the operator's own choice, and its signed location may be local too.
+func LocateWitness(ctx context.Context, client *http.Client, hint, key string) string {
+	var ans SignedReply
+	if err := getWitness(ctx, client, hint, "/witness/loc/"+key, nil, &ans); err != nil {
 		return hint
 	}
 	loc, err := VerifyWitnessLocation(ans, key)
 	if err != nil {
 		return hint
 	}
+	if !LiteralIsLocal(hostOf(hint)) {
+		u, err := url.Parse(loc.URL)
+		if err != nil || LiteralIsLocal(u.Hostname()) || resolvesInternalBy(ctx, u.Hostname()) {
+			return hint
+		}
+	}
 	return loc.URL
+}
+
+// resolvesInternalBy is ResolvesInternal, given up on when ctx is: a name whose
+// resolver never answers is treated as internal, so it cannot hold the check past
+// its deadline.
+func resolvesInternalBy(ctx context.Context, host string) bool {
+	done := make(chan bool, 1)
+	go func() { done <- ResolvesInternal(host) }()
+	select {
+	case internal := <-done:
+		return internal
+	case <-ctx.Done():
+		return true
+	}
 }
 
 // FetchKeyState asks the witness whose key is key, at base, for its key state
@@ -562,13 +741,9 @@ func LocateWitness(client *http.Client, hint, key string) string {
 // (VerifyKeyStateNotice). The read carries the inception of the log being
 // checked, as FetchReplica does, so a witness that answers a stranger as for a
 // log it does not hold can recognise a verifier presenting the log.
-func FetchKeyState(client *http.Client, base, key, aid string, presented []map[string]interface{}, now time.Time) (KeyState, error) {
-	headers := map[string]string{}
-	if proof, ok := InceptionProof(presented); ok {
-		headers[HeaderInception] = proof
-	}
-	ans, err := getSigned(client, base, "/witness/ksn/"+aid, headers)
-	if err != nil {
+func FetchKeyState(ctx context.Context, client *http.Client, base, key, aid string, presented []map[string]interface{}, now time.Time) (KeyState, error) {
+	var ans SignedReply
+	if err := getWitness(ctx, client, base, "/witness/ksn/"+aid, presented, &ans); err != nil {
 		return KeyState{}, err
 	}
 	return VerifyKeyStateNotice(ans, key, aid, now)
