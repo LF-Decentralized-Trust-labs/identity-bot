@@ -153,12 +153,12 @@ func TestAChainThroughAnUnpinnedCopyDoesNotHideOneThroughThePinnedIssuer(t *test
 	copyChain := []*x509.Certificate{{}, unpinned, c.root}
 	withIssuers(t, []*x509.Certificate{c.issuer}, nil)
 	for _, chains := range [][][]*x509.Certificate{{copyChain, pinnedChain}, {pinnedChain, copyChain}} {
-		iss, err := physicalIssuer(chains, []*x509.Certificate{c.root})
+		iss, err := classifyIssuer(chains, []*x509.Certificate{c.root}, false)
 		if err != nil || iss.SHA256 != sha256Hex(c.issuer) {
 			t.Fatalf("the pinned issuer's chain was not accepted: %v", err)
 		}
 	}
-	if _, err := physicalIssuer([][]*x509.Certificate{copyChain}, []*x509.Certificate{c.root}); err == nil {
+	if _, err := classifyIssuer([][]*x509.Certificate{copyChain}, []*x509.Certificate{c.root}, false); err == nil {
 		t.Fatal("a chain only through an unpinned copy was accepted")
 	}
 }

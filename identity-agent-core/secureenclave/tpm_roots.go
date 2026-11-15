@@ -24,7 +24,7 @@ var tpmRootFiles embed.FS
 var tpmManufacturerIssuers []*x509.Certificate
 
 // tpmVirtualIssuers are issuers of the same package that stand for Microsoft's own software
-// TPM (Hyper-V, Azure). They are never trusted: a chain through one is refused by name.
+// TPM (Hyper-V, Azure). They are trusted only for an owner who opted in to virtual TPMs (virtual_tpm_keys), and the proof then says its class is virtual.
 var tpmVirtualIssuers []*x509.Certificate
 
 // tpmLenientIssuers are issuers of the same package, physical ones, that crypto/x509 refuses to

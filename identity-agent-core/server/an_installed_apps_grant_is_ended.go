@@ -11,9 +11,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 )
 
 // An app-key grant has no end of its own, so it must be easy to end and
@@ -96,6 +98,12 @@ type appKeyGrantView struct {
 	Platform string    `json:"platform,omitempty"`
 	Level    string    `json:"level,omitempty"`
 	Since    time.Time `json:"since,omitempty"`
+	// For a TPM key, who certified the chip's endorsement key and its class: "physical", or
+	// "virtual" where the owner opted in to virtual TPMs. Notice says, for a virtual one, what
+	// that means for the owner, in the words every screen uses.
+	EKIssuer string `json:"ek_issuer,omitempty"`
+	EKClass  string `json:"ek_class,omitempty"`
+	Notice   string `json:"notice,omitempty"`
 }
 
 // handleListAppKeyGrants: GET /api/assets/{id}/app-key-grants, the owner's.
@@ -105,6 +113,10 @@ func (s *CoreServer) handleListAppKeyGrants(w http.ResponseWriter, r *http.Reque
 		v := appKeyGrantView{Key: g.Thumbprint, Person: g.Person}
 		if g.Proof != nil {
 			v.Platform, v.Level, v.Since = g.Proof.Platform, g.Proof.Level, g.Proof.Proved
+			v.EKIssuer, v.EKClass = g.Proof.EKIssuer, g.Proof.EKClass
+			if v.EKClass == secureenclave.TPMClassVirtual {
+				v.Notice = asset.VirtualTPMKeysWarning
+			}
 		}
 		out = append(out, v)
 	}

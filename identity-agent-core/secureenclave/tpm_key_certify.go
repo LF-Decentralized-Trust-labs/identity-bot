@@ -179,6 +179,14 @@ func VerifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, tpmManufacturerRoots)
 }
 
+// VerifyTPMKeyCertifyClasses is VerifyTPMKeyCertify for a caller that says whether the owner
+// opted in to virtual and cloud TPMs (asset.InstalledAppIdentity.AcceptsVirtualTPM). A chip of
+// a pinned physical issuer is accepted either way; a virtual TPM only with allowVirtual, and
+// then the proof says so (EKIssuer.Class is TPMClassVirtual).
+func VerifyTPMKeyCertifyClasses(evidence, challenge, credentialKey []byte, now time.Time, allowVirtual bool) (*InstalledAppKeyFacts, error) {
+	return verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey, now, tpmManufacturerRoots, allowVirtual)
+}
+
 // VerifyTPMKeyCertifyAgainstRoots is VerifyTPMKeyCertify for roots the caller
 // names, for the tool that checks the exchange against a software TPM
 // (testdata/tpmsim). The server never calls it: it takes the pinned roots.
@@ -190,6 +198,10 @@ func VerifyTPMKeyCertifyAgainstRoots(evidence, challenge, credentialKey []byte, 
 const TPMCredentialKeyLen = 32
 
 func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
+	return verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey, now, roots, false)
+}
+
+func verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate, allowVirtual bool) (*InstalledAppKeyFacts, error) {
 	if len(roots) == 0 {
 		return nil, notAttested("no TPM manufacturer roots are pinned in this build, so no TPM can be trusted")
 	}
@@ -282,7 +294,7 @@ func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 	}
 
 	// The EK certificate, and the AK's binding to that EK.
-	ekCert, ekIssuer, err := verifyEKCertificateIssuer(ev.EKCert, ev.EKChain, roots, now)
+	ekCert, ekIssuer, err := verifyEKCertificateClass(ev.EKCert, ev.EKChain, roots, now, allowVirtual)
 	if err != nil {
 		return nil, err
 	}
@@ -309,15 +321,20 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 var ErrVirtualTPM = errors.New("the TPM is a virtual or cloud one")
 
 // TPMClassPhysical is the class of a chip whose endorsement key a pinned physical
-// issuer certified: a discrete chip, a firmware TPM in the CPU, or Pluton. It is the only
-// class accepted. A virtual or cloud TPM (a key the hypervisor operator can read) is refused.
+// issuer certified: a discrete chip, a firmware TPM in the CPU, or Pluton. It is the only class
+// accepted unless the owner opted in to virtual TPMs. A virtual or cloud TPM (a key the hypervisor operator can read) is refused otherwise.
 const TPMClassPhysical = "physical"
+
+// TPMClassVirtual is the class of a virtual or cloud TPM (Microsoft's own software TPM in
+// Hyper-V or Azure): the hypervisor's operator can read its keys. It is carried by a proof
+// only for an owner who opted in (VerifyTPMKeyCertifyClasses).
+const TPMClassVirtual = "virtual"
 
 // EKIssuer says who certified a proved TPM's endorsement key.
 type EKIssuer struct {
 	Subject string // the issuer's subject, as the certificate gives it
 	SHA256  string // hex SHA-256 of the issuer certificate
-	Class   string // TPMClassPhysical: the only class a proof can carry
+	Class   string // TPMClassPhysical, or TPMClassVirtual where the owner opted in to it
 }
 
 func sha256Hex(c *x509.Certificate) string {
@@ -326,6 +343,12 @@ func sha256Hex(c *x509.Certificate) string {
 }
 
 func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time) (*x509.Certificate, *EKIssuer, error) {
+	return verifyEKCertificateClass(der, chain, roots, now, false)
+}
+
+// verifyEKCertificateClass is verifyEKCertificateIssuer for a caller that says whether a
+// virtual or cloud TPM may pass (an owner's opt-in). Without it a virtual TPM is refused.
+func verifyEKCertificateClass(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time, allowVirtual bool) (*x509.Certificate, *EKIssuer, error) {
 	if len(der) == 0 {
 		return nil, nil, notAttested("no endorsement key certificate")
 	}
@@ -351,6 +374,11 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 	for _, ic := range tpmManufacturerIssuers {
 		inter.AddCert(ic)
 	}
+	// The virtual issuers too, so a virtual TPM's chain is built, and then refused or
+	// accepted by its class, whether or not the front end sent them.
+	for _, ic := range tpmVirtualIssuers {
+		inter.AddCert(ic)
+	}
 	pool := x509.NewCertPool()
 	for _, r := range roots {
 		pool.AddCert(r)
@@ -372,7 +400,7 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 		if issuer == nil {
 			return nil, nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
 		}
-	} else if issuer, err = physicalIssuer(chains, roots); err != nil {
+	} else if issuer, err = classifyIssuer(chains, roots, allowVirtual); err != nil {
 		return nil, nil, err
 	}
 	// A manufacturer's CA signs other things too (vTPM and device certificates), so a
@@ -393,7 +421,7 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 	return leaf, issuer, nil
 }
 
-// physicalIssuer picks, among the chains that verified, one whose every certificate above
+// classifyIssuer picks, among the chains that verified, one whose every certificate above
 // the leaf is positively a physical TPM's, and says who issued the leaf. The Microsoft
 // root anchors issuers of firmware TPMs and Microsoft's own software TPM alike, and a front
 // end may send issuers of its own, so chaining to a pinned root is not enough:
@@ -401,7 +429,12 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 //   - the leaf's direct issuer must itself be pinned as physical (a pinned issuer, or a pinned
 //     root that has no pinned issuers under it), so an issuer the front end sent is not trusted
 //     for being sent, and a root that issues through pinned issuers is trusted only through them.
-func physicalIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate) (*EKIssuer, error) {
+//
+// allowVirtual is the owner's separate opt-in to virtual and cloud TPMs. Where it is set, a
+// chain whose leaf's direct issuer is pinned as a virtual issuer is accepted, with Class
+// TPMClassVirtual; an issuer the front end sent is trusted for neither class. Where it is not,
+// a virtual issuer anywhere in any chain refuses the key, as it always has.
+func classifyIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate, allowVirtual bool) (*EKIssuer, error) {
 	virtual := map[string]bool{}
 	for _, c := range tpmVirtualIssuers {
 		virtual[sha256Hex(c)] = true
@@ -410,16 +443,36 @@ func physicalIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate) (*E
 	for _, c := range tpmManufacturerIssuers {
 		pinned[sha256Hex(c)] = true
 	}
-	// A virtual or cloud TPM's issuer anywhere in any chain refuses the key outright.
+	// A virtual or cloud TPM's issuer anywhere in any chain refuses the key outright, unless the
+	// owner opted in to such a TPM, in which case it is accepted as virtual only through a
+	// pinned virtual issuer directly above the leaf.
+	var viaVirtual *EKIssuer
+	var virtualRefusal error
 	for _, ch := range chains {
 		if len(ch) < 2 {
 			continue
 		}
 		for _, c := range ch[1:] {
-			if virtual[sha256Hex(c)] {
+			if !virtual[sha256Hex(c)] {
+				continue
+			}
+			if !allowVirtual {
 				return nil, fmt.Errorf("%w: %w: the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", ErrNotAttested, ErrVirtualTPM, c.Subject.CommonName)
 			}
+			if iss := ch[1]; virtual[sha256Hex(iss)] {
+				viaVirtual = &EKIssuer{Subject: iss.Subject.String(), SHA256: sha256Hex(iss), Class: TPMClassVirtual}
+			} else if virtualRefusal == nil {
+				virtualRefusal = notAttested("the endorsement key was certified by %q, which is not pinned as a virtual TPM's issuer", iss.Subject.CommonName)
+			}
+			break
 		}
+	}
+	// A key with any virtual chain is a virtual TPM's: it is never reported as the stronger class.
+	if viaVirtual != nil {
+		return viaVirtual, nil
+	}
+	if virtualRefusal != nil {
+		return nil, virtualRefusal
 	}
 	// Otherwise each chain is judged on its own: one through an issuer that is not
 	// pinned (say, a copy the front end sent) does not hide another through the

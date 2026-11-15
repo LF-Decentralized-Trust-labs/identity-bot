@@ -51,6 +51,13 @@ func MakeTPMCredential(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, cred
 	return makeTPMCredential(ekPublic, ekCert, ekChain, akPublic, credentialKey, now, tpmManufacturerRoots, rand.Reader)
 }
 
+// MakeTPMCredentialClasses is MakeTPMCredential for a caller that says whether the owner opted
+// in to virtual and cloud TPMs: the exchange must pass the same class the later proof will
+// (VerifyTPMKeyCertifyClasses), or an opted-in sign-in would stop at its first step.
+func MakeTPMCredentialClasses(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, credentialKey []byte, now time.Time, allowVirtual bool) (*TPMCredential, error) {
+	return makeTPMCredentialClasses(ekPublic, ekCert, ekChain, akPublic, credentialKey, now, tpmManufacturerRoots, rand.Reader, allowVirtual)
+}
+
 // MakeTPMCredentialAgainstRoots is MakeTPMCredential for roots the caller names,
 // for the tool that checks this code against a software TPM
 // (testdata/tpmsim). The server never calls it: it takes the pinned roots.
@@ -59,6 +66,10 @@ func MakeTPMCredentialAgainstRoots(ekPublic, ekCert []byte, ekChain [][]byte, ak
 }
 
 func makeTPMCredential(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, credentialKey []byte, now time.Time, roots []*x509.Certificate, rnd io.Reader) (*TPMCredential, error) {
+	return makeTPMCredentialClasses(ekPublic, ekCert, ekChain, akPublic, credentialKey, now, roots, rnd, false)
+}
+
+func makeTPMCredentialClasses(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, credentialKey []byte, now time.Time, roots []*x509.Certificate, rnd io.Reader, allowVirtual bool) (*TPMCredential, error) {
 	if len(roots) == 0 {
 		return nil, notAttested("no TPM manufacturer roots are pinned in this build, so no TPM can be trusted")
 	}
@@ -68,7 +79,7 @@ func makeTPMCredential(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, cred
 	if len(ekPublic) > tpmMaxEvidence || len(akPublic) > tpmMaxEvidence || len(ekCert) > tpmMaxEvidence || len(ekChain) > 8 {
 		return nil, notAttested("a public area is too large")
 	}
-	cert, err := verifyEKCertificate(ekCert, ekChain, roots, now)
+	cert, _, err := verifyEKCertificateClass(ekCert, ekChain, roots, now, allowVirtual)
 	if err != nil {
 		return nil, err
 	}

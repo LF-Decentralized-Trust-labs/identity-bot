@@ -128,7 +128,7 @@ KEYS = {
     "platform_binary": "os min_version arch binary hash".split(),
     "store": "format size_mb".split(),
     "front_and_back_end": "static_front_end_url back_end_port device_front_ends installed_app_identity".split(),
-    "installed_app_identity": "android_package android_signers apple_app_id tpm_keys".split(),
+    "installed_app_identity": "android_package android_signers apple_app_id tpm_keys virtual_tpm_keys".split(),
     "when_down": "person_sees queue_requests queue_max_seconds".split(),
     "backup": "what every_hours".split(),
 }

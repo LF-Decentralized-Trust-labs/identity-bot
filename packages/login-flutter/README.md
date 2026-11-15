@@ -37,7 +37,7 @@ assertion over the SHA-256 of the proof text (`login-go`: `IsAssertionProof`,
 back end that checks only plain 64-byte proofs must also accept these assertions
 before an Apple front end can call it. That is the back end's work, not this SDK's.
 
-A Windows front end signs in as an installed app, with its TPM key, where the owner has accepted `tpm_keys` for the app (ADR-072 Amendment 7). Its evidence takes one more call to the app's back end than the other
+A Windows front end signs in as an installed app, with its TPM key, where the owner has accepted `tpm_keys` for the app (ADR-072 Amendment 7), and from a virtual or cloud computer only where the owner has also accepted `virtual_tpm_keys` (Amendment 10). Its evidence takes one more call to the app's back end than the other
 platforms': the front end sends its endorsement key and attestation key
 (`/signin/installed-key/credential`) and opens the credential that comes back in its TPM;
 `tpmEnrol` and `tpmAttest` are the channel's two calls for it.

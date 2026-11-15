@@ -79,7 +79,7 @@ func anInstalledAppsWorld(t *testing.T, offered, off []string) *anInstalledAppWo
 			}
 			return fake(ev, ch, now)
 		}
-		verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
+		verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time, allowVirtual bool) (*secureenclave.InstalledAppKeyFacts, error) {
 			if len(credKey) < secureenclave.TPMCredentialKeyLen || bytes.Equal(credKey, ch) {
 				return nil, errors.New("no secret credential key from the core")
 			}
@@ -602,9 +602,9 @@ func TestATPMSignInIsGivenTheCoresSecretCredentialKey(t *testing.T) {
 	iw.said.Platform = "tpm"
 	var gotChallenge, gotKey []byte
 	inner := verifyTPMInstalledKey
-	verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
+	verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time, allowVirtual bool) (*secureenclave.InstalledAppKeyFacts, error) {
 		gotChallenge, gotKey = ch, credKey
-		return inner(ev, ch, credKey, now)
+		return inner(ev, ch, credKey, now, allowVirtual)
 	}
 	p := iw.proof()
 	if _, err := iw.start(anAppsRequest("the-website", nil), "the-website", p); err != nil {
@@ -985,7 +985,7 @@ func TestTheCoreMakesATPMCredentialOnlyForAnAsksOwnApp(t *testing.T) {
 	var madeWith []byte
 	inner := makeTPMCredentialFor
 	t.Cleanup(func() { makeTPMCredentialFor = inner })
-	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte) (*secureenclave.TPMCredential, error) {
+	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte, allowVirtual bool) (*secureenclave.TPMCredential, error) {
 		madeWith = key
 		return &secureenclave.TPMCredential{CredentialBlob: []byte{0, 1, 2}, Secret: []byte{0, 1, 3}}, nil
 	}
@@ -1094,7 +1094,7 @@ func TestACredentialIsRefusedInPlainWordsWhenTPMKeysAreNotAllowedOrTheTPMIsVirtu
 	made := 0
 	inner := makeTPMCredentialFor
 	t.Cleanup(func() { makeTPMCredentialFor = inner })
-	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte) (*secureenclave.TPMCredential, error) {
+	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte, allowVirtual bool) (*secureenclave.TPMCredential, error) {
 		made++
 		return nil, fmt.Errorf("%w: %w: certified by MSFT-KEYID-1", secureenclave.ErrNotAttested, secureenclave.ErrVirtualTPM)
 	}

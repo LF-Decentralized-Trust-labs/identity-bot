@@ -355,3 +355,17 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 - The hosts that run an app's back end do not yet serve `/identity-agent/grant-ended`: `login.GrantEndedHandler` is the code they mount, and ending their own sessions (those begun at or before `issued`) is theirs. Until they do, nothing ends a session at once.
 - A grant recorded before this had no address and is never pushed; it ends at the standing check as before.
 - Nothing here has run against a real device, a real relay operator, or an installed front end.
+
+## Amendment 10 (2026-11-15): a utility app's owner may opt in to virtual and cloud TPMs
+
+*Amended 2026-11-15. Amendment 7 pins Microsoft's trusted TPM root list for physical chips only and refuses a virtual or cloud TPM by name. This adds the owner's separate opt-in for one. Nothing above is changed for an owner who does not make it.*
+
+**A declaration of its own.** `installed_app_identity` gains `virtual_tpm_keys` (`asset.InstalledAppIdentity.VirtualTPMKeys`). It is never implied by `tpm_keys`, and it is accepted only together with it: a virtual TPM is accepted only where a physical one is, so naming `virtual_tpm_keys` alone is refused when the identity is saved, and a stored identity that somehow names only it accepts no TPM. Where the owner has made both declarations, the Identity Agent accepts a key whose endorsement key is certified by an issuer pinned as virtual (`tpmvirtual`), and only through that pinned issuer directly above the leaf: an issuer a front end sends is trusted as neither class. Where the owner has not, the refusal is as before.
+
+**What the owner is told.** The sentence is `asset.VirtualTPMKeysWarning`, for every screen that offers the declaration: a virtual or cloud computer's security chip is run by whoever runs that computer's host, who can read its keys and sign in as the person, so the owner should allow it only if they trust that host. The refusal a person sees at a utility app whose owner has not opted in now also says the owner may allow virtual computers.
+
+**The class is recorded and shown.** A proof carries the class of the chip that signed (`physical`, or `virtual`), with the issuer's subject, on the grant it leads to. `GET /api/assets/{id}/app-key-grants` returns `ek_class` and `ek_issuer` for each live grant, and, for a virtual one, a `notice` with the sentence above. A key that has any chain through a virtual issuer is reported as virtual, never as the stronger class. The core also refuses to keep a virtual proof for an owner who did not opt in, even if the verifier let one through.
+
+**The credential exchange and the proof are asked alike.** `MakeTPMCredentialClasses` and `VerifyTPMKeyCertifyClasses` take the owner's answer as a parameter, and `MakeTPMCredential` and `VerifyTPMKeyCertify` stay physical-only, so a caller that did not ask for virtual TPMs cannot get them; an opted-in sign-in is not stopped at the exchange's first step, and a refused one is stopped before the TPM is asked to do anything.
+
+**Not changed.** A TPM, virtual or physical, proves the key and not the program (Amendment 7). A virtual TPM adds that its host can read the key. No real virtual machine's TPM has been seen by this code: the tests use issuers made for them, and a test checks that every issuer pinned as virtual chains to a pinned root, so an owner who opts in does not meet "no chain".

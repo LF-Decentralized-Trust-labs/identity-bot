@@ -75,10 +75,15 @@ func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset,
 	if aPageAsked(r) {
 		return nil, &SignInRefused{http.StatusForbidden, "a request that came from a web page cannot ask for an installed-app credential"}
 	}
-	// A TPM key the owner has not allowed is refused before the TPM is asked to do anything.
+	// A TPM key the owner has not allowed is refused before the TPM is asked to do anything,
+	// and a virtual one only where the owner opted in to it, the same as the proof will be.
+	allowVirtual := false
 	if s.assetHandler != nil {
-		if asset, found, err := s.assetHandler.Store.GetAsset(assetID); err == nil && found && !asset.InstalledApp.TPMKeys {
-			return nil, &SignInRefused{http.StatusForbidden, errTPMKeysNotAllowed.Error()}
+		if a, found, err := s.assetHandler.Store.GetAsset(assetID); err == nil && found {
+			if !a.InstalledApp.TPMKeys {
+				return nil, &SignInRefused{http.StatusForbidden, errTPMKeysNotAllowed.Error()}
+			}
+			allowVirtual = a.InstalledApp.AcceptsVirtualTPM()
 		}
 	}
 	s.installedAppAskMu.Lock()
@@ -95,7 +100,7 @@ func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset,
 	s.installedAppAsks[askID] = a
 	key := a.credentialKey
 	s.installedAppAskMu.Unlock()
-	cred, err := makeTPMCredentialFor(req, key)
+	cred, err := makeTPMCredentialFor(req, key, allowVirtual)
 	if err != nil {
 		return nil, &SignInRefused{http.StatusForbidden, inWordsForPerson(err).Error()}
 	}
@@ -104,8 +109,8 @@ func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset,
 
 // makeTPMCredentialFor is a variable-free seam so a test can stand in for
 // pinned manufacturer roots, as the verifiers above are.
-var makeTPMCredentialFor = func(req TPMCredentialRequest, credentialKey []byte) (*secureenclave.TPMCredential, error) {
-	return secureenclave.MakeTPMCredential(req.EKPublic, req.EKCert, req.EKChain, req.AKPublic, credentialKey, time.Now())
+var makeTPMCredentialFor = func(req TPMCredentialRequest, credentialKey []byte, allowVirtual bool) (*secureenclave.TPMCredential, error) {
+	return secureenclave.MakeTPMCredentialClasses(req.EKPublic, req.EKCert, req.EKChain, req.AKPublic, credentialKey, time.Now(), allowVirtual)
 }
 
 // InstalledAppKeyAsk is what an app's back end gets before it asks its
