@@ -513,12 +513,17 @@ func checkAskedFor(cred acdc, kind, method, path string, asked map[string]json.R
 	case schemas.AppGrant.Schema.SAID:
 		// An app's grant is asked for at the route that creates an app, never
 		// an AI agent's, so a request to grant an AI agent cannot be turned
-		// into an app's grant or the reverse. No route changes an app's
-		// capabilities yet; when one is added it is bound here with it.
+		// into an app's grant or the reverse. The owner changes what an
+		// existing app's grant gives at PUT /api/hosted-apps/{asset}/capabilities,
+		// and the grant it issues names that asset as what it is about.
 		switch {
 		case method == "POST" && path == "/api/hosted-apps":
 			if stringOf(asked["name"]) != stringAttr(cred.A, "name") {
 				return fmt.Errorf("the request asked for an app named differently")
+			}
+		case method == "PUT" && len(segments) == 4 && segments[0] == "api" && segments[1] == "hosted-apps" && segments[3] == "capabilities":
+			if segments[2] != about {
+				return fmt.Errorf("the request was about %s, the credential about %s", segments[2], about)
 			}
 		default:
 			return fmt.Errorf("%s %s is not a request that grants an app anything", method, path)
