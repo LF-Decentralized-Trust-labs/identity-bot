@@ -1,0 +1,32 @@
+name: login_flutter
+description: "Sign in with Identity Agent for an installed front end of a utility app: the sign-in screen, the hardware key on each platform and the kept grant, on top of login_dart."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.6.1
+  flutter: '>=3.27.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  qr_flutter: ^4.1.0
+  flutter_secure_storage: ^9.2.4
+  login_dart:
+    path: ../login-dart
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  # The fake utility app of login_dart's tests, which these run the screen against.
+  ed25519_edwards: ^0.3.1
+  pointycastle: ^4.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: org.identityagent.login_flutter
+        pluginClass: LoginFlutterPlugin

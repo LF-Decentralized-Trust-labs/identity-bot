@@ -134,7 +134,8 @@ class FakeApp {
           'site_aid': link.aid,
           'browser_key': challengeKey ?? j['browserKey'],
           'front_end': kind,
-          'expiry': '2026-11-11T12:10:00Z',
+          'expiry':
+              '${clock.add(const Duration(minutes: 10)).toUtc().toIso8601String().split('.').first}Z',
           'session_token': 'tok',
         });
         final sig = ed.sign(appKey, Uint8List.fromList(utf8.encode(c)));
