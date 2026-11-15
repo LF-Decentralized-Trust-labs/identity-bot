@@ -359,8 +359,13 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
 	var issuer *EKIssuer
 	if err != nil {
-		// An issuer crypto/x509 cannot read is checked directly (tpm_lenient.go).
-		issuer = lenientIssuer(leaf, roots, now)
+		// An issuer crypto/x509 cannot read is checked directly (tpm_lenient.go), and only
+		// when its verifier found no issuer: any other refusal (an unhandled critical
+		// extension, say) is final.
+		var unknown x509.UnknownAuthorityError
+		if errors.As(err, &unknown) {
+			issuer = lenientIssuer(leaf, roots, now)
+		}
 		if issuer == nil {
 			return nil, nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
 		}

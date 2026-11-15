@@ -1,8 +1,10 @@
 package secureenclave
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
 	"embed"
+	"encoding/hex"
 	"encoding/pem"
 	"identity-agent-core/tpmcert"
 	"io/fs"
@@ -77,6 +79,10 @@ func pinnedLenientTPMCerts(fsys fs.FS, dir string) []*tpmcert.Certificate {
 		b, _ := pem.Decode(raw)
 		if b == nil {
 			panic(dir + "/" + e.Name() + " is not PEM")
+		}
+		// A lenient issuer is pinned by the SHA-256 of its bytes, which names its file.
+		if h := sha256.Sum256(b.Bytes); hex.EncodeToString(h[:])+".pem" != e.Name() {
+			panic(dir + "/" + e.Name() + " is not the certificate it is named for")
 		}
 		c, err := tpmcert.Parse(b.Bytes)
 		if err != nil {
