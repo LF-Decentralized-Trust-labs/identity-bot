@@ -280,6 +280,28 @@ func TestAHandOverCeremonyWithRealDevicesIsAppliedAndDropsTheBox(t *testing.T) {
 // With a post-quantum commitment beside each classical one the next-keys
 // threshold is weighted, each owner worth one share however many digests it
 // committed, and two devices each signing at their classical digest meet it.
+// Where every owner must act the next-keys threshold is the plain form, one
+// clause per owner, which older KERI implementations read; where only some must,
+// each owner is a nested clause carrying their share (ADR-061 section 6).
+func TestTheNextThresholdIsPlainWhereEveryOwnerMustAct(t *testing.T) {
+	two := [][]string{{"a", "p"}, {"b", "q"}}
+	three := [][]string{{"a", "p"}, {"b", "q"}, {"c", "r"}}
+	for _, c := range []struct {
+		threshold int
+		groups    [][]string
+		want      string
+	}{
+		{2, two, `[["1","1"],["1","1"]]`},
+		{3, three, `[["1","1"],["1","1"],["1","1"]]`},
+		{2, three, `[{"1/2":["1","1"]},{"1/2":["1","1"]},{"1/2":["1","1"]}]`},
+		{2, [][]string{{"a"}, {"b"}}, `"2"`},
+	} {
+		if got := string(weightedNext(c.threshold, c.groups)); got != c.want {
+			t.Errorf("%d of %d: nt %s, want %s", c.threshold, len(c.groups), got, c.want)
+		}
+	}
+}
+
 func TestAHandOverWithPostQuantumCommitmentsUsesWeightedThresholds(t *testing.T) {
 	w := aCeremonyOfTwoDevices(t, true, true)
 	raw1, d1, _ := w.fetch(t, "tok-a")
@@ -288,7 +310,7 @@ func TestAHandOverWithPostQuantumCommitmentsUsesWeightedThresholds(t *testing.T)
 		Nt json.RawMessage `json:"nt"`
 	}
 	_ = json.Unmarshal(raw1, &body)
-	if len(ev1.NextDigest) != 4 || string(body.Nt) != `[{"1/2":["1","1"]},{"1/2":["1","1"]}]` {
+	if len(ev1.NextDigest) != 4 || string(body.Nt) != `[["1","1"],["1","1"]]` {
 		t.Fatalf("next digests %d, nt %s: want four digests under one weighted share per owner", len(ev1.NextDigest), body.Nt)
 	}
 	w.sign(t, "tok-a", d1, w.a[0].at(t, raw1, 1, -1))

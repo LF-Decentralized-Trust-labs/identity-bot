@@ -98,7 +98,10 @@ func digestsFor(nextKey, postQuantumDigest string) ([]string, error) {
 // weightedNext is the next-keys threshold over groups of digests, where each
 // group is one owner's and any one of its digests stands for the owner:
 // threshold of len(groups) owners, each worth 1/threshold, with a flat count
-// when every owner commits to one digest (ADR-061 section 6).
+// when every owner commits to one digest (ADR-061 section 6). Where every owner
+// must act it is the plain form, one clause per owner ([["1","1"],...]), which
+// older KERI implementations read; the nested form, which they do not, is kept
+// for when only some owners must act.
 func weightedNext(threshold int, groups [][]string) json.RawMessage {
 	nested := false
 	for _, g := range groups {
@@ -108,6 +111,17 @@ func weightedNext(threshold int, groups [][]string) json.RawMessage {
 	}
 	if !nested {
 		return json.RawMessage(fmt.Sprintf("%q", fmt.Sprintf("%x", threshold)))
+	}
+	if threshold >= len(groups) {
+		clauses := make([]string, 0, len(groups))
+		for _, g := range groups {
+			ones := make([]string, len(g))
+			for i := range ones {
+				ones[i] = `"1"`
+			}
+			clauses = append(clauses, "["+strings.Join(ones, ",")+"]")
+		}
+		return json.RawMessage("[" + strings.Join(clauses, ",") + "]")
 	}
 	w := keriRatio(1, threshold)
 	elements := make([]string, 0, len(groups))
@@ -176,6 +190,12 @@ func (s *CoreServer) ceremonyRotation(c *OwnerCeremony, stage string) (keriengin
 	req.Keys = []string{c.OwnPublicKey}
 	var next [][]string
 	if !c.HandOver {
+		// The identity's own share commits its classical next key only, so in
+		// a ceremony that keeps it, it is the one share with no post-quantum
+		// commitment until this core's next ordinary rotation renews one
+		// (rotateCarryingTheCommitment). Carrying it here needs the owners'
+		// devices to be told the identity's two digests, which the ceremony's
+		// terms do not yet say.
 		own, err := digestsFor(c.OwnNextPublicKey, "")
 		if err != nil {
 			return keriengine.PrepareRequest{}, fmt.Errorf("the identity's own next key: %w", err)

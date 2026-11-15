@@ -149,7 +149,8 @@ class CeremonyTerms {
   /// key it rotates into, and in a hand-over for the key after that too
   /// (ADR-061 section 6). The phone's own Identity Agent checks the digests
   /// themselves against the keys it derived; this is what is said, before it is
-  /// asked, when an organisation's change leaves the second one out.
+  /// asked, when an organisation's change leaves the second one out. It counts
+  /// digests only; the Identity Agent's check of their values is the gate.
   String? leavesOutThePostQuantumCommitmentOf(String me) {
     for (final o in owners) {
       if (o.aid != me) continue;

@@ -179,7 +179,7 @@ func TestAHandOverWithPostQuantumDigestsFromRealPhonesIsApplied(t *testing.T) {
 		Nt json.RawMessage `json:"nt"`
 	}
 	_ = json.Unmarshal(raw1, &body)
-	if len(ev1.NextDigest) != 4 || string(body.Nt) != `[{"1/2":["1","1"]},{"1/2":["1","1"]}]` {
+	if len(ev1.NextDigest) != 4 || string(body.Nt) != `[["1","1"],["1","1"]]` {
 		t.Fatalf("the first rotation commits to %d digests under nt %s: want both phones' classical and post-quantum digests under one share each", len(ev1.NextDigest), body.Nt)
 	}
 	for _, p := range []*aRealPhone{pa, pc} {

@@ -125,6 +125,12 @@ func aRotationCommitsTo(ev *keri.Event, want ownerCommitment) string {
 // classical one again, and in a hand-over must come with its partner for the
 // second rotation: half a commitment would put two shapes of owner into one
 // weighted threshold.
+//
+// Optional here is safe only because the device decides for itself: when asked
+// to sign, it derives its own classical and post-quantum next digests and
+// refuses a rotation missing either (aRotationCommitsTo), so a digest stripped
+// on the way in yields a ceremony its device will not sign, never a weaker
+// commitment. That check is the gate; this one only keeps out malformed input.
 func checkTheDigestsSent(handOver bool, nextPublicKey string, more CeremonyExtras) string {
 	if more.NextPostQuantumDigest == "" {
 		if more.AfterNextPostQuantumDigest != "" {

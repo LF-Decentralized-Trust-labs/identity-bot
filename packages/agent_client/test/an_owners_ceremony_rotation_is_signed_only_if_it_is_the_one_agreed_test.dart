@@ -97,7 +97,14 @@ void main() {
 
   test('a threshold that counts owners when each commits once and shares when it commits twice', () {
     expect(ceremonyNextThreshold(2, [['a'], ['b']]), '2');
+    // Both must act: the plain form, which older KERI implementations read.
     expect(ceremonyNextThreshold(2, [['a', 'p'], ['b', 'q']]), [
+      ['1', '1'],
+      ['1', '1']
+    ]);
+    // Any two of three: each owner a nested clause worth a half.
+    expect(ceremonyNextThreshold(2, [['a', 'p'], ['b', 'q'], ['c', 'r']]), [
+      {'1/2': ['1', '1']},
       {'1/2': ['1', '1']},
       {'1/2': ['1', '1']}
     ]);

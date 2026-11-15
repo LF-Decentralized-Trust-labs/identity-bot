@@ -455,6 +455,13 @@ class CeremonyPlace {
 /// The same rule as the core's, so the two are compared byte for byte.
 Object ceremonyNextThreshold(int threshold, List<List<String>> groups) {
   if (groups.every((g) => g.length == 1)) return threshold.toRadixString(16);
+  // Every owner must act: the plain form, one clause per owner, which older
+  // KERI implementations read (ADR-061 section 6).
+  if (threshold >= groups.length) {
+    return [
+      for (final g in groups) [for (final _ in g) '1']
+    ];
+  }
   final w = threshold <= 1 ? '1' : '1/$threshold';
   return [
     for (final g in groups) {w: [for (final _ in g) '1']}
