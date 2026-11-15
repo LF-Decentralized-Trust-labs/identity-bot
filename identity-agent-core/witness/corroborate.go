@@ -373,7 +373,7 @@ func corroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 			Replica: a.replica, Conflicting: a.conflicting, Ignored: ignored})
 		for _, rec := range a.replica {
 			if said := eventDigestOf(rec); said != "" {
-				receipts[said] = append(receipts[said], receiptsOf(rec)...)
+				receipts[said] = append(receipts[said], receiptsOf(rec, i+1)...)
 			}
 		}
 
@@ -495,14 +495,15 @@ func receiptsCarriedBy(records []map[string]interface{}) map[string][]drivers.Wi
 	out := map[string][]drivers.WitnessReceipt{}
 	for _, rec := range records {
 		if said := eventDigestOf(rec); said != "" {
-			out[said] = append(out[said], receiptsOf(rec)...)
+			out[said] = append(out[said], receiptsOf(rec, 0)...)
 		}
 	}
 	return out
 }
 
-// receiptsOf reads the "witness_receipts" of one served record.
-func receiptsOf(rec map[string]interface{}) []drivers.WitnessReceipt {
+// receiptsOf reads the "witness_receipts" of one served record, each marked with
+// its source: 0 for the presented log, one number for each witness asked.
+func receiptsOf(rec map[string]interface{}, source int) []drivers.WitnessReceipt {
 	list, _ := rec["witness_receipts"].([]interface{})
 	var out []drivers.WitnessReceipt
 	for _, e := range list {
@@ -510,7 +511,7 @@ func receiptsOf(rec map[string]interface{}) []drivers.WitnessReceipt {
 		w, _ := m["witness"].(string)
 		sig, _ := m["cesr_signature"].(string)
 		if w != "" && sig != "" {
-			out = append(out, drivers.WitnessReceipt{WitnessAID: w, CesrSignature: sig})
+			out = append(out, drivers.WitnessReceipt{WitnessAID: w, CesrSignature: sig, Source: source})
 		}
 	}
 	return out

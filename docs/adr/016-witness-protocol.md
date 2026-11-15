@@ -305,10 +305,18 @@ Where this departs from keripy, so nobody takes it for more:
   interaction would be refused for lateness, while the witnesses' signed answers about
   the tip already say whether they hold it. Revisit if a witness-side change makes
   interaction receipts prompt.
-- **The signatures checked per witness at one event are bounded.** A served record can
-  carry about a megabyte of receipts naming designated witnesses; the counter checks at
-  most four for any one witness at an event (`maxReceiptChecksPerWitness`), so that cost
-  cannot be made large. A genuine witness issues one receipt per event.
+- **The signatures checked for one witness at one event are bounded per source.** A served
+  record can carry about a megabyte of receipts naming designated witnesses, and keripy has
+  no such bound (it keeps one indexed signature per witness index and drops those that
+  fail). Receipts are pooled from the presented log and from each witness's answer, which
+  do not trust each other, so the allowance is kept per source and witness: at most four
+  receipts with the shape of a genuine one (an indexed signature that decodes, at the
+  witness's own place in the list) are signature-checked from one source for one witness,
+  and text that is not such a receipt costs nothing. A source can spend only its own
+  allowance, so one hostile witness cannot keep another's receipt from counting; what a
+  source holds beyond its allowance is not counted, which loses nothing an honest witness
+  gives (one receipt per event). The core and both page readers apply the same bound,
+  held together by the "witnessed" cases of `packages/login-web/test-vectors/seal.json`.
 - **A rotation at a place supersedes an interaction there, as in keripy.** An interaction
   at that place signed by a key the owner has since rotated away from is not taken as a
   rival, by the witness or by the one corroborating, so it cannot make a genuine claim

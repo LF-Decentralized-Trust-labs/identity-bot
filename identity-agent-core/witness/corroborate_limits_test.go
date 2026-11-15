@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+	"identity-agent-core/drivers"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -325,40 +326,57 @@ func TestOnlyAFixedNumberOfWitnessesAreAskedAtOnce(t *testing.T) {
 	}
 }
 
-// A witness's copy of the log can carry thousands of junk receipts beside the
-// real ones, each naming a designated witness. The genuine log is still
-// corroborated, from the receipts the presented log carries, and the junk does
-// not cost the check its time: the bound is on signature checks per witness.
-func TestAReplicaFullOfJunkReceiptsStillCorroboratesAGenuineLog(t *testing.T) {
-	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+// One hostile witness, first in the list, serves a copy of every event carrying
+// receipts that have the shape of genuine ones (an indexed signature at each other
+// witness's place) and are not. The other two witnesses' own receipts are served
+// only in their own copies and the presented log carries none, and the log is
+// still corroborated at its threshold of two: one witness out of three must not be
+// able to refuse a genuine claim by spending the others' checks.
+func TestAHostileWitnessFirstCannotSpendTheOthersChecks(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(3), 2, nil)
 	ws := l.witnessesHolding(t)
-	var junk []interface{}
-	for i := 0; i < 20000; i++ {
-		raw := make([]byte, 64) // well formed, so each is a real check that fails
-		raw[0], raw[1], raw[2] = byte(i), byte(i>>8), 7
-		sig, err := keri.MatterQB64(keri.CodeEd25519Sig, raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		junk = append(junk, map[string]interface{}{"witness": l.w.keys[i%2], "cesr_signature": sig})
-	}
-	for _, w := range ws {
-		var fat []map[string]interface{}
+	copyOf := func() []map[string]interface{} {
+		var out []map[string]interface{}
 		for _, rec := range l.records {
 			c := map[string]interface{}{}
 			for k, v := range rec {
 				c[k] = v
 			}
-			cur, _ := rec["witness_receipts"].([]interface{})
-			c["witness_receipts"] = append(append([]interface{}{}, junk...), cur...)
-			fat = append(fat, c)
+			delete(c, "witness_receipts")
+			out = append(out, c)
 		}
-		w.replica = fat
+		return out
 	}
-	start := time.Now()
+	receipt := func(rec map[string]interface{}, at int, over []byte) map[string]interface{} {
+		key := l.w.keys[at]
+		sig, err := drivers.SignEventReceipt(over, l.w.seeds[key], at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]interface{}{"witness": key, "cesr_signature": sig}
+	}
+	for j, w := range ws {
+		rep := copyOf()
+		for _, rec := range rep {
+			raw := mustRawOf(rec)
+			list := []interface{}{}
+			if j == 0 {
+				for at := 1; at <= 2; at++ {
+					for n := 0; n < 3*maxReceiptsAllowance; n++ {
+						list = append(list, receipt(rec, at, append(append([]byte{}, raw...), byte(n), 'x')))
+					}
+				}
+			}
+			rec["witness_receipts"] = append(list, receipt(rec, j, raw))
+		}
+		w.replica = rep
+	}
 	got := Corroborate(nil, registry(ws), l.prefix, l.records)
 	if !got.Corroborated() {
-		t.Fatalf("a genuine log was not corroborated because of junk beside its receipts: %+v", got)
+		t.Fatalf("one hostile witness refused a genuinely receipted log: %+v", got)
 	}
-	t.Logf("took %v", time.Since(start))
 }
+
+// maxReceiptsAllowance is the number of receipts per witness one source is
+// checked for (drivers.maxReceiptChecksPerWitness, which is not exported).
+const maxReceiptsAllowance = 4

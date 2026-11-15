@@ -123,11 +123,15 @@ Map<String, dynamic>? _json(String text) {
   }
 }
 
+/// The signatures checked, at one event, among one answer's receipts that name
+/// one witness (the same bound as the core's and login-web's).
+const _maxReceiptChecksPerWitness = 4;
+
 /// How many leading events of [texts] have their threshold of receipts, which
-/// are [receipts] by event SAID, as (witness, signature). Fails closed: an
-/// event whose witnesses or threshold cannot be read ends the count.
+/// are [receipts] by event SAID, as (witness, signature, source answer). Fails
+/// closed: an event whose witnesses or threshold cannot be read ends the count.
 ({int through, int named, int toad}) _receiptedThrough(List<String> texts,
-    List<String> saids, Map<String, List<(String, String)>> receipts) {
+    List<String> saids, Map<String, List<(String, String, int)>> receipts) {
   var designated = <String>[];
   var toad = 0;
   for (var i = 0; i < texts.length; i++) {
@@ -141,13 +145,23 @@ Map<String, dynamic>? _json(String text) {
     designated = after;
     toad = bt;
     final keys = <String>{};
-    for (final (witness, sig)
-        in receipts[saids[i]] ?? const <(String, String)>[]) {
+    // The signatures checked are bounded for each answer and witness, never
+    // across answers: the receipts are pooled from answers that do not trust
+    // each other, and one that could spend another's allowance could keep a
+    // genuine receipt from counting. A check is charged only for a receipt with
+    // the shape of a genuine one.
+    final tried = <String, int>{};
+    for (final (witness, sig, src)
+        in receipts[saids[i]] ?? const <(String, String, int)>[]) {
       final at = designated.indexOf(witness);
       final key = decodeMatter(witness, 'B', 32);
       if (at < 0 || key == null || sig.length != 88 || sig[0] != 'A')
         continue; // only an indexed receipt counts, as login-web's isIndexedReceipt
       if (_alphabet.indexOf(sig[1]) != at) continue;
+      if (keys.contains(witness)) continue;
+      final spender = '$src:$witness';
+      if ((tried[spender] ?? 0) >= _maxReceiptChecksPerWitness) continue;
+      tried[spender] = (tried[spender] ?? 0) + 1;
       final raw = decodeMatter(sig, sig.substring(0, 2), 64);
       if (raw == null || !ed25519Verify(key, utf8.encode(texts[i]), raw)) {
         continue;
@@ -174,9 +188,9 @@ class _Read {
 /// it. An answer that is not a log of [rid]'s, or cannot be read, counts for
 /// nothing and is no error for the others.
 WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
-  final receipts = <String, List<(String, String)>>{};
+  final receipts = <String, List<(String, String, int)>>{};
   final read = <_Read>[];
-  for (final a in answers) {
+  for (final (src, a) in answers.indexed) {
     if (a is! Map || a['aid'] != rid) continue;
     final kel = a['kel'];
     if (kel is! List || kel.isEmpty || kel.length > 256) continue;
@@ -223,8 +237,8 @@ WitnessedLog readWitnessedLog(String rid, List<Object?> answers) {
         if (r is Map &&
             r['witness'] is String &&
             r['cesr_signature'] is String) {
-          (receipts[checked.events[i].said] ??= [])
-              .add((r['witness'] as String, r['cesr_signature'] as String));
+          (receipts[checked.events[i].said] ??= []).add(
+              (r['witness'] as String, r['cesr_signature'] as String, src + 1));
         }
       }
     }
