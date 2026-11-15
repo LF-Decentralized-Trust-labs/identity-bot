@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/authorisation"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
@@ -808,6 +809,53 @@ func (s *CoreServer) theOwner() (string, bool) {
 	return oa.AID, true
 }
 
+// selfOwnedHolder is the person who holds an Identity Agent that answers to
+// no one else: its own identity is its owner authority (ownerAuthority's last
+// resort), and no signer is on a roster. The holder is that identity, and the
+// key that speaks for them is its current key. An organisation with a signer
+// or a named owner is never this: nobody there is "the identity itself".
+type selfOwnedHolder struct {
+	aid, key string
+}
+
+// theHolderOfASelfOwnedAgent is the holder of this Identity Agent when it is
+// self-owned, and whether it is. It is read from the same answer a signature as
+// the owner is checked against, so the holder who can sign as the owner can
+// close, and nobody else can.
+func (s *CoreServer) theHolderOfASelfOwnedAgent() (*selfOwnedHolder, bool) {
+	if s.DataStore == nil {
+		return nil, false
+	}
+	id, _ := s.DataStore.GetIdentity()
+	if id == nil || id.AID == "" || id.PublicKey == "" {
+		return nil, false
+	}
+	oa, err := s.ownerAuthority()
+	if err != nil || oa == nil || oa.AID != id.AID {
+		return nil, false
+	}
+	if s.assetHandler != nil {
+		for _, e := range s.assetHandler.Store.ListEmployees() {
+			if e.IsSigner && e.Status == "active" {
+				return nil, false
+			}
+		}
+	}
+	return &selfOwnedHolder{aid: id.AID, key: oa.PublicKey}, true
+}
+
+// KeySpeaksFor: only the identity's own current key speaks for the holder.
+func (h *selfOwnedHolder) KeySpeaksFor(person, signer, verkey string) bool {
+	if person != h.aid || verkey != h.key {
+		return false
+	}
+	raw, err := iacrypto.KeyFromVerkeyQB64(verkey)
+	if err != nil {
+		return false
+	}
+	return signer == iacrypto.NonTransferableAIDQB64(raw)
+}
+
 // errNoProvablePerson is a request that does not come from a person the
 // organisation can prove.
 var errNoProvablePerson = errors.New("a person speaks to an AI agent from an app paired to this " +
@@ -820,6 +868,9 @@ var errNoProvablePerson = errors.New("a person speaks to an AI agent from an app
 func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *coretypes.ControllerProof, error) {
 	if app, ok := TheAppThatAsked(r); ok {
 		return s.thePersonAnAppAsksFor(r, app)
+	}
+	if holder, ok := s.theHolderOfASelfOwnedAgent(); ok && theGateAdmittedTheOwner(r) {
+		return s.theHolderAsking(r, holder)
 	}
 	grant, ok := TheControllerThatAsked(r)
 	if !ok {
@@ -865,6 +916,25 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 	return person, &coretypes.ControllerProof{
 		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
 		Signature: sig, RequestBytes: body, ControllerGrant: grant.CredentialSAID,
+	}, nil
+}
+
+// theHolderAsking is the holder of a self-owned Identity Agent saying a
+// conversation is done, taken back or given more turns, on a request the gate
+// admitted as the owner's. Their own statement is the proof kept, as for a
+// person an app speaks for; the owner's request signature is not, because it
+// covers a request that may carry their words.
+func (s *CoreServer) theHolderAsking(r *http.Request, holder *selfOwnedHolder) (coretypes.Signer, *coretypes.ControllerProof, error) {
+	body, err := readSignedBody(r)
+	if err != nil {
+		return coretypes.Signer{}, nil, err
+	}
+	person, statement, salt, err := s.thePersonSpeaksFor(r, AppCaller{}, holder, body)
+	if err != nil {
+		return coretypes.Signer{}, nil, err
+	}
+	return person, &coretypes.ControllerProof{
+		Controller: holder.aid, PublicKey: holder.key, PersonStatement: statement, PersonSalt: salt,
 	}, nil
 }
 
@@ -932,8 +1002,13 @@ func (s *CoreServer) personStillStands(p coretypes.Signer) bool {
 		return s.personStandsAtAsset(p.Asset, p.AID)
 	}
 	if p.Standing == "owner" {
-		owner, ok := s.theOwner()
-		return ok && owner == p.AID
+		if owner, ok := s.theOwner(); ok && owner == p.AID {
+			return true
+		}
+		// The holder of a self-owned Identity Agent stands for as long as it
+		// is still self-owned (ADR-077 amendment).
+		holder, ok := s.theHolderOfASelfOwnedAgent()
+		return ok && holder.aid == p.AID
 	}
 	if s.assetHandler == nil {
 		return false
