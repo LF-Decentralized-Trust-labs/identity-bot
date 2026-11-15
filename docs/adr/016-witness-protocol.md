@@ -187,7 +187,20 @@ the asker's nonce, so the answer is fresh and the witness's own. A controller as
 before sending, and sends only what the witness lacks; a witness that has confirmed holding
 the log as far as it goes, by its tip or its receipts, is not asked again until there is
 more to send, or until an hour has passed, so a witness that has fallen behind is noticed
-and filled again; a witness's signed tip is believed as it stands, lower than before too. `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
+and filled again; a witness's signed tip is believed as it stands, lower than before too. `GET /witness/ksn/{aid}` answers the same question as KERI asks it: a key state notice, the
+reply `/ksn/{aid}` stating the newest event's place (lowercase hex) and digest, dated and
+signed over its bytes by the witness's own key, with nothing stated for a log that is not
+held or that the asker may not read. A verifier that checks a presented key log
+(`witness.Corroborate`) believes a witness only through this: the signature must be the
+key it asked, and the date within five minutes of now. The key log a witness serves over
+plain HTTP is not an answer, since any server can serve one; it is read only for receipts
+and signed conflicting events, which prove themselves. Corroboration also needs receipts
+from at least `bt` of the witnesses in force at every establishment event, counted by
+`drivers.WitnessingByEvent`. `GET /witness/loc/{witness_aid}` is the witness's own
+`/loc/scheme` reply, signed with the same key, for the address the agent knows itself by
+and never the one a request names; the registry of witness operators is only where to
+look for it.
+`GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
 exactly as its controller published and signed it; the asker checks it extends its own
 key log and is signed by the identity's key before believing it. An event is sent to
 exactly the witnesses it names, and a send that runs in the background is not cut short

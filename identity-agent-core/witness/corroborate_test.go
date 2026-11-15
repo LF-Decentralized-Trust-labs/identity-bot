@@ -5,116 +5,22 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/drivers"
+	"identity-agent-core/login"
 )
 
-// A verifier outside the core finds the witnesses a log designates through the
-// registry, never through what a server says about itself. These stand up
-// servers that answer like witnesses, because the question is who is asked.
-
-const corroKey = "BDesignatedWitnessKeyForCorroborationTests0000"
-
-func corroPresented(extra map[string]interface{}) []map[string]interface{} {
-	ev := map[string]interface{}{"t": "icp", "i": "EOrg", "s": "0", "d": "EInception", "b": []interface{}{corroKey}}
-	for k, v := range extra {
-		ev[k] = v
-	}
-	raw, _ := json.Marshal(ev)
-	return []map[string]interface{}{{"raw_bytes_b64": base64.StdEncoding.EncodeToString(raw)}}
-}
-
-// corroServer answers /witness/kel/ with the given body, and /health as the
-// given identity, which is what ANY server can do.
-func corroServer(t *testing.T, claimsAs string, kel string) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"service_aid": claimsAs})
-	})
-	mux.HandleFunc("/witness/kel/", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(kel)) })
-	s := httptest.NewServer(mux)
-	t.Cleanup(s.Close)
-	return s
-}
-
-const wholeLog = `{"kel":[{"t":"icp","i":"EOrg","s":"0","d":"EInception"}]}`
-
-func TestAWitnessIsFoundThroughTheRegistryAndAWholeLogCorroborates(t *testing.T) {
-	s := corroServer(t, corroKey, wholeLog)
-	pool := []BootstrapWitness{{AID: corroKey, WitnessKey: corroKey, URL: s.URL}}
-	got := Corroborate(nil, pool, "EOrg", corroPresented(nil))
-	if !got.Corroborated() || got.Held != 1 || got.Asked != 1 || len(got.Answers) != 1 || got.Answers[0].URL != s.URL {
-		t.Fatalf("a registered witness holding exactly the log did not corroborate it: %+v", got)
-	}
-}
-
-// THE CASE THIS EXISTS FOR. A server that says it is the designated witness,
-// and holds exactly the log, is not that witness unless the registry says so.
-func TestAServerClaimingToBeTheWitnessIsNotAskedWhenTheRegistryDoesNotListIt(t *testing.T) {
-	fake := corroServer(t, corroKey, wholeLog)
-	// The registry knows another witness's key at the fake's address, and the
-	// designated key at no address at all.
-	pool := []BootstrapWitness{
-		{AID: "BSomeoneElse", WitnessKey: "BSomeoneElse", URL: fake.URL},
-		{AID: corroKey, WitnessKey: corroKey}, // no URL: nowhere to ask
-	}
-	got := Corroborate(nil, pool, "EOrg", corroPresented(nil))
-	if got.Corroborated() || got.Asked != 0 || got.Held != 0 || got.Failed != 1 || len(got.Answers) != 0 {
-		t.Fatalf("a server that only claims the designated identity was asked or counted: %+v", got)
-	}
-}
-
-func TestAnEmptyRegistryAsksNobody(t *testing.T) {
-	fake := corroServer(t, corroKey, wholeLog)
-	_ = fake
-	got := Corroborate(nil, nil, "EOrg", corroPresented(nil))
-	if got.Corroborated() || got.Asked != 0 || got.Failed != 1 {
-		t.Fatalf("with no registry somebody was asked: %+v", got)
-	}
-}
-
-// Duplicity evidence is a contradiction even when the held log matches.
-func TestAnEmptyConflictingListIsNotDuplicity(t *testing.T) {
-	s := corroServer(t, corroKey, `{"kel":[{"t":"icp","i":"EOrg","s":"0","d":"EInception"}],"conflicting":[]}`)
-	pool := []BootstrapWitness{{AID: corroKey, WitnessKey: corroKey, URL: s.URL}}
-	if got := Corroborate(nil, pool, "EOrg", corroPresented(nil)); got.Contradicted || !got.Corroborated() {
-		t.Fatalf("an empty conflicting list contradicted an honest log: %+v", got)
-	}
-}
-
-func TestAWitnessHoldingALongerHistoryContradicts(t *testing.T) {
-	s := corroServer(t, corroKey, `{"kel":[{"t":"icp","i":"EOrg","s":"0","d":"EInception"},{"t":"rot","i":"EOrg","s":"1","d":"ERot"}]}`)
-	pool := []BootstrapWitness{{AID: corroKey, WitnessKey: corroKey, URL: s.URL}}
-	if got := Corroborate(nil, pool, "EOrg", corroPresented(nil)); !got.Contradicted {
-		t.Fatalf("a longer history at the witness did not contradict: %+v", got)
-	}
-}
-
-func TestALogDesignatingNoWitnessAsksNobody(t *testing.T) {
-	s := corroServer(t, corroKey, wholeLog)
-	pool := []BootstrapWitness{{AID: corroKey, WitnessKey: corroKey, URL: s.URL}}
-	got := Corroborate(nil, pool, "EOrg", corroPresented(map[string]interface{}{"b": []interface{}{}}))
-	if got.Designated != 0 || got.Asked != 0 || got.Corroborated() {
-		t.Fatalf("%+v", got)
-	}
-}
-
-// A caller that knows the witnesses in force after a rotation names them.
-func TestCorroborateThroughAsksTheKeysItIsGivenThroughTheRegistry(t *testing.T) {
-	const rotatedTo = "BWitnessInForceAfterARotation00000000000000000"
-	s := corroServer(t, rotatedTo, wholeLog)
-	pool := []BootstrapWitness{{AID: rotatedTo, WitnessKey: rotatedTo, URL: s.URL}}
-	got := CorroborateThrough(nil, pool, "EOrg", corroPresented(nil), []string{rotatedTo})
-	if !got.Corroborated() || got.Asked != 1 {
-		t.Fatalf("%+v", got)
-	}
-	// The inception's witness is not in this pool, so Corroborate cannot ask it.
-	if got := Corroborate(nil, pool, "EOrg", corroPresented(nil)); got.Asked != 0 || got.Failed != 1 {
-		t.Fatalf("%+v", got)
-	}
-}
+// The witnesses a log designates are asked the way KERI asks them: the log must
+// be receipted to its threshold at every establishment event, and a live answer
+// signed by each witness's own key says whether the log is the whole of it. These
+// stand up servers that answer like witnesses, because the question is who is
+// asked and what they can prove.
 
 // A real, signed log, so that what a witness hands back as "conflicting" can be
 // told from junk by checking its signature, which is the only way it can be.
@@ -186,20 +92,399 @@ func (l *signedLog) ixn(t *testing.T, prior string, by keri.Signer, tag string) 
 	return record(raw, signAt(t, by, raw, keri.SamePlace(0)))
 }
 
-func (l *signedLog) serve(t *testing.T, conflicting []map[string]interface{}) []BootstrapWitness {
-	t.Helper()
-	body, _ := json.Marshal(map[string]interface{}{"kel": l.records, "conflicting": conflicting})
-	s := corroServer(t, l.witness, string(body))
-	return []BootstrapWitness{{AID: l.witness, WitnessKey: l.witness, URL: s.URL}}
+// A witnessed, signed log: icp (key0), rot to key1 (sn 1), ixn signed by key1
+// (sn 2), witnessed by w with threshold toad, receipted by the witnesses in
+// receiptedBy.
+type witnessedLog struct {
+	signedLog
+	w    someWitnesses
+	toad int
 }
 
+func buildWitnessedLog(t *testing.T, w someWitnesses, toad int, receiptedBy []int) *witnessedLog {
+	t.Helper()
+	gen := func() keri.Signer {
+		s, err := keri.GenerateSigner(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	l := &witnessedLog{w: w, toad: toad}
+	l.key0, l.key1, l.key2 = gen(), gen(), gen()
+	icp, err := keri.BuildInception(keri.InceptionInput{Keys: []string{pub(t, l.key0)},
+		NextDigests: []string{digest(t, l.key1)}, Witnesses: w.keys, Toad: &toad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ie := parsed(t, icp)
+	l.prefix = ie.Identifier
+	rot, err := keri.BuildRotation(keri.RotationInput{Prefix: l.prefix, PriorSAID: ie.SAID, SN: 1,
+		Keys: []string{pub(t, l.key1)}, NextDigests: []string{digest(t, l.key2)},
+		PriorWitnesses: w.keys, Toad: &toad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := parsed(t, rot)
+	ixn := l.ixn(t, re.SAID, l.key1, "a")
+	l.saids = []string{ie.SAID, re.SAID, parsed(t, mustRawOf(ixn)).SAID}
+	l.records = []map[string]interface{}{
+		record(icp, signAt(t, l.key0, icp, keri.SamePlace(0))),
+		record(rot, signAt(t, l.key1, rot, keri.SamePlace(0))),
+		ixn,
+	}
+	for _, at := range receiptedBy {
+		for i := 0; i < 2; i++ {
+			l.receipt(t, i, at)
+		}
+	}
+	return l
+}
+
+// receipt has witness at (its place in the list) receipt the event at place sn.
+func (l *witnessedLog) receipt(t *testing.T, sn, at int) {
+	t.Helper()
+	key := l.w.keys[at]
+	sig, err := drivers.SignEventReceipt(mustRawOf(l.records[sn]), l.w.seeds[key], at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := l.records[sn]["witness_receipts"].([]interface{})
+	l.records[sn]["witness_receipts"] = append(cur, map[string]interface{}{"witness": key, "cesr_signature": sig})
+}
+
+// a witness is a server at a registered address that states what it holds, signed
+// by the key it signs as.
+type aWitness struct {
+	key  string
+	seed []byte
+	// state is what it says it holds: the place and digest, -1 and "" for nothing.
+	sn   int
+	said string
+	// at is the date it gives its notice.
+	at time.Time
+	// signAs is whose key signs its answers when it is not the witness at all.
+	signAs []byte
+	// replica and conflicting are what it serves, unsigned, as its copy.
+	replica, conflicting []map[string]interface{}
+	// location, when set, is the address it states for itself, signed.
+	location string
+	// noState serves no notice at all.
+	noState bool
+	srv     *httptest.Server
+}
+
+func (w *aWitness) serve(t *testing.T) {
+	t.Helper()
+	signer := w.seed
+	if w.signAs != nil {
+		signer = w.signAs
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/witness/ksn/", func(rw http.ResponseWriter, r *http.Request) {
+		if w.noState {
+			http.NotFound(rw, r)
+			return
+		}
+		aid := strings.TrimPrefix(r.URL.Path, "/witness/ksn/")
+		raw, err := BuildKeyStateNotice(aid, w.sn, w.said, w.at)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		sig, _ := login.SignString(string(raw), signer)
+		_ = json.NewEncoder(rw).Encode(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
+	})
+	mux.HandleFunc("/witness/kel/", func(rw http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(rw).Encode(map[string]interface{}{"kel": w.replica, "conflicting": w.conflicting})
+	})
+	mux.HandleFunc("/witness/loc/", func(rw http.ResponseWriter, r *http.Request) {
+		if w.location == "" {
+			http.NotFound(rw, r)
+			return
+		}
+		raw, err := BuildWitnessLocation(w.key, w.location, w.at)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		sig, _ := login.SignString(string(raw), signer)
+		_ = json.NewEncoder(rw).Encode(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
+	})
+	w.srv = httptest.NewServer(mux)
+	t.Cleanup(w.srv.Close)
+}
+
+// witnessesHolding makes the log's witnesses, each stating that it holds the
+// whole log (or what the test then changes).
+func (l *witnessedLog) witnessesHolding(t *testing.T) []*aWitness {
+	t.Helper()
+	var out []*aWitness
+	for _, key := range l.w.keys {
+		w := &aWitness{key: key, seed: l.w.seeds[key], sn: len(l.saids) - 1, said: l.saids[len(l.saids)-1],
+			at: time.Now(), replica: l.records}
+		w.serve(t)
+		out = append(out, w)
+	}
+	return out
+}
+
+func registry(ws []*aWitness) []BootstrapWitness {
+	var out []BootstrapWitness
+	for _, w := range ws {
+		out = append(out, BootstrapWitness{AID: w.key, WitnessKey: w.key, URL: w.srv.URL})
+	}
+	return out
+}
+
+// Receipts from every witness to the threshold, and each witness stating, signed
+// and now, that the newest event is its own: the log is corroborated, and the
+// verdict is reached from the registry, the receipts and the signatures only.
+func TestALogReceiptedToItsThresholdAndHeldByItsWitnessesCorroborates(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	got := Corroborate(nil, registry(ws), l.prefix, l.records)
+	if !got.Corroborated() || got.Held != 2 || got.Asked != 2 || got.Required != 2 || !got.ReceiptsMet || len(got.Answers) != 2 {
+		t.Fatalf("a log receipted to its threshold and held by its witnesses did not corroborate: %+v", got)
+	}
+}
+
+// A presented log with receipts from fewer than bt of the witnesses in force is
+// refused, however many witnesses say they hold it.
+func TestALogReceiptedByFewerThanItsThresholdIsRefused(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0})
+	ws := l.witnessesHolding(t)
+	for _, w := range ws {
+		w.replica = nil // what each witness serves carries no more receipts than the claim
+	}
+	got := Corroborate(nil, registry(ws), l.prefix, l.records)
+	if got.Corroborated() || got.ReceiptsMet {
+		t.Fatalf("a log with 1 receipt where 2 are needed corroborated: %+v", got)
+	}
+	if len(got.Unreceipted) != 2 || got.Unreceipted[0] != 0 || got.Unreceipted[1] != 1 {
+		t.Fatalf("the establishment events that fall short were not named: %v", got.Unreceipted)
+	}
+	// Another witness's receipt of the same event, served beside it, is counted.
+	l2 := buildWitnessedLog(t, witnessesOf(2), 2, []int{0})
+	ws2 := l2.witnessesHolding(t)
+	other := *l2
+	other.records = append([]map[string]interface{}(nil), l2.records...)
+	for i := range other.records {
+		c := map[string]interface{}{}
+		for k, v := range l2.records[i] {
+			c[k] = v
+		}
+		other.records[i] = c
+	}
+	other.receipt(t, 0, 1)
+	other.receipt(t, 1, 1)
+	ws2[1].replica = other.records
+	if got := Corroborate(nil, registry(ws2), l2.prefix, l2.records); !got.Corroborated() {
+		t.Fatalf("a receipt a witness serves for the event was not counted: %+v", got)
+	}
+}
+
+// A receipt one witness issued twice, or one a witness the log never designated
+// issued, is not a second witness.
+func TestOneWitnessReceiptingTwiceIsNotTwoWitnesses(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0})
+	l.receipt(t, 0, 0)
+	l.receipt(t, 1, 0)
+	ws := l.witnessesHolding(t)
+	if got := Corroborate(nil, registry(ws), l.prefix, l.records); got.ReceiptsMet || got.Corroborated() {
+		t.Fatalf("one witness's receipt counted twice met a threshold of 2: %+v", got)
+	}
+}
+
+// The withheld rotation: every receipt on the stale log is valid, and the
+// witnesses, asked now, state, signed, that they hold more.
+func TestAWitnessStatingItHoldsALongerHistoryRefusesTheClaim(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	stale := l.records[:2]
+	// The witnesses hold sn 2; the claim shows up to sn 1, with every receipt in order, which
+	// is why a receipt cannot be what catches it.
+	got := Corroborate(nil, registry(ws), l.prefix, stale)
+	if !got.Contradicted || got.Corroborated() {
+		t.Fatalf("a log with its last event cut off was not refused: %+v", got)
+	}
+}
+
+// A different event at a place the claim shows one is a fork.
+func TestAWitnessStatingADifferentEventAtThePlaceRefusesTheClaim(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	ws[0].said = "EADifferentEventSaid0000000000000000000000"
+	if got := Corroborate(nil, registry(ws), l.prefix, l.records); !got.Contradicted {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A server at a registered witness address that is not the witness cannot sign
+// as its key, so what it says is ignored, however much it says.
+func TestAServerThatCannotSignAsTheWitnessIsIgnored(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	impostor := witnessesOf(1)
+	ws[0].signAs = impostor.seeds[impostor.keys[0]]
+	ws[0].srv.Close()
+	ws[0].serve(t)
+	// And it claims the log is longer, which a witness could say.
+	ws[0].sn, ws[0].said = 9, "EImpostorSaysTheLogIsLonger00000000000000"
+	got := Corroborate(nil, registry(ws), l.prefix, l.records)
+	if got.Contradicted || got.Failed != 1 || got.Asked != 1 || got.Held != 1 {
+		t.Fatalf("an impostor at a registered address was believed, or counted: %+v", got)
+	}
+	if got.Corroborated() {
+		t.Fatal("one witness of two corroborated a threshold of 2")
+	}
+}
+
+// What a witness serves as its copy of the log, unsigned, is not evidence of
+// what it holds: a longer copy there does not refuse the claim, and a whole one
+// does not corroborate it.
+func TestAnUnsignedCopyOfTheLogIsNotAnAnswer(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	for _, w := range ws {
+		w.noState = true
+	}
+	got := Corroborate(nil, registry(ws), l.prefix, l.records[:2])
+	if got.Contradicted || got.Corroborated() || got.Asked != 0 || got.Failed != 2 {
+		t.Fatalf("an unsigned copy was taken for an answer: %+v", got)
+	}
+}
+
+// A notice that is not dated now is a replay, however well it is signed.
+func TestAStaleNoticeIsNotBelieved(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	ws[0].at = time.Now().Add(-2 * KeyStateFreshness)
+	ws[1].at = time.Now().Add(2 * KeyStateFreshness)
+	got := Corroborate(nil, registry(ws), l.prefix, l.records)
+	if got.Asked != 0 || got.Failed != 2 || got.Corroborated() {
+		t.Fatalf("a notice dated %v from now was believed: %+v", 2*KeyStateFreshness, got)
+	}
+}
+
+// A witness that holds nothing, or less, is not a confirmation, however it is
+// signed.
+func TestAWitnessHoldingNothingOrLessDoesNotConfirm(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	ws[0].sn, ws[0].said = -1, ""
+	ws[1].sn, ws[1].said = 1, l.saids[1]
+	got := Corroborate(nil, registry(ws), l.prefix, l.records)
+	if got.Empty != 1 || got.Behind != 1 || got.Held != 0 || got.Corroborated() || got.Contradicted {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// The registry says where to look and nothing more. A witness that has moved
+// states, signed by its key, where it is reached now; and a location signed by
+// any other key is no location.
+func TestAWitnessIsFoundWhereItsOwnSignedLocationSays(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(1), 1, []int{0})
+	ws := l.witnessesHolding(t)
+	moved := ws[0]
+	// The registered address has nothing but the signed statement of where the
+	// witness is now.
+	hint := &aWitness{key: moved.key, seed: moved.seed, at: time.Now(), location: moved.srv.URL, noState: true}
+	hint.serve(t)
+	pool := []BootstrapWitness{{AID: moved.key, WitnessKey: moved.key, URL: hint.srv.URL}}
+	got := Corroborate(nil, pool, l.prefix, l.records)
+	if !got.Corroborated() || got.Answers[0].URL != moved.srv.URL {
+		t.Fatalf("a witness was not found where its own signed location says: %+v", got)
+	}
+
+	other := witnessesOf(1)
+	liar := &aWitness{key: moved.key, seed: moved.seed, signAs: other.seeds[other.keys[0]], at: time.Now(),
+		location: moved.srv.URL, noState: true}
+	liar.serve(t)
+	pool = []BootstrapWitness{{AID: moved.key, WitnessKey: moved.key, URL: liar.srv.URL}}
+	got = Corroborate(nil, pool, l.prefix, l.records)
+	if got.Corroborated() || got.Failed != 1 {
+		t.Fatalf("a location signed by another key was followed: %+v", got)
+	}
+}
+
+func TestAWitnessTheRegistryDoesNotListIsNotAsked(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(1), 1, []int{0})
+	ws := l.witnessesHolding(t)
+	pool := []BootstrapWitness{{AID: "EOther", WitnessKey: "BSomeOtherWitnessKey0000000000000000000000000", URL: ws[0].srv.URL}}
+	got := Corroborate(nil, pool, l.prefix, l.records)
+	if got.Corroborated() || got.Asked != 0 || got.Failed != 1 || len(got.Answers) != 0 {
+		t.Fatalf("a server claiming to be the witness was asked: %+v", got)
+	}
+	if got := Corroborate(nil, nil, l.prefix, l.records); got.Corroborated() || got.Asked != 0 || got.Failed != 1 {
+		t.Fatalf("an empty registry asked somebody: %+v", got)
+	}
+}
+
+func TestALogDesignatingNoWitnessAsksNobody(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(1), 1, []int{0})
+	ws := l.witnessesHolding(t)
+	got := CorroborateThrough(nil, registry(ws), l.prefix, l.records, nil)
+	if got.Designated != 0 || got.Asked != 0 || got.Corroborated() {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A log built and receipted by keripy itself, with receipts keripy's Hab.witness
+// made, is corroborated with nothing of ours in the way it was made.
+func TestALogBuiltAndReceiptedByKeripyCorroborates(t *testing.T) {
+	b, err := os.ReadFile("../drivers/testdata/keripy_witness_receipts.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Controller   string `json:"controller"`
+		EventSAID    string `json:"event_said"`
+		EventB64     string `json:"event_b64"`
+		MessageB64   string `json:"event_message_b64"`
+		Witnesses    []string
+		WitnessesRaw json.RawMessage `json:"witnesses"`
+		Receipts     []struct {
+			Witness    string `json:"witness"`
+			SeedB64    string `json:"seed_b64"`
+			Index      int    `json:"index"`
+			Attachment string `json:"attachment"`
+		} `json:"receipts"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	// The controller's signature is the last 88 characters of keripy's message.
+	msg, _ := base64.StdEncoding.DecodeString(v.MessageB64)
+	sig := string(msg[len(msg)-88:])
+	rec := map[string]interface{}{"raw_bytes_b64": v.EventB64, "cesr_signature": sig}
+	var wits []*aWitness
+	for _, r := range v.Receipts {
+		seed, _ := base64.StdEncoding.DecodeString(r.SeedB64)
+		rec["witness_receipts"] = append(asList(rec["witness_receipts"]),
+			map[string]interface{}{"witness": r.Witness, "cesr_signature": r.Attachment[8:]})
+		w := &aWitness{key: r.Witness, seed: seed, sn: 0, said: v.EventSAID, at: time.Now()}
+		w.serve(t)
+		wits = append(wits, w)
+	}
+	log := []map[string]interface{}{rec}
+	got := Corroborate(nil, registry(wits), v.Controller, log)
+	if !got.Corroborated() || got.Required != 2 || got.Held != 2 {
+		t.Fatalf("a log keripy built and receipted was not corroborated: %+v", got)
+	}
+}
+
+func asList(v interface{}) []interface{} {
+	l, _ := v.([]interface{})
+	return l
+}
+
+// Only a validly signed rival is duplicity: what else a witness hands back
+// proves nothing.
 func TestOnlyAValidlySignedRivalIsDuplicity(t *testing.T) {
-	l := buildSignedLog(t)
-	// The key the log had already rotated away from at sn 2.
+	l := buildWitnessedLog(t, witnessesOf(1), 1, []int{0})
 	staleKey := l.ixn(t, l.saids[1], l.key0, "b")
-	// Signed by the key in force: the identity signed two events at sn 2.
 	valid := l.ixn(t, l.saids[1], l.key1, "c")
-	// Another identifier's event at the same place, correctly signed by its own key.
 	other := buildSignedLog(t)
 	elsewhere := other.ixn(t, other.saids[1], other.key1, "d")
 
@@ -219,8 +504,9 @@ func TestOnlyAValidlySignedRivalIsDuplicity(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			pool := l.serve(t, c.conflicting)
-			got := Corroborate(nil, pool, l.prefix, l.records)
+			ws := l.witnessesHolding(t)
+			ws[0].conflicting = c.conflicting
+			got := Corroborate(nil, registry(ws), l.prefix, l.records)
 			if got.Contradicted != c.fails {
 				t.Fatalf("contradicted = %v, want %v: %+v", got.Contradicted, c.fails, got)
 			}
@@ -231,5 +517,79 @@ func TestOnlyAValidlySignedRivalIsDuplicity(t *testing.T) {
 				t.Fatalf("ignored = %+v, want %d", got.Answers, c.ignored)
 			}
 		})
+	}
+}
+
+// A key state notice that was not made for this identifier, by this witness, as
+// the /ksn reply, is not one.
+func TestAKeyStateNoticeIsReadOnlyAsWhatItIs(t *testing.T) {
+	w := witnessesOf(2)
+	key, seed := w.keys[0], w.seeds[w.keys[0]]
+	now := time.Now()
+	make := func(aid string, sn int, at time.Time, as []byte) SignedReply {
+		raw, err := BuildKeyStateNotice(aid, sn, "ESaid00000000000000000000000000000000000000", at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sig, _ := login.SignString(string(raw), as)
+		return SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}
+	}
+	if st, err := VerifyKeyStateNotice(make("EAid", 255, now, seed), key, "EAid", now); err != nil || st.SN != 255 {
+		t.Fatalf("a good notice was refused: %v %+v", err, st)
+	}
+	if _, err := VerifyKeyStateNotice(make("EAid", 1, now, seed), key, "EOther", now); err == nil {
+		t.Fatal("a notice about another identifier was taken")
+	}
+	if _, err := VerifyKeyStateNotice(make("EAid", 1, now, w.seeds[w.keys[1]]), key, "EAid", now); err == nil {
+		t.Fatal("a notice signed by another key was taken")
+	}
+	// Altered after it was signed.
+	good := make("EAid", 1, now, seed)
+	raw, _ := base64.StdEncoding.DecodeString(good.RpyB64)
+	good.RpyB64 = base64.StdEncoding.EncodeToString([]byte(strings.Replace(string(raw), `"s":"1"`, `"s":"0"`, 1)))
+	if _, err := VerifyKeyStateNotice(good, key, "EAid", now); err == nil {
+		t.Fatal("an altered notice was taken")
+	}
+}
+
+// The notice this service serves is the notice the checker reads: signed by the
+// witnessing key, for the log it holds, and the same for a log not held as for
+// one the asker may not read.
+func TestTheNoticeAWitnessServesIsTheOneTheCheckerReads(t *testing.T) {
+	s, _ := testService(t)
+	w := witnessesOf(1)
+	key := w.keys[0]
+	s.SignReceipt = func(statement string) (string, string, error) {
+		sig, err := login.SignString(statement, w.seeds[key])
+		return key, sig, err
+	}
+	l := buildWitnessedLog(t, witnessesOf(1), 1, nil)
+	ev := parsed(t, mustRawOf(l.records[0]))
+	if err := s.Store.StoreKelEvent(KelEvent{SignerAID: l.prefix, SequenceNum: 0, EventSAID: ev.SAID,
+		EventJSON: "{}", StoredAt: NowRFC3339()}); err != nil {
+		t.Fatal(err)
+	}
+	ans, err := s.KeyStateNotice(l.prefix, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := VerifyKeyStateNotice(ans, key, l.prefix, time.Now())
+	if err != nil || st.SN != 0 || st.SAID != ev.SAID {
+		t.Fatalf("the served notice was not read as served: %v %+v", err, st)
+	}
+	ans, _ = s.KeyStateNotice(l.prefix, false)
+	if st, err := VerifyKeyStateNotice(ans, key, l.prefix, time.Now()); err != nil || st.SN != -1 {
+		t.Fatalf("an asker who may not read was told what is held: %v %+v", err, st)
+	}
+	if _, err := s.WitnessLocationNotice("https://w.example/"); err == nil {
+		t.Fatal("a location was signed with no witnessing identity to say whose it is")
+	}
+	s.OurWitnessAID = func() (string, error) { return key, nil }
+	loc, err := s.WitnessLocationNotice("https://w.example/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := VerifyWitnessLocation(loc, key); err != nil || got.URL != "https://w.example" {
+		t.Fatalf("the served location was not read as served: %v %+v", err, got)
 	}
 }

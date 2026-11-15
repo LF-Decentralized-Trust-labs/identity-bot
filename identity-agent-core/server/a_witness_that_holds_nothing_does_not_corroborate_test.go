@@ -54,14 +54,16 @@ func TestAWitnessAnsweringWithAnEmptyArrayDoesNotCorroborate(t *testing.T) {
 	}
 }
 
-// A witness holding the events, same digests, corroborates and is counted held.
+// A witness holding the events, same digests, is counted held.
 func TestAWitnessHoldingTheEventsIsCountedHeld(t *testing.T) {
 	w := newStandInWitness(t)
 	claim := freshClaim(w)
 	w.held["EFresh"] = claim
 	got := agentWithNoIdentity(t).askTheWitnesses("EFresh", claim)
-	if !got.Corroborated() || got.Held != 1 || got.Empty != 0 {
-		t.Fatalf("a witness holding the claimed history did not corroborate: %+v", got)
+	// Held is the witness's side: a signed notice that this is its newest
+	// event. Whether the log was receipted is the other, and is not in a stand-in.
+	if got.Held != 1 || got.Empty != 0 || got.Contradicted {
+		t.Fatalf("a witness holding the claimed history was not counted held: %+v", got)
 	}
 }
 
@@ -116,13 +118,14 @@ func TestAPresentedLogWithoutBytesIsNotCorroborated(t *testing.T) {
 	}
 }
 
-// A witness's copy with no readable digest is not a copy that holds the event:
-// the fail-open holdsDigests closes.
+// A witness that cannot name the event it holds, only a copy with no digest,
+// cannot sign a notice that says it, so it is not asked successfully and holds
+// nothing.
 func TestAWitnessCopyWithNoDigestIsBehindNotHeld(t *testing.T) {
 	w := newStandInWitness(t)
 	w.held["EFresh"] = []map[string]interface{}{{"t": "icp", "i": "EFresh", "s": "0", "b": []interface{}{w.key}}}
 	got := agentWithNoIdentity(t).askTheWitnesses("EFresh", freshClaim(w))
-	if got.Corroborated() || got.Behind != 1 || got.Held != 0 || got.Contradicted {
+	if got.Corroborated() || got.Failed != 1 || got.Held != 0 || got.Contradicted {
 		t.Fatalf("a copy with no digest counted as held: %+v", got)
 	}
 }
