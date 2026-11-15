@@ -326,10 +326,9 @@ These seams are still open, and each is refused rather than half-working:
 
 - An App Grant signed on another device is kept by this Identity Agent only once an add-on
   registers the app grant kind; until then it is not taken up. No add-on registers it yet.
-- Re-issuing an app's grant while the owner's key is on another device withdraws the old App
-  Grant before the new one is signed, which leaves the app with none until it is; no route
-  re-issues an app's grant yet, and the one that does must keep the old grant until the new one
-  is taken up.
+- **Closed (2026-11-15).** Re-issuing an app's grant while the owner's key is on another device no
+  longer leaves the app with none: `PUT /api/hosted-apps/{asset}/capabilities` keeps the old grant
+  until the new one is taken up, and the core then withdraws it (see the Amendment at the end).
 - No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
   route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
   route that will. The owner changes an existing app's capabilities at `PUT /api/hosted-apps/{asset}/capabilities` (Amendment, 2026-11-15).
