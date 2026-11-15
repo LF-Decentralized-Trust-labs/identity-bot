@@ -792,6 +792,9 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 
 	now := NowRFC3339()
 	said := eventSAID(event)
+	if said == "" {
+		return nil, fmt.Errorf("rejected: the event states no digest, so it has no identifier to be receipted under")
+	}
 	// The published bytes are stored alongside the readable form. Storing only
 	// the readable form is what made every event a witness held unverifiable
 	// after the fact. Only the signatures that verified are kept.
@@ -1059,6 +1062,9 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	}
 	kind := ClassifyAID(signerAID, rootAID)
 	said := eventSAID(event)
+	if said == "" {
+		return fmt.Errorf("refusing to broadcast an event for %s that states no digest", signerAID)
+	}
 	// A key log that cannot be read leaves the list in force unknown. The event
 	// still goes to the witnesses this agent has, and what comes back is kept,
 	// but nothing is counted until the log can be read: a damaged rotation
@@ -1163,6 +1169,9 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			continue
 		}
 		said := eventSAID(ev)
+		if said == "" {
+			continue
+		}
 		f, _ := s.Store.GetFinalization(said)
 		todo = append(todo, pass{said: said, seq: sn, raw: raw, f: f})
 		if f != nil && f.State == FinalizeTimeout && f.ReceiptCount == 0 {
@@ -1232,6 +1241,9 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					return
 				}
 				said := eventSAID(ev)
+				if said == "" {
+					return
+				}
 				// A witness that took an event the log gives no list for (it
 				// designates nobody, so this one is a bootstrap witness, or the
 				// log cannot be read) still holds it, so its tip is confirmed
@@ -1468,6 +1480,9 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 	}
 	known := s.designatedTargets(designated)
 	said := eventSAID(event)
+	if said == "" {
+		return fmt.Errorf("refusing to broadcast an event for %s that states no digest", signerAID)
+	}
 	seq, _ := eventSeq(event)
 	s.begin(said, signerAID, seq, threshold, rawEvent)
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
