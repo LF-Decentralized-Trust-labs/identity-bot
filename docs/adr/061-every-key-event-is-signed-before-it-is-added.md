@@ -599,8 +599,14 @@ organisation's ceremony reads the organisation's log from the address the
 invitation named, verifies it (`drivers.VerifiedLogOf`), and has the witnesses
 that log names, found in its own registry, confirm it holds the whole history
 (`witness.Corroborate`); it signs a first rotation only at the place after that
-log's last event. A log that names no witnesses has nobody else to ask, and its
-verified copy places the event. The device keeps the event it signed at each
+log's last event. One witness holding the whole history is enough to place it,
+and one that holds more, a different event or a signed rival refuses it; asking
+for the log's full threshold would stop a phone signing whenever one witness is
+down, and several witnesses lying together is what duplicity detection is for.
+A log that never named witnesses has nobody else to ask, and its
+verified copy places the event; one that named witnesses and names none now is
+refused, since an organisation holding its own keys can write a branch that
+cuts them all. The device keeps the event it signed at each
 place and signs no other there, and a hand-over's second rotation is placed by
 the first one the device signed.
 

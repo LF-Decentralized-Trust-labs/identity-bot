@@ -126,38 +126,77 @@ func (s *CoreServer) handleSignACeremonyRotation(w http.ResponseWriter, r *http.
 	//   - anything else must follow the end of the organisation's log as this
 	//     device reads it from the organisation and checks it with the
 	//     witnesses the log names.
+	//
+	// The organisation's log is read without the lock held, so a slow or
+	// unanswering organisation holds up nothing else on this device; the place
+	// is decided again under the lock, against what is on disk then, before
+	// the decision is kept.
 	ceremonyInvitesMu.Lock()
-	defer ceremonyInvitesMu.Unlock()
-	kept := s.readCeremonyInvites()
-	k, onDisk := kept[body.InviteToken]
+	k, onDisk := s.readCeremonyInvites()[body.InviteToken]
+	ceremonyInvitesMu.Unlock()
 	if !onDisk {
 		http.Error(w, "this device could not keep a record of what it signs for this ownership change, so it will not sign: "+
 			"a signature it cannot remember is one it could be asked to contradict", http.StatusInternalServerError)
 		return
 	}
-	place := strconv.FormatUint(ev.SN, 10)
-	if signed, ok := k.Signed[place]; ok {
-		if signed != ev.SAID {
-			http.Error(w, fmt.Sprintf("this device already signed a different event at place %d of the organisation's key history; "+
-				"signing this one too would give the organisation two histories", ev.SN), http.StatusConflict)
-			return
-		}
-	} else if prev, ok := k.Signed[strconv.FormatUint(ev.SN-1, 10)]; !(ev.SN > 0 && ok && prev == ev.PriorSAID) {
+	logChecked := false
+	if ceremonyPlaceOf(k, ev) == placeNeedsTheLog {
 		if why, code := s.followsTheOrganisationsLog(in, ev); why != "" {
 			http.Error(w, why, code)
 			return
 		}
+		logChecked = true
+	}
+
+	ceremonyInvitesMu.Lock()
+	defer ceremonyInvitesMu.Unlock()
+	kept := s.readCeremonyInvites()
+	k, onDisk = kept[body.InviteToken]
+	switch p := ceremonyPlaceOf(k, ev); {
+	case !onDisk:
+		http.Error(w, "this ownership change is no longer kept on this device, so it will not sign", http.StatusNotFound)
+		return
+	case p == placeTaken:
+		http.Error(w, fmt.Sprintf("this device already signed a different event at place %d of the organisation's key history; "+
+			"signing this one too would give the organisation two histories", ev.SN), http.StatusConflict)
+		return
+	case p == placeNeedsTheLog && !logChecked:
+		http.Error(w, "what this device has signed for this change moved while it was checking; ask again", http.StatusConflict)
+		return
 	}
 	if k.Signed == nil {
 		k.Signed = map[string]string{}
 	}
-	k.Signed[place] = ev.SAID
+	k.Signed[strconv.FormatUint(ev.SN, 10)] = ev.SAID
 	kept[body.InviteToken] = k
 	if err := s.writeCeremonyInvites(kept); err != nil {
 		http.Error(w, "this device could not record what it is about to sign, so it did not sign it", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]string{"signature_b64": base64.StdEncoding.EncodeToString(ed25519.Sign(key, raw))})
+}
+
+// Where a rotation goes, as what this device already signed decides it.
+const (
+	placeSignedAlready = iota // this very event: sign it again
+	placeTaken                // another event was signed there: refuse
+	placeFollowsSigned        // follows the event signed at the place before
+	placeNeedsTheLog          // only the organisation's log can say
+)
+
+func ceremonyPlaceOf(k keptCeremonyInvite, ev *keri.Event) int {
+	if signed, ok := k.Signed[strconv.FormatUint(ev.SN, 10)]; ok {
+		if signed == ev.SAID {
+			return placeSignedAlready
+		}
+		return placeTaken
+	}
+	if ev.SN > 0 {
+		if prev, ok := k.Signed[strconv.FormatUint(ev.SN-1, 10)]; ok && prev == ev.PriorSAID {
+			return placeFollowsSigned
+		}
+	}
+	return placeNeedsTheLog
 }
 
 // followsTheOrganisationsLog reports why [ev] does not follow the end of the
@@ -192,13 +231,29 @@ func (s *CoreServer) followsTheOrganisationsLog(in redeemedInvite, ev *keri.Even
 		if c.Contradicted {
 			return "the organisation's witnesses do not hold the history it showed this device: " + c.Why, http.StatusConflict
 		}
+		// One witness holding the whole history is enough to place the event,
+		// and one honest witness that holds more, or a different event, or a
+		// signed rival, refuses it (Contradicted). Asking for the log's full
+		// threshold would leave a phone unable to sign whenever one witness was
+		// down, and what it adds (several witnesses lying together while every
+		// honest one is out of reach) is what duplicity detection is for.
 		if !c.Corroborated() {
 			return fmt.Sprintf("none of the organisation's witnesses could confirm its key history yet (%d named, %d answered, %d behind, %d could not be asked), "+
 				"so where this change goes could not be checked; try again shortly", c.Designated, c.Asked, c.Behind, c.Failed), http.StatusServiceUnavailable
 		}
 	} else {
-		// An identity that names no witnesses has nobody else to ask: its own
-		// verified history is all there is, as ADR-061 section 9 allows.
+		// An identity that never named witnesses has nobody else to ask: its own
+		// verified history is all there is, as ADR-061 section 9 allows. One
+		// whose history named witnesses and now names none is refused: an
+		// organisation holds its own keys, so it can write a branch that cuts
+		// every witness and show its owners that instead of the history its
+		// witnesses hold.
+		for sn := uint64(0); sn < tip.SN(); sn++ {
+			if st := verified.StateAt(sn); st != nil && len(st.Witnesses()) > 0 {
+				return "the organisation's key history names no witnesses now but did before, so nobody can confirm it is the history " +
+					"its witnesses hold, and this device will not sign a change to it", http.StatusConflict
+			}
+		}
 		log.Printf("[ceremony] %s names no witnesses; its own key history, checked here, places this change", in.siteAID)
 	}
 	if ev.SN != tip.SN()+1 || ev.PriorSAID != tip.Digest() {

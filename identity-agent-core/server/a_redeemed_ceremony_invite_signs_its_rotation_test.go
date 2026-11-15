@@ -206,6 +206,27 @@ func TestADeviceIsNotShownAShortenedHistory(t *testing.T) {
 	}
 }
 
+// An organisation holds its own keys, so it can write a branch of its history
+// that cuts every witness and show its owners that instead. A history that
+// named witnesses and names none now has nobody to confirm it, and nothing is
+// signed onto it.
+func TestADeviceSignsNothingOntoAHistoryThatCutItsWitnesses(t *testing.T) {
+	d := aCeremonyDeviceOf(t)
+	cut, sig := d.org.rotateCutting(t, d.witness.witnessKey)
+	ev, err := keri.ParseEvent(cut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.served = append(d.served, map[string]interface{}{
+		"raw_bytes_b64":  base64.StdEncoding.EncodeToString(cut),
+		"cesr_signature": sig,
+	})
+	raw, _ := ceremonyRotation(t, d.org.aid, 2, ev.SAID, d.pub(t, 0))
+	if w := d.ask("tok", 0, raw); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "names no witnesses now") {
+		t.Fatalf("a rotation onto a history that cut its witnesses was answered %d (%s), want 409", w.Code, w.Body)
+	}
+}
+
 // An invitation the organisation did not take into a ceremony is not one this
 // device signs rotations for.
 func TestAnInviteThatIsNotACeremonyIsNotSignedFor(t *testing.T) {
