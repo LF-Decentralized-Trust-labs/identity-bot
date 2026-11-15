@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,17 +82,48 @@ func (d *aCeremonyDevice) ask(token string, gen int, raw []byte) *httptest.Respo
 	return w
 }
 
-// ceremonyRotation is a rotation of [prefix] at place [sn] after [prior],
-// revealing [keys], and its digest.
-func ceremonyRotation(t *testing.T, prefix string, sn uint64, prior string, keys ...ed25519.PublicKey) ([]byte, string) {
+// commits is what this device derives to commit to at [gen]: the classical
+// digest of that generation's key and its post-quantum partner.
+func (d *aCeremonyDevice) commits(t *testing.T, gen int) ownerCommitment {
 	t.Helper()
-	var ks, ns []string
+	c, err := ownerCommitmentAt(d.root, d.relIdx, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// rotation is a rotation of [prefix] at place [sn] after [prior], revealing
+// [keys], and its digest. It commits to the keys' digests and, as an
+// organisation that kept this device's commitments would, to this device's
+// commitment for each of the two generations after its own.
+func (d *aCeremonyDevice) rotation(t *testing.T, prefix string, sn uint64, prior string, keys ...ed25519.PublicKey) ([]byte, string) {
+	t.Helper()
+	var next []string
+	for _, k := range keys {
+		dg, _ := keri.NextDigest(iacrypto.VerkeyQB64(k))
+		next = append(next, dg)
+	}
+	for g := 1; g <= 2; g++ {
+		c := d.commits(t, g)
+		for _, dg := range []string{c.Classical, c.PostQuantum} {
+			if !slices.Contains(next, dg) {
+				next = append(next, dg)
+			}
+		}
+	}
+	return ceremonyRotationCommitting(t, prefix, sn, prior, keys, next)
+}
+
+// ceremonyRotationCommitting is a rotation revealing [keys] and committing to
+// exactly [next].
+func ceremonyRotationCommitting(t *testing.T, prefix string, sn uint64, prior string, keys []ed25519.PublicKey, next []string) ([]byte, string) {
+	t.Helper()
+	var ks []string
 	for _, k := range keys {
 		ks = append(ks, iacrypto.VerkeyQB64(k))
-		d, _ := keri.NextDigest(iacrypto.VerkeyQB64(k))
-		ns = append(ns, d)
 	}
-	raw, err := keri.BuildRotation(keri.RotationInput{Prefix: prefix, Keys: ks, PriorSAID: prior, SN: int(sn), NextDigests: ns})
+	raw, err := keri.BuildRotation(keri.RotationInput{Prefix: prefix, Keys: ks, PriorSAID: prior, SN: int(sn), NextDigests: next})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,20 +151,20 @@ func TestADeviceSignsOnlyACeremonyRotationThatRevealsItsKey(t *testing.T) {
 	d := aCeremonyDeviceOf(t)
 	aid := d.org.aid
 
-	raw, said := ceremonyRotation(t, aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 7))
+	raw, said := d.rotation(t, aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 7))
 	if w := d.ask("tok", 0, raw); !signedBy(w, d.pub(t, 0), raw) {
 		t.Fatalf("the device did not sign the rotation with its key: %d %s", w.Code, w.Body)
 	}
 	// The key it committed to signs a rotation that reveals it, as a hand-over's
 	// second does, placed after the first one it signed.
-	raw2, _ := ceremonyRotation(t, aid, 2, said, d.pub(t, 1))
+	raw2, _ := d.rotation(t, aid, 2, said, d.pub(t, 1))
 	if w := d.ask("tok", 1, raw2); !signedBy(w, d.pub(t, 1), raw2) {
 		t.Fatalf("the committed key did not sign the second rotation: %d %s", w.Code, w.Body)
 	}
 
-	notMine, _ := ceremonyRotation(t, aid, 1, d.org.icpSAID, d.pub(t, 5))
-	other, _ := ceremonyRotation(t, "EOTHERAID", 1, "EOTHERAID", d.pub(t, 0))
-	beyond, _ := ceremonyRotation(t, aid, 3, said, d.pub(t, 2))
+	notMine, _ := d.rotation(t, aid, 1, d.org.icpSAID, d.pub(t, 5))
+	other, _ := d.rotation(t, "EOTHERAID", 1, "EOTHERAID", d.pub(t, 0))
+	beyond, _ := d.rotation(t, aid, 3, said, d.pub(t, 2))
 	for name, c := range map[string]struct {
 		w    *httptest.ResponseRecorder
 		want int
@@ -154,14 +186,14 @@ func TestADeviceSignsOnlyACeremonyRotationThatRevealsItsKey(t *testing.T) {
 // other there: two signed events at one place are two histories.
 func TestADeviceSignsOneEventAtEachPlaceOfTheOrganisationsLog(t *testing.T) {
 	d := aCeremonyDeviceOf(t)
-	raw, _ := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 7))
+	raw, _ := d.rotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 7))
 	if w := d.ask("tok", 0, raw); w.Code != http.StatusOK {
 		t.Fatalf("the first rotation was not signed: %d %s", w.Code, w.Body)
 	}
 	if w := d.ask("tok", 0, raw); !signedBy(w, d.pub(t, 0), raw) {
 		t.Fatalf("the same rotation, asked again, was not signed again: %d %s", w.Code, w.Body)
 	}
-	fork, _ := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 8))
+	fork, _ := d.rotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0), d.pub(t, 8))
 	if w := d.ask("tok", 0, fork); w.Code != http.StatusConflict {
 		t.Fatalf("a second, different rotation at the same place was answered %d (%s), want 409", w.Code, w.Body)
 	}
@@ -172,9 +204,9 @@ func TestADeviceSignsOneEventAtEachPlaceOfTheOrganisationsLog(t *testing.T) {
 // organisation says it does.
 func TestADeviceSignsOnlyARotationThatFollowsTheOrganisationsLog(t *testing.T) {
 	d := aCeremonyDeviceOf(t)
-	_, elsewhere := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 9))
-	afterUnheld, _ := ceremonyRotation(t, d.org.aid, 1, elsewhere, d.pub(t, 0))
-	pastTheEnd, _ := ceremonyRotation(t, d.org.aid, 2, d.org.icpSAID, d.pub(t, 0))
+	_, elsewhere := d.rotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 9))
+	afterUnheld, _ := d.rotation(t, d.org.aid, 1, elsewhere, d.pub(t, 0))
+	pastTheEnd, _ := d.rotation(t, d.org.aid, 2, d.org.icpSAID, d.pub(t, 0))
 	for name, raw := range map[string][]byte{
 		"after an event the history does not hold": afterUnheld,
 		"past the end of the history":              pastTheEnd,
@@ -200,7 +232,7 @@ func TestADeviceIsNotShownAShortenedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The organisation's address still serves only the inception.
-	raw, _ := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0))
+	raw, _ := d.rotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0))
 	if w := d.ask("tok", 0, raw); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "witnesses") {
 		t.Fatalf("a rotation on a shortened history was answered %d (%s), want a 409 from the witness", w.Code, w.Body)
 	}
@@ -221,7 +253,7 @@ func TestADeviceSignsNothingOntoAHistoryThatCutItsWitnesses(t *testing.T) {
 		"raw_bytes_b64":  base64.StdEncoding.EncodeToString(cut),
 		"cesr_signature": sig,
 	})
-	raw, _ := ceremonyRotation(t, d.org.aid, 2, ev.SAID, d.pub(t, 0))
+	raw, _ := d.rotation(t, d.org.aid, 2, ev.SAID, d.pub(t, 0))
 	if w := d.ask("tok", 0, raw); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "names no witnesses now") {
 		t.Fatalf("a rotation onto a history that cut its witnesses was answered %d (%s), want 409", w.Code, w.Body)
 	}
@@ -249,11 +281,11 @@ func TestAnInviteThatIsNotACeremonyIsNotSignedFor(t *testing.T) {
 // log and nothing could sign the next.
 func TestAnAgentThatRestartedStillSignsTheSecondRotation(t *testing.T) {
 	d := aCeremonyDeviceOf(t)
-	raw1, said := ceremonyRotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0))
+	raw1, said := d.rotation(t, d.org.aid, 1, d.org.icpSAID, d.pub(t, 0))
 	if w := d.ask("tok", 0, raw1); w.Code != http.StatusOK {
 		t.Fatalf("the first rotation was not signed: %d %s", w.Code, w.Body)
 	}
-	raw, _ := ceremonyRotation(t, d.org.aid, 2, said, d.pub(t, 1))
+	raw, _ := d.rotation(t, d.org.aid, 2, said, d.pub(t, 1))
 
 	d.s.redeemedInvites = redeemedInviteBook{} // the Identity Agent was restarted
 	if w := d.ask("tok", 1, raw); !signedBy(w, d.pub(t, 1), raw) {

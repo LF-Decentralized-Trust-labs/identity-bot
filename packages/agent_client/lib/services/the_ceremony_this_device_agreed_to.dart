@@ -144,6 +144,23 @@ class CeremonyTerms {
     return null;
   }
 
+  /// Why this change cannot be signed by [me], in words, or null when it commits
+  /// [me] the way a phone does: a classical digest AND a post-quantum one for the
+  /// key it rotates into, and in a hand-over for the key after that too
+  /// (ADR-061 section 6). The phone's own Identity Agent checks the digests
+  /// themselves against the keys it derived; this is what is said, before it is
+  /// asked, when an organisation's change leaves the second one out.
+  String? leavesOutThePostQuantumCommitmentOf(String me) {
+    for (final o in owners) {
+      if (o.aid != me) continue;
+      if (o.next.length < 2 || (handOver && o.after.length < 2)) {
+        return 'this change leaves out the protection against quantum '
+            'computers that this phone asked for, so it will not be signed';
+      }
+    }
+    return null;
+  }
+
   /// How many owners' devices have signed the rotation waiting.
   int get signedCount => owners.where((o) => o.signed).length;
 
@@ -363,6 +380,8 @@ class CeremonyDevice {
     }
     final shape = terms.unexpectedShape;
     if (shape != null) throw CeremonyNotSigned(shape);
+    final bare = terms.leavesOutThePostQuantumCommitmentOf(me);
+    if (bare != null) throw CeremonyNotSigned(bare);
     final agreed = await agreements.read(token);
     if (terms.stage == CeremonyStage.first) {
       // Offered again, it must be the change already agreed to: a first

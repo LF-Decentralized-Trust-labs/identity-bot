@@ -52,40 +52,51 @@ type aCeremonyWorld struct {
 // commitment beside its classical next key.
 func aCeremonyOfTwoDevices(t *testing.T, handOver, pq bool) *aCeremonyWorld {
 	t.Helper()
+	w := &aCeremonyWorld{a: signerSeeds(3, 10), c: signerSeeds(3, 20)}
+	return w.begin(t, handOver, func(w *aCeremonyWorld) []CeremonyInvitee {
+		invitee := func(name, aid, token string, k []aSigner, seedBase int) CeremonyInvitee {
+			inv := CeremonyInvitee{Name: name, TokenDigest: enrolsecret.Digest(token), PairwiseAID: aid,
+				PublicKey: k[0].key(), NextPublicKey: k[1].key()}
+			if handOver {
+				inv.AfterNextPublicKey = k[2].key()
+			}
+			if pq {
+				inv.NextPostQuantumDigest = digestOfSeed(t, signerSeeds(1, seedBase)[0].seed)
+				if handOver {
+					inv.AfterNextPostQuantumDigest = digestOfSeed(t, signerSeeds(1, seedBase+1)[0].seed)
+				}
+			}
+			return inv
+		}
+		return []CeremonyInvitee{invitee("C", deviceC, "tok-c", w.c, 40), invitee("A", deviceA, "tok-a", w.a, 30)}
+	})
+}
+
+// begin has the box found an identity on keys it derives and saves a ceremony
+// of the invitees [invited] makes, whose devices have the keys in w.a and w.c.
+func (w *aCeremonyWorld) begin(t *testing.T, handOver bool, invited func(*aCeremonyWorld) []CeremonyInvitee) *aCeremonyWorld {
+	t.Helper()
 	s := foundOnDerivedKeys(t, []string{iacrypto.NonTransferableAIDQB64(signerSeeds(1, 90)[0].pub())})
 	s.localOwnerSecret = testOwnerSecret
 	keys, err := s.ownRotationKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &aCeremonyWorld{s: s, a: signerSeeds(3, 10), c: signerSeeds(3, 20), r: chi.NewRouter()}
+	w.s, w.r = s, chi.NewRouter()
 	w.r.Get("/api/signer/invites/{token}/ceremony-event", s.handleCeremonyEvent)
 	w.r.Post("/api/signer/invites/{token}/ceremony-signature", s.handleCeremonySignature)
 	w.r.Get("/api/signer/invites/{token}/ceremony-terms", s.handleCeremonyTerms)
 
-	invitee := func(name, aid, token string, k []aSigner, seedBase int) CeremonyInvitee {
-		inv := CeremonyInvitee{Name: name, TokenDigest: enrolsecret.Digest(token), PairwiseAID: aid,
-			PublicKey: k[0].key(), NextPublicKey: k[1].key()}
-		if handOver {
-			inv.AfterNextPublicKey = k[2].key()
-		}
-		if pq {
-			inv.NextPostQuantumDigest = digestOfSeed(t, signerSeeds(1, seedBase)[0].seed)
-			if handOver {
-				inv.AfterNextPostQuantumDigest = digestOfSeed(t, signerSeeds(1, seedBase+1)[0].seed)
-			}
-		}
-		return inv
-	}
 	c := &OwnerCeremony{ID: "c1", Threshold: 2, Status: ceremonyCollecting, HandOver: handOver,
-		OwnPublicKey: keys.Current, OwnNextPublicKey: keys.Next,
-		Invited: []CeremonyInvitee{invitee("C", deviceC, "tok-c", w.c, 40), invitee("A", deviceA, "tok-a", w.a, 30)}}
+		OwnPublicKey: keys.Current, OwnNextPublicKey: keys.Next, Invited: invited(w)}
 	ceremonyMu.Lock()
 	if err := s.saveCeremony(c); err != nil {
 		t.Fatal(err)
 	}
 	ceremonyMu.Unlock()
-	s.completeCeremonyIfReady(c)
+	if len(c.Outstanding()) == 0 {
+		s.completeCeremonyIfReady(c)
+	}
 	return w
 }
 

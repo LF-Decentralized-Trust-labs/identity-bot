@@ -92,6 +92,22 @@ const (
 	MessagingBranch   = 7000002
 )
 
+// DerivePairwisePostQuantumSeed derives the seed of the post-quantum next key
+// that sits beside classical key [generation] of one relationship: path
+// m/44'/0'/0'/relationshipIndex'/(PostQuantumBranch+generation)'.
+//
+// It is inside the relationship's own branch, at an index no classical
+// generation reaches, so it is never the same 32 bytes as the classical key of
+// that relationship or the post-quantum key of the identity's own
+// PostQuantumBranch (one secret behind two keys would let obtaining either
+// give both, ADR-061 section 1). Fixed, so the phrase alone reproduces it.
+func DerivePairwisePostQuantumSeed(bip39Seed []byte, relationshipIndex, generation int) ([]byte, error) {
+	if generation < 0 || generation > 1<<20 {
+		return nil, fmt.Errorf("key generation %d is out of range", generation)
+	}
+	return DerivePairwiseSeed(bip39Seed, relationshipIndex, PostQuantumBranch+generation)
+}
+
 // DerivePairwiseSeed derives an Ed25519 seed for a contact index using BIP32/SLIP-0010 HD from the root keystore seed.
 // Path: m / 44' / 0' / 0' / contactIndex' / keyIndex'
 // This is the architected derivation (replaces previous HKDF). Deterministic, matches across engines for restore.

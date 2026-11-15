@@ -110,6 +110,24 @@ func (s *CoreServer) handleSignACeremonyRotation(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// WHAT THE ROTATION COMMITS THIS DEVICE TO IS NOT TAKEN ON THE
+	// ORGANISATION'S WORD EITHER. The key this device reveals now commits, in
+	// the same event, to the key of the next generation and to its post-quantum
+	// partner. An organisation that left either out, or put a digest of its own
+	// in their place, would get this owner's signature on a rotation that takes
+	// the owner's next key or quietly drops the post-quantum commitment.
+	// Checked against what this device derives from its own phrase, here,
+	// because the phrase is only here.
+	want, cerr := ownerCommitmentAt(root, rel.RelationshipIndex, body.Generation+1)
+	if cerr != nil {
+		http.Error(w, "what this rotation should commit this device to could not be worked out, so it was not signed", http.StatusInternalServerError)
+		return
+	}
+	if why := aRotationCommitsTo(ev, want); why != "" {
+		http.Error(w, why, http.StatusConflict)
+		return
+	}
+
 	// WHERE THE ROTATION GOES IN THE ORGANISATION'S LOG IS NOT TAKEN ON ITS
 	// WORD (ADR-061 section 9). A signer outside the core takes the place it
 	// signs at from the key state it has verified itself: an organisation's

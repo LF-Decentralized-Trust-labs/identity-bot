@@ -35,15 +35,28 @@ void main() {
   const prior = 'EPrior00000000000000000000000000000000000';
   final alice = id('alice'), bob = id('bob');
 
+  // The core's derivation runs as a process, so each one is made once.
+  final pqDigests = <String, String>{};
+  Future<String> pqDigest(String w) async => pqDigests[w] ??=
+      (await km.postQuantumNext(seedOf(w))).digest;
+
   Future<Map<String, Object?>> owner(String who, String name,
           {bool signed = false}) async =>
       {
         'name': name,
         'aid': id(who),
         'key': keyOf('${who}0'),
-        'next': [await km.nextKeyDigest(keyOf('${who}1'))],
+        // As a phone commits: the classical digest, then its post-quantum
+        // partner, which the core's own code derives from a seed.
+        'next': [
+          await km.nextKeyDigest(keyOf('${who}1')),
+          await pqDigest('${who}P1')
+        ],
         'next_key': keyOf('${who}1'),
-        'after': [await km.nextKeyDigest(keyOf('${who}2'))],
+        'after': [
+          await km.nextKeyDigest(keyOf('${who}2')),
+          await pqDigest('${who}P2')
+        ],
         'signed': signed,
       };
 
@@ -280,5 +293,42 @@ void main() {
             .sign('http://org', 'tok', CeremonyTerms.fromJson(t1b), me: alice),
         throwsA(isA<CeremonyNotSigned>()));
     expect(seen.where((r) => r.method == 'POST'), isEmpty);
+  });
+
+  test('a change that leaves out this phone\'s post-quantum commitment is not signed', () async {
+    for (final stage in ['rot1', 'rot2']) {
+      for (final field in ['next', 'after']) {
+        // Only the digest that matters at the stage is checked against the
+        // event, but the person agreed to both: a change that drops either is
+        // not the change a phone asked for.
+        final (t, raw) = await offer(stage);
+        final owners = (t['owners'] as List).cast<Map<String, Object?>>();
+        owners.first[field] = [(owners.first[field] as List).first];
+        final (client, _) = org(t, raw);
+        final signed = <int>[];
+        final device = deviceOver(client, InMemoryCeremonyAgreements(), signed: signed);
+        final reading = await device.read('http://org', 'tok');
+        await expectLater(
+            device.sign('http://org', 'tok', reading!.terms!, me: alice),
+            throwsA(isA<CeremonyNotSigned>().having(
+                (e) => e.reason, 'reason', contains('quantum'))),
+            reason: '$stage with $field dropped');
+        expect(signed, isEmpty, reason: 'the key was asked to sign');
+      }
+    }
+  });
+
+  test('another owner leaving out its commitment is not this phone\'s to refuse', () async {
+    // What this phone commits to is its own; a co-owner whose device made no
+    // post-quantum commitment is held to its classical key (ADR-061 section 6).
+    final (t, raw) = await offer('rot1');
+    final owners = (t['owners'] as List).cast<Map<String, Object?>>();
+    owners.last['next'] = [(owners.last['next'] as List).first];
+    final (client, _) = org(t, raw);
+    final signed = <int>[];
+    final device = deviceOver(client, InMemoryCeremonyAgreements(), signed: signed);
+    final terms = (await device.read('http://org', 'tok'))!.terms!;
+    expect(terms.leavesOutThePostQuantumCommitmentOf(alice), isNull);
+    expect(terms.leavesOutThePostQuantumCommitmentOf(bob), isNotNull);
   });
 }

@@ -78,6 +78,7 @@ every path below, for one fixed phrase, with the keys it must give.
 |---|---|---|
 | Classical signing key *j* | `m/44'/0'/0'/0'/j'` | committed by the establishment event at position *j* − 1, revealed by the one at position *j* (key 0 founds the identity) |
 | Post-quantum next key, generation *j* | `m/44'/0'/0'/7000001'/j'` | committed by the establishment event at position *j*; revealed, if ever, by the one at position *j* + 1 |
+| Post-quantum next key beside classical key *j* of a relationship (an owner's own device in an ownership change, section 6) | `m/44'/0'/0'/r'/(7000001+j)'`, *r* the relationship's index | committed by the ownership change that rotates the owner into classical key *j*; revealed, if ever, by the one after |
 | Messaging keyset, generation *g* | `m/44'/0'/0'/7000002'/g'` | anchored at founding (*g* = 0); a later generation when messaging keys are replaced |
 
 An establishment event's **position** is how many establishment events come
@@ -630,6 +631,15 @@ owner's post-quantum reserve meet the whole identity's threshold. So in the
 multi-owner ceremony each owner supplies their own next classical and
 post-quantum digests, and `kt` and `nt` stay the ceremony's own thresholds,
 written so that an owner's two commitments count once, for that owner.
+
+*What an owner's device sends is derived, not chosen.* On accepting, the device
+sends the digests of its classical key *j* and its post-quantum key *j* (table in
+section 1) for *j* = 1, and for *j* = 2 in a hand-over. It will sign a rotation
+that reveals its key only if that rotation's `n` carries the digests it would
+derive itself for the generation after, both of them, so a core cannot drop an
+owner's post-quantum commitment or swap in one of its own. The post-quantum
+key of an owner is a different secret from its classical key and from the
+identity's own post-quantum key.
 
 *The layout is fixed, so every signer can check it.* The owners are ordered by
 their identifiers, compared as ASCII strings, ascending. Owner *i* (from 0)

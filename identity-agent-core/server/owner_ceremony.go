@@ -295,6 +295,9 @@ func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicK
 			return nil, false, fmt.Errorf("this ceremony hands the identity over, so the key you will " +
 				"commit to after this rotation is needed too, and was not sent")
 		}
+		if why := checkTheDigestsSent(c.HandOver, nextPublicKey, more); why != "" {
+			return nil, false, fmt.Errorf("%s", why)
+		}
 		c.Invited[i].NextPostQuantumDigest = more.NextPostQuantumDigest
 		c.Invited[i].AfterNextPublicKey = more.AfterNextPublicKey
 		c.Invited[i].AfterNextPostQuantumDigest = more.AfterNextPostQuantumDigest

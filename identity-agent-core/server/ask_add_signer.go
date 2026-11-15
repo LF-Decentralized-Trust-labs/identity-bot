@@ -166,6 +166,21 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 			afterNextPub = iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey))
 		}
 	}
+	// The post-quantum digest that goes beside each classical one (ADR-061
+	// section 6), so an ownership change commits this owner to a key a quantum
+	// computer cannot take from its digest. NOT optional: an owner whose
+	// commitment is classical only would be the weak share of every weighted
+	// next-keys threshold, and the phone refuses to sign a rotation that leaves
+	// its own out (ownerCommitmentAt, aRotationCommitsTo). Sent always and used
+	// only by an ownership ceremony, like the key after next.
+	commitNext, commitAfterNext, cerr := s.commitmentsOfThisDevice(rel)
+	if cerr != nil {
+		return nil, fmt.Errorf("derive the post-quantum commitments this owner makes: %w", cerr)
+	}
+	afterNextPQ := ""
+	if afterNextPub != "" {
+		afterNextPQ = commitAfterNext.PostQuantum
+	}
 
 	// What this organisation will seal its backups and its disk to.
 	//
@@ -210,15 +225,19 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	}
 
 	body, _ := json.Marshal(disclosureBody(fields, profile, map[string]string{
-		"pairwise_aid":               rel.PairwiseAID,
-		"machine_owner_aid":          machineOwnerAID,
-		"oobi":                       rel.RelayOOBI,
-		"vouch_sig":                  vouchSig,
-		"vouch_payload":              string(vouchPayload),
-		"public_key":                 iacrypto.VerkeyQB64(pub),
-		"next_public_key":            iacrypto.VerkeyQB64(nextPub),
-		"after_next_public_key":      afterNextPub,
-		"backup_seal_public_key_b64": sealKey,
+		"pairwise_aid":          rel.PairwiseAID,
+		"machine_owner_aid":     machineOwnerAID,
+		"oobi":                  rel.RelayOOBI,
+		"vouch_sig":             vouchSig,
+		"vouch_payload":         string(vouchPayload),
+		"public_key":            iacrypto.VerkeyQB64(pub),
+		"next_public_key":       iacrypto.VerkeyQB64(nextPub),
+		"after_next_public_key": afterNextPub,
+		// Digests of keys that stay on this device: public, and useless to
+		// anyone who does not hold the phrase.
+		"next_post_quantum_digest":       commitNext.PostQuantum,
+		"after_next_post_quantum_digest": afterNextPQ,
+		"backup_seal_public_key_b64":     sealKey,
 	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/signer/invites/" + p.InviteToken + "/redeem"
 	resp, err := siteClient(15*time.Second, redeemURL).Post(redeemURL, "application/json", strings.NewReader(string(body)))
