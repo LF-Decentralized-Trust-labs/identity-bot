@@ -313,6 +313,29 @@ private-use range or inside an implementation.
   `org_aid` match the owner and organization being shown. A vouch with no `name`,
   or whose signer has since rotated, names nobody.
 
+### `t = 6` · `sign_statement`
+- **Summary:** an app asks a person to sign a statement with their own Identity
+  Agent's root key, after reading exactly what it says, so the app can prove the
+  person said it. (Code 5 stays reserved as `issue`; see ADR-021.)
+- **Who mints:** a relying party (a page's organisation Identity Agent, with the
+  app's website asset).
+- **Request schema:** `site_aid`, `site_oobi`, `signer_oobi`, `audience`, `nonce`,
+  `dt`, `expiry`, `statement`, `title?`, `session_token`, `sig`. The Ask is signed
+  by the site (`sig` over the canonical body, checked against the key log at
+  `signer_oobi`), and the signer must be the site it names.
+- **Preview:** "Sign a statement", the exact statement, and the page asking. Never
+  filed under data the person shares.
+- **Outcome:** the person's Identity Agent signs the envelope of
+  [statement-signature.md](statement-signature.md) with the root key in force and
+  posts `{signature, signer_aid, signer_oobi, kel_sn, nonce}` to the asker's
+  `/api/statement/callback`. The signature is Ed25519, written as CESR `AA`;
+  `kel_sn` is the sequence number of the latest establishment event.
+- **Verified:** a verifier rebuilds the envelope (the asker's identifier and the
+  statement) and checks the signature against the key the signer's key history
+  holds at `kel_sn`, which must be at or after the latest inception or rotation.
+- **Rules and vectors:** [statement-signature.md](statement-signature.md),
+  `identity-agent-core/statements/testdata/vectors.json`, and ADR-080.
+
 ---
 
 ## 11. What is open vs. proprietary (for implementers)

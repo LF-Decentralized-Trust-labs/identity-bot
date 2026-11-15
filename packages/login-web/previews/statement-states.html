@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Every state of the wait a person sees while they sign a statement on their own device (ADR-080), drawn by
+     the same component the built page uses. Build first: `npm run build:app`, then open this file. -->
+<meta charset="utf-8">
+<title>Signing a statement: every state</title>
+<style>body{font-family:system-ui,sans-serif;background:#e5e7eb;margin:0;padding:16px}section{position:relative;height:620px;margin:0 0 16px;transform:translateZ(0);overflow:hidden;border-radius:12px;background:#9ca3af}h1{font-size:16px}h3{margin:0;padding:6px 10px;font-size:12px;background:#111827;color:#fff;position:relative;z-index:2}</style>
+<h1>Signing a statement: every state</h1>
+<div id="states"></div>
+<script src="../bundle/identity-agent-app.js"></script>
+<script>
+  const pointer = "https://org.example/i/0bbaa3173ae9968b9137cff02cc16b34";
+  const statement = "grape-decision-approval/1\ndecision=7\ntitle-hash=EXAMPLE\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve";
+  const views = [
+    { state: "pointer", pointer, statement }, { state: "waiting", pointer, statement }, { state: "scanned", pointer, statement },
+    { state: "signed" }, { state: "declined" }, { state: "expired" },
+    { state: "error", reason: "This device does not hold your root key, so it cannot sign this. Open the request on the device that does." },
+  ];
+  for (const v of views) {
+    const s = document.createElement("section"); s.innerHTML = "<h3>" + v.state + "</h3><div></div>";
+    document.getElementById("states").appendChild(s);
+    IdentityAgentApp.previewStatementState(s.lastChild, v);
+  }
+  // each modal is position:fixed, so contain it in its section
+  document.querySelectorAll("section > div > div").forEach((d) => { d.style.position = "absolute"; });
+</script>

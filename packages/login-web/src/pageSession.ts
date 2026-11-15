@@ -27,6 +27,7 @@ export interface PageSessionStart {
 export async function startPageSession(opts: {
   /** `{agent}/api/login/session/{asset_id}` */
   sessionEndpoint: string;
+  /** `{ action: 6, statement, title? }` asks a person to sign a statement (ADR-080) instead of signing in. */
   body?: Record<string, unknown>;
   fetchFn?: typeof fetch;
 }): Promise<PageSessionStart> {
@@ -72,6 +73,12 @@ export interface PageSessionRead {
   reason?: string;
   /** Why the last answer was refused while the sign-in is still open, so the person can fix it and try again. */
   lastRefusal?: string;
+  /** For a statement asked of a person (`action: 6`, ADR-080), on `verified`, to the holder of the secret,
+   *  once: what the person's Identity Agent signed. `kelSn` is the KERI sequence number of the latest
+   *  establishment event of the signer's key log. */
+  signature?: string;
+  signerAid?: string;
+  kelSn?: number;
   /** Verified, but this caller was not given the identity: it has lost its secret, or already read it. */
   identityWithheld?: boolean;
 }
@@ -100,5 +107,8 @@ export async function readPageSession(opts: {
     reason: d.reason as string | undefined,
     lastRefusal: d.last_refusal as string | undefined,
     identityWithheld: d.identity_withheld === true ? true : undefined,
+    signature: d.signature as string | undefined,
+    signerAid: d.signer_aid as string | undefined,
+    kelSn: typeof d.kel_sn === "number" ? d.kel_sn : undefined,
   };
 }

@@ -62,7 +62,11 @@ import (
 )
 
 type CoreServer struct {
-	DataStore store.Store
+	// statementAsks are the statements this Identity Agent has asked a person to sign, as an
+	// asker, until they are answered or expire (a_person_signs_a_statement_for_an_app.go).
+	statementMu   sync.Mutex
+	statementAsks map[string]*statementAsk
+	DataStore     store.Store
 	// pairwiseReg is what this core publishes for its pairwise identifiers
 	// (pairwise_registry.go).
 	pairwiseMu     sync.Mutex

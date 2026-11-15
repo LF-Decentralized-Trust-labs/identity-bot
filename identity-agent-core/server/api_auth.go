@@ -118,6 +118,7 @@ var publicRoutes = map[string]string{
 	"POST /api/login/app-key/end":                   "the person's signed answer ends their installed-app grant; only the person it is for can",
 	"POST /api/login/session/{asset_id}":            "sign-in widget: a browser starts a session",
 	"GET /api/login/session/{asset_id}/{token}":     "sign-in widget: the browser polls its own session",
+	"POST /api/statement/callback":                  "the person's Identity Agent posts its signature of a statement asked of them (checked here against their key log)",
 	"OPTIONS /api/login/session/{asset_id}":         "CORS preflight for the sign-in widget",
 	"OPTIONS /api/login/session/{asset_id}/{token}": "CORS preflight for the sign-in widget",
 
