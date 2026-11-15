@@ -427,3 +427,15 @@ func TestAnAddOnReadsAStatementAnswerOnlyAsTheAssetItWasStartedFor(t *testing.T)
 		t.Fatal("a name with a line break was taken")
 	}
 }
+
+func TestTheScreenSaysWhetherThePersonHasDealtWithTheAskerBefore(t *testing.T) {
+	if !strings.Contains(askerStanding(false), "never dealt") || !strings.Contains(askerStanding(true), "dealt with this asker before") {
+		t.Fatal(askerStanding(false), askerStanding(true))
+	}
+	w := aStatementWorldWith(t, true)
+	s := w.start(t, aPagesOrigin, "my-note/1\nI agree.", "")
+	_, pv, _ := w.decode(t, s.Pointer)
+	if !strings.Contains(pv.Warning, "You have dealt with this asker before.") {
+		t.Fatalf("a recorded contact was not said to be known: %q", pv.Warning)
+	}
+}

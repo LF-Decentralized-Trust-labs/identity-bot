@@ -40,7 +40,7 @@ Why it is safe enough, in order of weight:
 1. **The person reads exactly what is signed.** The screen shows the statement verbatim and, for a registered form,
    a reading built only from the checked statement and a checked title.
 2. **Consent every time.** No automatic tier. The approval is bound to the exact bytes of the Ask by the consent digest.
-3. **The asker is named by identifier and page**, verified from its key log: the Ask must be signed by the site it names.
+3. **The asker is named by its identifier, which is verified** from its key log (the Ask must be signed by the site it names) and which the signed bytes name. The page's name beside it is the asker's own word, and the screen says so, and says whether this person has dealt with that identifier before (a sign-in to an app makes the app a contact).
 4. **The signed bytes name the asker**, so the signature is useless to another verifier.
 5. **A header no key event can begin with**, so it is never read as a key event or a credential.
 6. **Limits on size and characters**, so what is shown is what is signed.

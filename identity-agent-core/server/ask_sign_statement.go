@@ -100,6 +100,13 @@ func (signStatementAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, 
 		}
 		return GenericPreview{}, errors.New("this device cannot use your root key right now, so it cannot sign this")
 	}
+	// The page's name is the asker's own word; what is verified is its identifier, which is what the signed
+	// bytes name. Whether this person has dealt with that identifier before is the one thing their own
+	// agent knows about it, so it is said (a sign-in to an app makes the app a contact).
+	known := false
+	if c, err := s.DataStore.GetContact(p.SiteAID); err == nil && c != nil {
+		known = true
+	}
 	rows := make([]PreviewDetail, 0, len(shown.Rows))
 	for _, r := range shown.Rows {
 		rows = append(rows, PreviewDetail{Label: r.Label, Value: r.Value})
@@ -113,8 +120,17 @@ func (signStatementAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, 
 			Heading: shown.Heading, Form: shown.Form, Rows: rows, Verbatim: shown.Verbatim,
 			SignerNote: "Only your signature makes " + origin + " count this as yours.",
 		},
-		Warning: "Your signature is made with your root key and cannot be taken back. Approve only if you mean it.",
+		Warning: askerStanding(known) + " Your signature is made with your root key and cannot be taken back. Approve only if you mean it.",
 	}, nil
+}
+
+// askerStanding says what this person's own agent knows of whoever asks, in plain words. The name a
+// page gives is its own, and the signature names the asker's identifier, not the name.
+func askerStanding(known bool) string {
+	if known {
+		return "You have dealt with this asker before."
+	}
+	return "You have never dealt with this asker: the name it gives is its own word."
 }
 
 func (signStatementAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[string]interface{}, error) {
