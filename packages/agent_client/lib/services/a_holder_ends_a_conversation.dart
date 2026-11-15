@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 
+import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
 import '../crypto/person_statement.dart';
+import 'the_key_in_force.dart';
 
 /// What the Identity Agent answered to a close, reopen or limit.
 class ConversationControlled {
@@ -109,4 +111,16 @@ Uint8List _publicKey(Uint8List seed) {
 String _id() {
   final b = PersonStatement.newSalt();
   return base64Url.encode(b).replaceAll('=', '');
+}
+
+/// The identity this device holds and the seed of the key it has in force now,
+/// from the phrase's [rootSeed]: what [holderControlsAConversation] signs with.
+/// [plain] must not be an owner-signing client (the key in force is read through
+/// the key log, and that client asks this which key to sign with).
+Future<({String aid, Uint8List signingSeed})> theHoldersKeyInForce(
+    http.Client plain, String baseUrl, Uint8List rootSeed) async {
+  final keys = TheKeyInForce(plain, baseUrl);
+  final aid = await keys.ownIdentifier();
+  final at = await keys.index(rootSeed);
+  return (aid: aid, signingSeed: KeyManager.signingSeed(rootSeed, index: at));
 }

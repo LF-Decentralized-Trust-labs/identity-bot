@@ -869,8 +869,12 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 	if app, ok := TheAppThatAsked(r); ok {
 		return s.thePersonAnAppAsksFor(r, app)
 	}
-	if holder, ok := s.theHolderOfASelfOwnedAgent(); ok && s.theOwnerAsks(r) {
-		return s.theHolderAsking(r, holder)
+	// Only on the route a conversation is closed, reopened or limited on, so every
+	// other request (a controller's, most of all) is read as it always was.
+	if _, _, control := theControlAPersonSigns(r); control {
+		if holder, ok := s.theHolderOfASelfOwnedAgent(); ok && s.theOwnerAsks(r) {
+			return s.theHolderAsking(r, holder)
+		}
 	}
 	grant, ok := TheControllerThatAsked(r)
 	if !ok {
