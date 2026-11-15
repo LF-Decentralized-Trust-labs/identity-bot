@@ -9,7 +9,7 @@
 
 ## Context
 
-An app (for example a task console) sometimes needs proof that a particular person said a particular thing: that
+A utility app (for example a page where a team reviews the decisions made for it) sometimes needs proof that a particular person said a particular thing: that
 they approve a decision, or disagree with one. A signed-in browser cannot give it: its session says who signed in,
 never what that person has now read and agreed to. The proof has to be the person's own Identity Agent's signature,
 made with the key that is theirs, after they read the exact words on their own device.
@@ -59,4 +59,4 @@ after their Identity Agent showed them the statement and they chose to.
 - Any signed-in session of an app may start one; whether it should be only the owner's is the app's to decide (a follow-up).
 - A decline is advisory: it is told to the page so it can say so, and only a signature settles the request.
 - A person with their root key on a phone, and an Ask opened on a computer that does not hold it, must open it on the phone.
-  The phone signs too (the core's handler is in every build, not an add-on), by the supervisor's ruling of 2026-11-15 under the rule that a capability lands on every platform it applies to; Rob's question stays open. A queue the phone fulfils later (`signing_requests`) is separate work.
+  The phone signs too: the handler is in the core, so every build of the Identity Agent has it, on a phone as on a computer. A queue the phone fulfils later (`signing_requests`) is separate work.

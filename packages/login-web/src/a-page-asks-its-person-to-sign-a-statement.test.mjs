@@ -45,7 +45,7 @@ const open = (fn, presenter, extra = {}) => {
   return s;
 };
 const TRIPLE = { signature: "AA" + "x".repeat(86), signer_aid: "EOwner", kel_sn: 5 };
-const statement = "grape-decision-approval/1\ndecision=7";
+const statement = "decision-approval/1\ndecision=7";
 
 // the whole way: pointer, waiting, scanned, signed; resolves with exactly the three fields
 {
@@ -134,6 +134,10 @@ for (const bad of [{ ...TRIPLE, signature: undefined }, { ...TRIPLE, signer_aid:
   const sc = screen();
   await assert.rejects(open(fn, sc).signStatement(statement), (e) => e instanceof StatementNotSigned && e.reason === "error" && /not whole/.test(e.message), JSON.stringify(bad));
   assert.equal(sc.views.at(-1).state, "error");
+  // the request has ended, so the screen's Close closes it
+  assert.equal(sc.closed, 0);
+  sc.press("cancel");
+  assert.equal(sc.closed, 1, "Close on an ended request's screen closes it");
 }
 
 // the app will not start it: the reason is a sentence, not a status code
@@ -142,6 +146,8 @@ for (const [status, json, want] of [[403, {}, /not been given the right/], [400,
   const sc = screen();
   await assert.rejects(open(fn, sc).signStatement(statement), (e) => e instanceof StatementNotSigned && e.reason === "refused" && want.test(e.message) && !/\b(403|400|503)\b/.test(e.message));
   assert.equal(sc.views.at(-1).state, "error");
+  sc.press("cancel");
+  assert.equal(sc.closed, 1, "Close on a refusal's screen closes it");
 }
 
 // an ended session closes the screen and says so, as every call does

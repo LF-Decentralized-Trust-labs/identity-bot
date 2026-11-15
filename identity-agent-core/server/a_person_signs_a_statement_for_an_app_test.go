@@ -121,7 +121,7 @@ func (w *aStatementWorld) execute(t *testing.T, pointer, digest string, approved
 	return rec.Code, rec.Body.String()
 }
 
-const approvalForAPage = "grape-decision-approval/1\ndecision=7\ntitle-hash=ETITLEHASH\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve"
+const approvalForAPage = "decision-approval/1\ndecision=7\ntitle-hash=ETITLEHASH\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve"
 
 func aRealApproval(t *testing.T, title string) string {
 	t.Helper()

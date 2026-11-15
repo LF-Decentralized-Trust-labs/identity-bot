@@ -1068,8 +1068,9 @@ async function askStatement(
   const say = (view: StatementView, actions = { cancel() {}, again() {} }) => env.presenter?.show(view, actions);
   let action: "cancel" | "again" | null = null;
   const actions = { cancel: () => void (action = "cancel"), again: () => void (action = "again") };
+  // The request has ended: the screen says why, and its Close closes it, since nothing is waiting on it now.
   const fail = (reason: StatementNotSigned["reason"], message: string, view: StatementView): never => {
-    say(view, actions);
+    say(view, { cancel: () => env.presenter?.close(), again() {} });
     throw new StatementNotSigned(reason, message);
   };
   const start = async (): Promise<{ id: string; pointer: string }> => {

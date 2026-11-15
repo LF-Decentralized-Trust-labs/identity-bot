@@ -13,11 +13,11 @@ void main() {
       'counterparty_name': 'https://console.example',
       'statement': {
         'heading': 'Your approval of a decision',
-        'form': 'grape-decision-approval/1',
+        'form': 'decision-approval/1',
         'rows': [
           {'label': 'Decision 7', 'value': '"Use the queue"'}
         ],
-        'verbatim': 'grape-decision-approval/1\ndecision=7',
+        'verbatim': 'decision-approval/1\ndecision=7',
         'signer_note': 'Only your signature makes https://console.example count this as yours.',
       },
       'ask_digest': 'EDigest',
@@ -26,7 +26,7 @@ void main() {
     expect(r.statement, isNotNull);
     expect(r.statement!.heading, 'Your approval of a decision');
     expect(r.statement!.rows.single.label, 'Decision 7');
-    expect(r.statement!.verbatim, 'grape-decision-approval/1\ndecision=7');
+    expect(r.statement!.verbatim, 'decision-approval/1\ndecision=7');
     expect(r.statement!.signerNote, contains('Only your signature'));
   });
 

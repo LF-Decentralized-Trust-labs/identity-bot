@@ -11,11 +11,11 @@
     "impact": "small",
     "undo_minutes": 5
    },
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
    "title_hash": "EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo",
    "envelope_for_asker": {
-    "asker": "EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z",
-    "bytes": "statement-signature/1\nasker: EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z\n\ngrape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve"
+    "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve"
    }
   },
   {
@@ -26,11 +26,11 @@
     "impact": "architectural",
     "undo_minutes": 240
    },
-   "statement": "grape-decision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=po-1\nimpact=architectural\nundo-minutes=240\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=po-1\nimpact=architectural\nundo-minutes=240\nverdict=approve",
    "title_hash": "EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho",
    "envelope_for_asker": {
-    "asker": "EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z",
-    "bytes": "statement-signature/1\nasker: EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z\n\ngrape-decision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=po-1\nimpact=architectural\nundo-minutes=240\nverdict=approve"
+    "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=po-1\nimpact=architectural\nundo-minutes=240\nverdict=approve"
    }
   },
   {
@@ -41,17 +41,17 @@
     "impact": "moderate",
     "undo_minutes": 0
    },
-   "statement": "grape-decision-approval/1\ndecision=9\ntitle-hash=EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc\ndecided-by=agent-b\nimpact=moderate\nundo-minutes=0\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=9\ntitle-hash=EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc\ndecided-by=agent-b\nimpact=moderate\nundo-minutes=0\nverdict=approve",
    "title_hash": "EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc",
    "envelope_for_asker": {
-    "asker": "EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z",
-    "bytes": "statement-signature/1\nasker: EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z\n\ngrape-decision-approval/1\ndecision=9\ntitle-hash=EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc\ndecided-by=agent-b\nimpact=moderate\nundo-minutes=0\nverdict=approve"
+    "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=9\ntitle-hash=EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc\ndecided-by=agent-b\nimpact=moderate\nundo-minutes=0\nverdict=approve"
    }
   }
  ],
  "disagreements": [
   {
-   "statement": "grape-disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,po-1\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
+   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,po-1\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
    "subject": {
     "kind": "decision",
     "ref": "7",
@@ -67,13 +67,13 @@
  "generic_ok": [
   {
    "name": "decision approval",
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
-   "header": "grape-decision-approval/1"
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "header": "decision-approval/1"
   },
   {
    "name": "disagreement",
-   "statement": "grape-disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,po-1\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
-   "header": "grape-disagreement/1"
+   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,po-1\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
+   "header": "disagreement/1"
   },
   {
    "name": "plain text of two lines",
@@ -99,7 +99,7 @@
   },
   {
    "name": "header with capitals",
-   "statement": "Grape-Note/1\nx",
+   "statement": "My-Note/1\nx",
    "refused_because": "first line is not a name and version"
   },
   {
@@ -189,37 +189,37 @@
   },
   {
    "name": "approval with an extra line",
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve\nverdict=approve",
    "refused_because": "wrong number of lines"
   },
   {
    "name": "approval with the lines swapped",
-   "statement": "grape-decision-approval/1\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecision=7\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecision=7\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
    "refused_because": "line 2 is not decision="
   },
   {
    "name": "approval with a trailing space",
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small \nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small \nundo-minutes=5\nverdict=approve",
    "refused_because": "impact is small, moderate or architectural"
   },
   {
    "name": "approval with a verdict that is not approve",
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=reject",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=reject",
    "refused_because": "not verdict=approve"
   },
   {
    "name": "approval with an impact it is not",
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=tiny\nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=tiny\nundo-minutes=5\nverdict=approve",
    "refused_because": "impact is small, moderate or architectural"
   },
   {
    "name": "approval with a leading zero id",
-   "statement": "grape-decision-approval/1\ndecision=07\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=07\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
    "refused_because": "are numbers"
   },
   {
    "name": "approval with a title that is not the one hashed",
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
    "refused_because": "not the sentence the statement is of",
    "title": "Use a different queue for retries"
   },
@@ -232,16 +232,16 @@
  ],
  "title_ok": [
   {
-   "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
    "title": "Use the existing queue for retries"
   }
  ],
  "signature_vector": {
   "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
   "public_key_hex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
-  "asker": "EEHRcmwqcKNVsGRSphFindfEJjOfcEsbG3QwRT6Gkd8z",
-  "statement": "grape-decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
-  "signature_hex": "ce3ce91054f1f2946dcff98a49f25c91f60ba1f7d673324e6881e2cf1207b0e08e8af834b0b3369c60721733d5a262a9213a044227e523f047498cda2c138602",
-  "signature_qb64": "AADOPOkQVPHylG3P-YpJ8lyR9guh99ZzMk5ogeLPEgew4I6K-DSwszacYHIXM9WiYqkhOgRCJ-Uj8EdJjNosE4YC"
+  "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+  "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+  "signature_hex": "b8e130e6b98aa813906cb88cf86081395120c4d5951bcdfbe5dae5b0b68fba3f72528e2c6ec313c3d9067bd0e7be057e147637efee63d898bf8aa38877c4010d",
+  "signature_qb64": "AAC44TDmuYqoE5BsuIz4YIE5USDE1ZUbzfvl2uWwto-6P3JSjixuwxPD2QZ70Oe-BX4Udjfv7mPYmL-Ko4h3xAEN"
  }
 }

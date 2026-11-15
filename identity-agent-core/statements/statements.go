@@ -9,7 +9,7 @@
 //   - The generic rules every statement meets before it can be shown or signed (Check).
 //   - The envelope the Identity Agent signs: a fixed header, the asker's identifier, then the
 //     statement exactly as shown (Envelope).
-//   - Registered display forms (grape-decision-approval/1 is the first), which change how a statement
+//   - Registered display forms (decision-approval/1 is the first), which change how a statement
 //     is shown and never whether it can be signed (Show).
 package statements
 
@@ -41,7 +41,7 @@ const (
 const EnvelopeHeader = "statement-signature/1"
 
 // DecisionApprovalForm is the first line of the registered decision-approval statement.
-const DecisionApprovalForm = "grape-decision-approval/1"
+const DecisionApprovalForm = "decision-approval/1"
 
 var headerShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}/[0-9]{1,4}$`)
 
@@ -74,7 +74,7 @@ func Check(statement string) (header string, err error) {
 		return "", errors.New("the statement ends with a line break")
 	}
 	if !headerShape.MatchString(lines[0]) {
-		return "", errors.New("the statement's first line is not a name and version, like grape-decision-approval/1")
+		return "", errors.New("the statement's first line is not a name and version, like decision-approval/1")
 	}
 	return lines[0], nil
 }
@@ -180,7 +180,7 @@ func Show(statement, title string) (Shown, error) {
 
 func quote(v string) string { return strconv.Quote(v) }
 
-// DecisionApproval is what a grape-decision-approval/1 statement says, read back.
+// DecisionApproval is what a decision-approval/1 statement says, read back.
 type DecisionApproval struct {
 	ID          string
 	TitleHash   string

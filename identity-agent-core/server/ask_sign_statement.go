@@ -163,7 +163,7 @@ func (signStatementAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (
 	}
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
-		return nil, errors.New("this agent has no identity to sign as")
+		return nil, errors.New("this Identity Agent has no identity to sign as")
 	}
 	events, err := s.DataStore.GetEvents(identity.AID)
 	if err != nil {
@@ -183,7 +183,7 @@ func (signStatementAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (
 		publicURL = s.EndpointService.CurrentURL()
 	}
 	if publicURL == "" {
-		return nil, errors.New("this agent has no public address, so the asker cannot check who signed")
+		return nil, errors.New("this Identity Agent has no public address, so the asker cannot check who signed")
 	}
 	answer := map[string]interface{}{
 		"nonce": p.Nonce, "signature": sig, "signer_aid": identity.AID,

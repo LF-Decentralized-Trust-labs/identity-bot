@@ -46,11 +46,11 @@ A form is a header a person's Identity Agent knows how to read, so it can show t
 how a statement is shown and never whether it can be signed; a statement whose header is not registered is signed shown as
 text.
 
-### `grape-decision-approval/1`
+### `decision-approval/1`
 
 Seven lines, in this order, nothing else:
 
-    grape-decision-approval/1
+    decision-approval/1
     decision=<number>
     title-hash=<BLAKE3-256 of the decision's sentence, CESR E>
     decided-by=<who decided it>
@@ -62,4 +62,4 @@ The sentence the hash is of may be sent with the Ask (`title`); it must hash to 
 600 characters, or the statement is refused. What the person sees is built only from the checked statement and the
 checked sentence. Without a sentence the person sees the hash, not text nobody checked.
 
-`grape-disagreement/1` is a statement the generic rules cover; it has no display form yet and is shown as text.
+`disagreement/1` is a statement the generic rules cover; it has no display form yet and is shown as text.
