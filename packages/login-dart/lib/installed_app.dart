@@ -27,6 +27,61 @@ abstract class InstalledPlatform {
 /// Where an installed front end asks its back end for an ask (a sealed call).
 const installedAskPath = '/signin/installed-key/ask';
 
+/// Where a TPM front end gets the credential its TPM must open (a sealed call;
+/// the only platform that needs one).
+const installedCredentialPath = '/signin/installed-key/credential';
+
+/// What a TPM front end sends for its credential: its endorsement key's public
+/// area and certificate (and the certificate's issuers) and its attestation key.
+class TpmEnrolment {
+  final Uint8List ekPublic, ekCert, akPublic;
+  final List<Uint8List> ekChain;
+  const TpmEnrolment(
+      {required this.ekPublic,
+      required this.ekCert,
+      required this.akPublic,
+      this.ekChain = const []});
+
+  Map<String, Object> toJson(String ask) => {
+        'ask': ask,
+        'ek_public': base64.encode(ekPublic),
+        'ek_cert': base64.encode(ekCert),
+        'ek_chain': [for (final c in ekChain) base64.encode(c)],
+        'ak_public': base64.encode(akPublic),
+      };
+}
+
+/// The credential the Identity Agent made for a [TpmEnrolment], which the TPM
+/// opens with TPM2_ActivateCredential: each a size-prefixed TPM2B.
+class TpmCredential {
+  final Uint8List credentialBlob, secret;
+  const TpmCredential(this.credentialBlob, this.secret);
+
+  factory TpmCredential.fromJson(Object? j) {
+    Uint8List? part(Object? v) {
+      if (v is! String || v.isEmpty) return null;
+      try {
+        return base64.decode(v);
+      } on FormatException {
+        return null;
+      }
+    }
+
+    final blob = j is Map ? part(j['credential_blob']) : null;
+    final secret = j is Map ? part(j['secret']) : null;
+    if (blob == null || secret == null) {
+      throw const TrustRefused('the app\'s credential for the TPM is not readable');
+    }
+    return TpmCredential(blob, secret);
+  }
+}
+
+/// How a TPM's evidence gets its credential in the middle of making it: the
+/// front end's hardware gives its keys, this asks the app's back end for the
+/// credential, and the hardware opens it.
+typedef CredentialExchange = Future<TpmCredential> Function(
+    TpmEnrolment enrolment);
+
 /// What the back end hands an installed front end to make evidence for.
 class InstalledAsk {
   final String ask;

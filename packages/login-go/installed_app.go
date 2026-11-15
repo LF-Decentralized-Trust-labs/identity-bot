@@ -31,7 +31,13 @@ const (
 // Where an installed front end asks its back end for an ask, and starts its
 // sign-in. Both are calls sealed for the back end (seal.go), like every other.
 const (
-	InstalledAskPath   = "/signin/installed-key/ask"
+	InstalledAskPath = "/signin/installed-key/ask"
+	// InstalledCredentialPath is the extra step a TPM's evidence needs and no other
+	// platform's does: the front end sends its endorsement key's public area and
+	// certificate and its attestation key (InstalledCredentialRequest), and the
+	// back end passes them to the Identity Agent and answers with the credential
+	// only that TPM can open (InstalledCredential).
+	InstalledCredentialPath = "/signin/installed-key/credential"
 	InstalledStartPath = "/signin/session"
 )
 
@@ -132,4 +138,55 @@ func ReadFrontEndStart(body []byte) (FrontEndStart, error) {
 		return FrontEndStart{}, errors.New("login: the sign-in does not say which front end it is for, 'browser' or 'installed_app'")
 	}
 	return s, nil
+}
+
+// InstalledCredentialRequest is a TPM front end's request for a credential, for
+// the ask the back end gave it. The byte fields are standard base64.
+type InstalledCredentialRequest struct {
+	Ask      string   `json:"ask"`
+	EKPublic []byte   `json:"ek_public"`
+	EKCert   []byte   `json:"ek_cert"`
+	EKChain  [][]byte `json:"ek_chain"`
+	AKPublic []byte   `json:"ak_public"`
+}
+
+// InstalledCredential is the Identity Agent's credential, for the TPM to open
+// with TPM2_ActivateCredential, in the TCG wire form (each a size-prefixed TPM2B).
+type InstalledCredential struct {
+	CredentialBlob []byte `json:"credential_blob"`
+	Secret         []byte `json:"secret"`
+}
+
+// The most a credential request carries. A TPM's public areas and an EK
+// certificate with its issuers are a few KiB; anything past this is not one.
+const (
+	maxCredentialPart  = 8 << 10
+	maxCredentialChain = 8
+)
+
+// ReadInstalledCredentialRequest reads a credential request strictly and refuses
+// one missing a part or carrying more than a TPM's evidence could. Whether the
+// keys are a TPM's is the Identity Agent's to decide, not this reader's.
+func ReadInstalledCredentialRequest(body []byte) (InstalledCredentialRequest, error) {
+	var q InstalledCredentialRequest
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&q); err != nil {
+		return InstalledCredentialRequest{}, fmt.Errorf("login: the credential request is not readable: %w", err)
+	}
+	if dec.More() {
+		return InstalledCredentialRequest{}, errors.New("login: the credential request has more than one document")
+	}
+	if q.Ask == "" || len(q.EKPublic) == 0 || len(q.EKCert) == 0 || len(q.AKPublic) == 0 {
+		return InstalledCredentialRequest{}, errors.New("login: the credential request names no ask, endorsement key, certificate or attestation key")
+	}
+	if len(q.EKPublic) > maxCredentialPart || len(q.EKCert) > maxCredentialPart || len(q.AKPublic) > maxCredentialPart || len(q.EKChain) > maxCredentialChain {
+		return InstalledCredentialRequest{}, errors.New("login: the credential request is larger than a TPM's evidence")
+	}
+	for _, c := range q.EKChain {
+		if len(c) == 0 || len(c) > maxCredentialPart {
+			return InstalledCredentialRequest{}, errors.New("login: the credential request has an unreadable issuer certificate")
+		}
+	}
+	return q, nil
 }

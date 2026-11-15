@@ -174,7 +174,17 @@ class AppSession {
       final asked = _ok(
           await _send('POST', installedAskPath, '{}', (_) async => {}),
           'Asking the app for evidence of this device\'s key');
-      proof = await key.prove(_guard(() => InstalledAsk.fromJson(asked)));
+      final ask = _guard(() => InstalledAsk.fromJson(asked));
+      proof = await key.prove(ask, exchange: (enrolment) async {
+        final j = _ok(
+            await _send(
+                'POST',
+                installedCredentialPath,
+                jsonEncode(enrolment.toJson(ask.ask)),
+                (_) async => {}),
+            'Asking the app for a credential for this device\'s TPM');
+        return _guard(() => TpmCredential.fromJson(j));
+      });
       if (proof == null) {
         throw const SignInFailed(
             'This device cannot prove its key to the app, so it cannot sign in as the app\'s installed front end.');

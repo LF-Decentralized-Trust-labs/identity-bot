@@ -57,6 +57,10 @@ class FakeApp {
   String? thumbprintSeen;
   bool installedOnly = true;
 
+  /// What a TPM front end asked its credential with, and whether the back end refuses it.
+  Map<String, dynamic>? credentialAskedWith;
+  bool refuseCredential = false;
+
   /// When set, the challenge the back end signs names this key, not the one asked for.
   String? challengeKey;
   int status401After = -1;
@@ -113,6 +117,18 @@ class FakeApp {
             'asset_id': assetId,
             'challenge': b64uEncode(List<int>.generate(32, (i) => 100 + i)),
             'expires': '2026-11-11T12:05:00Z'
+          }
+        );
+      case 'POST /signin/installed-key/credential':
+        credentialAskedWith = jsonDecode(body) as Map<String, dynamic>;
+        if (refuseCredential) {
+          return (status: 403, body: {'error': 'the endorsement key is not a TPM manufacturer\'s'});
+        }
+        return (
+          status: 200,
+          body: {
+            'credential_blob': base64.encode([0, 3, 1, 2, 3]),
+            'secret': base64.encode([0, 2, 9, 9])
           }
         );
       case 'POST /signin/session':
@@ -203,7 +219,8 @@ class FakeHardware implements HardwareKeyPlatform {
       rawToDer(b64uDecode(await key.sign(utf8.decode(message)))!);
   @override
   Future<({Uint8List point, Uint8List evidence})> attestNewKey(
-      String label, Uint8List challenge) async {
+      String label, Uint8List challenge,
+      {CredentialExchange? exchange}) async {
     // Android fixes the attestation challenge when the key is generated: a new key per ask.
     key = SoftwareFrontEndKey.generate();
     made++;

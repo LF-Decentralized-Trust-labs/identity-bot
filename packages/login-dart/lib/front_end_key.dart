@@ -49,7 +49,12 @@ abstract class FrontEndKey {
   /// a key that has none to give. A hardware key is made FOR the ask (Android's
   /// key attestation fixes its challenge when the key is generated), so proving
   /// replaces the key: read [jwk] and [thumbprint] after, never before.
-  Future<InstalledKeyProof?> prove(InstalledAsk ask) async => null;
+  ///
+  /// A TPM's evidence needs a credential only the Identity Agent can make: its
+  /// hardware calls [exchange] with its keys and opens what comes back.
+  Future<InstalledKeyProof?> prove(InstalledAsk ask,
+          {CredentialExchange? exchange}) async =>
+      null;
 
   /// Whether [signature] is this key's signature over [message].
   bool verify(String message, String signature) {
@@ -152,8 +157,12 @@ abstract class HardwareKeyPlatform {
   /// Makes a NEW key under [label] in hardware for [challenge] (replacing any
   /// held) and gives its public point and the hardware's evidence that it is the
   /// hardware's own, made for that challenge.
+  ///
+  /// A platform whose evidence needs a credential from the Identity Agent (a TPM)
+  /// gets it by calling [exchange]; one that does not ignores it.
   Future<({Uint8List point, Uint8List evidence})> attestNewKey(
-      String label, Uint8List challenge);
+      String label, Uint8List challenge,
+      {CredentialExchange? exchange});
 
   /// The key [label] names signing [statementDigest] (the SHA-256 of the sign-in
   /// statement): ASN.1 DER ECDSA for Android and a TPM, an App Attest assertion
@@ -210,12 +219,13 @@ class HardwareFrontEndKey extends FrontEndKey {
   }
 
   @override
-  Future<InstalledKeyProof?> prove(InstalledAsk ask) async {
+  Future<InstalledKeyProof?> prove(InstalledAsk ask,
+      {CredentialExchange? exchange}) async {
     final challenge = b64uDecode(ask.challenge);
     if (challenge == null) {
       throw const TrustRefused('the ask\'s challenge is not readable');
     }
-    final made = await hardware.attestNewKey(label, challenge);
+    final made = await hardware.attestNewKey(label, challenge, exchange: exchange);
     final (x, y) = _coordinates(made.point);
     _x = x;
     _y = y;

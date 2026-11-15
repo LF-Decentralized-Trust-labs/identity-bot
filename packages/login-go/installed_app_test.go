@@ -146,3 +146,24 @@ func TestAnAppleAssertionIsCheckedAsTheIdentityAgentChecksIt(t *testing.T) {
 		}
 	}
 }
+
+func TestACredentialRequestIsReadStrictly(t *testing.T) {
+	ok := `{"ask":"a","ek_public":"AAEB","ek_cert":"MAA=","ek_chain":["MAE="],"ak_public":"AAEC"}`
+	q, err := ReadInstalledCredentialRequest([]byte(ok))
+	if err != nil || q.Ask != "a" || len(q.EKChain) != 1 || len(q.AKPublic) != 3 {
+		t.Fatalf("a whole request was refused or misread: %+v, %v", q, err)
+	}
+	for name, body := range map[string]string{
+		"no ask":       `{"ek_public":"AAEB","ek_cert":"MAA=","ak_public":"AAEC"}`,
+		"no cert":      `{"ask":"a","ek_public":"AAEB","ak_public":"AAEC"}`,
+		"no AK":        `{"ask":"a","ek_public":"AAEB","ek_cert":"MAA="}`,
+		"unknown part": `{"ask":"a","ek_public":"AAEB","ek_cert":"MAA=","ak_public":"AAEC","extra":1}`,
+		"two docs":     ok + ok,
+		"empty issuer": `{"ask":"a","ek_public":"AAEB","ek_cert":"MAA=","ek_chain":[""],"ak_public":"AAEC"}`,
+		"huge":         `{"ask":"a","ek_public":"AAEB","ek_cert":"` + strings.Repeat("QQ", 9000) + `","ak_public":"AAEC"}`,
+	} {
+		if _, err := ReadInstalledCredentialRequest([]byte(body)); err == nil {
+			t.Errorf("%s: was read", name)
+		}
+	}
+}

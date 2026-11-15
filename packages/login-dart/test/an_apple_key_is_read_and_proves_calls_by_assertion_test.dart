@@ -72,7 +72,8 @@ class _Apple implements HardwareKeyPlatform {
       assertion;
   @override
   Future<({Uint8List point, Uint8List evidence})> attestNewKey(
-      String label, Uint8List challenge) async {
+      String label, Uint8List challenge,
+      {CredentialExchange? exchange}) async {
     final e = attestation(bytes(32, 5), bytes(32, 6));
     return (point: appleAttestedPoint(e), evidence: e);
   }
