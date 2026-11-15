@@ -22,6 +22,9 @@ type grantEndedVectors struct {
 	Refusals  []struct {
 		Name, Change, Value string
 	} `json:"refusals"`
+	RefusedBodies []struct {
+		Name, Suffix, Body string
+	} `json:"refused_bodies"`
 }
 
 func readGrantEnded(t *testing.T) (grantEndedVectors, ed25519.PublicKey, time.Time) {
@@ -70,6 +73,15 @@ func TestANoticeThatChangedAfterSigningOrIsForAnotherAppOrIsStaleIsRefused(t *te
 			t.Errorf("%s was taken", r.Name)
 		}
 	}
+	for _, r := range v.RefusedBodies {
+		b := r.Body
+		if b == "" {
+			b = string(body(v.Notice)) + r.Suffix
+		}
+		if _, err := VerifyGrantEnded([]byte(b), asset, pub, now); err == nil {
+			t.Errorf("%s was taken", r.Name)
+		}
+	}
 	stale, _ := time.Parse(time.RFC3339, v.StaleNow)
 	if _, err := VerifyGrantEnded(body(v.Notice), asset, pub, stale); err == nil {
 		t.Error("a notice outside the window was taken")
@@ -91,8 +103,12 @@ func TestTheHandlerEndsTheGrantOnlyForANoticeThatChecks(t *testing.T) {
 	v, pub, now := readGrantEnded(t)
 	asset := v.Notice["asset"].(string)
 	var ended []GrantEnded
+	var cutoffs []time.Time
 	h := GrantEndedHandler(asset, func(context.Context) (ed25519.PublicKey, error) { return pub, nil },
-		func(_ context.Context, g GrantEnded) (int, error) { ended = append(ended, g); return 1, nil },
+		func(_ context.Context, g GrantEnded, begunBy time.Time) (int, error) {
+			ended, cutoffs = append(ended, g), append(cutoffs, begunBy)
+			return 1, nil
+		},
 		func() time.Time { return now })
 	post := func(b string) int {
 		rr := httptest.NewRecorder()
@@ -109,6 +125,10 @@ func TestTheHandlerEndsTheGrantOnlyForANoticeThatChecks(t *testing.T) {
 	}
 	if code := post(string(body(v.Notice))); code != http.StatusOK || len(ended) != 1 || ended[0].Person != v.Notice["person"] {
 		t.Fatalf("a good notice: %d, %+v", code, ended)
+	}
+	// The back end is handed the notice's time as the cutoff: sessions begun after it stay.
+	if want, _ := time.Parse("2006-01-02T15:04:05Z", v.Notice["issued"].(string)); !cutoffs[0].Equal(want) {
+		t.Fatalf("the cutoff given to end is %s, want the notice's time %s", cutoffs[0], want)
 	}
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, GrantEndedPath, nil))

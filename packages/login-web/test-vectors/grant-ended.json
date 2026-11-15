@@ -34,6 +34,31 @@
       "change": "v",
       "name": "an unknown version",
       "value": "2"
+    },
+    {
+      "change": "signature",
+      "name": "a signature that is not unpadded base64url",
+      "value": "not base64!"
+    },
+    {
+      "change": "person",
+      "name": "an empty person",
+      "value": ""
+    },
+    {
+      "change": "issued",
+      "name": "a time not in YYYY-MM-DDTHH:MM:SSZ",
+      "value": "2026-11-15 06:20:00"
+    }
+  ],
+  "refused_bodies": [
+    {
+      "name": "a second JSON value after the notice",
+      "suffix": " {}"
+    },
+    {
+      "name": "a body that is not JSON",
+      "body": "ended"
     }
   ],
   "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",

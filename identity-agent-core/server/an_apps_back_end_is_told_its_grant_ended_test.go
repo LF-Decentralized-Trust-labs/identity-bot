@@ -48,6 +48,8 @@ type aBackEnd struct {
 	// refuse answers every notice 403, as a back end that will not take it does.
 	refuse atomic.Bool
 	m      *relay.Manager
+	// bodies is every notice posted, in order.
+	bodies []string
 }
 
 func (b *aBackEnd) sessionFor(key string) (string, bool) {
@@ -63,6 +65,10 @@ func (b *aBackEnd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.got.Add(1)
+	raw, _ := io.ReadAll(io.LimitReader(r.Body, 4097))
+	b.mu.Lock()
+	b.bodies = append(b.bodies, string(raw))
+	b.mu.Unlock()
 	if b.unavailable.Add(-1) >= 0 {
 		http.Error(w, "restarting", http.StatusServiceUnavailable)
 		return
@@ -71,7 +77,6 @@ func (b *aBackEnd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
-	raw, _ := io.ReadAll(io.LimitReader(r.Body, 4097))
 	var n grantEndedNotice
 	if json.Unmarshal(raw, &n) != nil {
 		b.refused.Add(1)
@@ -420,5 +425,24 @@ func TestTheCoreCallsOnlyAPublicHttpsOrigin(t *testing.T) {
 	}
 	if err := refusePrivate("tcp", "93.184.216.34:443", nil); err != nil {
 		t.Errorf("a public address was refused: %v", err)
+	}
+}
+
+// Every attempt carries the same notice, dated when the grant ended: a retry sent
+// later is not re-dated, so it cannot reach a session begun after the grant ended.
+func TestARetryCarriesTheNoticeDatedWhenTheGrantEnded(t *testing.T) {
+	w := aPushedWorld(t)
+	w.org.grantBackoff = []time.Duration{0, 1100 * time.Millisecond}
+	addr := startBackEnd(t, w.rl, w.be)
+	w.signIn(t, addr)
+	w.be.unavailable.Store(1)
+	if _, err := w.org.browserKeys().End("the-website", w.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the retried notice", func() bool { _, ok := w.be.sessionFor(w.key); return !ok })
+	w.be.mu.Lock()
+	defer w.be.mu.Unlock()
+	if len(w.be.bodies) != 2 || w.be.bodies[0] != w.be.bodies[1] {
+		t.Fatalf("the retry is not the first notice again: %q", w.be.bodies)
 	}
 }

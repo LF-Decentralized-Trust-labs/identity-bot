@@ -148,19 +148,31 @@ func (s *CoreServer) grantPushHTTP() *http.Client {
 // tellBackEndsGrantsEnded is browserKeys.ended: it starts one push for each grant
 // that had an address, and returns at once.
 func (s *CoreServer) tellBackEndsGrantsEnded(gone []browserKeyRecord) {
+	// The notice is dated when the grant ended, not when it is sent, so a back end
+	// ending the sessions begun at or before it never ends one the person began
+	// again later, however late an attempt is.
+	ended := time.Now()
+	ctx := s.AppCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	for _, r := range gone {
 		if r.Push == "" {
 			continue
 		}
 		go func(r browserKeyRecord) {
-			grantEndedSlots <- struct{}{}
+			select {
+			case grantEndedSlots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-grantEndedSlots }()
-			s.tellBackEnd(r)
+			s.tellBackEnd(ctx, r, ended)
 		}(r)
 	}
 }
 
-func (s *CoreServer) tellBackEnd(r browserKeyRecord) {
+func (s *CoreServer) tellBackEnd(ctx context.Context, r browserKeyRecord, ended time.Time) {
 	origin, err := pushOrigin(r.Push)
 	if err != nil {
 		log.Printf("[identity-agent-core] not telling the back end of %s its grant ended: %v", r.Asset, err)
@@ -179,10 +191,9 @@ func (s *CoreServer) tellBackEnd(r browserKeyRecord) {
 		log.Printf("[identity-agent-core] could not sign a grant-ended notice for %s: %v", r.Asset, err)
 		return
 	}
-	ctx := s.AppCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	// Signed once: every attempt carries the same notice, dated when the grant
+	// ended. The attempts all fall well inside the window a back end takes.
+	body, _ := json.Marshal(signGrantEnded(seed, a.PairwiseAID, r.Thumbprint, r.Person, ended))
 	var last error
 	backoff := s.grantBackoff
 	if backoff == nil {
@@ -194,15 +205,14 @@ func (s *CoreServer) tellBackEnd(r browserKeyRecord) {
 			return
 		case <-time.After(wait):
 		}
-		// A key that has been given a grant again since is not ended: a retry made
-		// after the person signed in again must not end the new session.
+		// A key that has been given a grant again since is not told about again:
+		// the notice's date already spares the new session, and this also spares it
+		// where the person signed in again within the same second.
 		if i > 0 {
 			if _, speaks := s.browserKeys().Get(r.Asset, r.Thumbprint, time.Now()); speaks {
 				return
 			}
 		}
-		// Signed afresh each time, so a late attempt is not refused as stale.
-		body, _ := json.Marshal(signGrantEnded(seed, a.PairwiseAID, r.Thumbprint, r.Person, time.Now()))
 		last = s.postGrantEnded(ctx, origin+grantEndedPath, body)
 		var refused *refusedNotice
 		if last == nil || errors.As(last, &refused) {
