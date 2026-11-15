@@ -307,6 +307,12 @@
       "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"installed_app\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}",
       "go_reads": true,
       "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"installed_app\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"
+    },
+    {
+      "name": "a utility app's relay identifier named in the challenge (ADR-072 Amendment 7)",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"
     }
   ],
   "description": "Produced by the Go core: canonical bodies, accept/refuse decisions for key and signature spellings, and a signed assertion. The TypeScript verifier must agree byte for byte. Regenerated and checked by TestThePublishedLoginVectorsAreTheCores in identity-agent-core/login.",
