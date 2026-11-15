@@ -6,6 +6,7 @@
 **Amended:** 2026-11-03 — The AI agent asked may send progress notes before it answers (see §Amendment 2)
 **Amended:** 2026-11-03 — An AI agent at rest may open a conversation toward an AI agent its grant names, at a rate its grant states (see §Amendment 3)
 **Amended:** 2026-11-12 — A conversation closes by a signed entry from its opener or its owner, never for being quiet (see ADR-077)
+**Amended:** 2026-11-15 — A body says a turn started on a message with a second receipt (see §Amendment 4)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context
@@ -309,3 +310,14 @@ This changes one sentence of the Decision: "A body cannot open a conversation." 
 - **Amendment 2's list.** Amendment 2 lists what the one asked may send while its ask is open. Once both amendments stand, the one asked may not open a new conversation while the ask is open: it holds an unanswered message it was given, so it is not at rest.
 - **An older reader refuses it.** A reader built before this amendment refuses an ask with no `in_reply_to`, which is the safe failure: it never acts on a conversation it cannot place. A sender opens a conversation only toward an AI agent known to read this, which within one organisation's Identity Agent is always so.
 - **A governed opening.** Every refusal of an opening ask is written to the signed governance record, as any refused message is.
+
+## Amendment 4: A second receipt says a turn started (2026-11-15)
+
+A receipt says a message arrived. It does not say anyone has begun work on it, which is what a sender that is waiting wants to know. A body says that with a second receipt.
+
+- **The same receipt, other words.** It is a `receipt` from the same body, to the same sender, naming the same message, whose words are `turn started`. Only those words tell it from the delivery receipt. It is signed and countersigned like every receipt, and like every receipt it takes no turn and keeps nothing open.
+- **Once per message, and only after the first.** The Identity Agent accepts one for a message, and only when the delivery receipt for that message was taken: never for a message still queued or given up on. A second one, or one that came first, is refused. When several for one message arrive at once, exactly one is kept: the place for it is claimed before the entry is appended, and given back if the append fails.
+- **Said when a turn starts on a message.** A running body says it as its turn begins, after the delivery receipt. A body acting through the supervisor interface says it when it takes an ask from its inbox. A message that starts no turn gets none: a wake the host started itself has no message and no sender waiting, and a message the body refuses is answered by its failure notice, not by a start. A body that cannot say it must not stop the turn: the message is already taken.
+- **What a sender does with it.** A utility app that a person writes through reads it from the checked trail and, when it never comes, sends the same message again under the same id (the utility app matches it against the trail and does not post it twice, but the Identity Agent does not yet refuse a second entry with one id, ADR-068 step 2). An AI agent that asked another records the ask as started when it comes, and never moves it back to delivered whatever order the two receipts arrive in.
+
+Nothing is superseded: a reader that knows only the first receipt reads the second as one more receipt.
