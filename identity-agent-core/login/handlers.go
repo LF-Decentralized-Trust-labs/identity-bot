@@ -42,9 +42,11 @@ type Handler struct {
 	Pending *PendingStore
 	// InstalledApps is the person's own record of the installed-app sign-ins they approved.
 	InstalledApps *InstalledAppSignInStore
-	KeriDriver    drivers.KeriEngine
-	DevRelay      string
-	HTTPClient    *http.Client
+	// BrowserSignIns is the person's own record of the browser sign-ins they approved at utility apps.
+	BrowserSignIns *InstalledAppSignInStore
+	KeriDriver     drivers.KeriEngine
+	DevRelay       string
+	HTTPClient     *http.Client
 	// PeerClient, when set, is the client for a call to rawURL, an address a site
 	// supplied (its challenge, callback, introductions and registry). The server
 	// sets it to the guarded client; unset, HTTPClient is used.
@@ -118,15 +120,20 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	browsers, err := NewBrowserSignInStore(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	relay := OwnerRelayURL()
 	return &Handler{
-		InstalledApps: apps,
-		Store:         store,
-		Pending:       NewPendingStore(),
-		KeriDriver:    keri,
-		DevRelay:      relay,
-		HTTPClient:    &http.Client{Timeout: 15 * time.Second},
-		dataDir:       dataDir,
+		InstalledApps:  apps,
+		BrowserSignIns: browsers,
+		Store:          store,
+		Pending:        NewPendingStore(),
+		KeriDriver:     keri,
+		DevRelay:       relay,
+		HTTPClient:     &http.Client{Timeout: 15 * time.Second},
+		dataDir:        dataDir,
 	}, nil
 }
 
@@ -783,6 +790,11 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 	if err != nil {
 		return nil, fmt.Errorf("could not keep a record of this sign-in, so it was not approved: %w", err)
 	}
+	undoBrowser, err := h.recordBrowserSignIn(rel, bundle)
+	if err != nil {
+		undo()
+		return nil, fmt.Errorf("could not keep a record of this sign-in, so it was not approved: %w", err)
+	}
 	if err := h.postAssertion(bundle.CallbackURL, bundle.SessionToken, assertion, creds); err != nil {
 		// Drop the record only when the host definitely refused (a 4xx). A
 		// timeout or a server error may have come after the host accepted, and a
@@ -792,6 +804,7 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 		var refused *callbackRefusedError
 		if errors.As(err, &refused) && refused.definite() {
 			undo()
+			undoBrowser()
 		}
 		return nil, err
 	}

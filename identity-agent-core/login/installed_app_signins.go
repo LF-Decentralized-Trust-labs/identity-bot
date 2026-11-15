@@ -46,13 +46,27 @@ type InstalledAppSignInStore struct {
 	mu    sync.Mutex
 	path  string
 	items map[string]InstalledAppSignIn
+	// keep is the most records held (0 = no bound); the oldest approvals go first.
+	keep int
 }
 
 func NewInstalledAppSignInStore(dataDir string) (*InstalledAppSignInStore, error) {
-	s := &InstalledAppSignInStore{
-		path:  filepath.Join(dataDir, "installed_app_sign_ins.json"),
-		items: map[string]InstalledAppSignIn{},
-	}
+	return openSignInStore(filepath.Join(dataDir, "installed_app_sign_ins.json"), 0)
+}
+
+// MaxBrowserSignIns bounds the person's record of browser sign-ins: a browser's
+// sign-in lapses on its own, so the record is a recent history, not a ledger.
+const MaxBrowserSignIns = 200
+
+// NewBrowserSignInStore is the person's own record of the browser sign-ins
+// they approved at utility apps, kept apart from the installed-app one
+// because a browser's grant lapses and is ended at the app, not by this store.
+func NewBrowserSignInStore(dataDir string) (*InstalledAppSignInStore, error) {
+	return openSignInStore(filepath.Join(dataDir, "browser_sign_ins.json"), MaxBrowserSignIns)
+}
+
+func openSignInStore(path string, keep int) (*InstalledAppSignInStore, error) {
+	s := &InstalledAppSignInStore{path: path, items: map[string]InstalledAppSignIn{}, keep: keep}
 	b, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -83,6 +97,16 @@ func (s *InstalledAppSignInStore) Put(r InstalledAppSignIn) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.items[installedAppSignInID(r.SiteAID, r.Key)] = r
+	for s.keep > 0 && len(s.items) > s.keep {
+		oldest, first := "", true
+		var at time.Time
+		for id, it := range s.items {
+			if first || it.ApprovedAt.Before(at) {
+				oldest, at, first = id, it.ApprovedAt, false
+			}
+		}
+		delete(s.items, oldest)
+	}
 	return s.save()
 }
 
@@ -286,4 +310,59 @@ const AlreadyEndedMessage = "It had already been ended"
 func (h *Handler) forgetAlreadyEnded(rec InstalledAppSignIn) bool {
 	_ = h.InstalledApps.Delete(rec.SiteAID, rec.Key)
 	return true
+}
+
+// recordBrowserSignIn keeps the person's own record of a browser sign-in they
+// approve at a utility app: which app, which browser key, when. The app holds
+// the session and may end it at once (a limit, a sign-out), so this is what the
+// person said yes to, never a claim that it is still open. Like the installed
+// one it is kept before the assertion is posted.
+func (h *Handler) recordBrowserSignIn(rel *SiteRelationship, b *ChallengeBundle) (undo func(), err error) {
+	if b.FrontEnd != FrontEndBrowser || b.BrowserKey == "" || h.BrowserSignIns == nil {
+		return func() {}, nil
+	}
+	prev, had := h.BrowserSignIns.Get(b.SiteAID, b.BrowserKey)
+	relKey := b.SiteAID
+	if b.RelationshipAnchorAID != "" {
+		relKey = b.RelationshipAnchorAID
+	}
+	err = h.BrowserSignIns.Put(InstalledAppSignIn{
+		Key: b.BrowserKey, SiteAID: b.SiteAID, SiteOOBI: b.SiteOOBI, Audience: b.Audience,
+		PairwiseAID: rel.PairwiseAID, ApprovedAt: time.Now().UTC(), RelationshipKey: relKey,
+	})
+	return func() {
+		if had {
+			_ = h.BrowserSignIns.Put(prev)
+		} else {
+			_ = h.BrowserSignIns.Delete(b.SiteAID, b.BrowserKey)
+		}
+	}, err
+}
+
+// HandleBrowserSignIns: GET, the person's own list of browser sign-ins approved.
+func (h *Handler) HandleBrowserSignIns(w http.ResponseWriter, _ *http.Request) {
+	out := []InstalledAppSignIn{}
+	if h.BrowserSignIns != nil {
+		out = h.BrowserSignIns.List()
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"browser_sign_ins": out})
+}
+
+// HandleForgetBrowserSignIn: POST {site_aid, key}, the person clears one line
+// from their record. It does not end the session at the app.
+func (h *Handler) HandleForgetBrowserSignIn(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SiteAID string `json:"site_aid"`
+		Key     string `json:"key"`
+	}
+	raw, err := boundedread.All(r.Body, boundedread.Document)
+	if err != nil || json.Unmarshal(raw, &body) != nil || body.SiteAID == "" || CheckBrowserKeyThumbprint(body.Key) != nil || h.BrowserSignIns == nil {
+		jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": "say which app and which key"})
+		return
+	}
+	if err := h.BrowserSignIns.Delete(body.SiteAID, body.Key); err != nil {
+		jsonreply.Write(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"ok": true, "forgotten": true})
 }
