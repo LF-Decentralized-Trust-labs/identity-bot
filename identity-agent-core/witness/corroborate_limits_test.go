@@ -324,3 +324,41 @@ func TestOnlyAFixedNumberOfWitnessesAreAskedAtOnce(t *testing.T) {
 		t.Fatalf("a witness past the bound was asked (hits %d): %+v", ws[0].hits.Load(), got)
 	}
 }
+
+// A witness's copy of the log can carry thousands of junk receipts beside the
+// real ones, each naming a designated witness. The genuine log is still
+// corroborated, from the receipts the presented log carries, and the junk does
+// not cost the check its time: the bound is on signature checks per witness.
+func TestAReplicaFullOfJunkReceiptsStillCorroboratesAGenuineLog(t *testing.T) {
+	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
+	ws := l.witnessesHolding(t)
+	var junk []interface{}
+	for i := 0; i < 20000; i++ {
+		raw := make([]byte, 64) // well formed, so each is a real check that fails
+		raw[0], raw[1], raw[2] = byte(i), byte(i>>8), 7
+		sig, err := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		junk = append(junk, map[string]interface{}{"witness": l.w.keys[i%2], "cesr_signature": sig})
+	}
+	for _, w := range ws {
+		var fat []map[string]interface{}
+		for _, rec := range l.records {
+			c := map[string]interface{}{}
+			for k, v := range rec {
+				c[k] = v
+			}
+			cur, _ := rec["witness_receipts"].([]interface{})
+			c["witness_receipts"] = append(append([]interface{}{}, junk...), cur...)
+			fat = append(fat, c)
+		}
+		w.replica = fat
+	}
+	start := time.Now()
+	got := Corroborate(nil, registry(ws), l.prefix, l.records)
+	if !got.Corroborated() {
+		t.Fatalf("a genuine log was not corroborated because of junk beside its receipts: %+v", got)
+	}
+	t.Logf("took %v", time.Since(start))
+}

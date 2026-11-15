@@ -228,3 +228,44 @@ func TestOneWitnessCannotMeetAThresholdTwice(t *testing.T) {
 		t.Fatalf("one witness counted twice towards a threshold: %+v", got.WitnessDetail)
 	}
 }
+
+// Each receipt is a signature check, and a served record can carry about a
+// megabyte of them, each naming a designated witness. Only a few are checked for
+// one witness at one event: a genuine receipt behind a run of forged ones is not
+// reached, and one behind fewer is.
+func TestOnlyAFewReceiptsAreCheckedForOneWitnessAtAnEvent(t *testing.T) {
+	forged := func(n int) []WitnessReceipt {
+		var out []WitnessReceipt
+		for i := 0; i < n; i++ {
+			// Well formed, so each is a real signature check that fails.
+			raw := make([]byte, 64)
+			raw[0], raw[1], raw[2] = byte(i), byte(i>>8), 7
+			sig, err := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, WitnessReceipt{CesrSignature: sig})
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		junk    int
+		counted int
+	}{{maxReceiptChecksPerWitness - 1, 1}, {maxReceiptChecksPerWitness, 0}, {20000, 0}} {
+		in, w1, _, sign1, _ := witnessedLog(t)
+		for k := range in.Receipts {
+			list := forged(tc.junk)
+			for i := range list {
+				list[i].WitnessAID = w1
+			}
+			in.Receipts[k] = append(list, WitnessReceipt{WitnessAID: w1, CesrSignature: sign1(k)})
+		}
+		got, err := ValidateKELFromBytes(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := got.WitnessDetail[0].ReceiptsVerified; n != tc.counted {
+			t.Errorf("%d forged receipts before the genuine one: %d counted, want %d", tc.junk, n, tc.counted)
+		}
+	}
+}

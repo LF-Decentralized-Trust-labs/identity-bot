@@ -456,6 +456,12 @@ func Designates(designated []string, witnessAID string) bool {
 	return false
 }
 
+// maxReceiptChecksPerWitness bounds the signatures checked, at one event, among
+// the receipts naming one designated witness. A genuine witness issues one
+// receipt per event, and two sources of the same one are two checks, so a small
+// allowance covers every honest case and a run of forged ones is cut off.
+const maxReceiptChecksPerWitness = 4
+
 // WitnessingByEvent is the witnessing report for every event of a key log,
 // by the event's identifier: one walk of the log for all of them, where
 // WitnessingOf walks it once per event asked about.
@@ -533,14 +539,20 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 		// under a second spelling of its identifier, which is how a single
 		// party becomes a quorum.
 		counted := map[string]bool{}
+		// Each signature check costs CPU, and a served record can carry about a
+		// megabyte of receipts, each naming a designated witness. At most
+		// maxReceiptChecksPerWitness are checked for any one witness at an event;
+		// the rest could not add a vote, only cost a check each.
+		tried := map[string]int{}
 		for _, r := range in.Receipts[ev.SAID] {
 			if !Designates(designated, r.WitnessAID) {
 				continue
 			}
 			key, ok := WitnessKey(r.WitnessAID)
-			if !ok || counted[key] {
+			if !ok || counted[key] || tried[key] >= maxReceiptChecksPerWitness {
 				continue
 			}
+			tried[key]++
 			if err := VerifyEventReceipt(r.WitnessAID, raw, ev.SAID, r.CesrSignature, designated); err != nil {
 				continue
 			}
