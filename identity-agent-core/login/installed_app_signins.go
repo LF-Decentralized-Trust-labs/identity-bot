@@ -42,6 +42,12 @@ type InstalledAppSignIn struct {
 	// RelayID and BackEnd are what the challenge named for the utility app (ADR-072
 	// Amendment 8): where the person's Identity Agent sends the end of a browser
 	// session. Empty for a sign-in whose app had not recorded them.
+	//
+	// Both were checked before they were kept (CheckUtilityAppAddress). That is the
+	// shape of the address, not where its name leads: whatever sends the end of a
+	// session to BackEnd must send it through the guarded client for an address a site
+	// chose (Handler.peerClient, which the server makes the guarded client), which refuses a connection to a
+	// private address however the name was written.
 	RelayID string `json:"relay_id,omitempty"`
 	BackEnd string `json:"back_end,omitempty"`
 }
@@ -325,6 +331,11 @@ func (h *Handler) forgetAlreadyEnded(rec InstalledAppSignIn) bool {
 func (h *Handler) recordBrowserSignIn(rel *SiteRelationship, b *ChallengeBundle) (undo func(), err error) {
 	if b.FrontEnd != FrontEndBrowser || b.BrowserKey == "" || h.BrowserSignIns == nil {
 		return func() {}, nil
+	}
+	// Whatever the challenge named is checked again at the place it is kept: this
+	// is the one place that writes it down, and it has more than one way in.
+	if err := CheckUtilityAppAddress(b); err != nil {
+		return nil, err
 	}
 	prev, had := h.BrowserSignIns.Get(b.SiteAID, b.BrowserKey)
 	relKey := b.SiteAID

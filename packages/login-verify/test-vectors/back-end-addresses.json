@@ -1,0 +1,472 @@
+{
+  "description": "The rule for a utility app's back-end address (`api`), shared by the Identity Agent core (identity-agent-core/backendaddr), the login page (packages/login-web/src/app.ts, backEndAddress) and the Dart link reader (packages/login-dart, AppLink.fromFragment). `addresses` are cases of the rule itself: `accepted` says whether the address is one a back end may be named by. A case marked `dev_only` is http on this machine, which the core accepts only in a development build and which a page or Dart reader, having no build mode, accepts. `links` are cases of reading a link's api: trailing slashes are stripped and the rest must pass the rule; `read_as` is what is kept, or null when the link is refused. Hand-written, not generated: a rule changed in one place fails here in the others.",
+  "addresses": [
+    {
+      "name": "a name and nothing else",
+      "address": "https://tasks.example.com",
+      "accepted": true
+    },
+    {
+      "name": "a port",
+      "address": "https://tasks.example.com:8443",
+      "accepted": true
+    },
+    {
+      "name": "the highest port",
+      "address": "https://tasks.example.com:65535",
+      "accepted": true
+    },
+    {
+      "name": "the lowest port",
+      "address": "https://tasks.example.com:1",
+      "accepted": true
+    },
+    {
+      "name": "a path",
+      "address": "https://tasks.example.com/app/v1",
+      "accepted": true
+    },
+    {
+      "name": "a path with characters a URL path may carry",
+      "address": "https://tasks.example.com/a&b/c(d)/e;f=g,h:i@j~k_l.m-n",
+      "accepted": true
+    },
+    {
+      "name": "a path with a percent escape",
+      "address": "https://tasks.example.com/a%20b",
+      "accepted": true
+    },
+    {
+      "name": "two labels",
+      "address": "https://a.b",
+      "accepted": true
+    },
+    {
+      "name": "an internationalised name, as it is written on the wire",
+      "address": "https://xn--bcher-kva.example",
+      "accepted": true
+    },
+    {
+      "name": "a name with digits and hyphens",
+      "address": "https://app-2.eu-west-1.example.com",
+      "accepted": true
+    },
+    {
+      "name": "a name that only ends like a private suffix",
+      "address": "https://notlocal.example.com",
+      "accepted": true
+    },
+    {
+      "name": "a name that merely contains a private word",
+      "address": "https://internal-tools.example.com",
+      "accepted": true
+    },
+    {
+      "name": "http on this machine by address",
+      "address": "http://127.0.0.1:8080",
+      "accepted": true,
+      "dev_only": true
+    },
+    {
+      "name": "http on this machine by name",
+      "address": "http://localhost:3000",
+      "accepted": true,
+      "dev_only": true
+    },
+    {
+      "name": "http on this machine with no port",
+      "address": "http://localhost",
+      "accepted": true,
+      "dev_only": true
+    },
+    {
+      "name": "http on this machine by address, no port",
+      "address": "http://127.0.0.1",
+      "accepted": true,
+      "dev_only": true
+    },
+    {
+      "name": "http on this machine with a path",
+      "address": "http://localhost:3000/api",
+      "accepted": true,
+      "dev_only": true
+    },
+    {
+      "name": "nothing",
+      "address": "",
+      "accepted": false
+    },
+    {
+      "name": "http to a public name",
+      "address": "http://tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "another scheme",
+      "address": "ftp://tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "no scheme",
+      "address": "tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "scheme in capitals",
+      "address": "HTTPS://tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a capital in the name",
+      "address": "https://Tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a trailing slash",
+      "address": "https://tasks.example.com/",
+      "accepted": false
+    },
+    {
+      "name": "a trailing slash after a path",
+      "address": "https://tasks.example.com/app/",
+      "accepted": false
+    },
+    {
+      "name": "a trailing slash after a port",
+      "address": "https://tasks.example.com:8443/",
+      "accepted": false
+    },
+    {
+      "name": "a query",
+      "address": "https://tasks.example.com?x=1",
+      "accepted": false
+    },
+    {
+      "name": "a query after a path",
+      "address": "https://tasks.example.com/app?x=1",
+      "accepted": false
+    },
+    {
+      "name": "a fragment",
+      "address": "https://tasks.example.com#f",
+      "accepted": false
+    },
+    {
+      "name": "a user name",
+      "address": "https://user@tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a user name and password",
+      "address": "https://user:pw@tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a user name in front of an address on this machine",
+      "address": "http://localhost@tasks.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a private IPv4 address",
+      "address": "https://10.0.0.5",
+      "accepted": false
+    },
+    {
+      "name": "a link-local IPv4 address, where a cloud keeps its credentials",
+      "address": "https://169.254.169.254",
+      "accepted": false
+    },
+    {
+      "name": "a private IPv4 address with a port",
+      "address": "https://192.168.1.1:8443",
+      "accepted": false
+    },
+    {
+      "name": "the loopback address under https",
+      "address": "https://127.0.0.1",
+      "accepted": false
+    },
+    {
+      "name": "an IPv6 address",
+      "address": "https://[::1]",
+      "accepted": false
+    },
+    {
+      "name": "an IPv4 address with a path",
+      "address": "https://8.8.8.8/dns",
+      "accepted": false
+    },
+    {
+      "name": "an all-digit last label",
+      "address": "https://example.123",
+      "accepted": false
+    },
+    {
+      "name": "a name with no dot",
+      "address": "https://intranet",
+      "accepted": false
+    },
+    {
+      "name": "localhost under https",
+      "address": "https://localhost",
+      "accepted": false
+    },
+    {
+      "name": "a .local name",
+      "address": "https://printer.local",
+      "accepted": false
+    },
+    {
+      "name": "a .internal name",
+      "address": "https://db.internal",
+      "accepted": false
+    },
+    {
+      "name": "a .lan name",
+      "address": "https://nas.lan",
+      "accepted": false
+    },
+    {
+      "name": "a .home.arpa name",
+      "address": "https://router.home.arpa",
+      "accepted": false
+    },
+    {
+      "name": "a .localhost name",
+      "address": "https://app.localhost",
+      "accepted": false
+    },
+    {
+      "name": "a .corp name",
+      "address": "https://wiki.corp",
+      "accepted": false
+    },
+    {
+      "name": "a .intranet name",
+      "address": "https://hr.intranet",
+      "accepted": false
+    },
+    {
+      "name": "a .localdomain name",
+      "address": "https://box.localdomain",
+      "accepted": false
+    },
+    {
+      "name": "port zero",
+      "address": "https://tasks.example.com:0",
+      "accepted": false
+    },
+    {
+      "name": "a port above the highest",
+      "address": "https://tasks.example.com:65536",
+      "accepted": false
+    },
+    {
+      "name": "a port with a leading zero",
+      "address": "https://tasks.example.com:080",
+      "accepted": false
+    },
+    {
+      "name": "a port that is not a number",
+      "address": "https://tasks.example.com:abc",
+      "accepted": false
+    },
+    {
+      "name": "an empty port",
+      "address": "https://tasks.example.com:",
+      "accepted": false
+    },
+    {
+      "name": "a space in the path",
+      "address": "https://tasks.example.com/a b",
+      "accepted": false
+    },
+    {
+      "name": "a space in the name",
+      "address": "https://tasks .example.com",
+      "accepted": false
+    },
+    {
+      "name": "a dot segment",
+      "address": "https://tasks.example.com/a/../b",
+      "accepted": false
+    },
+    {
+      "name": "a leading dot segment",
+      "address": "https://tasks.example.com/./a",
+      "accepted": false
+    },
+    {
+      "name": "an empty segment",
+      "address": "https://tasks.example.com/a//b",
+      "accepted": false
+    },
+    {
+      "name": "a bad percent escape",
+      "address": "https://tasks.example.com/a%zz",
+      "accepted": false
+    },
+    {
+      "name": "a percent escape cut short",
+      "address": "https://tasks.example.com/a%4",
+      "accepted": false
+    },
+    {
+      "name": "a trailing dot on the name",
+      "address": "https://tasks.example.com.",
+      "accepted": false
+    },
+    {
+      "name": "an empty label",
+      "address": "https://tasks..example.com",
+      "accepted": false
+    },
+    {
+      "name": "a label starting with a hyphen",
+      "address": "https://-bad.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a label ending with a hyphen",
+      "address": "https://bad-.example.com",
+      "accepted": false
+    },
+    {
+      "name": "an underscore in the name",
+      "address": "https://a_b.example.com",
+      "accepted": false
+    },
+    {
+      "name": "a non-ASCII name",
+      "address": "https://bücher.example",
+      "accepted": false
+    },
+    {
+      "name": "a name that only starts like this machine",
+      "address": "http://localhost.evil.example",
+      "accepted": false
+    },
+    {
+      "name": "an address that only starts like this machine's",
+      "address": "http://127.0.0.1.evil.example",
+      "accepted": false
+    },
+    {
+      "name": "this machine's name followed by a user name trick",
+      "address": "http://127.0.0.1:80@evil.example",
+      "accepted": false
+    },
+    {
+      "name": "a backslash",
+      "address": "https://tasks.example.com\\evil",
+      "accepted": false
+    },
+    {
+      "name": "a control character",
+      "address": "https://tasks.example.com/a\u0001b",
+      "accepted": false
+    },
+    {
+      "name": "a newline",
+      "address": "https://tasks.example.com\n",
+      "accepted": false
+    },
+    {
+      "name": "a carriage return in the path",
+      "address": "https://tasks.example.com/a\rb",
+      "accepted": false
+    },
+    {
+      "name": "an IPv4 address whose last part is written in hex",
+      "address": "https://10.0.0.0x5",
+      "accepted": false
+    },
+    {
+      "name": "an IPv4 address written with hex parts only",
+      "address": "https://0x7f.0x1",
+      "accepted": false
+    },
+    {
+      "name": "an IPv4 loopback address with a hex last part",
+      "address": "https://127.0.0.0x1",
+      "accepted": false
+    },
+    {
+      "name": "an IPv4 address with an octal first part and a hex last part",
+      "address": "https://0177.0.0.0x1",
+      "accepted": false
+    },
+    {
+      "name": "an IPv4 address with a hex last part and a port",
+      "address": "https://192.168.1.0x1:8443",
+      "accepted": false
+    },
+    {
+      "name": "a name whose last label starts with a digit",
+      "address": "https://a.0x10",
+      "accepted": false
+    },
+    {
+      "name": "a path segment that is a dot, percent-escaped",
+      "address": "https://example.com/a/%2e%2e/b",
+      "accepted": false
+    },
+    {
+      "name": "a path segment that is a dot, percent-escaped in capitals",
+      "address": "https://example.com/%2E",
+      "accepted": false
+    }
+  ],
+  "links": [
+    {
+      "name": "an address as the owner records it",
+      "link_api": "https://tasks.example.com",
+      "read_as": "https://tasks.example.com"
+    },
+    {
+      "name": "a trailing slash a link may carry",
+      "link_api": "https://tasks.example.com/",
+      "read_as": "https://tasks.example.com"
+    },
+    {
+      "name": "several trailing slashes",
+      "link_api": "https://tasks.example.com///",
+      "read_as": "https://tasks.example.com"
+    },
+    {
+      "name": "a path with a trailing slash",
+      "link_api": "https://tasks.example.com/app/",
+      "read_as": "https://tasks.example.com/app"
+    },
+    {
+      "name": "a capital is not folded to lower case",
+      "link_api": "https://Tasks.example.com/",
+      "read_as": null
+    },
+    {
+      "name": "a private address",
+      "link_api": "https://10.0.0.1/",
+      "read_as": null
+    },
+    {
+      "name": "a link that names no back end",
+      "link_api": "",
+      "read_as": null
+    },
+    {
+      "name": "only slashes",
+      "link_api": "///",
+      "read_as": null
+    },
+    {
+      "name": "http on this machine",
+      "link_api": "http://localhost:3000/",
+      "read_as": "http://localhost:3000"
+    },
+    {
+      "name": "a query",
+      "link_api": "https://tasks.example.com/?x=1",
+      "read_as": null
+    }
+  ]
+}

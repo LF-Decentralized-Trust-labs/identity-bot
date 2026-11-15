@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"identity-agent-core/enrolsecret"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/backendaddr"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/jsonreply"
@@ -513,7 +513,7 @@ var (
 // already issued keep the old one. The route and an add-on both come here, so the
 // shape check and the write are in one place.
 func (h *Handler) SetRelayID(assetID, relayID string) (*Asset, error) {
-	if !relayIDShape.MatchString(relayID) {
+	if backendaddr.CheckRelayID(relayID) != nil {
 		return nil, ErrRelayIDShape
 	}
 	frontEndsMu.Lock()
@@ -565,14 +565,18 @@ func (h *Handler) HandleSetBackEnd(w http.ResponseWriter, r *http.Request) {
 
 // ErrBackEndShape is a back-end address a front end would not accept: not https
 // (or http on this machine), not lower case, or with a trailing slash.
-var ErrBackEndShape = errors.New("a back-end address is an https address in lower case with no trailing slash")
+var ErrBackEndShape = backendaddr.ErrShape
+
+// inDev says whether this is a development build, which may name a back end on this
+// machine. A variable so a test can say it is.
+var inDev = buildmode.IsDev
 
 // SetBackEnd records the back-end address of the utility app assetID, in the form a
 // front end reads a link's (the page's `backEndAddress`), so the two compare equal.
 // It may be set again; challenges already issued keep the old one. The route and an
 // add-on both come here.
 func (h *Handler) SetBackEnd(assetID, address string) (*Asset, error) {
-	if !backEndShape.MatchString(address) || strings.HasSuffix(address, "/") {
+	if err := backendaddr.Check(address, inDev()); err != nil {
 		return nil, ErrBackEndShape
 	}
 	frontEndsMu.Lock()
@@ -593,14 +597,6 @@ func (h *Handler) SetBackEnd(assetID, address string) (*Asset, error) {
 	}
 	return &a, nil
 }
-
-// backEndShape is the page's `backEndAddress` (packages/login-web/src/app.ts): an
-// https origin, or http on this machine, in lower case, with an optional path.
-var backEndShape = regexp.MustCompile(`^(https://[a-z0-9.\-]+(:[0-9]+)?|http://(127\.0\.0\.1|localhost)(:[0-9]+)?)(/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$`)
-
-// relayIDShape is a self-addressing identifier as written in this system: 44
-// characters of the URL-safe alphabet, the first a derivation code.
-var relayIDShape = regexp.MustCompile(`^[A-Z][A-Za-z0-9_-]{43}$`)
 
 func (h *Handler) appForFrontEnds(id string) (a Asset, ok bool, status int, msg string) {
 	a, found, err := h.Store.GetAsset(id)

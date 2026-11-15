@@ -566,6 +566,9 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	if err := CheckFrontEnd(bundle.FrontEnd); err != nil {
 		return nil, nil, nil, err
 	}
+	if err := CheckUtilityAppAddress(bundle); err != nil {
+		return nil, nil, nil, err
+	}
 	// The expiry is read from the bundle whose signature was just verified,
 	// never from an earlier fetch of the same session, which a relay could
 	// have served differently.

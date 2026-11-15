@@ -87,12 +87,12 @@ func TestTheBrowserRecordKeepsOnlyTheMostRecentApprovals(t *testing.T) {
 func TestABrowserSignInKeepsWhereTheAppIs(t *testing.T) {
 	h := aBrowserRecordHandler(t)
 	_, err := h.recordBrowserSignIn(&SiteRelationship{PairwiseAID: "Dperson"}, &ChallengeBundle{SiteAID: "Dsite", BrowserKey: aTestKey,
-		FrontEnd: FrontEndBrowser, RelayID: "Erelay", BackEnd: "https://tasks.example.com"})
+		FrontEnd: FrontEndBrowser, RelayID: "Eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BackEnd: "https://tasks.example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, ok := h.BrowserSignIns.Get("Dsite", aTestKey)
-	if !ok || got.RelayID != "Erelay" || got.BackEnd != "https://tasks.example.com" {
+	if !ok || got.RelayID != "Eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || got.BackEnd != "https://tasks.example.com" {
 		t.Fatalf("kept %+v", got)
 	}
 }

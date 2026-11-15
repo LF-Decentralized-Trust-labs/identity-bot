@@ -335,6 +335,10 @@ func TestTheRelayIdentifierOfAnAppIsRecordedAndReplaced(t *testing.T) {
 func TestTheBackEndOfAnAppIsRecordedInTheFormAFrontEndReads(t *testing.T) {
 	h, r := anAppHandler(t, Asset{ID: "a", AssetType: "app"})
 	r.(*chi.Mux).Put("/assets/{id}/back-end", h.HandleSetBackEnd)
+	// A development build may name a back end on this machine; the others may not.
+	was := inDev
+	t.Cleanup(func() { inDev = was })
+	inDev = func() bool { return true }
 	for _, ok := range []string{"https://tasks.example.com", "https://tasks.example.com:8443/api", "http://127.0.0.1:8080", "http://localhost"} {
 		if rec := do(r, "PUT", "/assets/a/back-end", `{"back_end":"`+ok+`"}`); rec.Code != http.StatusOK {
 			t.Fatalf("%s answered %d: %s", ok, rec.Code, rec.Body)
@@ -347,6 +351,16 @@ func TestTheBackEndOfAnAppIsRecordedInTheFormAFrontEndReads(t *testing.T) {
 		`{"back_end":"http://tasks.example.com"}`, `{"back_end":"https://tasks.example.com?x=1"}`, `{"back_end":"https://a b"}`, `{"back_end":"ftp://x"}`} {
 		if rec := do(r, "PUT", "/assets/a/back-end", bad); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s answered %d", bad, rec.Code)
+		}
+	}
+	if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != "http://localhost" {
+		t.Fatalf("a refused request changed it to %q", a.BackEnd)
+	}
+	// Outside a development build, this machine and a private network are refused.
+	inDev = func() bool { return false }
+	for _, bad := range []string{"http://localhost", "http://127.0.0.1:8080", "https://10.0.0.5", "https://169.254.169.254", "https://db.internal", "https://intranet"} {
+		if rec := do(r, "PUT", "/assets/a/back-end", `{"back_end":"`+bad+`"}`); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s answered %d outside a development build", bad, rec.Code)
 		}
 	}
 	if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != "http://localhost" {
