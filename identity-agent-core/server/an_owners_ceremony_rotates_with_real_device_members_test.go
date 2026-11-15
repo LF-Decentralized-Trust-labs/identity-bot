@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/backup"
 	"identity-agent-core/enrolsecret"
 	"identity-agent-core/iacrypto"
 )
@@ -215,16 +216,40 @@ func TestAHandOverCeremonyWithRealDevicesIsAppliedAndDropsTheBox(t *testing.T) {
 	if !w.s.keyIsElsewhere() {
 		t.Error("the box still reads the identity's key as its own")
 	}
-	// The mark holds on its own: with the record's key put back to the one the
-	// box derived, nothing here goes on to sign or rotate for the identity.
+	// The mark holds on its own: with the record put back to a key the box
+	// derives and the next key it would commit to (a record every other check
+	// accepts), nothing here goes on to sign or rotate for the identity.
+	root, err := ensureRootSeed(w.s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived := func(gen int) string {
+		seed, err := backup.DerivePairwiseSeed(root, after.DerivationIndex, gen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	}
 	back := *after
-	back.PublicKey = box0
+	back.PublicKey = derived(after.KeyGeneration)
+	back.NextKeyDigest = iacrypto.Blake3QB64Must([]byte(derived(after.KeyGeneration + 1)))
 	_ = w.s.DataStore.SaveIdentity(back)
 	if _, err := w.s.identitySigningSeed(); !errors.Is(err, errKeyElsewhere) {
 		t.Errorf("a handed-over identity whose record names the box's key derives its key again: %v", err)
 	}
 	if _, err := w.s.ownRotationKeys(); err == nil {
 		t.Error("a handed-over identity whose record names the box's key derives a rotation key")
+	}
+	// The same record without the mark is one the box signs and rotates for,
+	// so it is the mark, and nothing else, that refuses above.
+	unmarked := back
+	unmarked.HandedOver = false
+	_ = w.s.DataStore.SaveIdentity(unmarked)
+	if _, err := w.s.identitySigningSeed(); err != nil {
+		t.Fatalf("the record the test puts back is not one the box would sign for, so it tests nothing: %v", err)
+	}
+	if _, err := w.s.ownRotationKeys(); err != nil {
+		t.Fatalf("the record the test puts back is not one the box would rotate, so it tests nothing: %v", err)
 	}
 	_ = w.s.DataStore.SaveIdentity(*after)
 	if _, err := w.s.ownRotationKeys(); err == nil {

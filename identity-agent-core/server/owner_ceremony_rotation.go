@@ -455,6 +455,10 @@ func (s *CoreServer) handleCeremonySignature(w http.ResponseWriter, r *http.Requ
 		// After the second rotation nothing here signs for this identity. The
 		// record already names an owner's key as the current one, so the key
 		// is read as elsewhere; what is left is the signer a box installed.
+		// The mark is a second write after the rotation's: if it is lost, the
+		// record still names an owner's key, which already refuses every
+		// signature and rotation here; the mark is what holds if that record
+		// is ever put back.
 		s.eventSigners.Delete(ev.Identifier)
 		if err := s.markHandedOver(ev.Identifier); err != nil {
 			writeError(w, http.StatusInternalServerError, "The hand-over was made, and the record of it could not be kept", err.Error())

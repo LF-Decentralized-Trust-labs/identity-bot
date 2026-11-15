@@ -310,7 +310,9 @@ func (s *CoreServer) ceremonyInvitesTag(invites []byte) ([]byte, error) {
 // keepCeremonyInvite writes [in] to disk under its code. What is held is the
 // code that lets this phone's Identity Agent sign for that one ceremony, which
 // is why entries are dropped when their time is up, and why the file carries a
-// tag.
+// tag. A file whose tag does not hold reads as empty, so it is replaced by one
+// holding only this entry: its entries were never to be believed, and are not
+// carried over.
 func (s *CoreServer) keepCeremonyInvite(token string, in redeemedInvite) error {
 	ceremonyInvitesMu.Lock()
 	defer ceremonyInvitesMu.Unlock()
@@ -348,6 +350,13 @@ func (s *CoreServer) writeCeremonyInvites(kept map[string]keptCeremonyInvite) er
 // not yet out of time. A file whose tag does not hold, or that has none, or
 // that cannot be checked because the root seed cannot be read, holds nothing:
 // the ceremonies in it are not signed for, and the person is asked again.
+//
+// The tag says this device wrote the file; it does not say this is the newest
+// file it wrote. An older copy put back holds a valid tag and may lack a pin
+// written since. What stops a second, different event at a pinned place then
+// is the front end's own record of what it agreed to and signed, kept in the
+// platform's secure storage rather than in this folder, and the organisation's
+// log as its witnesses hold it, read again before signing.
 // Callers hold ceremonyInvitesMu.
 func (s *CoreServer) readCeremonyInvites() map[string]keptCeremonyInvite {
 	none := map[string]keptCeremonyInvite{}
