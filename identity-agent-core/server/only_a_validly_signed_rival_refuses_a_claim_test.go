@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
-	"identity-agent-core/witness"
 )
 
 func eventSAIDOf(t *testing.T, rec map[string]interface{}) string {
@@ -78,7 +78,7 @@ func TestOnlyAValidlySignedRivalRefusesAClaimInTheCore(t *testing.T) {
 				if strings.HasPrefix(r.URL.Path, "/witness/ksn/") {
 					raw, _ := buildNoticeOf(bob.witnessKey, c.aid, 2, heldSAID, time.Now())
 					key, sig, _ := bob.svc.SignReceipt(string(raw))
-					_ = json.NewEncoder(w).Encode(witness.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: key, Signature: sig})
+					_ = json.NewEncoder(w).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: key, Signature: sig})
 					return
 				}
 				_, _ = w.Write(body)

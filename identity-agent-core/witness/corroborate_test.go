@@ -3,6 +3,7 @@ package witness
 import (
 	"encoding/base64"
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,11 +159,11 @@ func (l *witnessedLog) receipt(t *testing.T, sn, at int) {
 // buildNoticeOf is a notice by witnessKey that states the log of aid as being at
 // place sn with digest said, for tests that have no whole log behind them.
 func buildNoticeOf(witnessKey, aid string, sn int, said string, at time.Time) ([]byte, error) {
-	rec := NoKeyState(aid)
+	rec := witnessproto.NoKeyState(aid)
 	if sn >= 0 {
 		rec.S, rec.D = strconv.FormatInt(int64(sn), 16), said
 	}
-	return BuildKeyStateNotice(witnessKey, rec, at)
+	return witnessproto.BuildKeyStateNotice(witnessKey, rec, at)
 }
 
 // a witness is a server at a registered address that states what it holds, signed
@@ -229,7 +230,7 @@ func (w *aWitness) serve(t *testing.T) {
 			return
 		}
 		sig, _ := login.SignString(string(raw), signer)
-		_ = json.NewEncoder(rw).Encode(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
+		_ = json.NewEncoder(rw).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
 	})
 	mux.HandleFunc("/witness/kel/", func(rw http.ResponseWriter, r *http.Request) {
 		if i := strings.LastIndex(r.URL.Path, "/event/"); i >= 0 {
@@ -253,13 +254,13 @@ func (w *aWitness) serve(t *testing.T) {
 			http.NotFound(rw, r)
 			return
 		}
-		raw, err := BuildWitnessLocation(w.key, w.location, w.at)
+		raw, err := witnessproto.BuildWitnessLocation(w.key, w.location, w.at)
 		if err != nil {
 			t.Error(err)
 			return
 		}
 		sig, _ := login.SignString(string(raw), signer)
-		_ = json.NewEncoder(rw).Encode(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
+		_ = json.NewEncoder(rw).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
 	})
 	w.srv = httptest.NewServer(mux)
 	t.Cleanup(w.srv.Close)
@@ -447,11 +448,11 @@ func TestAnUnsignedCopyOfTheLogIsNotAnAnswer(t *testing.T) {
 func TestAStaleNoticeIsNotBelieved(t *testing.T) {
 	l := buildWitnessedLog(t, witnessesOf(2), 2, []int{0, 1})
 	ws := l.witnessesHolding(t)
-	ws[0].at = time.Now().Add(-2 * KeyStateFreshness)
-	ws[1].at = time.Now().Add(2 * KeyStateFreshness)
+	ws[0].at = time.Now().Add(-2 * witnessproto.KeyStateFreshness)
+	ws[1].at = time.Now().Add(2 * witnessproto.KeyStateFreshness)
 	got := Corroborate(nil, registry(ws), l.prefix, l.records)
 	if got.Asked != 0 || got.Failed != 2 || got.Corroborated() {
-		t.Fatalf("a notice dated %v from now was believed: %+v", 2*KeyStateFreshness, got)
+		t.Fatalf("a notice dated %v from now was believed: %+v", 2*witnessproto.KeyStateFreshness, got)
 	}
 }
 
@@ -614,28 +615,28 @@ func TestAKeyStateNoticeIsReadOnlyAsWhatItIs(t *testing.T) {
 	w := witnessesOf(2)
 	key, seed := w.keys[0], w.seeds[w.keys[0]]
 	now := time.Now()
-	make := func(aid string, sn int, at time.Time, as []byte) SignedReply {
+	make := func(aid string, sn int, at time.Time, as []byte) witnessproto.SignedReply {
 		raw, err := buildNoticeOf(key, aid, sn, "ESaid00000000000000000000000000000000000000", at)
 		if err != nil {
 			t.Fatal(err)
 		}
 		sig, _ := login.SignString(string(raw), as)
-		return SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}
+		return witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}
 	}
-	if st, err := VerifyKeyStateNotice(make("EAid", 255, now, seed), key, "EAid", now); err != nil || st.SN != 255 {
+	if st, err := witnessproto.VerifyKeyStateNotice(make("EAid", 255, now, seed), key, "EAid", now); err != nil || st.SN != 255 {
 		t.Fatalf("a good notice was refused: %v %+v", err, st)
 	}
-	if _, err := VerifyKeyStateNotice(make("EAid", 1, now, seed), key, "EOther", now); err == nil {
+	if _, err := witnessproto.VerifyKeyStateNotice(make("EAid", 1, now, seed), key, "EOther", now); err == nil {
 		t.Fatal("a notice about another identifier was taken")
 	}
-	if _, err := VerifyKeyStateNotice(make("EAid", 1, now, w.seeds[w.keys[1]]), key, "EAid", now); err == nil {
+	if _, err := witnessproto.VerifyKeyStateNotice(make("EAid", 1, now, w.seeds[w.keys[1]]), key, "EAid", now); err == nil {
 		t.Fatal("a notice signed by another key was taken")
 	}
 	// Altered after it was signed.
 	good := make("EAid", 1, now, seed)
 	raw, _ := base64.StdEncoding.DecodeString(good.RpyB64)
 	good.RpyB64 = base64.StdEncoding.EncodeToString([]byte(strings.Replace(string(raw), `"s":"1"`, `"s":"0"`, 1)))
-	if _, err := VerifyKeyStateNotice(good, key, "EAid", now); err == nil {
+	if _, err := witnessproto.VerifyKeyStateNotice(good, key, "EAid", now); err == nil {
 		t.Fatal("an altered notice was taken")
 	}
 }
@@ -662,12 +663,12 @@ func TestTheNoticeAWitnessServesIsTheOneTheCheckerReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := VerifyKeyStateNotice(ans, key, l.prefix, time.Now())
+	st, err := witnessproto.VerifyKeyStateNotice(ans, key, l.prefix, time.Now())
 	if err != nil || st.SN != 0 || st.SAID != ev.SAID {
 		t.Fatalf("the served notice was not read as served: %v %+v", err, st)
 	}
 	ans, _ = s.KeyStateNotice(l.prefix, false)
-	if st, err := VerifyKeyStateNotice(ans, key, l.prefix, time.Now()); err != nil || st.SN != -1 {
+	if st, err := witnessproto.VerifyKeyStateNotice(ans, key, l.prefix, time.Now()); err != nil || st.SN != -1 {
 		t.Fatalf("an asker who may not read was told what is held: %v %+v", err, st)
 	}
 	s.OurWitnessAID = nil
@@ -679,7 +680,7 @@ func TestTheNoticeAWitnessServesIsTheOneTheCheckerReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := VerifyWitnessLocation(loc, key); err != nil || got.URL != "https://w.example" {
+	if got, err := witnessproto.VerifyWitnessLocation(loc, key); err != nil || got.URL != "https://w.example" {
 		t.Fatalf("the served location was not read as served: %v %+v", err, got)
 	}
 }
@@ -744,30 +745,30 @@ func TestAfterARotationTheWitnessesInForceAreTheOnesAsked(t *testing.T) {
 func TestALocationIsReadOnlyAsWhatItIs(t *testing.T) {
 	w := witnessesOf(2)
 	key, seed := w.keys[0], w.seeds[w.keys[0]]
-	reply := func(eid, url string, as []byte) SignedReply {
-		raw, err := BuildWitnessLocation(eid, url, time.Now())
+	reply := func(eid, url string, as []byte) witnessproto.SignedReply {
+		raw, err := witnessproto.BuildWitnessLocation(eid, url, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
 		sig, _ := login.SignString(string(raw), as)
-		return SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}
+		return witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}
 	}
-	if _, err := VerifyWitnessLocation(reply(key, "https://w.example", seed), key); err != nil {
+	if _, err := witnessproto.VerifyWitnessLocation(reply(key, "https://w.example", seed), key); err != nil {
 		t.Fatalf("a good location was refused: %v", err)
 	}
-	if _, err := VerifyWitnessLocation(reply(w.keys[1], "https://w.example", seed), key); err == nil {
+	if _, err := witnessproto.VerifyWitnessLocation(reply(w.keys[1], "https://w.example", seed), key); err == nil {
 		t.Fatal("a location for another witness was taken")
 	}
-	if _, err := VerifyWitnessLocation(reply(key, "ftp://w.example", seed), key); err == nil {
+	if _, err := witnessproto.VerifyWitnessLocation(reply(key, "ftp://w.example", seed), key); err == nil {
 		t.Fatal("an address that is not http or https was taken")
 	}
 	notice, _ := buildNoticeOf(key, "EAid", 1, "ESaid0000000000000000000000000000000000000", time.Now())
 	sig, _ := login.SignString(string(notice), seed)
-	if _, err := VerifyWitnessLocation(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(notice), Signature: sig}, key); err == nil {
+	if _, err := witnessproto.VerifyWitnessLocation(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(notice), Signature: sig}, key); err == nil {
 		t.Fatal("a key state notice was taken for a location")
 	}
 	loc := reply(key, "https://w.example", seed)
-	if _, err := VerifyKeyStateNotice(loc, key, "EAid", time.Now()); err == nil {
+	if _, err := witnessproto.VerifyKeyStateNotice(loc, key, "EAid", time.Now()); err == nil {
 		t.Fatal("a location was taken for a key state notice")
 	}
 }

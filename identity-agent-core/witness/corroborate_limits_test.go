@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -169,13 +170,13 @@ func TestASignedLocationThatIsInternalIsNotWentTo(t *testing.T) {
 	key, seed := w.keys[0], w.seeds[w.keys[0]]
 	locatedAt := ""
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		raw, err := BuildWitnessLocation(key, locatedAt, time.Now())
+		raw, err := witnessproto.BuildWitnessLocation(key, locatedAt, time.Now())
 		if err != nil {
 			t.Error(err)
 			return
 		}
 		sig, _ := login.SignString(string(raw), seed)
-		_ = json.NewEncoder(rw).Encode(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig})
+		_ = json.NewEncoder(rw).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig})
 	}))
 	defer srv.Close()
 
@@ -251,7 +252,7 @@ func TestTheNoticeIsKeripysAndCarriesTheFullKeyState(t *testing.T) {
 			t.Errorf("the key state record has no %q, which keripy's has", f)
 		}
 	}
-	var st KeyStateRecord
+	var st witnessproto.KeyStateRecord
 	_ = json.Unmarshal(rep.Data, &st)
 	last := parsed(t, mustRawOf(l.records[2]))
 	est := parsed(t, mustRawOf(l.records[1]))
@@ -271,10 +272,10 @@ func TestTheNoticeIsKeripysAndCarriesTheFullKeyState(t *testing.T) {
 
 	// A notice signed by the right key but naming another witness is not this
 	// witness's: it was made for somebody else's answer and replayed.
-	elsewhere, _ := BuildKeyStateNotice(w.keys[1], st, time.Now())
+	elsewhere, _ := witnessproto.BuildKeyStateNotice(w.keys[1], st, time.Now())
 	sig, _ := login.SignString(string(elsewhere), w.seeds[key])
-	replayed := SignedReply{RpyB64: base64.StdEncoding.EncodeToString(elsewhere), Signature: sig}
-	if _, err := VerifyKeyStateNotice(replayed, key, l.prefix, time.Now()); err == nil {
+	replayed := witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(elsewhere), Signature: sig}
+	if _, err := witnessproto.VerifyKeyStateNotice(replayed, key, l.prefix, time.Now()); err == nil {
 		t.Fatal("a notice for another witness's route was taken")
 	}
 }
@@ -284,12 +285,12 @@ func TestTheNoticeIsKeripysAndCarriesTheFullKeyState(t *testing.T) {
 func TestALocationOfAnotherSchemeIsRefusedForItsScheme(t *testing.T) {
 	w := witnessesOf(1)
 	key, seed := w.keys[0], w.seeds[w.keys[0]]
-	raw, err := keri.EndpointLocation(key, "ftp", "ftp://w.example", replyDate(time.Now()))
+	raw, err := keri.EndpointLocation(key, "ftp", "ftp://w.example", time.Now().UTC().Format("2006-01-02T15:04:05.000000+00:00"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sig, _ := login.SignString(string(raw), seed)
-	_, err = VerifyWitnessLocation(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}, key)
+	_, err = witnessproto.VerifyWitnessLocation(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}, key)
 	if err == nil || !strings.Contains(err.Error(), "scheme") {
 		t.Fatalf("an ftp location was not refused for its scheme: %v", err)
 	}

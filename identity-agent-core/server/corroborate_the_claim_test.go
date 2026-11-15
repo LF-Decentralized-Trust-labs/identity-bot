@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -89,7 +90,7 @@ func newStandInWitness(t *testing.T) *standInWitness {
 			return
 		}
 		sig, _ := login.SignString(string(raw), bytes.Repeat([]byte{7}, 32))
-		json.NewEncoder(rw).Encode(witness.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
+		json.NewEncoder(rw).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
 	})
 	mux.HandleFunc("/witness/kel/", func(rw http.ResponseWriter, r *http.Request) {
 		aid := r.URL.Path[len("/witness/kel/"):]
@@ -415,9 +416,9 @@ func (w *standInWitness) receipts(t *testing.T, aid string) {
 // buildNoticeOf is a notice by witnessKey that states the log of aid as at place
 // sn with digest said, for stand-in witnesses that hold no whole log.
 func buildNoticeOf(witnessKey, aid string, sn int, said string, at time.Time) ([]byte, error) {
-	rec := witness.NoKeyState(aid)
+	rec := witnessproto.NoKeyState(aid)
 	if sn >= 0 {
 		rec.S, rec.D = strconv.FormatInt(int64(sn), 16), said
 	}
-	return witness.BuildKeyStateNotice(witnessKey, rec, at)
+	return witnessproto.BuildKeyStateNotice(witnessKey, rec, at)
 }

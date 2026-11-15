@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"testing"
 	"time"
@@ -9,10 +10,9 @@ import (
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/endpoint"
-	"identity-agent-core/witness"
 )
 
-func keyStateOf(t *testing.T, base, path, witnessKey, aid string, headers func(*http.Request)) witness.KeyState {
+func keyStateOf(t *testing.T, base, path, witnessKey, aid string, headers func(*http.Request)) witnessproto.KeyState {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, base+path, nil)
 	if headers != nil {
@@ -26,11 +26,11 @@ func keyStateOf(t *testing.T, base, path, witnessKey, aid string, headers func(*
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s: %d", path, resp.StatusCode)
 	}
-	var ans witness.SignedReply
+	var ans witnessproto.SignedReply
 	if err := json.NewDecoder(resp.Body).Decode(&ans); err != nil {
 		t.Fatal(err)
 	}
-	st, err := witness.VerifyKeyStateNotice(ans, witnessKey, aid, time.Now())
+	st, err := witnessproto.VerifyKeyStateNotice(ans, witnessKey, aid, time.Now())
 	if err != nil {
 		t.Fatalf("GET %s: the notice does not verify: %v", path, err)
 	}
@@ -58,19 +58,19 @@ func TestAStrangerIsGivenTheNoticeOfALogNotHeld(t *testing.T) {
 	target := base + "/api/witness/ksn/" + c.aid
 	resp := c.signedGet(t, target, c.aid, c.signers[0], time.Now())
 	defer resp.Body.Close()
-	var ans witness.SignedReply
+	var ans witnessproto.SignedReply
 	if err := json.NewDecoder(resp.Body).Decode(&ans); err != nil {
 		t.Fatal(err)
 	}
-	if st, err := witness.VerifyKeyStateNotice(ans, bob.witnessKey, c.aid, time.Now()); err != nil || st.SN != 0 {
+	if st, err := witnessproto.VerifyKeyStateNotice(ans, bob.witnessKey, c.aid, time.Now()); err != nil || st.SN != 0 {
 		t.Fatalf("the identity was not told what its witness holds: %v %+v", err, st)
 	}
 	other, _ := keri.GenerateSigner(true)
 	resp2 := c.signedGet(t, target, c.aid, other, time.Now())
 	defer resp2.Body.Close()
-	var ans2 witness.SignedReply
+	var ans2 witnessproto.SignedReply
 	_ = json.NewDecoder(resp2.Body).Decode(&ans2)
-	if st, err := witness.VerifyKeyStateNotice(ans2, bob.witnessKey, c.aid, time.Now()); err != nil || st.SN != -1 {
+	if st, err := witnessproto.VerifyKeyStateNotice(ans2, bob.witnessKey, c.aid, time.Now()); err != nil || st.SN != -1 {
 		t.Fatalf("a signature by another key opened the notice: %v %+v", err, st)
 	}
 }
@@ -81,7 +81,7 @@ func TestAStrangerIsGivenTheNoticeOfALogNotHeld(t *testing.T) {
 func TestAWitnessSignsItsOwnAddressAndNoOtherAndNoneItDoesNotKnow(t *testing.T) {
 	bob := startPeer(t, "bob")
 	base := servedThroughTheRealRouter(t, bob)
-	status := func(path string, host string) (int, *witness.SignedReply) {
+	status := func(path string, host string) (int, *witnessproto.SignedReply) {
 		req, _ := http.NewRequest(http.MethodGet, base+path, nil)
 		if host != "" {
 			req.Host = host
@@ -91,7 +91,7 @@ func TestAWitnessSignsItsOwnAddressAndNoOtherAndNoneItDoesNotKnow(t *testing.T) 
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		var ans witness.SignedReply
+		var ans witnessproto.SignedReply
 		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&ans) != nil {
 			return resp.StatusCode, nil
 		}
@@ -115,7 +115,7 @@ func TestAWitnessSignsItsOwnAddressAndNoOtherAndNoneItDoesNotKnow(t *testing.T) 
 	if code != http.StatusOK || ans == nil {
 		t.Fatalf("the witness would not state its own location: %d", code)
 	}
-	loc, err := witness.VerifyWitnessLocation(*ans, bob.witnessKey)
+	loc, err := witnessproto.VerifyWitnessLocation(*ans, bob.witnessKey)
 	if err != nil || loc.URL != "https://bob.example" {
 		t.Fatalf("the location was %+v (%v), not the address the agent knows itself by", loc, err)
 	}

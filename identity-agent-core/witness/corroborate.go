@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -115,7 +116,7 @@ type WitnessAnswer struct {
 	// Key is the designated witness key, and URL the address that answered.
 	Key, URL string
 	// State is the witness's signed key state notice.
-	State KeyState
+	State witnessproto.KeyState
 	// Shown is the event the witness handed over when its notice stated more
 	// than was presented, or another event at a place of it: what that notice is
 	// believed by (see corroborateThrough). Nil when the notice stated no such
@@ -233,7 +234,7 @@ const witnessTimeout = 8 * time.Second
 // oneWitnessAnswer is what asking one designated witness produced.
 type oneWitnessAnswer struct {
 	base        string
-	state       KeyState
+	state       witnessproto.KeyState
 	shown       map[string]interface{}
 	replica     []map[string]interface{}
 	conflicting []map[string]interface{}
@@ -245,7 +246,7 @@ type oneWitnessAnswer struct {
 // contradiction when the witness shows an event that is validly signed by the
 // identity's own keys, which a witness cannot make. departure is the place of the
 // event to ask for, or -1 when the notice departs from nothing.
-func departure(state KeyState, presented []map[string]interface{}) int {
+func departure(state witnessproto.KeyState, presented []map[string]interface{}) int {
 	tip := len(presented) - 1
 	switch {
 	case state.SN > tip:
@@ -705,11 +706,11 @@ func getWitness(ctx context.Context, client *http.Client, base, route string, pr
 // services. A registry that itself writes a local address as the hint is
 // the operator's own choice, and its signed location may be local too.
 func LocateWitness(ctx context.Context, client *http.Client, hint, key string) string {
-	var ans SignedReply
+	var ans witnessproto.SignedReply
 	if err := getWitness(ctx, client, hint, "/witness/loc/"+key, nil, &ans); err != nil {
 		return hint
 	}
-	loc, err := VerifyWitnessLocation(ans, key)
+	loc, err := witnessproto.VerifyWitnessLocation(ans, key)
 	if err != nil {
 		return hint
 	}
@@ -741,10 +742,10 @@ func resolvesInternalBy(ctx context.Context, host string) bool {
 // (VerifyKeyStateNotice). The read carries the inception of the log being
 // checked, as FetchReplica does, so a witness that answers a stranger as for a
 // log it does not hold can recognise a verifier presenting the log.
-func FetchKeyState(ctx context.Context, client *http.Client, base, key, aid string, presented []map[string]interface{}, now time.Time) (KeyState, error) {
-	var ans SignedReply
+func FetchKeyState(ctx context.Context, client *http.Client, base, key, aid string, presented []map[string]interface{}, now time.Time) (witnessproto.KeyState, error) {
+	var ans witnessproto.SignedReply
 	if err := getWitness(ctx, client, base, "/witness/ksn/"+aid, presented, &ans); err != nil {
-		return KeyState{}, err
+		return witnessproto.KeyState{}, err
 	}
-	return VerifyKeyStateNotice(ans, key, aid, now)
+	return witnessproto.VerifyKeyStateNotice(ans, key, aid, now)
 }
