@@ -62,5 +62,26 @@
    "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
    "refuse": "needs the hardware"
   }
- ]
+ ],
+ "apple_assertion": {
+  "about": "An App Attest assertion over the SHA-256 of the proof text, made by Apple's published steps with a software key (no device produced it). Held by login-go and the Identity Agent's own VerifyAppleAssertion.",
+  "app_id": "TEAM123456.org.example.portal",
+  "key_x_hex": "f58fc1d880bc7174709f8141d8e6e3af7a0ffce49d661ff729987d535a552c2c",
+  "key_y_hex": "ee5fb36ec74c80f2279218ff69ba6d14b8a51a4f19e008506a182e07ac7ca4d5",
+  "proof_text": "IABK1\nGET\n/session/whoami\n2026-11-11T12:00:00Z\nnonce\nbinding\nbody",
+  "assertion_hex": "a2697369676e61747572655846304402206edceafa0c2a74721faf0bfdcf2ed9344662833241e2b8d22657b978ff0e7df102206e59daf81b771c5debad8b4b165a5fc2bf60f47fbec7e757b57f4d882438df8b7161757468656e74696361746f724461746158258e5d3f5dae9c29baf9afb4c500132179f94fbf5c27187e942c8b73b044cb42aa4000000007",
+  "counter": 7,
+  "refusals": [
+   {
+    "name": "a different program",
+    "app_id": "TEAM123456.org.evil",
+    "refuse": "different program"
+   },
+   {
+    "name": "another call's proof text",
+    "proof_text": "IABK1\nGET\n/session/other\n2026-11-11T12:00:00Z\nnonce\nbinding\nbody",
+    "refuse": "not the key's"
+   }
+  ]
+ }
 }

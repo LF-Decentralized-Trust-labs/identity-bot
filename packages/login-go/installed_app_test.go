@@ -1,10 +1,13 @@
 package login
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -86,3 +89,60 @@ func TestASitesPublicRoutesNeverDropAnInstalledAppsProofSilently(t *testing.T) {
 func b64uDecodeForTest(s string) ([]byte, error) { return base64RawURL.DecodeString(s) }
 
 var base64RawURL = base64.RawURLEncoding
+
+func TestAnAppleAssertionIsCheckedAsTheIdentityAgentChecksIt(t *testing.T) {
+	var v struct {
+		A struct {
+			AppID     string `json:"app_id"`
+			XHex      string `json:"key_x_hex"`
+			YHex      string `json:"key_y_hex"`
+			ProofText string `json:"proof_text"`
+			Assertion string `json:"assertion_hex"`
+			Counter   uint32 `json:"counter"`
+			Refusals  []struct {
+				Name      string `json:"name"`
+				AppID     string `json:"app_id"`
+				ProofText string `json:"proof_text"`
+				Refuse    string `json:"refuse"`
+			} `json:"refusals"`
+		} `json:"apple_assertion"`
+	}
+	raw, err := os.ReadFile("../login-web/test-vectors/installed-app.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	a := v.A
+	x, _ := hex.DecodeString(a.XHex)
+	y, _ := hex.DecodeString(a.YHex)
+	pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+	as, _ := hex.DecodeString(a.Assertion)
+	if !IsAssertionProof(as) || IsAssertionProof(make([]byte, 64)) {
+		t.Fatal("an assertion is told from a plain 64-byte proof by its length")
+	}
+	h := sha256.Sum256([]byte(a.ProofText))
+	n, err := VerifyAppleAssertion(as, h[:], pub, a.AppID)
+	if err != nil || n != a.Counter {
+		t.Fatalf("a good assertion: %d %v", n, err)
+	}
+	for _, c := range a.Refusals {
+		app, text := a.AppID, a.ProofText
+		if c.AppID != "" {
+			app = c.AppID
+		}
+		if c.ProofText != "" {
+			text = c.ProofText
+		}
+		hh := sha256.Sum256([]byte(text))
+		if _, err := VerifyAppleAssertion(as, hh[:], pub, app); err == nil || !strings.Contains(err.Error(), c.Refuse) {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+	}
+	for _, bad := range [][]byte{nil, {0xa1}, as[:len(as)-1], append(append([]byte{}, as...), 0)} {
+		if _, err := VerifyAppleAssertion(bad, h[:], pub, a.AppID); err == nil {
+			t.Fatalf("a malformed assertion was taken: %x", bad)
+		}
+	}
+}

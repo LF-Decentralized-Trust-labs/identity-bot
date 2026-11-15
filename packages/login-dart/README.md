@@ -19,6 +19,8 @@ Windows). A browser does not use it: its page is `login-web`.
 - `lib/front_end_key.dart` — `FrontEndKey`: `HardwareFrontEndKey`, an installed
   front end's key in its device's secure hardware (the platform supplies a
   `HardwareKeyPlatform`: login-flutter), and `SoftwareFrontEndKey` for tests.
+- `lib/apple_attest.dart` — the public key of an Apple App Attest attestation object (the
+  device gives that key only as an identifier).
 - `lib/installed_app.dart` — the evidence an installed front end's key is proved by
   and the start body that carries it, held to
   `../login-web/test-vectors/installed-app.json`, which `login-go` runs too.

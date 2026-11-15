@@ -45,20 +45,19 @@ object HardwareKey {
         return byteArrayOf(4) + fixed(w.affineX) + fixed(w.affineY)
     }
 
-    /** The key [label] names, made (without attestation) when there is none. */
-    fun publicPoint(label: String): ByteArray {
+    /** The key [label] names, or null when there is none yet: a key is made for an ask. */
+    fun publicPoint(label: String): ByteArray? {
         val ks = store()
-        if (!ks.containsAlias(label)) generate(label, null)
-        return point(ks.getCertificate(label))
+        return if (ks.containsAlias(label)) point(ks.getCertificate(label)) else null
     }
 
-    private fun generate(label: String, challenge: ByteArray?) {
+    private fun generate(label: String, challenge: ByteArray) {
         fun spec(strongBox: Boolean) = KeyGenParameterSpec.Builder(label, KeyProperties.PURPOSE_SIGN)
             .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             // SHA-256 for every call's proof; NONE so the key can sign the statement's digest as it is.
             .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_NONE)
             .apply {
-                if (challenge != null) setAttestationChallenge(challenge)
+                setAttestationChallenge(challenge)
                 if (strongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setIsStrongBoxBacked(true)
             }
             .build()
@@ -88,7 +87,7 @@ object HardwareKey {
     }
 
     /** ECDSA over SHA-256 of [message], ASN.1 DER. */
-    fun sign(label: String, message: ByteArray): ByteArray =
+    fun signCall(label: String, message: ByteArray): ByteArray =
         Signature.getInstance("SHA256withECDSA").apply { initSign(private_(label)); update(message) }.sign()
 
     /** ECDSA over [digest] as it is (the SHA-256 of the sign-in statement), ASN.1 DER. */

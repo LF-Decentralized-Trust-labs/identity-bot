@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:login_dart/app_session.dart';
 import 'package:login_dart/front_end_key.dart';
@@ -92,6 +93,32 @@ void main() {
     await t.pumpAndSettle(const Duration(milliseconds: 20));
     expect(find.textContaining('not accepted'), findsOneWidget);
     expect(got, isNull);
+  });
+
+  testWidgets(
+      'hardware that cannot prove its key is said so in its own words, not as the app being down',
+      (t) async {
+    final app = FakeApp(clock: DateTime.now().toUtc());
+    await t.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => t.binding.setSurfaceSize(null));
+    await t.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: UtilityAppSignInScreen(
+      appName: 'Task console',
+      makeClient: () => app.client,
+      assetId: (_) => app.assetId,
+      keyFor: (_) async => throw PlatformException(
+          code: 'tpm_evidence_unavailable',
+          message: 'The TPM cannot be proved yet.'),
+      storeFor: (_) => MemoryGrantStore(),
+      onSignedIn: (_) {},
+    ))));
+    await t.enterText(find.byKey(const Key('field-link')), linkOf(app));
+    await t.tap(find.byKey(const Key('sign-in')));
+    await t.pumpAndSettle();
+    expect(
+        find.textContaining('The TPM cannot be proved yet.'), findsOneWidget);
+    expect(find.textContaining('could not be reached'), findsNothing);
   });
 
   testWidgets('a notice about an ended session is shown above the sign-in',

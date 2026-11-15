@@ -133,13 +133,18 @@ abstract class HardwareKeyPlatform {
   /// The platform that vouches for the key: [InstalledPlatform].
   String get platform;
 
-  /// The uncompressed P-256 public point (65 bytes, 0x04 first) of the key
-  /// [label] names, made in hardware on first use and kept across restarts.
-  Future<Uint8List> publicPoint(String label);
+  /// Whether the proof of each call is an App Attest assertion (Apple), not a
+  /// plain ECDSA signature: an App Attest key signs only assertions.
+  bool get callProofIsAssertion => false;
 
-  /// ECDSA P-256 over SHA-256 of [message] by the key, ASN.1 DER as the hardware
-  /// gives it. This is what signs every call after sign-in.
-  Future<Uint8List> signDer(String label, Uint8List message);
+  /// The uncompressed P-256 public point (65 bytes, 0x04 first) of the key
+  /// [label] names, or null when there is none yet (a key is made for an ask).
+  Future<Uint8List?> publicPoint(String label);
+
+  /// The proof of one call, over [message] (the proof text): ECDSA P-256 over its
+  /// SHA-256, ASN.1 DER, as Android and a TPM give it, or, where
+  /// [callProofIsAssertion], the App Attest assertion over its SHA-256.
+  Future<Uint8List> signCall(String label, Uint8List message);
 
   /// Makes a NEW key under [label] in hardware for [challenge] (replacing any
   /// held) and gives its public point and the hardware's evidence that it is the
@@ -157,13 +162,15 @@ abstract class HardwareKeyPlatform {
 class HardwareFrontEndKey extends FrontEndKey {
   final HardwareKeyPlatform hardware;
   final String label;
-  String _x, _y;
+  String? _x, _y;
   HardwareFrontEndKey._(this.hardware, this.label, this._x, this._y);
 
   @override
-  String get x => _x;
+  String get x => _x ?? (throw StateError(_noKey));
   @override
-  String get y => _y;
+  String get y => _y ?? (throw StateError(_noKey));
+  static const _noKey =
+      'this front end has no key yet: it is made when a sign-in is started';
 
   static (String, String) _coordinates(Uint8List p) {
     if (p.length != 65 || p[0] != 4) {
@@ -177,7 +184,9 @@ class HardwareFrontEndKey extends FrontEndKey {
   /// secure hardware, a key that is not P-256) is the platform's to throw.
   static Future<HardwareFrontEndKey> open(
       HardwareKeyPlatform hardware, String label) async {
-    final (x, y) = _coordinates(await hardware.publicPoint(label));
+    final p = await hardware.publicPoint(label);
+    if (p == null) return HardwareFrontEndKey._(hardware, label, null, null);
+    final (x, y) = _coordinates(p);
     return HardwareFrontEndKey._(hardware, label, x, y);
   }
 
@@ -188,8 +197,11 @@ class HardwareFrontEndKey extends FrontEndKey {
   FrontEndKind get kind => FrontEndKind.installedApp;
 
   @override
-  Future<String> sign(String message) async => b64uEncode(derToRaw(
-      await hardware.signDer(label, Uint8List.fromList(utf8.encode(message)))));
+  Future<String> sign(String message) async {
+    final proof = await hardware.signCall(
+        label, Uint8List.fromList(utf8.encode(message)));
+    return b64uEncode(hardware.callProofIsAssertion ? proof : derToRaw(proof));
+  }
 
   @override
   Future<InstalledKeyProof?> prove(String assetId, InstalledAsk ask) async {

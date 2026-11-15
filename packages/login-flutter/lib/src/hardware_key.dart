@@ -1,17 +1,17 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:login_dart/apple_attest.dart';
 import 'package:login_dart/front_end_key.dart';
 import 'package:login_dart/installed_app.dart';
 
 /// The device's secure hardware, reached through the platform's own code (the
-/// plugin's android/ folder). One channel, four calls, the ones
+/// plugin's android/, darwin/ and windows/ folders). One channel, four calls, the ones
 /// `HardwareKeyPlatform` names; the key never crosses it, only its public point,
 /// signatures and the platform's evidence, all as bytes.
 ///
-/// Built here, not tested here: only Android's side exists (see README, "Not
-/// built"), and no hardware is attached to this repository's tests. The tests
-/// run this class against a fake channel, which holds the Dart half of the
-/// contract to what the Android side returns.
+/// No hardware is attached to this repository's tests: they run this class
+/// against a fake channel, which holds the Dart half of the contract to what each
+/// platform's code returns (see the README for what is untested on a device).
 class MethodChannelHardwareKey implements HardwareKeyPlatform {
   static const channelName = 'org.identityagent.login_flutter/hardware_key';
   final MethodChannel _channel;
@@ -50,16 +50,29 @@ class MethodChannelHardwareKey implements HardwareKeyPlatform {
   }
 
   @override
-  Future<Uint8List> publicPoint(String label) =>
-      _bytes('publicPoint', {'label': label});
+  bool get callProofIsAssertion => _platform == InstalledPlatform.apple;
 
   @override
-  Future<Uint8List> signDer(String label, Uint8List message) =>
-      _bytes('sign', {'label': label, 'message': message});
+  Future<Uint8List?> publicPoint(String label) =>
+      _channel.invokeMethod<Uint8List>('publicPoint', {'label': label});
+
+  @override
+  Future<Uint8List> signCall(String label, Uint8List message) =>
+      _bytes('signCall', {'label': label, 'message': message});
 
   @override
   Future<({Uint8List point, Uint8List evidence})> attestNewKey(
       String label, Uint8List challenge) async {
+    if (_platform == InstalledPlatform.apple) {
+      // The device gives an App Attest key only as an identifier, so its public point is
+      // read from the attestation object, and kept for the next run.
+      final evidence = await _bytes(
+          'attestNewKey', {'label': label, 'challenge': challenge});
+      final point = appleAttestedPoint(evidence);
+      await _channel
+          .invokeMethod<void>('keepPoint', {'label': label, 'point': point});
+      return (point: point, evidence: evidence);
+    }
     final r = await _channel.invokeMapMethod<String, Object?>(
         'attestNewKey', {'label': label, 'challenge': challenge});
     final point = r?['point'], evidence = r?['evidence'];

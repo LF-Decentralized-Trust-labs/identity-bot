@@ -191,12 +191,14 @@ class FakeHardware implements HardwareKeyPlatform {
   int made = 0;
   @override
   String get platform => InstalledPlatform.android;
+  @override
+  bool get callProofIsAssertion => false;
   Uint8List get _point =>
       Uint8List.fromList([4, ...b64uDecode(key.x)!, ...b64uDecode(key.y)!]);
   @override
-  Future<Uint8List> publicPoint(String label) async => _point;
+  Future<Uint8List?> publicPoint(String label) async => _point;
   @override
-  Future<Uint8List> signDer(String label, Uint8List message) async =>
+  Future<Uint8List> signCall(String label, Uint8List message) async =>
       rawToDer(b64uDecode(await key.sign(utf8.decode(message)))!);
   @override
   Future<({Uint8List point, Uint8List evidence})> attestNewKey(

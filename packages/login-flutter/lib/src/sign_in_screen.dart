@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
 import 'package:login_dart/app_checks.dart';
 import 'package:login_dart/app_session.dart';
@@ -100,6 +101,12 @@ class _State extends State<UtilityAppSignInScreen> {
       if (mounted) setState(() => _error = e.message);
     } on TrustRefused catch (e) {
       if (mounted) setState(() => _error = e.message);
+    } on PlatformException catch (e) {
+      // The device's hardware said why it cannot make or prove the key: say that, not that the app is down.
+      if (mounted) {
+        setState(() => _error = e.message ??
+            'This device\'s secure hardware could not make the key.');
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _error =

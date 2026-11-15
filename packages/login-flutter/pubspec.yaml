@@ -30,3 +30,11 @@ flutter:
       android:
         package: org.identityagent.login_flutter
         pluginClass: LoginFlutterPlugin
+      ios:
+        pluginClass: LoginFlutterPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: LoginFlutterPlugin
+        sharedDarwinSource: true
+      windows:
+        pluginClass: LoginFlutterPluginCApi
