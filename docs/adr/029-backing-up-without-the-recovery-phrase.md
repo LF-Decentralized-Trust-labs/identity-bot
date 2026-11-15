@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-07-29
 **Extends:** ADR-014 (Key Custody), ADR-027 (Hardware-Gated Signing Key Custody)
+**Amended:** 2026-11-15 — a slot bound to the file it is in (see "Amendment, 2026-11-15" at the end)
 
 ## Context
 
@@ -49,3 +50,26 @@ Two related changes follow from the same reasoning:
 **Name recipients in the manifest so the right slot can be found directly.** Rejected: the manifest is not encrypted, so it would publish an organisation's ownership to anyone holding its backup.
 
 **Keep sending the phrase and accept it.** Rejected. It is the thing that makes running on hardware you do not control unsafe, and it forced the phrase to live on the device permanently.
+
+## Amendment, 2026-11-15: a slot bound to the file it is in
+
+### Context
+
+A `sealed_x25519_v1` slot wraps the backup key with no authenticated data. That is right while a file's body is authenticated against its whole header, slots included, but then no slot can ever be added to a file, because adding one changes the header and the body no longer opens. A holder of the backup key who is asked to give the file to a new recipient would have to re-encrypt the body.
+
+### Decision
+
+A second slot type, `sealed_x25519_v2`, for a backup whose body authenticates only a fixed preamble and a random 16-byte **file identifier**, not its slots.
+
+- The slot layout is unchanged: ephemeral public key (32 bytes), nonce (12), wrapped backup key with its tag (48).
+- The key that wraps the backup key comes from the same X25519 exchange and the same HKDF-SHA256 (salt: the ephemeral public key then the recipient's public key), under its own label, `identity-agent-backup-seal-shared-v2`, in place of `identity-agent-backup-seal-shared-v1`.
+- The wrap is AES-256-GCM with the **file identifier as its authenticated data**.
+
+So a slot lifted out of one file does not open in another, a v1 slot is never read as a v2 slot or the other way round, and whoever holds a file's backup key can add a slot for a new recipient without touching the body. The archive still names no recipient (the rule above is unchanged), and any single recipient's slot still opens it.
+
+`UnsealBEKForFile` opens such a slot. The committed vectors for both slot types are in `identity-agent-core/backup/testdata/seal-slot-vectors.json`; an implementation that writes these slots checks its output against them. Nothing in the core writes a v2 slot: the core publishes the format, the vectors and the checker.
+
+### Consequences
+
+A file format that uses v2 slots must authenticate its body against the preamble and the file identifier, never the slots, and must draw a fresh random backup key for every file (a holder who is asked to open a file hands back that file's key). Removing a slot only denies access to that recipient; it does not change the key, so a recipient who already holds the key keeps it.
+
