@@ -156,6 +156,7 @@ sequenceDiagram
 - the owner's setting of which front ends an app offers may be used through, and its enforcement when a sign-in starts and again when it is approved (Amendment 2)
 - an installed front end's hardware key, proved by a hardware attestation the core verifies, and its app-key grant, which lasts until it is ended and which the person and the owner can end (Amendment 3)
 - sealed front-end traffic: the format, test vectors, the page's side in TypeScript and in Dart (`packages/login-dart`, which every installed front end uses), and the Go side (Amendment 4)
+- revocation of an installed app's grant pushed to the app's back end, signed with the app's key (Amendment 9)
 - a relay identifier's witnesses, the owner's declaration that makes a witness hold its log, and the page's and Dart's reading of the log from them, with test vectors (Amendment 5)
 
 **Not built:**
@@ -164,7 +165,6 @@ sequenceDiagram
 - an app claiming its own relay name
 - the back end carrying a front end's signed request to the core
 - an app's approval request for one action
-- revocation pushed to the app
 
 The talk-route path that ADR-066 describes is built, and conforms to this ADR as of Amendment 1.
 
@@ -336,3 +336,22 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 
 **Not built.** The Identity Agent does not tell the back end when the owner or the person ends a grant there: the back end finds out at its standing check, which asks whether the key still speaks for the person (within a minute), not at each call. Revocation push for it remains Amendment 3's "not settled". Nothing here has run against a real device or a real TPM manufacturer's chain.
 
+## Amendment 9 (2026-11-15): the core tells an app's back end when an installed app's grant ends
+
+*Amended 2026-11-15. This builds the push section 6 describes, for an installed app's grant; Amendments 3 and 8 listed it as not built. Edits above, each made by this amendment: one line of "What is built" added, and "revocation pushed to the app" removed from "Not built". Nothing else above is changed.*
+
+**What is pushed, and when.** When an installed app's grant ends by any road (the person ends it, the owner ends it, the owner switches the installed front end off, a member is removed, or the app's own back end signs the person out), the core tells the app's back end, after the grant is already gone from the core. The back end ends every session and app-key grant it holds for that person at that key at once, instead of at its next standing check.
+
+**Where it goes.** The grant's record keeps the address the sign-in was approved for, which is the audience the app's own back end named when it started the sign-in. The core posts the notice to `/identity-agent/grant-ended` at that address, through the relay when the address is a relay name. The address is only an `https` origin, and the core dials only public addresses (a loopback, private or link-local address, and a redirect, are refused), because the address came from the app.
+
+**What is sent.** One JSON body: `v`, `asset` (the app's identifier), `key` (the front end key's thumbprint), `person` (as the app knows them), `issued` (UTC, to the second) and `signature`, Ed25519 by the app's asset key over `identity-agent grant-ended v1`, then the four fields, one to a line. The key is the one that already signs the app's challenges, which the app's back end holds the identifier of. The back end refuses a notice for another asset, one it cannot check, one with a field it does not define, and one dated more than five minutes from its clock, which stops an old notice ending a grant the same key was later given again. Ending is idempotent, so a repeated notice does no harm inside the window. The shape and the check are `packages/login-go/grant_ended.go` (`VerifyGrantEnded`, `GrantEndedHandler`), and the core's signer and login-go's check both run `packages/login-web/test-vectors/grant-ended.json`.
+
+**What the back end may rely on, and not.** The notice is sent by the core once, then again after 2, 10 and 60 seconds if the back end cannot take it (a 5xx, a timeout or no answer); a 4xx other than 408 and 429 is the back end's refusal and is not repeated, and is logged by the core. A notice can be lost, so the back end's standing check (Amendment 8) stays: the core's refusal at each use is the guarantee, and the push is what makes the back end's own sessions end at once when it is reachable.
+
+**What the relay can see.** That a notice was posted to the app and when; the body is signed and not sealed, so the relay can read the key's thumbprint and the person's pairwise identifier. A relay already sees which app a person reaches and when; it learns here that a grant ended. Sealing the notice to the back end's sealing key (Amendment 4) needs the core to know that key, which it does not today.
+
+**Not built.**
+- A browser's session is not pushed. It lapses within a working day and its record keeps no address. Switching the browser front end off still stops it at the next standing check.
+- The add-ons' hosts (the back end half in `identity-agent-addons`) do not yet serve `/identity-agent/grant-ended`: `login.GrantEndedHandler` is the code they mount, and ending each host's own sessions is theirs.
+- A grant recorded before this had no address and is never pushed; it ends at the standing check as before.
+- Nothing here has run against a real device, a real relay operator, or an installed front end.

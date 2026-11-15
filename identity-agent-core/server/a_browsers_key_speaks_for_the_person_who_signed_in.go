@@ -58,18 +58,28 @@ type browserKeyRecord struct {
 	// so the same gate can be asked again whenever the key is used: a credential
 	// that has lapsed or been revoked since stops the key speaking.
 	Presented []interface{} `json:"presented,omitempty"`
+	// Push is the address the app's back end took this sign-in at (the origin the
+	// person approved it for), where the core tells it the grant has ended
+	// (ADR-072 section 6). Only an installed app's grant keeps one.
+	Push string `json:"push,omitempty"`
 }
 
 // browserKeys is the record, kept in a file of its own beside the others so a
 // restart does not make everyone sign in again.
 type browserKeys struct {
 	dataDir string
+	// ended is told which installed-app grants an End just removed, after the
+	// record is saved. It must not wait on anything: the owner's or the person's
+	// own action is not held up by an app's back end.
+	ended func([]browserKeyRecord)
 }
 
 // One lock for the process, for the reason grantsLock is.
 var browserKeysLock sync.Mutex
 
-func (s *CoreServer) browserKeys() *browserKeys { return &browserKeys{dataDir: s.DataDir} }
+func (s *CoreServer) browserKeys() *browserKeys {
+	return &browserKeys{dataDir: s.DataDir, ended: s.tellBackEndsGrantsEnded}
+}
 
 func (b *browserKeys) path() string { return filepath.Join(b.dataDir, "browser_key_sign_ins.json") }
 
@@ -100,7 +110,13 @@ func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.T
 // RecordAppKey keeps that an installed app's hardware key speaks for person at
 // asset until it is ended (an app-key grant, ADR-072 section 4).
 func (b *browserKeys) RecordAppKey(asset, person, thumbprint string, now time.Time, presented []interface{}, proof installedAppFact) error {
-	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, time.Time{}, now, presented, &proof)
+	return b.RecordAppKeyAt("", asset, person, thumbprint, now, presented, proof)
+}
+
+// RecordAppKeyAt is RecordAppKey for a grant whose back end is told when it ends,
+// at push.
+func (b *browserKeys) RecordAppKeyAt(push, asset, person, thumbprint string, now time.Time, presented []interface{}, proof installedAppFact) error {
+	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, time.Time{}, now, presented, &proof, push)
 }
 
 // liveAt: a record with a lapse time lives until it; only an installed app's
@@ -115,13 +131,13 @@ func (b *browserKeyRecord) liveAt(now time.Time) bool {
 }
 
 func (b *browserKeys) record(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}) error {
-	return b.recordWith(asset, person, thumbprint, frontEnd, until, now, presented, nil)
+	return b.recordWith(asset, person, thumbprint, frontEnd, until, now, presented, nil, "")
 }
 
 // errGrantHeld is a live app-key grant for another person at the key.
 var errGrantHeld = errors.New("this key already speaks for another person: that grant must end first")
 
-func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}, proof *installedAppFact) error {
+func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}, proof *installedAppFact, push string) error {
 	if asset == "" || person == "" {
 		return errors.New("a browser key speaks for a person at an asset")
 	}
@@ -147,7 +163,7 @@ func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, unt
 			delete(all, k)
 		}
 	}
-	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, FrontEnd: frontEnd, Proof: proof, Presented: presented}
+	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, FrontEnd: frontEnd, Proof: proof, Presented: presented, Push: push}
 	return b.save(all)
 }
 
@@ -216,6 +232,7 @@ func (b *browserKeys) End(asset, thumbprint, person string) (int, error) {
 		return 0, err
 	}
 	n := 0
+	var gone []browserKeyRecord
 	for k, r := range all {
 		if r.Asset != asset {
 			continue
@@ -223,12 +240,33 @@ func (b *browserKeys) End(asset, thumbprint, person string) (int, error) {
 		if (thumbprint != "" && r.Thumbprint == thumbprint) || (thumbprint == "" && r.Person == person) {
 			delete(all, k)
 			n++
+			gone = append(gone, r)
 		}
 	}
 	if n == 0 {
 		return 0, nil
 	}
-	return n, b.save(all)
+	if err := b.save(all); err != nil {
+		return n, err
+	}
+	b.tell(gone)
+	return n, nil
+}
+
+// tell passes on the installed-app grants a call just removed.
+func (b *browserKeys) tell(gone []browserKeyRecord) {
+	if b.ended == nil {
+		return
+	}
+	var apps []browserKeyRecord
+	for _, r := range gone {
+		if r.FrontEnd == login.FrontEndInstalledApp {
+			apps = append(apps, r)
+		}
+	}
+	if len(apps) > 0 {
+		b.ended(apps)
+	}
 }
 
 // keysSpeakingAt is the trail.KeyRoster for one app asset: a key speaks for a

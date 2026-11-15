@@ -41,6 +41,7 @@ func (b *browserKeys) EndKind(asset, kind string) (int, error) {
 		return 0, err
 	}
 	n := 0
+	var gone []browserKeyRecord
 	for k, r := range all {
 		rk := r.FrontEnd
 		if rk == "" {
@@ -49,12 +50,17 @@ func (b *browserKeys) EndKind(asset, kind string) (int, error) {
 		if r.Asset == asset && rk == kind {
 			delete(all, k)
 			n++
+			gone = append(gone, r)
 		}
 	}
 	if n == 0 {
 		return 0, nil
 	}
-	return n, b.save(all)
+	if err := b.save(all); err != nil {
+		return n, err
+	}
+	b.tell(gone)
+	return n, nil
 }
 
 // AppKeyGrants are the live installed-app records at the asset, oldest first.
