@@ -652,6 +652,9 @@ func New(cfg Config) (*CoreServer, error) {
 	} else if err != nil {
 		log.Printf("[identity-agent-core] ERROR: assets are unavailable until this is fixed; a file the asset store needs could not be read, and nothing was changed: %v", err)
 	}
+	// The engine holds nothing after a restart: every asset's identity is
+	// handed back to it now, after the owner's log it may be approved in.
+	s.reviveAssetIdentities()
 	// A ceremony record from an earlier version held its invite codes in the
 	// clear: carried to digests now, and the server does not start if it cannot be.
 	if err := s.migrateCeremony(); err != nil {
