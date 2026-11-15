@@ -1,145 +1,149 @@
 #include "tpm_key.h"
 
 #include <windows.h>
-#include <bcrypt.h>
+#include <dpapi.h>
 #include <ncrypt.h>
+#include <shlobj.h>
+#include <tbs.h>
 
-#include <codecvt>
-#include <locale>
-
-// NOT COMPILED OR RUN: no Windows machine was available when this was written.
-//
-// What is here is what CNG documents: a persisted, non-exportable ECDSA P-256 key in the
-// Platform Crypto Provider (the TPM), its public point, and signatures. What is NOT here is
-// the evidence the Identity Agent asks of a TPM key (tpm_key_certify.go: a TPM2_Certify by an
-// attestation key, the EK certificate chain and a TPM2_ActivateCredential result): the core
-// states that its half of that exchange (the TPM2_MakeCredential blob the app must activate)
-// is not built and that no TPM manufacturer root is pinned yet, so evidence made now could
-// not be accepted. See README, "Not built".
+// NOT COMPILED OR RUN ON WINDOWS: no Windows machine was available when this was written.
+// What was run is everything under tpm2.cpp, on Linux against a software TPM (test/). What
+// is Windows's own and unproved is here: the TBS calls, DPAPI, the file location, and the
+// CNG property that fetches an EK certificate the TPM does not carry.
 
 namespace tpm_key {
 namespace {
 
-std::wstring Wide(const std::string& s) {
-  return std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes("identity-agent.login_flutter." + s);
-}
-
-struct Provider {
-  NCRYPT_PROV_HANDLE h = 0;
-  ~Provider() { if (h) NCryptFreeObject(h); }
-};
-struct Key {
-  NCRYPT_KEY_HANDLE h = 0;
-  ~Key() { if (h) NCryptFreeObject(h); }
-};
-
-bool Fail(Failure* why, const char* code, SECURITY_STATUS s) {
-  if (why) {
-    why->code = code;
-    why->message = std::string(code) + " failed, status 0x" + std::to_string(static_cast<unsigned long>(s));
+// One TBS context per call: transient objects belong to it and go with it.
+struct Tbs {
+  TBS_HCONTEXT ctx = 0;
+  ~Tbs() { if (ctx) Tbsip_Context_Close(ctx); }
+  bool Open(Failure* why) {
+    // TBS_CONTEXT_PARAMS2 as the Windows SDK declares it (version 2, with the TPM 2.0 bit
+    // set), spelt here because not every toolchain's tbs.h has it.
+    struct Params2 { UINT32 version; UINT32 flags; } p{2, 1u << 1 /*includeTpm20*/};
+    TBS_RESULT r = Tbsi_Context_Create(reinterpret_cast<const TBS_CONTEXT_PARAMS*>(&p), &ctx);
+    if (r != TBS_SUCCESS) {
+      if (why) *why = {"no_tpm", "this computer has no TPM 2.0 the app can use (TBS status 0x" + std::to_string(static_cast<unsigned long>(r)) + ")", 0};
+      return false;
+    }
+    return true;
   }
-  return false;
-}
-
-bool Open(Provider& p, Failure* why) {
-  SECURITY_STATUS s = NCryptOpenStorageProvider(&p.h, MS_PLATFORM_CRYPTO_PROVIDER, 0);
-  return s == ERROR_SUCCESS || Fail(why, "no_tpm", s);
-}
-
-std::optional<Bytes> Point(NCRYPT_KEY_HANDLE k, Failure* why) {
-  DWORD n = 0;
-  SECURITY_STATUS s = NCryptExportKey(k, 0, BCRYPT_ECCPUBLIC_BLOB, nullptr, nullptr, 0, &n, 0);
-  if (s != ERROR_SUCCESS) { Fail(why, "export", s); return std::nullopt; }
-  Bytes blob(n);
-  s = NCryptExportKey(k, 0, BCRYPT_ECCPUBLIC_BLOB, nullptr, blob.data(), n, &n, 0);
-  if (s != ERROR_SUCCESS) { Fail(why, "export", s); return std::nullopt; }
-  auto* h = reinterpret_cast<BCRYPT_ECCKEY_BLOB*>(blob.data());
-  if (h->dwMagic != BCRYPT_ECDSA_PUBLIC_P256_MAGIC || h->cbKey != 32 || n < sizeof(*h) + 64) {
-    Fail(why, "not_p256", 0);
-    return std::nullopt;
+  tpm2::Transport Transport() {
+    return [this](const Bytes& cmd, Bytes* resp) {
+      resp->assign(4096, 0);
+      UINT32 n = static_cast<UINT32>(resp->size());
+      TBS_RESULT r = Tbsip_Submit_Command(ctx, TBS_COMMAND_LOCALITY_ZERO, TBS_COMMAND_PRIORITY_NORMAL, cmd.data(),
+                                          static_cast<UINT32>(cmd.size()), resp->data(), &n);
+      if (r != TBS_SUCCESS) return false;
+      resp->resize(n);
+      return true;
+    };
   }
-  Bytes out{0x04};
-  out.insert(out.end(), blob.begin() + sizeof(*h), blob.begin() + sizeof(*h) + 64);
-  return out;
+};
+
+std::wstring Dir() {
+  PWSTR local = nullptr;
+  std::wstring dir;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+    dir = std::wstring(local) + L"\\identity-agent";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    dir += L"\\login_flutter";
+    CreateDirectoryW(dir.c_str(), nullptr);
+  }
+  if (local) CoTaskMemFree(local);
+  return dir;
 }
 
-// CNG gives r then s, 32 bytes each; the Identity Agent reads ASN.1 DER.
-Bytes ToDer(const unsigned char* raw) {
-  auto part = [](const unsigned char* v) {
-    Bytes b(v, v + 32);
-    while (b.size() > 1 && b[0] == 0) b.erase(b.begin());
-    if (b[0] & 0x80) b.insert(b.begin(), 0);
-    Bytes out{0x02, static_cast<unsigned char>(b.size())};
-    out.insert(out.end(), b.begin(), b.end());
-    return out;
-  };
-  Bytes r = part(raw), s = part(raw + 32);
-  Bytes out{0x30, static_cast<unsigned char>(r.size() + s.size())};
-  out.insert(out.end(), r.begin(), r.end());
-  out.insert(out.end(), s.begin(), s.end());
-  return out;
+std::wstring Path(const std::string& name) {
+  std::wstring w;
+  for (char c : name) {  // a label is made of the app's own characters: keep to a safe set
+    w += (isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-') ? static_cast<wchar_t>(c) : L'_';
+  }
+  return Dir() + L"\\" + w + L".blob";
 }
 
-std::optional<Bytes> Sign(const std::string& label, const Bytes& digest, Failure* why) {
-  Provider p;
-  if (!Open(p, why)) return std::nullopt;
-  Key k;
-  SECURITY_STATUS s = NCryptOpenKey(p.h, &k.h, Wide(label).c_str(), 0, 0);
-  if (s != ERROR_SUCCESS) { Fail(why, "no_key", s); return std::nullopt; }
+// The key blob is the TPM's (its private part opens only in this TPM, under this storage
+// key), and DPAPI keeps it to this Windows user as well.
+struct DpapiFiles : tpm2::BlobStore {
+  bool Put(const std::string& name, const Bytes& v) override {
+    DATA_BLOB in{static_cast<DWORD>(v.size()), const_cast<BYTE*>(v.data())}, out{};
+    if (!CryptProtectData(&in, L"identity-agent login_flutter key", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return false;
+    HANDLE f = CreateFileW(Path(name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD wrote = 0;
+    bool ok = f != INVALID_HANDLE_VALUE && WriteFile(f, out.pbData, out.cbData, &wrote, nullptr) && wrote == out.cbData;
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    LocalFree(out.pbData);
+    return ok;
+  }
+  std::optional<Bytes> Get(const std::string& name) override {
+    HANDLE f = CreateFileW(Path(name).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return std::nullopt;
+    DWORD size = GetFileSize(f, nullptr), got = 0;
+    Bytes raw(size == INVALID_FILE_SIZE || size > (1u << 20) ? 0 : size);
+    bool ok = !raw.empty() && ReadFile(f, raw.data(), size, &got, nullptr) && got == size;
+    CloseHandle(f);
+    if (!ok) return std::nullopt;
+    DATA_BLOB in{static_cast<DWORD>(raw.size()), raw.data()}, out{};
+    if (!CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return std::nullopt;
+    Bytes v(out.pbData, out.pbData + out.cbData);
+    LocalFree(out.pbData);
+    return v;
+  }
+};
+
+// The certificate a TPM without one in its own memory can still have: Windows fetches the
+// ones its makers publish (PCP_EKCERT on the Platform Crypto Provider).
+std::optional<Bytes> EkCertificateFromWindows() {
+  NCRYPT_PROV_HANDLE p = 0;
+  if (NCryptOpenStorageProvider(&p, MS_PLATFORM_CRYPTO_PROVIDER, 0) != ERROR_SUCCESS) return std::nullopt;
   DWORD n = 0;
-  s = NCryptSignHash(k.h, nullptr, const_cast<PBYTE>(digest.data()), static_cast<DWORD>(digest.size()), nullptr, 0, &n, 0);
-  if (s != ERROR_SUCCESS || n != 64) { Fail(why, "sign", s); return std::nullopt; }
-  Bytes sig(n);
-  s = NCryptSignHash(k.h, nullptr, const_cast<PBYTE>(digest.data()), static_cast<DWORD>(digest.size()), sig.data(), n, &n, 0);
-  if (s != ERROR_SUCCESS) { Fail(why, "sign", s); return std::nullopt; }
-  return ToDer(sig.data());
-}
-
-Bytes Sha256(const Bytes& m) {
-  Bytes out(32);
-  BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, const_cast<PUCHAR>(m.data()), static_cast<ULONG>(m.size()), out.data(), 32);
+  std::optional<Bytes> out;
+  if (NCryptGetProperty(p, L"PCP_EKCERT", nullptr, 0, &n, 0) == ERROR_SUCCESS && n > 0 && n <= 8192) {
+    Bytes b(n);
+    if (NCryptGetProperty(p, L"PCP_EKCERT", b.data(), n, &n, 0) == ERROR_SUCCESS) {
+      b.resize(n);
+      out = b;
+    }
+  }
+  NCryptFreeObject(p);
   return out;
 }
 
 }  // namespace
 
-std::optional<Bytes> PublicPoint(const std::string& label, Failure* why) {
-  Provider p;
-  if (!Open(p, why)) return std::nullopt;
-  Key k;
-  SECURITY_STATUS s = NCryptOpenKey(p.h, &k.h, Wide(label).c_str(), 0, 0);
-  if (s == NTE_BAD_KEYSET) return std::nullopt;  // no key yet: not a failure
-  if (s != ERROR_SUCCESS) { Fail(why, "open", s); return std::nullopt; }
-  return Point(k.h, why);
+std::optional<Bytes> PublicPoint(const std::string& label, Failure*) {
+  DpapiFiles store;
+  return tpm2::PublicPointOf(store, label);
 }
 
-std::optional<Bytes> CreateKey(const std::string& label, Failure* why) {
-  Provider p;
-  if (!Open(p, why)) return std::nullopt;
-  {
-    Key old;
-    if (NCryptOpenKey(p.h, &old.h, Wide(label).c_str(), 0, 0) == ERROR_SUCCESS) {
-      NCryptDeleteKey(old.h, 0);
-      old.h = 0;  // NCryptDeleteKey frees the handle
-    }
-  }
-  Key k;
-  SECURITY_STATUS s = NCryptCreatePersistedKey(p.h, &k.h, BCRYPT_ECDSA_P256_ALGORITHM, Wide(label).c_str(), 0, 0);
-  if (s != ERROR_SUCCESS) { Fail(why, "create", s); return std::nullopt; }
-  DWORD usage = NCRYPT_ALLOW_SIGNING_FLAG;
-  s = NCryptSetProperty(k.h, NCRYPT_KEY_USAGE_PROPERTY, reinterpret_cast<PBYTE>(&usage), sizeof(usage), NCRYPT_PERSIST_FLAG);
-  if (s != ERROR_SUCCESS) { Fail(why, "usage", s); return std::nullopt; }
-  s = NCryptFinalizeKey(k.h, 0);
-  if (s != ERROR_SUCCESS) { Fail(why, "finalize", s); return std::nullopt; }
-  return Point(k.h, why);
+std::optional<tpm2::Enrolment> Enrol(const std::string& label, Failure* why) {
+  Tbs tbs;
+  if (!tbs.Open(why)) return std::nullopt;
+  tpm2::Device dev(tbs.Transport());
+  DpapiFiles store;
+  return tpm2::MakeEnrolment(dev, store, label, EkCertificateFromWindows, why);
 }
 
-std::optional<Bytes> SignCall(const std::string& label, const Bytes& message, Failure* why) {
-  return Sign(label, Sha256(message), why);
+std::optional<tpm2::Attested> Attest(const std::string& label, const Bytes& challenge, const Bytes& credential,
+                                     const Bytes& secret, Failure* why) {
+  Tbs tbs;
+  if (!tbs.Open(why)) return std::nullopt;
+  tpm2::Device dev(tbs.Transport());
+  DpapiFiles store;
+  return tpm2::Attest(dev, store, label, challenge, credential, secret, why);
 }
 
 std::optional<Bytes> SignDigest(const std::string& label, const Bytes& digest, Failure* why) {
-  return Sign(label, digest, why);
+  Tbs tbs;
+  if (!tbs.Open(why)) return std::nullopt;
+  tpm2::Device dev(tbs.Transport());
+  DpapiFiles store;
+  return tpm2::SignDigest(dev, store, label, digest, why);
+}
+
+std::optional<Bytes> SignCall(const std::string& label, const Bytes& message, Failure* why) {
+  return SignDigest(label, tpm2::Sha256(message), why);
 }
 
 }  // namespace tpm_key

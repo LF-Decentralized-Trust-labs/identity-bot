@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:login_dart/apple_attest.dart';
 import 'package:login_dart/front_end_key.dart';
 import 'package:login_dart/installed_app.dart';
+import 'package:login_dart/tpm_evidence.dart';
 
 /// The device's secure hardware, reached through the platform's own code (the
 /// plugin's android/, darwin/ and windows/ folders). One channel, four calls, the ones
@@ -62,7 +63,9 @@ class MethodChannelHardwareKey implements HardwareKeyPlatform {
 
   @override
   Future<({Uint8List point, Uint8List evidence})> attestNewKey(
-      String label, Uint8List challenge) async {
+      String label, Uint8List challenge,
+      {CredentialExchange? exchange}) async {
+    if (_platform == InstalledPlatform.tpm) return _attestTpm(label, challenge, exchange);
     if (_platform == InstalledPlatform.apple) {
       // The device gives an App Attest key only as an identifier, so its public point is
       // read from the attestation object, and kept for the next run.
@@ -87,4 +90,54 @@ class MethodChannelHardwareKey implements HardwareKeyPlatform {
   @override
   Future<Uint8List> signStatement(String label, Uint8List statementDigest) =>
       _bytes('signStatement', {'label': label, 'digest': statementDigest});
+
+  /// A TPM's evidence is made in two calls with the Identity Agent between them:
+  /// `tpmEnrol` makes the attestation key and reads the endorsement key and its
+  /// certificate; the Identity Agent's credential for them comes back through
+  /// [exchange]; `tpmAttest` makes the app key, opens the credential in the TPM
+  /// and has the attestation key certify the key for [challenge].
+  Future<({Uint8List point, Uint8List evidence})> _attestTpm(
+      String label, Uint8List challenge, CredentialExchange? exchange) async {
+    if (exchange == null) {
+      throw PlatformException(
+          code: 'no_credential_exchange',
+          message: 'a TPM\'s key is proved through the Identity Agent\'s credential, '
+              'and nothing was given to ask for it');
+    }
+    final e = await _channel.invokeMapMethod<String, Object?>(
+        'tpmEnrol', {'label': label});
+    Uint8List need(Map<String, Object?>? m, String k) {
+      final v = m?[k];
+      if (v is! Uint8List || v.isEmpty) {
+        throw PlatformException(
+            code: 'no_answer', message: 'the device\'s TPM gave no $k');
+      }
+      return v;
+    }
+
+    final chain = e?['ek_chain'];
+    final enrolment = TpmEnrolment(
+        ekPublic: need(e, 'ek_public'),
+        ekCert: need(e, 'ek_cert'),
+        akPublic: need(e, 'ak_public'),
+        ekChain: [
+          if (chain is List)
+            for (final c in chain)
+              if (c is Uint8List) c
+        ]);
+    final credential = await exchange(enrolment);
+    final r = await _channel.invokeMapMethod<String, Object?>('tpmAttest', {
+      'label': label,
+      'challenge': challenge,
+      'credential_blob': credential.credentialBlob,
+      'secret': credential.secret,
+    });
+    final point = need(r, 'point');
+    final attested = TpmAttested(
+        keyPublic: need(r, 'key_public'),
+        certifyInfo: need(r, 'certify_info'),
+        certifySignature: need(r, 'certify_signature'),
+        credentialSecret: need(r, 'credential_secret'));
+    return (point: point, evidence: tpmEvidence(enrolment, attested));
+  }
 }

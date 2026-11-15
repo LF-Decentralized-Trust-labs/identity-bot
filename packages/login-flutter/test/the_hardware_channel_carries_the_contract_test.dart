@@ -121,6 +121,55 @@ void main() {
         reason: 'the point is kept natively for the next run');
   });
 
+  test('a TPM is enrolled, given the Identity Agent\'s credential, and then attests',
+      () async {
+    final chainCert = Uint8List.fromList([48, 1, 1]);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (c) async {
+      calls.add(c);
+      switch (c.method) {
+        case 'tpmEnrol':
+          return {
+            'ek_public': Uint8List.fromList([0, 1, 1]),
+            'ek_cert': Uint8List.fromList([48, 0]),
+            'ek_chain': [chainCert],
+            'ak_public': Uint8List.fromList([0, 1, 2]),
+          };
+        case 'tpmAttest':
+          return {
+            'point': point,
+            'key_public': Uint8List.fromList([0, 1, 3]),
+            'certify_info': Uint8List.fromList([1]),
+            'certify_signature': Uint8List.fromList([2]),
+            'credential_secret': Uint8List.fromList([3]),
+          };
+      }
+      return null;
+    });
+    final hw = MethodChannelHardwareKey(
+        channel: channel, platform: InstalledPlatform.tpm);
+    TpmEnrolment? sent;
+    final made = await hw.attestNewKey('k', Uint8List.fromList([7, 7]),
+        exchange: (e) async {
+      sent = e;
+      return TpmCredential(Uint8List.fromList([0, 1, 9]), Uint8List.fromList([0, 1, 8]));
+    });
+    expect(calls.map((c) => c.method), ['tpmEnrol', 'tpmAttest'],
+        reason: 'the credential is asked for between the two, never before the keys exist');
+    expect(sent!.ekChain, [chainCert]);
+    final attest = calls[1].arguments as Map;
+    expect(attest['challenge'], [7, 7]);
+    expect(attest['credential_blob'], [0, 1, 9]);
+    expect(attest['secret'], [0, 1, 8]);
+    expect(made.point, point);
+    expect(String.fromCharCodes(made.evidence), contains('"credential_secret"'));
+    // With nothing to ask for the credential the TPM is not asked at all.
+    calls.clear();
+    await expectLater(hw.attestNewKey('k', Uint8List(32)),
+        throwsA(isA<PlatformException>()));
+    expect(calls, isEmpty);
+  });
+
   test('a grant is kept under the app, relay and back end together', () {
     expect(grantSlot('A', 'R', 'https://x'),
         isNot(grantSlot('A', 'R2', 'https://x')));

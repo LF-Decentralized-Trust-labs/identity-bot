@@ -20,7 +20,7 @@ against a fake channel and the shared vectors; the native code is not.
 |---|---|---|---|
 | Android | `android/` | Android Key Attestation, a key made for the ask's challenge | Written, untested. Needs `compileSdk 34`, a real device (an emulator's keys are software) |
 | iOS, macOS | `darwin/` | App Attest: the attestation for `SHA-256(challenge)`, and an assertion for each statement and **each call's proof** | Written, untested. App Attest does not run in a simulator |
-| Windows | `windows/` | A TPM key certify, a `TPM2_ActivateCredential` result and the EK chain | **Cannot sign in yet**: the key, its public point and its signatures are written; `attestNewKey` refuses in words, because the Identity Agent has not built its half of the credential exchange (the `TPM2_MakeCredential` blob an app must activate) and pins no TPM maker's root, so evidence made now could not be accepted (`tpm_key_certify.go`) |
+| Windows | `windows/` | A TPM key certify by an attestation key, a `TPM2_ActivateCredential` result of the Identity Agent's credential, and the EK certificate | Written. The TPM commands (`tpm2.cpp`) run against a software TPM and are accepted by the Identity Agent's verifier (`windows/test/run.sh`); the Windows calls (TBS, DPAPI, the EK certificate fetch) compile with mingw-w64 and **have not run on Windows**. **No manufacturer root is pinned yet**, so no TPM key is accepted (`identity-agent-core/secureenclave/tpmroots/README.md`) |
 
 An App Attest key signs only assertions, so on Apple the proof of each call is an
 assertion over the SHA-256 of the proof text (`login-go`: `IsAssertionProof`,
@@ -29,6 +29,17 @@ back end that checks only plain proofs (identity-agent-addons `appserve`, `check
 must also take assertions before an Apple front end can call it: not done here, in
 another repository.
 
-Until Windows evidence exists a Windows front end cannot sign in as an installed app,
-so this capability is not done for it. It is the one remaining gap, and it is the
-Identity Agent's to close first.
+Until the owner pins TPM manufacturers' roots (the Identity Agent refuses every TPM
+key while none is) a Windows front end signs in as `browser`, as ADR-072 Amendment 2
+accepts. A TPM's evidence takes one more call to the app's back end than the other
+platforms': the front end sends its endorsement key and attestation key
+(`/signin/installed-key/credential`) and opens the credential that comes back in its TPM;
+`tpmEnrol` and `tpmAttest` are the channel's two calls for it.
+
+What running `windows/test/run.sh` shows: the endorsement key `tpm2.cpp` makes is the standard EK
+(the one a certificate certifies); a software TPM opens the Identity Agent's credential in
+`TPM2_ActivateCredential` and refuses a tampered one; the evidence is accepted by
+`VerifyTPMKeyCertify`; the key's signatures verify under the point it gave. What it does not
+show: TBS, a real manufacturer's chain, DPAPI, the Windows call that fetches an EK certificate a
+TPM does not carry, or a real Windows machine's rules for what a program may do with its TPM.
+A TPM's EK certificate may need its issuers sent too (`ek_chain`); the front end sends none yet.

@@ -10,10 +10,11 @@
 #include "tpm_key.h"
 
 // The channel `MethodChannelHardwareKey` (lib/src/hardware_key.dart) speaks, on Windows.
-// NOT COMPILED OR RUN: see tpm_key.cpp.
+// NOT COMPILED OR RUN ON WINDOWS: see tpm_key.cpp.
 
 namespace {
 
+using flutter::EncodableList;
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 using Result = flutter::MethodResult<EncodableValue>;
@@ -29,6 +30,10 @@ void Answer(Result& result, std::optional<tpm_key::Bytes> v, const tpm_key::Fail
   else result.Success();  // no key yet
 }
 
+EncodableValue Value(const tpm_key::Bytes& b) { return EncodableValue(std::vector<unsigned char>(b.begin(), b.end())); }
+
+void Fail(Result& result, const tpm_key::Failure& why) { result.Error(why.code.empty() ? "tpm" : why.code, why.message); }
+
 void Handle(const flutter::MethodCall<EncodableValue>& call, std::unique_ptr<Result> result) {
   const auto* args = std::get_if<EncodableMap>(call.arguments());
   const std::string* label = nullptr;
@@ -42,15 +47,31 @@ void Handle(const flutter::MethodCall<EncodableValue>& call, std::unique_ptr<Res
   if (m == "publicPoint") {
     Answer(*result, tpm_key::PublicPoint(*label, &why), why);
   } else if (m == "keepPoint") {
-    result->Success();  // the TPM can give the point again; nothing to keep
-  } else if (m == "attestNewKey") {
-    // A new key is made so that the sign-in names a key made for this ask, but the TPM's
-    // evidence for it cannot be made yet: the Identity Agent's side of the credential
-    // exchange is not built and no TPM manufacturer root is pinned (tpm_key_certify.go).
-    // Refusing here says so, rather than handing over evidence that would not be accepted.
-    result->Error("tpm_evidence_unavailable",
-                  "A Windows TPM key cannot be proved to the Identity Agent yet: it has not "
-                  "built its half of the TPM credential exchange or pinned a TPM maker's root.");
+    result->Success();  // the key's blob holds its point; nothing to keep
+  } else if (m == "tpmEnrol") {
+    // Step one of a TPM's evidence: the attestation key and the endorsement key and
+    // its certificate, which go to the Identity Agent for a credential (login_flutter's
+    // Dart half sends them and calls tpmAttest with what comes back).
+    auto e = tpm_key::Enrol(*label, &why);
+    if (!e) return Fail(*result, why);
+    EncodableList chain;
+    for (const auto& c : e->ek_chain) chain.push_back(Value(c));
+    result->Success(EncodableValue(EncodableMap{{EncodableValue("ek_public"), Value(e->ek_public)},
+                                                {EncodableValue("ek_cert"), Value(e->ek_cert)},
+                                                {EncodableValue("ek_chain"), EncodableValue(chain)},
+                                                {EncodableValue("ak_public"), Value(e->ak_public)}}));
+  } else if (m == "tpmAttest") {
+    const auto* challenge = args ? Bytes(*args, "challenge") : nullptr;
+    const auto* credential = args ? Bytes(*args, "credential_blob") : nullptr;
+    const auto* secret = args ? Bytes(*args, "secret") : nullptr;
+    if (!challenge || !credential || !secret) return result->Error("bad_args", "no challenge, credential or secret");
+    auto a = tpm_key::Attest(*label, *challenge, *credential, *secret, &why);
+    if (!a) return Fail(*result, why);
+    result->Success(EncodableValue(EncodableMap{{EncodableValue("point"), Value(a->point)},
+                                                {EncodableValue("key_public"), Value(a->key_public)},
+                                                {EncodableValue("certify_info"), Value(a->certify_info)},
+                                                {EncodableValue("certify_signature"), Value(a->certify_signature)},
+                                                {EncodableValue("credential_secret"), Value(a->credential_secret)}}));
   } else if (m == "signCall") {
     const auto* b = args ? Bytes(*args, "message") : nullptr;
     if (!b) return result->Error("bad_args", "no message");
