@@ -186,7 +186,8 @@ const ASSERTION_FIELDS = new Set([
 const CHALLENGE_FIELDS = new Set([
   "v", "t", "site_aid", "site_oobi", "audience", "nonce", "dt", "expiry",
   "requested_disclosures", "requested_credentials", "requested_score",
-  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "front_end", "callback_url", "session_token", "sig",
+  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "front_end", "device_platform", "device_name",
+  "callback_url", "session_token", "sig",
 ]);
 const REQUESTED_CREDENTIAL_FIELDS = new Set(["schema_said", "required"]);
 const REQUESTED_SCORE_FIELDS = new Set(["min_band", "min_score", "required"]);
@@ -285,6 +286,10 @@ export function canonicalChallengeBody(challenge: LoginChallenge): string {
   if (str(c.browser_key, "browser_key") !== "") parts.push(textField("browser_key", c.browser_key));
   // The front end a sign-in is for (ADR-072 §2), omitted when the challenge names none.
   if (str(c.front_end, "front_end") !== "") parts.push(textField("front_end", c.front_end));
+  // The device an installed app's key was proved on, and what the app calls it
+  // (ADR-072 Amendment 7), each omitted when the challenge names none.
+  if (str(c.device_platform, "device_platform") !== "") parts.push(textField("device_platform", c.device_platform));
+  if (str(c.device_name, "device_name") !== "") parts.push(textField("device_name", c.device_name));
   parts.push(textField("callback_url", c.callback_url), textField("session_token", c.session_token));
   return `{${parts.join(",")}}`;
 }

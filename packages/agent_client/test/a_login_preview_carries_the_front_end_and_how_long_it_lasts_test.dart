@@ -14,4 +14,20 @@ void main() {
     expect(p.frontEnd, '');
     expect(p.lastsUntilEnded, isFalse);
   });
+
+  test('an installed app\'s preview names the device and what it calls it', () {
+    final p = LoginPreview.fromJson({
+      'front_end': 'installed_app',
+      'device_platform': 'android',
+      'device_name': 'Ann\'s Pixel',
+    });
+    expect(p.devicePlatform, 'android');
+    expect(p.deviceName, 'Ann\'s Pixel');
+  });
+
+  test('a preview that names no device does not make one up', () {
+    final p = LoginPreview.fromJson({'front_end': 'browser'});
+    expect(p.devicePlatform, '');
+    expect(p.deviceName, '');
+  });
 }

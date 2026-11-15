@@ -311,3 +311,15 @@ Section 2 step 2 had the link name the app. A page took the app's identifier, th
 **What this does not close.** A pin is as current as the page's last publication: a page published with a stale `min` is held to that older floor until it is published again. The pin does not protect a visitor from the host that serves the page.
 
 The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedApp`, `pinAppLink`, `readPinnedAppLink`, `pinnedAppLink`). The test is `a-page-signs-in-only-to-the-app-it-is-pinned-to.test.mjs`.
+
+## Amendment 7 (2026-11-15): the consent names the device an installed app runs on
+
+*Amended 2026-11-15. Nothing above is changed.*
+
+An installed app's sign-in challenge carries two more signed fields, `device_platform` and `device_name`, both omitted when empty, so the person's consent can say which device is asking.
+
+**The platform is proved, the name is not.** `device_platform` is `android`, `apple` or `tpm`, set by the core that verified the key's hardware proof (Amendment 3) from that proof's own result, never from the request. `device_name` is the label the installed app gave its device. Nothing proves it, so the consent shows it as the installed app's word, in a row of its own ("Device: an Android device", then "What the app calls it: Ann's Pixel"), and no decision reads it. It is never quoted inside the Device row: a name can hold any quotation mark, so it could close the quote and make what follows read as the Identity Agent's own words. The core cleans it before signing (control, line-break and direction-changing characters dropped, spaces collapsed, at most 48 characters), and the person's Identity Agent refuses a challenge whose name is not already clean, whose platform is none of the three, or which names a device for any kind but `installed_app`. Both fields are in the signed body, so a relay cannot add, change or drop them. An Identity Agent too old to know the fields leaves them out of the body it checks, so the signature fails and it refuses such a sign-in rather than showing it without the device; a challenge with neither field reads as before. The TypeScript canonical form (`packages/login-verify`) carries both fields in the same place, and the shared challenge vectors include one.
+
+**Not covered.** The installed app's key does not sign the name, so a front end that is the genuine program on a stolen device can call it anything. The kind of device is the part to rely on. The name travels in the challenge, which is signed but not encrypted, so whatever carries the sign-in session can read it. A native Apple key proof cannot tell an iPhone from a Mac, so `apple` reads "an Apple device"; a TPM proves a computer, so `tpm` reads "a computer".
+
+The code is `login.CheckDevice` and `login.CleanDeviceName`; the tests are `a_sign_in_names_the_device_test.go` (`login`) and `a_sign_in_names_the_device_an_installed_app_runs_on_test.go` (`server`).

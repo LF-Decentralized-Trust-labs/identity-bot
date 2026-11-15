@@ -56,6 +56,14 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 	if c.FrontEnd != "" {
 		parts = append(parts, jsonField("front_end", c.FrontEnd))
 	}
+	// Omitted when empty, like the front end, so only a sign-in that names a
+	// device carries one, and a relay cannot add, change or drop it.
+	if c.DevicePlatform != "" {
+		parts = append(parts, jsonField("device_platform", c.DevicePlatform))
+	}
+	if c.DeviceName != "" {
+		parts = append(parts, jsonField("device_name", c.DeviceName))
+	}
 	parts = append(parts,
 		jsonField("callback_url", nfc(c.CallbackURL)),
 		jsonField("session_token", c.SessionToken),

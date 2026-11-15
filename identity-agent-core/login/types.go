@@ -35,7 +35,16 @@ type ChallengeBundle struct {
 	// for another. Omitted when the challenge names none, so a challenge for
 	// anything else keeps its form.
 	FrontEnd string `json:"front_end,omitempty"`
-	Sig      string `json:"sig,omitempty"`
+	// DevicePlatform and DeviceName say which device an installed app runs on,
+	// when the sign-in is for an installed app's key. DevicePlatform is what
+	// the core that checked the key's hardware proof established, "android",
+	// "apple" or "tpm"; DeviceName is the label the installed app gave its
+	// device, which nothing proves. Both are signed in the challenge, so a
+	// relay cannot change them, and both are omitted when empty so a
+	// challenge for anything else keeps its form. See CheckDevice.
+	DevicePlatform string `json:"device_platform,omitempty"`
+	DeviceName     string `json:"device_name,omitempty"`
+	Sig            string `json:"sig,omitempty"`
 }
 
 type RequestedCredential struct {
@@ -154,8 +163,14 @@ type LoginPreviewResponse struct {
 	// key speak for the person until they or the app's owner end it, not for a
 	// working day: an installed app's app-key grant (ADR-072 section 4). The
 	// consent screen shows it before the person approves.
-	LastsUntilEnded bool   `json:"lasts_until_ended,omitempty"`
-	RPSessionURL    string `json:"rp_session_url"`
+	LastsUntilEnded bool `json:"lasts_until_ended,omitempty"`
+	// DevicePlatform is the kind of device an installed app's key was proved
+	// to be held on, and DeviceName the label the installed app gave it. The
+	// platform is proved; the name is the installed app's word, and the
+	// consent screen says so.
+	DevicePlatform string `json:"device_platform,omitempty"`
+	DeviceName     string `json:"device_name,omitempty"`
+	RPSessionURL   string `json:"rp_session_url"`
 }
 
 // ScoreAttestation is a signed statement about the holder's identity level.

@@ -37,6 +37,16 @@ import (
 // pass false and an installed_app sign-in there is refused: without the proof
 // it is a bearer QR sign-in nothing tells from a browser's.
 func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool) (sessionToken, qrURL string, errCode int, errMsg string) {
+	return s.createSignedAssetChallengeOn(assetID, audience, askedFrom, disclosures, browserKey, frontEnd, publicURL, installedAppKey, nil)
+}
+
+// createSignedAssetChallengeOn is createSignedAssetChallenge for a sign-in
+// whose installed app's key the core proved: device is what the proof
+// established (the platform) and what the installed app calls its device, and
+// both go into the signed challenge so the person's consent can name the
+// device. It is nil for every other sign-in, and is used only with an
+// installedAppKey the core itself verified.
+func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool, device *installedAppFact) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
@@ -121,6 +131,12 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		SessionToken:         sessionToken,
 		BrowserKey:           browserKey,
 		FrontEnd:             frontEnd,
+	}
+	// Only a proved installed app's key names a device: the platform is the
+	// proof's, not the request's.
+	if device != nil && installedAppKey && frontEnd == asset.FrontEndInstalledApp {
+		bundle.DevicePlatform = device.Platform
+		bundle.DeviceName = device.DeviceName
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,

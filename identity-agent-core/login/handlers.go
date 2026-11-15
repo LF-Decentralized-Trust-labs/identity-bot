@@ -559,6 +559,9 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	if err := CheckFrontEnd(bundle.FrontEnd); err != nil {
 		return nil, nil, nil, err
 	}
+	if err := CheckDevice(bundle.FrontEnd, bundle.DevicePlatform, bundle.DeviceName); err != nil {
+		return nil, nil, nil, err
+	}
 	// The expiry is read from the bundle whose signature was just verified,
 	// never from an earlier fetch of the same session, which a relay could
 	// have served differently.
@@ -617,6 +620,8 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		RelationshipAnchorAID: bundle.RelationshipAnchorAID,
 		FrontEnd:              bundle.FrontEnd,
 		LastsUntilEnded:       bundle.FrontEnd == FrontEndInstalledApp,
+		DevicePlatform:        bundle.DevicePlatform,
+		DeviceName:            bundle.DeviceName,
 		RPSessionURL:          req.RPSessionURL,
 	}
 	return bundle, rel, preview, nil
@@ -903,6 +908,8 @@ func (h *Handler) HandlePendingList(w http.ResponseWriter, _ *http.Request) {
 			PairwiseAID:          p.Relationship.PairwiseAID,
 			FrontEnd:             p.Bundle.FrontEnd,
 			LastsUntilEnded:      p.Bundle.FrontEnd == FrontEndInstalledApp,
+			DevicePlatform:       p.Bundle.DevicePlatform,
+			DeviceName:           p.Bundle.DeviceName,
 			RPSessionURL:         p.RPSessionURL,
 		})
 	}

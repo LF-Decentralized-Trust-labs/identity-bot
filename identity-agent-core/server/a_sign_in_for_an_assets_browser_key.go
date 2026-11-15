@@ -105,7 +105,7 @@ func (s *CoreServer) startFrontEndKeySignIn(r *http.Request, callerAsset, assetI
 		}
 		fact = &f
 	}
-	token, qr, code, msg := s.createSignedAssetChallenge(assetID, audience, "", nil, key, frontEnd, publicURL, fact != nil)
+	token, qr, code, msg := s.createSignedAssetChallengeOn(assetID, audience, "", nil, key, frontEnd, publicURL, fact != nil, fact)
 	if code != 0 {
 		return BrowserKeySignIn{}, &SignInRefused{code, msg}
 	}

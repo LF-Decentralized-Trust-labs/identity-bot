@@ -62,6 +62,12 @@ export interface LoginChallenge {
    *  `installed_app` (ADR-072 §2, amended). Signed; the assertion repeats it,
    *  so the person approves a named kind. */
   front_end?: string;
+  /** For an installed app whose key the core proved in hardware: the platform
+   *  the proof showed (`android`, `apple` or `tpm`) and the label the installed
+   *  app gave its device, which nothing proves (ADR-072 Amendment 7). Signed;
+   *  shown on the person's consent, not repeated in the assertion. */
+  device_platform?: string;
+  device_name?: string;
   callback_url: string;
   session_token: string;
   sig?: string;

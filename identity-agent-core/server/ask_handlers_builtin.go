@@ -69,7 +69,7 @@ func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	if pv.RequestedScore != nil {
 		details = append(details, PreviewDetail{Label: "Trust score", Value: scoreRequestValue(pv.RequestedScore)})
 	}
-	details = append(details, frontEndDetails(pv.FrontEnd, pv.LastsUntilEnded)...)
+	details = append(details, frontEndDetails(pv.FrontEnd, pv.LastsUntilEnded, pv.DevicePlatform, pv.DeviceName)...)
 	return GenericPreview{
 		T: 1, Action: "login", Title: "Sign-in request",
 		Subtitle: pv.Audience, Counterparty: pv.SiteAID, Details: details,
@@ -82,7 +82,7 @@ func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 // details shows them before the person approves (ADR-072 Amendment 3). An
 // installed app's approval lasts until it is ended, which is said in so many
 // words; a sign-in that names no kind says nothing about one.
-func frontEndDetails(frontEnd string, lastsUntilEnded bool) []PreviewDetail {
+func frontEndDetails(frontEnd string, lastsUntilEnded bool, devicePlatform, deviceName string) []PreviewDetail {
 	var out []PreviewDetail
 	switch frontEnd {
 	case login.FrontEndInstalledApp:
@@ -90,8 +90,35 @@ func frontEndDetails(frontEnd string, lastsUntilEnded bool) []PreviewDetail {
 	case login.FrontEndBrowser:
 		out = append(out, PreviewDetail{Label: "Front end", Value: "a web browser"})
 	}
+	out = append(out, deviceDetails(devicePlatform, deviceName)...)
 	if lastsUntilEnded {
 		out = append(out, PreviewDetail{Label: "Lasts", Value: "until you end it, in My apps"})
+	}
+	return out
+}
+
+// deviceDetails says which device an installed app runs on. The kind of
+// device is what the core proved from the key's hardware, so it is the Device
+// row. The name is the installed app's own word, so it is a row of its own,
+// labelled as the app's, rather than quoted inside the Device row: a name can
+// hold any quotation mark, so it could close a quote it sat in and make the
+// rest read as the Identity Agent's own words. Nothing when the sign-in names
+// no proved platform.
+func deviceDetails(platform, name string) []PreviewDetail {
+	var kind string
+	switch platform {
+	case login.DeviceAndroid:
+		kind = "an Android device"
+	case login.DeviceApple:
+		kind = "an Apple device"
+	case login.DeviceTPM:
+		kind = "a computer"
+	default:
+		return nil
+	}
+	out := []PreviewDetail{{Label: "Device", Value: kind}}
+	if name = login.CleanDeviceName(name); name != "" {
+		out = append(out, PreviewDetail{Label: "What the app calls it", Value: name})
 	}
 	return out
 }
