@@ -69,11 +69,31 @@ func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	if pv.RequestedScore != nil {
 		details = append(details, PreviewDetail{Label: "Trust score", Value: scoreRequestValue(pv.RequestedScore)})
 	}
+	details = append(details, frontEndDetails(pv.FrontEnd, pv.LastsUntilEnded)...)
 	return GenericPreview{
 		T: 1, Action: "login", Title: "Sign-in request",
 		Subtitle: pv.Audience, Counterparty: pv.SiteAID, Details: details,
 		Warning: "Only what is listed above is shared.",
 	}, nil
+}
+
+// frontEndDetails are the rows that tell the person which kind of front end is
+// asking and how long approving lasts, so a screen that lists a sign-in's
+// details shows them before the person approves (ADR-072 Amendment 3). An
+// installed app's approval lasts until it is ended, which is said in so many
+// words; a sign-in that names no kind says nothing about one.
+func frontEndDetails(frontEnd string, lastsUntilEnded bool) []PreviewDetail {
+	var out []PreviewDetail
+	switch frontEnd {
+	case login.FrontEndInstalledApp:
+		out = append(out, PreviewDetail{Label: "Front end", Value: "an installed app"})
+	case login.FrontEndBrowser:
+		out = append(out, PreviewDetail{Label: "Front end", Value: "a web browser"})
+	}
+	if lastsUntilEnded {
+		out = append(out, PreviewDetail{Label: "Lasts", Value: "until you end it, in My apps"})
+	}
+	return out
 }
 
 // credentialRequestValue says what approving would actually do about this
