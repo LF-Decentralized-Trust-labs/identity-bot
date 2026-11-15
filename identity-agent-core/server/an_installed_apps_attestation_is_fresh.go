@@ -43,6 +43,63 @@ type installedAppAsk struct {
 	challenge     []byte
 	credentialKey []byte // never leaves the core
 	until         time.Time
+	// credentials is how many credentials the core made for this ask (a TPM's
+	// credential exchange), which are capped.
+	credentials int
+}
+
+// installedAppCredentialsPerAsk bounds the credentials made for one ask: each
+// is an RSA operation an app's front end asks for, and a front end needs one.
+const installedAppCredentialsPerAsk = 3
+
+// TPMCredentialRequest is what an installed front end with a TPM sends, through
+// its app's back end, to get the credential its TPM must open before it can
+// attest a key (TPM2_ActivateCredential): the public area and certificate of
+// its endorsement key, its attestation key's public area, and the certificate's
+// issuers. The byte fields are standard base64 on the wire.
+type TPMCredentialRequest struct {
+	EKPublic []byte   `json:"ek_public"`
+	EKCert   []byte   `json:"ek_cert"`
+	EKChain  [][]byte `json:"ek_chain"`
+	AKPublic []byte   `json:"ak_public"`
+}
+
+// makeInstalledAppKeyCredential is the credential exchange's one core step: for an ask of
+// the calling app's own asset, a credential only the TPM holding the named
+// endorsement and attestation keys can open, keyed by the secret the core kept
+// for the ask. The ask stays open: the evidence that follows spends it.
+func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset, assetID, askID string, req TPMCredentialRequest) (*secureenclave.TPMCredential, error) {
+	if err := s.theAppAsking(r, callerAsset, assetID); err != nil {
+		return nil, err
+	}
+	if aPageAsked(r) {
+		return nil, &SignInRefused{http.StatusForbidden, "a request that came from a web page cannot ask for an installed-app credential"}
+	}
+	s.installedAppAskMu.Lock()
+	a, ok := s.installedAppAsks[askID]
+	if !ok || a.asset != assetID || time.Now().After(a.until) {
+		s.installedAppAskMu.Unlock()
+		return nil, &SignInRefused{http.StatusForbidden, errAskNotHeld.Error()}
+	}
+	if a.credentials >= installedAppCredentialsPerAsk {
+		s.installedAppAskMu.Unlock()
+		return nil, &SignInRefused{http.StatusTooManyRequests, "this attestation has had its credentials: ask for a new attestation"}
+	}
+	a.credentials++
+	s.installedAppAsks[askID] = a
+	key := a.credentialKey
+	s.installedAppAskMu.Unlock()
+	cred, err := makeTPMCredentialFor(req, key)
+	if err != nil {
+		return nil, &SignInRefused{http.StatusForbidden, err.Error()}
+	}
+	return cred, nil
+}
+
+// makeTPMCredentialFor is a variable-free seam so a test can stand in for
+// pinned manufacturer roots, as the verifiers above are.
+var makeTPMCredentialFor = func(req TPMCredentialRequest, credentialKey []byte) (*secureenclave.TPMCredential, error) {
+	return secureenclave.MakeTPMCredential(req.EKPublic, req.EKCert, req.EKChain, req.AKPublic, credentialKey, time.Now())
 }
 
 // InstalledAppKeyAsk is what an app's back end gets before it asks its

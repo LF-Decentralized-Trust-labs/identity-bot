@@ -40,8 +40,7 @@ package secureenclave
 // check would pass the moment a root is pinned. So the credential's key is the
 // core's alone and the app learns the credential only from the TPM, by
 // TPM2_ActivateCredential on a blob the core made with TPM2_MakeCredential
-// (the core's side of that exchange is not built yet, and until it is no
-// TPM key can be proved). verifyTPMKeyCertify refuses, in code, a
+// (the core's side of that exchange is MakeTPMCredential). verifyTPMKeyCertify refuses, in code, a
 // credentialKey that is short or is the challenge. Two values derive:
 //
 //	extraData  = SHA-256("identity-agent-tpm-key-certify-v1" 0x00 || challenge)
@@ -76,11 +75,16 @@ package secureenclave
 //     caller needs, and accepting one would be accepting a key that cannot be
 //     the app's signing key.
 //
-// PINNED ROOTS. tpmManufacturerRoots is EMPTY in this file and verification
-// FAILS CLOSED while it is. The real roots (Infineon, STMicroelectronics,
-// Nuvoton, Intel PTT, AMD fTPM, Microsoft's virtual-TPM root, ...) must be
-// supplied by the vendor-roots process from the manufacturers' published
-// certificates; none are invented here.
+// PINNED ROOTS. tpmManufacturerRoots is the PEM files committed in tpmroots
+// (tpm_roots.go), and verification FAILS CLOSED while there are none. Which
+// manufacturers' roots to trust is the owner's decision, made by committing
+// them (tpmroots/README.md); none are invented here.
+//
+// THE CREDENTIAL EXCHANGE is built (tpm_make_credential.go) and was checked
+// against a software TPM, the reference implementation of the TPM 2.0 library,
+// which opened the core's credential with TPM2_ActivateCredential and certified
+// a key whose evidence this file accepts (testdata/tpmsim). What a real
+// manufacturer's TPM and certificate chain do has not been seen.
 //
 // NOT PROVEN WITHOUT A REAL TPM: see tpm_key_certify_test.go. The structures
 // are parsed from the TCG spec, and the tests use synthetic structures built
@@ -106,7 +110,7 @@ import (
 // tpmManufacturerRoots are the TPM manufacturer root certificates an EK
 // certificate must chain to. Empty on purpose: verification fails closed until
 // the vendor roots are supplied.
-var tpmManufacturerRoots []*x509.Certificate
+var tpmManufacturerRoots []*x509.Certificate // set from tpmroots by tpm_roots.go
 
 const (
 	tpmGeneratedValue  = 0xFF544347
@@ -169,6 +173,13 @@ func tpmCredentialSecret(credentialKey, akName, ekPublicDER []byte) []byte {
 // TPM. It does NOT prove which app holds it: AppIDPresent is always false.
 func VerifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time) (*InstalledAppKeyFacts, error) {
 	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, tpmManufacturerRoots)
+}
+
+// VerifyTPMKeyCertifyAgainstRoots is VerifyTPMKeyCertify for roots the caller
+// names, for the tool that checks the exchange against a software TPM
+// (testdata/tpmsim). The server never calls it: it takes the pinned roots.
+func VerifyTPMKeyCertifyAgainstRoots(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
+	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, roots)
 }
 
 // TPMCredentialKeyLen is the least length of the secret the core keeps for one attestation.
@@ -360,6 +371,9 @@ type tpmPublic struct {
 	x, y    []byte
 	mod     []byte
 	exp     uint32
+	// The symmetric algorithm of a decrypt key (an EK's), which sizes the
+	// credential's encryption: its algorithm, key size in bits and mode.
+	symAlg, symBits, symMode int
 }
 
 func parseTPM2BPublic(b []byte) (*tpmPublic, error) {
@@ -376,8 +390,9 @@ func parseTPM2BPublic(b []byte) (*tpmPublic, error) {
 	a.sized() // authPolicy
 	skipSym := func() {
 		if alg := a.u16(); alg != tpmAlgNull {
-			a.u16() // keyBits
-			a.u16() // mode
+			p.symAlg = alg
+			p.symBits = a.u16()
+			p.symMode = a.u16()
 		}
 	}
 	readScheme := func() {
@@ -531,3 +546,9 @@ func verifyTPMSignature(ak *tpmPublic, msg, sig []byte) error {
 	}
 	return errTPM("signature algorithm does not match the attestation key")
 }
+
+// TPMCertifyExtraData is the qualifying data an app gives TPM2_Certify for an
+// ask's challenge (see the header). It is exported for the tool that makes the
+// exchange's vector from a software TPM (testdata/tpmsim), and for a front end's
+// own port to be held to.
+func TPMCertifyExtraData(challenge []byte) []byte { return tpmCertifyExtraData(challenge) }

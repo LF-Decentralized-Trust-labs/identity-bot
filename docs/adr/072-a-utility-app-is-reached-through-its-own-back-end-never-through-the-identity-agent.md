@@ -160,7 +160,7 @@ sequenceDiagram
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
-- an installed front end's hardware key proved on **Windows** (the TPM verifier is written and refuses everything until the manufacturers' roots and the credential round trip exist, Amendment 3)
+- an installed front end's hardware key proved on **Windows**: the credential round trip is built (Amendment 7) and no manufacturer's root is pinned, so the core still refuses every TPM key
 - an app claiming its own relay name
 - the back end carrying a front end's signed request to the core
 - an app's approval request for one action
@@ -311,3 +311,17 @@ Section 2 step 2 had the link name the app. A page took the app's identifier, th
 **What this does not close.** A pin is as current as the page's last publication: a page published with a stale `min` is held to that older floor until it is published again. The pin does not protect a visitor from the host that serves the page.
 
 The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedApp`, `pinAppLink`, `readPinnedAppLink`, `pinnedAppLink`). The test is `a-page-signs-in-only-to-the-app-it-is-pinned-to.test.mjs`.
+
+## Amendment 7 (2026-11-14): a TPM's credential round trip is built, and no manufacturer is trusted yet
+
+*Amended 2026-11-14. This builds the core's half of the TPM credential exchange that Amendment 3 said was not built. Edits above: one line of "Not built". Nothing else above is changed.*
+
+**A TPM's evidence takes one more call than the other platforms'.** Before it can attest a key, a front end's TPM must open a credential only this Identity Agent can make, which is what ties its attestation key to an endorsement key a manufacturer certified. The front end sends its endorsement key's public area and certificate, the certificate's issuers and its attestation key's public area to its back end (`POST /signin/installed-key/credential`, sealed like every call, with the ask's name). The back end passes them to the core (`addon.Host.MakeInstalledAppKeyCredential`), which answers `{credential_blob, secret}`, the two TPM2B structures `TPM2_ActivateCredential` takes. The front end opens them in its TPM and sends the released value in its evidence.
+
+**What the core checks before it makes one, and what is in it.** The ask is the caller's own and is still open; a web page gets none; at most three are made for one ask. The endorsement key's certificate must chain to a pinned root, the public area it sent must be that certificate's key (RSA 2048 or larger, or ECC P-256), and it must be a restricted decrypt key fixed in its TPM. The credential is `TPM2_MakeCredential` of an HMAC under the secret the core keeps for the ask, over the attestation key's name and the endorsement key (`secureenclave.MakeTPMCredential`). The secret is never given to the front end or the back end, so software with a genuine certificate and an attestation key of its own cannot produce what the TPM releases. The ask stays open for the evidence, which spends it as before.
+
+**How it was checked.** The credential, and the evidence built on what a TPM released, were made with a software TPM, the reference implementation of the TPM 2.0 library, which opened the core's credential with `TPM2_ActivateCredential` and refused one that had been altered (`secureenclave/testdata/tpmsim`), for an RSA and for an ECC endorsement key. The Windows front end's TPM commands (`packages/login-flutter/windows/tpm2.cpp`) were run the same way, and what they make is accepted by `VerifyTPMKeyCertify`. The simulator's endorsement certificate is signed by a root made for the test: **no real manufacturer's certificate chain, and no real TPM, has been seen by this code.**
+
+**No manufacturer's root is pinned, so a Windows installed app still signs in as `browser`.** The roots are the PEM files in `identity-agent-core/secureenclave/tpmroots`, and there are none. Whom to trust to say a TPM is real is the owner's decision; Microsoft publishes the makers' roots and issuers together (`tools/tpmroots` makes the files from that package, and records where they came from). Whichever are pinned, an endorsement certificate needs its issuers: the front end sends none yet (`ek_chain`), so for a maker whose certificates carry intermediates, either they are pinned too or the front end must fetch them from the certificate's authority information. Until then Amendment 2's accepted case stands.
+
+**A TPM proves the key and not the program.** As Amendment 3 says, the owner must have accepted `tpm_keys` for the asset. On Windows the key's blob is kept under the person's profile, encrypted to them with DPAPI, and a program running as the same person can ask the TPM to sign with it.

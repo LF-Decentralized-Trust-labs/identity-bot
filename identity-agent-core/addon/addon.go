@@ -40,6 +40,7 @@ import (
 	"identity-agent-core/limits"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
 	"net/http"
@@ -147,6 +148,17 @@ type Host interface {
 	// names the ask and carries the key's signature over
 	// server.InstalledAppSignInStatement for it.
 	BeginInstalledAppKey(r *http.Request, callerAsset, assetID string) (server.InstalledAppKeyAsk, error)
+	// MakeInstalledAppKeyCredential is the extra step of a TPM's attestation (the
+	// other platforms need none): for the ask BeginInstalledAppKey issued, it
+	// makes the credential the installed app's TPM must open with
+	// TPM2_ActivateCredential to show its attestation key shares a TPM with an
+	// endorsement key a manufacturer certified. The credential is keyed by a
+	// secret the core keeps and never gives out, so only a TPM can release what
+	// is inside; the app's back end passes the credential to the front end and
+	// the released value comes back in the evidence. The ask stays open, up to a
+	// few credentials; the evidence passed to StartFrontEndKeySignIn spends it.
+	// The same caller rules as BeginInstalledAppKey.
+	MakeInstalledAppKeyCredential(r *http.Request, callerAsset, assetID, ask string, req server.TPMCredentialRequest) (*secureenclave.TPMCredential, error)
 	// AssetStillAdmits is whether the asset's enrolment policy lets in the
 	// person known to it as pairwiseAID now, by MEMBERSHIP only: the
 	// membership check the sign-in made, asked again, so a person removed

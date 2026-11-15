@@ -972,3 +972,55 @@ func TestEndingASignInTheOwnerAlreadyEndedDropsItFromTheListAndSaysSo(t *testing
 		t.Fatalf("a sign-in the host says is not live is still listed: %+v", l.L)
 	}
 }
+
+// A TPM's credential is made for the ask the app's back end holds, for the app's
+// own asset only, never for a page, and a few times at most; the ask stays open
+// for the evidence, and the credential is made from the core's own secret for it.
+func TestTheCoreMakesATPMCredentialOnlyForAnAsksOwnApp(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	var madeWith []byte
+	inner := makeTPMCredentialFor
+	t.Cleanup(func() { makeTPMCredentialFor = inner })
+	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte) (*secureenclave.TPMCredential, error) {
+		madeWith = key
+		return &secureenclave.TPMCredential{CredentialBlob: []byte{0, 1, 2}, Secret: []byte{0, 1, 3}}, nil
+	}
+	ask, err := iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := TPMCredentialRequest{}
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, req); err != nil {
+		t.Fatalf("the app's own ask was refused: %v", err)
+	}
+	iw.org.installedAppAskMu.Lock()
+	held := iw.org.installedAppAsks[ask.ID].credentialKey
+	iw.org.installedAppAskMu.Unlock()
+	if len(held) == 0 || !bytes.Equal(held, madeWith) || bytes.Equal(madeWith, ask.Challenge) {
+		t.Fatal("the credential was not made from the core's own secret for the ask")
+	}
+	// The ask is still open: the evidence spends it.
+	if _, err := iw.org.takeInstalledAppAsk(ask.ID, "the-website", time.Now()); err != nil {
+		t.Fatalf("making a credential spent the ask: %v", err)
+	}
+
+	// Another app's ask, a page, and an ask nobody issued get nothing.
+	ask, _ = iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("some-other-app", nil), "", "some-other-app", ask.ID, req); err == nil {
+		t.Fatal("another app's ask was used to make a credential")
+	}
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"}), "", "the-website", ask.ID, req); err == nil {
+		t.Fatal("a web page got a credential")
+	}
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", "no-such-ask", req); err == nil {
+		t.Fatal("an ask nobody issued got a credential")
+	}
+	// The cap.
+	var last error
+	for i := 0; i < installedAppCredentialsPerAsk+1; i++ {
+		_, last = iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, req)
+	}
+	if last == nil {
+		t.Fatal("one ask has no limit on the credentials made for it")
+	}
+}
