@@ -20,11 +20,11 @@ import (
 	"identity-agent-core/iacrypto"
 )
 
-// The owners ceremony against a real engine and real device keys (T-1160).
+// The owners ceremony against a real engine and real device keys.
 //
 // The box holds its own key. Each device is a test double: an Ed25519 seed that
 // signs the bytes the ceremony's route hands it, at the places the event gives
-// it, and returns the signature through the route a device's app uses. Nothing
+// it, and returns the signature through the route a device's front end uses. Nothing
 // in the core is faked; what is under test is that the ceremony ends "applied"
 // with a log keri-go verifies, where it used to end "failed" with any device
 // member (see a_single_key_identity_rotates_to_its_devices_test.go).
@@ -359,7 +359,7 @@ func TestTheTermsNameEachOwnerAndWhoHasSigned(t *testing.T) {
 // A ceremony whose devices never sign can be given up on while nothing is in
 // the log, and cannot be started over meanwhile; once a hand-over's first
 // rotation is in the log it cannot be dropped, because the owners hold control
-// beside this agent's key and the only way out is to finish.
+// beside this Identity Agent's key and the only way out is to finish.
 func TestACeremonyWaitingForSignaturesCanBeAbandonedOnlyBeforeAnythingIsInTheLog(t *testing.T) {
 	abandon := func(w *aCeremonyWorld) int {
 		rec := httptest.NewRecorder()
@@ -465,7 +465,7 @@ func TestAnAbandonmentIsNotUndoneByALateAcceptance(t *testing.T) {
 }
 
 // The fields the phone reads (packages/agent_client, the_ceremony_this_device_agreed_to.dart)
-// are the ones the organisation's agent says: a field renamed here breaks a phone
+// are the ones the organisation's Identity Agent says: a field renamed here breaks a phone
 // that is not in this repository to be tested, so this holds the two together
 // with what a real hand-over answered, which the phone's own test reads too.
 func TestTheTermsHaveTheFieldsThePhoneReads(t *testing.T) {

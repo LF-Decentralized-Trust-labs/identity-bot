@@ -87,7 +87,7 @@ type redeemedInvite struct {
 	publishedPath string
 	siteAID       string
 	siteOOBI      string
-	// ceremony is an invite that brought this agent into an ownership ceremony,
+	// ceremony is an invite that brought this Identity Agent into an ownership ceremony,
 	// which goes on after the acceptance: the other owners have still to accept
 	// and then every device signs, so it is remembered for longer.
 	ceremony bool

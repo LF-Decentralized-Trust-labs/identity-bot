@@ -133,7 +133,7 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/signer/invites":                      "inviting a signer decides who else may sign for this identity",
 	"POST /api/signer/invites/{token}/redeem":       "redeeming a signer invitation adds somebody who may sign",
 	"POST /api/redeemed-invites/ceremony-signature": "signing an ownership ceremony's rotation with the key this device derived for the organisation is the owner's own act, from this device",
-	"POST /api/redeemed-invites/published":          "only the agent that redeemed an invite may ask the inviting app for what it published against it, signing with the key it redeemed with",
+	"POST /api/redeemed-invites/published":          "only the Identity Agent that redeemed an invite may ask the inviting app for what it published against it, signing with the key it redeemed with",
 
 	// --- this machine's own enclave ---
 	//

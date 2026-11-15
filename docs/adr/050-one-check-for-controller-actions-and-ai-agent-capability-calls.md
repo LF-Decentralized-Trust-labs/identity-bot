@@ -45,7 +45,7 @@ opens them to a controller. They are:
   hold, approving or giving up a share of somebody else's recovery;
 - backups: retrieving, exporting or pulling back an archive;
 - who may act: inviting and redeeming signers, asking the inviting app what it
-  published for an invite this agent redeemed, signing an ownership ceremony's
+  published for an invite this Identity Agent redeemed, signing an ownership ceremony's
   rotation with the key this device derived for the organisation, and adding or
   removing a controller;
 - who the owner is: the identity record, key events, contact records and the

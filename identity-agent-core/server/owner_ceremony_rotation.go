@@ -137,7 +137,7 @@ func countThreshold(n int) json.RawMessage {
 func (s *CoreServer) ceremonyRotation(c *OwnerCeremony, stage string) (keriengine.PrepareRequest, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
-		return keriengine.PrepareRequest{}, fmt.Errorf("this agent has no identity to rotate")
+		return keriengine.PrepareRequest{}, fmt.Errorf("this Identity Agent has no identity to rotate")
 	}
 	members, err := c.members()
 	if err != nil {
@@ -315,7 +315,7 @@ func (s *CoreServer) handleCeremonyTerms(w http.ResponseWriter, r *http.Request)
 		// dropped", so the state is said to the one holding a code of the
 		// ceremony and to nobody else.
 		if status, detail, ok := s.ceremonyStatusForToken(token); ok {
-			// The detail is the agent's own words about why it failed, and says
+			// The detail is the Identity Agent's own words about why it failed, and says
 			// when a hand-over stopped after its first rotation was made.
 			jsonreply.Write(w, http.StatusOK, map[string]any{"status": status, "detail": detail})
 			return
