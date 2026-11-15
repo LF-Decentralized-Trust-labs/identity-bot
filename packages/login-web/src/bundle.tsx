@@ -22,9 +22,10 @@ import { createRoot } from "react-dom/client";
 import { SignInButton } from "./SignInButton.js";
 import { appFetch, appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink, SessionEnded, type AppLink, type AppSession } from "./app.js";
 import { signInProblem } from "./signInProblem.js";
+import { mountSessions } from "./sessionsPanel.js";
 
 // A hosted page has no unpinned read of a link: `readAppLink` is the pinned one.
-export { appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem };
+export { appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem, mountSessions };
 
 export interface SignInHandlers {
   /** The person approved and the session is kept; call the app as them now. */
