@@ -21,6 +21,13 @@ class UtilityAppSignInScreen extends StatefulWidget {
   /// The app's own link, when this front end is its own app's and so is pinned by
   /// what it is (ADR-072 section 2); otherwise the person pastes or scans one.
   final String? pinnedLink;
+
+  /// The link the person used last, put in the field to be changed or kept, so a
+  /// person who signs out is not asked to paste it again. Ignored when [pinnedLink] is set.
+  final String? initialLink;
+
+  /// Called with the link once a sign-in has started on it, so the app can keep it for [initialLink].
+  final void Function(String link)? onLinkUsed;
   final http.Client Function() makeClient;
 
   /// The key and the grant store for the link opened (an installed app: a
@@ -47,6 +54,8 @@ class UtilityAppSignInScreen extends StatefulWidget {
     required this.storeFor,
     required this.onSignedIn,
     this.pinnedLink,
+    this.initialLink,
+    this.onLinkUsed,
     this.every = const Duration(seconds: 2),
     this.notice,
     this.scan,
@@ -85,7 +94,7 @@ String _name(String appName) =>
     appName.trim().isEmpty ? 'this utility app' : appName.trim();
 
 class _State extends State<UtilityAppSignInScreen> {
-  late final _link = TextEditingController(text: widget.pinnedLink ?? '');
+  late final _link = TextEditingController(text: widget.pinnedLink ?? widget.initialLink ?? '');
   String? _pointer, _fingerprint, _error, _progress;
   bool _busy = false, _copied = false;
 
@@ -141,6 +150,7 @@ class _State extends State<UtilityAppSignInScreen> {
       final session = AppSession(client, link, await widget.keyFor(link),
           store: widget.storeFor(link));
       final started = await session.start(onPhase: _phase);
+      widget.onLinkUsed?.call(_link.text.trim());
       if (!mounted) return;
       setState(() {
         _pointer = started.pointer;

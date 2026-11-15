@@ -21,6 +21,8 @@ Future<void> open(WidgetTester t, FakeApp app, FakeHardware hw,
     String? pinned,
     String? notice,
     String appName = 'Task console',
+    String? initialLink,
+    void Function(String)? onLinkUsed,
     Future<FrontEndKey> Function(AppLink)? keyFor}) async {
   await t.binding.setSurfaceSize(const Size(900, 1600));
   addTearDown(() => t.binding.setSurfaceSize(null));
@@ -29,6 +31,8 @@ Future<void> open(WidgetTester t, FakeApp app, FakeHardware hw,
           body: UtilityAppSignInScreen(
     appName: appName,
     pinnedLink: pinned,
+    initialLink: initialLink,
+    onLinkUsed: onLinkUsed,
     makeClient: () => app.client,
     keyFor: keyFor ?? (_) => HardwareFrontEndKey.open(hw, 'app-key'),
     storeFor: (_) => MemoryGrantStore(),
@@ -269,6 +273,27 @@ void main() {
     expect(copied, ['https://ia.example/i/tok']);
     expect(find.text('Link copied'), findsOneWidget);
     await t.pumpAndSettle(const Duration(milliseconds: 20));
+  });
+
+  testWidgets('the link the person used last is offered again, and reported once a sign-in starts on it',
+      (t) async {
+    final app = FakeApp(clock: DateTime.now().toUtc())..pendingAsks = 2;
+    final used = <String>[];
+    await open(t, app, FakeHardware(), initialLink: linkOf(app), onLinkUsed: used.add);
+    expect(find.widgetWithText(TextField, linkOf(app)), findsOneWidget);
+    expect(used, isEmpty);
+    await t.tap(find.byKey(const Key('sign-in')));
+    await t.pumpAndSettle(const Duration(milliseconds: 20));
+    expect(used, [linkOf(app)]);
+  });
+
+  testWidgets('a link that is not the app\'s is not reported as used', (t) async {
+    final app = FakeApp();
+    final used = <String>[];
+    await open(t, app, FakeHardware(), initialLink: 'https://tasks.example/', onLinkUsed: used.add);
+    await t.tap(find.byKey(const Key('sign-in')));
+    await t.pump();
+    expect(used, isEmpty);
   });
 
   testWidgets('a notice about an ended session is shown above the sign-in',
