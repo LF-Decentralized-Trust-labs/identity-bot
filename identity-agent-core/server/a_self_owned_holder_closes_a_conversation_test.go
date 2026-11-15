@@ -43,6 +43,7 @@ func TestTheHolderOfASelfOwnedAgentClosesAndStandsAsOwner(t *testing.T) {
 		nonce := "holder-" + string(rune('a'+n))
 		body, _ := json.Marshal(agentmessage.PersonMessage{Conversation: "c1", Nonce: nonce})
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+		r.RemoteAddr = "203.0.113.9:51000"
 		if admitted {
 			r = r.WithContext(context.WithValue(r.Context(), theGateAdmittedTheOwnerKey{}, "signed"))
 		}
@@ -100,6 +101,31 @@ func TestTheHolderOfASelfOwnedAgentClosesAndStandsAsOwner(t *testing.T) {
 	} {
 		if e := c(); e == nil {
 			t.Errorf("%s was admitted as the holder", name)
+		}
+	}
+
+	// The owner's own app on this computer is the owner without signing the
+	// request: the local secret is what says so.
+	{
+		n++
+		nonce := "holder-local"
+		body, _ := json.Marshal(agentmessage.PersonMessage{Conversation: "c1", Nonce: nonce})
+		r := local(http.MethodPost, closeRoute, string(body))
+		salt, _ := agentmessage.NewSalt()
+		fp, _ := agentmessage.Fingerprint(salt, nil)
+		id, vk, _ := agentbody.Identity(holderKey)
+		st := agentmessage.PersonStatement{
+			Agent: s.thisIdentityAgentsIdentifier(), Conversation: "c1", MessageID: nonce, Kind: agentmessage.PersonKindClose,
+			From: "EOURS", Signer: id, Nonce: "nonce-0123456789abcdefx", Time: time.Now().UTC().Format(time.RFC3339),
+			FingerprintVersion: agentmessage.FingerprintV1, Fingerprint: fp,
+		}
+		sig, _ := agentbody.Sign(holderKey, st.Bytes())
+		js, _ := json.Marshal(agentmessage.PersonProof{Statement: st, Verkey: vk, Signature: sig})
+		r.Header.Set(headerSpeakingFor, st.From)
+		r.Header.Set(headerPersonStatement, base64.RawURLEncoding.EncodeToString(js))
+		r.Header.Set(headerPersonSalt, base64.RawURLEncoding.EncodeToString(salt))
+		if p, _, err := s.thePersonAsking(r); err != nil || p.Standing != "owner" {
+			t.Fatalf("the holder's own app on this computer was refused: %v %+v", err, p)
 		}
 	}
 

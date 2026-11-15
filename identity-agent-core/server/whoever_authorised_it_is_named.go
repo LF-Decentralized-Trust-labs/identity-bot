@@ -869,7 +869,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 	if app, ok := TheAppThatAsked(r); ok {
 		return s.thePersonAnAppAsksFor(r, app)
 	}
-	if holder, ok := s.theHolderOfASelfOwnedAgent(); ok && theGateAdmittedTheOwner(r) {
+	if holder, ok := s.theHolderOfASelfOwnedAgent(); ok && s.theOwnerAsks(r) {
 		return s.theHolderAsking(r, holder)
 	}
 	grant, ok := TheControllerThatAsked(r)
