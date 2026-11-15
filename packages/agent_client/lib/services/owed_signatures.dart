@@ -21,7 +21,7 @@ import 'the_event_this_device_expects.dart' show CeremonyStage;
 typedef ReadsACeremony = Future<CeremonyReading?> Function(
     String orgUrl, String token);
 
-/// What can be shown to the person outside the app. Implemented with the
+/// What can be shown to the person outside the Identity Agent app. Implemented with the
 /// system's notifications; a test passes a recorder.
 abstract class TellsThePerson {
   /// A signature is owed to [change]'s [rotation] (1 or 2).

@@ -59,7 +59,7 @@ class AnOwnershipChange {
 /// **Readable after the first unlock, and not before.** A background look runs
 /// while the phone is usually locked, and a keychain item kept "only while
 /// unlocked" cannot be read then, so the look would never see a change. The
-/// price is that the code can be read by this app while the phone is locked but
+/// price is that the code can be read by the Identity Agent app while the phone is locked but
 /// has been unlocked once since it started: the usual choice for a background
 /// reader, and the code lets this phone sign only for that one change, and only
 /// the rotation its person was shown. Entries kept before this are rewritten
@@ -67,7 +67,7 @@ class AnOwnershipChange {
 /// them).
 ///
 /// Changes to the list are made under a short lease kept beside it, because a
-/// background look and the app can both change it at once, and a change lost
+/// background look and the Identity Agent app can both change it at once, and a change lost
 /// there is the phone's only way back to that change.
 class OwnershipChangesInProgress {
   OwnershipChangesInProgress({FlutterSecureStorage? storage, Duration lease = const Duration(seconds: 10)})

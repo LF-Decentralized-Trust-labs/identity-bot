@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 
 // The phone looks for owed signatures while it is usually locked, so the list of
 // changes it agreed to must be readable then: entries kept under the old
-// setting are rewritten once, under the new one. The app and a background look
+// setting are rewritten once, under the new one. The Identity Agent app and a background look
 // both change the list, and neither may lose the other's change.
 
 /// A secure storage in memory that records what was done to it.
@@ -85,7 +85,7 @@ void main() {
     expect(storage.ops.where((o) => !o.contains('changes_lock')).toList(), ['write ownership_changes_readable_after_first_unlock']);
   });
 
-  test('the app and a background look changing the list at once lose nothing', () async {
+  test('the Identity Agent app and a background look changing the list at once lose nothing', () async {
     final values = <String, String>{};
     final app = OwnershipChangesInProgress(storage: Recording(values));
     final background = OwnershipChangesInProgress(storage: Recording(values));
@@ -111,7 +111,7 @@ void main() {
   const old = '[{"org_url":"https://old.example","token":"tok-old","me":"EMe","org_name":"Old"}]';
 
   test('a change added while the first look after an upgrade rewrites the list is not lost', () async {
-    // The background look reads the old list and stalls; the app, meanwhile, adds a
+    // The background look reads the old list and stalls; the Identity Agent app, meanwhile, adds a
     // change (and upgrades what is kept, if it is let to); then the look goes on.
     final values = {'ownership_changes_in_progress': old};
     final stalled = Recording(values)..holdListRead = Completer<void>();
