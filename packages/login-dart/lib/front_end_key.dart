@@ -32,6 +32,10 @@ abstract class FrontEndKey {
   /// What kind of front end this key can start a sign-in for.
   FrontEndKind get kind;
 
+  /// Whether what [sign] gives is an App Attest assertion (Apple), which the back
+  /// end and the Identity Agent check as one, not a 64-byte plain signature.
+  bool get signsAssertions => false;
+
   /// The public key as the sign-in start asks for it.
   Map<String, String> get jwk => {'kty': 'EC', 'crv': 'P-256', 'x': x, 'y': y};
 
@@ -45,8 +49,7 @@ abstract class FrontEndKey {
   /// a key that has none to give. A hardware key is made FOR the ask (Android's
   /// key attestation fixes its challenge when the key is generated), so proving
   /// replaces the key: read [jwk] and [thumbprint] after, never before.
-  Future<InstalledKeyProof?> prove(String assetId, InstalledAsk ask) async =>
-      null;
+  Future<InstalledKeyProof?> prove(InstalledAsk ask) async => null;
 
   /// Whether [signature] is this key's signature over [message].
   bool verify(String message, String signature) {
@@ -194,6 +197,9 @@ class HardwareFrontEndKey extends FrontEndKey {
   bool get isNonExtractable => true;
 
   @override
+  bool get signsAssertions => hardware.callProofIsAssertion;
+
+  @override
   FrontEndKind get kind => FrontEndKind.installedApp;
 
   @override
@@ -204,7 +210,7 @@ class HardwareFrontEndKey extends FrontEndKey {
   }
 
   @override
-  Future<InstalledKeyProof?> prove(String assetId, InstalledAsk ask) async {
+  Future<InstalledKeyProof?> prove(InstalledAsk ask) async {
     final challenge = b64uDecode(ask.challenge);
     if (challenge == null) {
       throw const TrustRefused('the ask\'s challenge is not readable');
@@ -213,7 +219,8 @@ class HardwareFrontEndKey extends FrontEndKey {
     final (x, y) = _coordinates(made.point);
     _x = x;
     _y = y;
-    final digest = installedAppStatementDigest(assetId, challenge, thumbprint);
+    final digest =
+        installedAppStatementDigest(ask.assetId, challenge, thumbprint);
     return InstalledKeyProof(
         platform: hardware.platform,
         evidence: made.evidence,

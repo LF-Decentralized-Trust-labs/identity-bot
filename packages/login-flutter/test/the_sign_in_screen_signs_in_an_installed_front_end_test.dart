@@ -24,7 +24,6 @@ Future<void> open(WidgetTester t, FakeApp app, FakeHardware hw,
     appName: 'Task console',
     pinnedLink: pinned,
     makeClient: () => app.client,
-    assetId: (_) => app.assetId,
     keyFor: (_) => HardwareFrontEndKey.open(hw, 'app-key'),
     storeFor: (_) => MemoryGrantStore(),
     every: const Duration(milliseconds: 10),
@@ -106,7 +105,6 @@ void main() {
             body: UtilityAppSignInScreen(
       appName: 'Task console',
       makeClient: () => app.client,
-      assetId: (_) => app.assetId,
       keyFor: (_) async => throw PlatformException(
           code: 'tpm_evidence_unavailable',
           message: 'The TPM cannot be proved yet.'),

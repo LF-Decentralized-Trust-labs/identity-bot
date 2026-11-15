@@ -43,7 +43,7 @@ void main() {
     final key = await HardwareFrontEndKey.open(hw, 'k');
     expect(key.x.length, 43);
     expect(await key.sign('m'), isNotEmpty);
-    final proof = await key.prove('Eapp', InstalledAsk('a1', 'AAAA', 'x'));
+    final proof = await key.prove(InstalledAsk('a1', 'Eapp', 'AAAA', 'x'));
     expect(proof!.platform, 'android');
     expect(proof.evidence, [9, 9]);
     expect(calls.map((c) => c.method),

@@ -116,7 +116,7 @@ void main() {
     final key = await HardwareFrontEndKey.open(_Apple(assertion), 'k');
     expect(() => key.thumbprint, throwsStateError,
         reason: 'no key exists until one is made for an ask');
-    await key.prove('Eapp', InstalledAsk('a', b64uEncode(bytes(32, 9)), 'x'));
+    await key.prove(InstalledAsk('a', 'Eapp', b64uEncode(bytes(32, 9)), 'x'));
     expect(key.x, b64uEncode(bytes(32, 5)));
     expect(b64uDecode(await key.sign('IABK1\nGET\n/x')), assertion);
   });

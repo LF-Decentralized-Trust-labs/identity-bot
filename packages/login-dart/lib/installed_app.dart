@@ -31,22 +31,28 @@ const installedAskPath = '/signin/installed-key/ask';
 class InstalledAsk {
   final String ask;
 
+  /// The utility app's asset, which the key's statement names (only the back end
+  /// knows it: the app's identifier a link carries is another name).
+  final String assetId;
+
   /// Unpadded base64url of the challenge bytes the hardware attests.
   final String challenge;
   final String expires;
-  const InstalledAsk(this.ask, this.challenge, this.expires);
+  const InstalledAsk(this.ask, this.assetId, this.challenge, this.expires);
 
   factory InstalledAsk.fromJson(Object? j) {
     if (j is! Map ||
         j['ask'] is! String ||
         (j['ask'] as String).isEmpty ||
+        j['asset_id'] is! String ||
+        (j['asset_id'] as String).isEmpty ||
         j['challenge'] is! String ||
         b64uDecode(j['challenge']) == null ||
         j['expires'] is! String) {
       throw const TrustRefused('the app\'s ask for evidence is not readable');
     }
-    return InstalledAsk(
-        j['ask'] as String, j['challenge'] as String, j['expires'] as String);
+    return InstalledAsk(j['ask'] as String, j['asset_id'] as String,
+        j['challenge'] as String, j['expires'] as String);
   }
 }
 

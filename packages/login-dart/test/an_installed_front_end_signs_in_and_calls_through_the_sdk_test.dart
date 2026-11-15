@@ -16,8 +16,7 @@ import 'support/fake_app.dart';
 // not the app, and an ended grant says so.
 
 AppSession open(FakeApp app, FrontEndKey key, {GrantStore? store}) =>
-    AppSession(app.client, app.link, key,
-        assetId: app.assetId, store: store, now: () => app.clock);
+    AppSession(app.client, app.link, key, store: store, now: () => app.clock);
 
 void main() {
   test('an installed front end proves its key, signs in and holds a grant',

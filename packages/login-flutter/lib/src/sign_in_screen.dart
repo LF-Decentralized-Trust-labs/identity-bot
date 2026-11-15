@@ -21,9 +21,6 @@ class UtilityAppSignInScreen extends StatefulWidget {
   final String? pinnedLink;
   final http.Client Function() makeClient;
 
-  /// The utility app's asset identifier, which the hardware's evidence is made for.
-  final String Function(AppLink link) assetId;
-
   /// The key and the grant store for the link opened (an installed app: a
   /// `HardwareFrontEndKey` and a `SecureGrantStore`).
   final Future<FrontEndKey> Function(AppLink link) keyFor;
@@ -44,7 +41,6 @@ class UtilityAppSignInScreen extends StatefulWidget {
     super.key,
     required this.appName,
     required this.makeClient,
-    required this.assetId,
     required this.keyFor,
     required this.storeFor,
     required this.onSignedIn,
@@ -87,7 +83,7 @@ class _State extends State<UtilityAppSignInScreen> {
     final client = widget.makeClient();
     try {
       final session = AppSession(client, link, await widget.keyFor(link),
-          assetId: widget.assetId(link), store: widget.storeFor(link));
+          store: widget.storeFor(link));
       final started = await session.start();
       if (!mounted) return;
       setState(() {

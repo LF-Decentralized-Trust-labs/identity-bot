@@ -110,6 +110,7 @@ class FakeApp {
           status: 200,
           body: {
             'ask': asked,
+            'asset_id': assetId,
             'challenge': b64uEncode(List<int>.generate(32, (i) => 100 + i)),
             'expires': '2026-11-11T12:05:00Z'
           }

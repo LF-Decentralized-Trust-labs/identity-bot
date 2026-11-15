@@ -49,7 +49,10 @@ type InstalledKeyProof struct {
 // InstalledAsk is what the back end hands its installed front end to make the
 // evidence for: the ask's name and the challenge the hardware attests.
 type InstalledAsk struct {
-	Ask       string `json:"ask"`
+	Ask string `json:"ask"`
+	// AssetID is the utility app's asset, which the key's statement names. Only the
+	// back end knows it: the app's identifier a link carries is another name.
+	AssetID   string `json:"asset_id"`
 	Challenge string `json:"challenge"` // unpadded base64url of the challenge bytes
 	Expires   string `json:"expires"`
 }

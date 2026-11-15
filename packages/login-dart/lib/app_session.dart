@@ -100,9 +100,6 @@ class AppSession {
   final AppLink link;
   final FrontEndKey key;
 
-  /// The utility app's own asset identifier, which the hardware's evidence is
-  /// made for. For an installed front end it is what the app is.
-  final String assetId;
   final GrantStore store;
   final AnswerLogs logs;
   final DateTime Function() now;
@@ -112,8 +109,7 @@ class AppSession {
   bool _synced = false;
 
   AppSession(this.client, this.link, this.key,
-      {required this.assetId,
-      GrantStore? store,
+      {GrantStore? store,
       AnswerLogs? logs,
       DateTime Function()? now,
       Random? random})
@@ -178,8 +174,7 @@ class AppSession {
       final asked = _ok(
           await _send('POST', installedAskPath, '{}', (_) async => {}),
           'Asking the app for evidence of this device\'s key');
-      proof =
-          await key.prove(assetId, _guard(() => InstalledAsk.fromJson(asked)));
+      proof = await key.prove(_guard(() => InstalledAsk.fromJson(asked)));
       if (proof == null) {
         throw const SignInFailed(
             'This device cannot prove its key to the app, so it cannot sign in as the app\'s installed front end.');
