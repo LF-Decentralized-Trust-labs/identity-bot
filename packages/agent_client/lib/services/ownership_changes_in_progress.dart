@@ -55,17 +55,52 @@ class AnOwnershipChange {
 /// the screen, or was restarted, could never sign the second rotation, and the
 /// first would already be in the log. In secure storage because the code in it
 /// is what lets this phone's agent sign for that one change.
+///
+/// **Readable after the first unlock, and not before.** A background look runs
+/// while the phone is usually locked, and a keychain item kept "only while
+/// unlocked" cannot be read then, so the look would never see a change. The
+/// price is that the code can be read by this app while the phone is locked but
+/// has been unlocked once since it started: the usual choice for a background
+/// reader, and the code lets this phone sign only for that one change, and only
+/// the rotation its person was shown. Entries kept before this are rewritten
+/// once under the new setting ([all] does it the first time the phone can read
+/// them).
+///
+/// Changes to the list are made under a short lease kept beside it, because a
+/// background look and the app can both change it at once, and a change lost
+/// there is the phone's only way back to that change.
 class OwnershipChangesInProgress {
-  OwnershipChangesInProgress({FlutterSecureStorage? storage})
+  OwnershipChangesInProgress({FlutterSecureStorage? storage, Duration lease = const Duration(seconds: 10)})
       : _storage = storage ??
             const FlutterSecureStorage(
               aOptions: AndroidOptions(encryptedSharedPreferences: true),
+              iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
               mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-            );
+            ),
+        _lease = lease;
   final FlutterSecureStorage _storage;
+  final Duration _lease;
   static const _key = 'ownership_changes_in_progress';
+  static const _upgraded = 'ownership_changes_readable_after_first_unlock';
+  static const _lockKey = 'ownership_changes_lock';
+
+  /// Rewrites what an earlier version kept under the old setting, once. A read
+  /// that fails (the phone is locked and has not been unlocked since it started)
+  /// leaves it for the next.
+  Future<void> _upgradeOnce() async {
+    try {
+      if (await _storage.read(key: _upgraded) == '1') return;
+      final raw = await _storage.read(key: _key);
+      if (raw != null) {
+        await _storage.delete(key: _key);
+        await _storage.write(key: _key, value: raw);
+      }
+      await _storage.write(key: _upgraded, value: '1');
+    } catch (_) {/* looked at again the next time */}
+  }
 
   Future<List<AnOwnershipChange>> all() async {
+    await _upgradeOnce();
     final raw = await _storage.read(key: _key);
     if (raw == null || raw.isEmpty) return const [];
     try {
@@ -78,13 +113,53 @@ class OwnershipChangesInProgress {
     }
   }
 
-  Future<void> add(AnOwnershipChange change) async {
-    final kept = [for (final c in await all()) if (c.token != change.token) c, change];
-    await _storage.write(key: _key, value: jsonEncode([for (final c in kept) c.toJson()]));
+  Future<void> add(AnOwnershipChange change) => _exclusively(() => _change(
+      (all) => [for (final c in all) if (c.token != change.token) c, change]));
+
+  Future<void> remove(String token) =>
+      _exclusively(() => _change((all) => [for (final c in all) if (c.token != token) c]));
+
+  /// Reads the list, makes [edit] of it, writes it, and reads it back: if what is
+  /// there is not what was written, somebody wrote at the same moment (the lease
+  /// is not a lock a second isolate is made to wait on), so the edit is made again
+  /// to the list that is there now.
+  Future<void> _change(List<AnOwnershipChange> Function(List<AnOwnershipChange> all) edit) async {
+    for (var i = 0; i < 4; i++) {
+      final written = jsonEncode([for (final c in edit(await all())) c.toJson()]);
+      await _storage.write(key: _key, value: written);
+      if (await _storage.read(key: _key) == written) return;
+    }
   }
 
-  Future<void> remove(String token) async {
-    final kept = [for (final c in await all()) if (c.token != token) c];
-    await _storage.write(key: _key, value: jsonEncode([for (final c in kept) c.toJson()]));
+  /// Runs [change] holding the lease, or without it if it cannot be had in a
+  /// couple of seconds: a stuck holder must not stop a person agreeing to
+  /// something. The lease expires on its own.
+  Future<void> _exclusively(Future<void> Function() change) async {
+    final me = '${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
+    var held = false;
+    for (var i = 0; i < 40 && !held; i++) {
+      try {
+        final cur = await _storage.read(key: _lockKey);
+        final expires = cur == null ? 0 : int.tryParse(cur.split('|').last) ?? 0;
+        if (cur == null || expires < DateTime.now().millisecondsSinceEpoch) {
+          await _storage.write(
+              key: _lockKey,
+              value: '$me|${DateTime.now().add(_lease).millisecondsSinceEpoch}');
+          held = (await _storage.read(key: _lockKey))?.startsWith('$me|') ?? false;
+        }
+      } catch (_) {
+        break;
+      }
+      if (!held) await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    try {
+      await change();
+    } finally {
+      if (held) {
+        try {
+          await _storage.delete(key: _lockKey);
+        } catch (_) {/* it expires */}
+      }
+    }
   }
 }
