@@ -296,6 +296,14 @@ Where this departs from keripy, so nobody takes it for more:
   tip above is the one to ask.
 - **A witness that does not serve `/witness/ksn/{aid}` counts as not answering**, so a log
   whose witnesses are all such services is not corroborated until they do.
+- **Receipts to the threshold are asked of establishment events only.** keripy also
+  waits for them on an interaction. A log whose last events are interactions is
+  corroborated by its latest establishment event's receipts and by the witnesses' signed
+  answers about the tip.
+- **A rotation at a place supersedes an interaction there, as in keripy.** An interaction
+  at that place signed by a key the owner has since rotated away from is not taken as a
+  rival, by the witness or by the one corroborating, so it cannot make a genuine claim
+  refused.
 - **`f` is written equal to `s`.** keripy's `f` is the first-seen ordinal, which differs
   from `s` only after a recovery rotation has superseded events; the record here follows
   one chain.

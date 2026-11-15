@@ -115,7 +115,8 @@ func (s *Service) admit(signerAID string, raw []byte, sigs []string) (*admitted,
 // state before that place, and the log holds a state at that place. held is
 // what the log holds there; whether it is a different event is the caller's
 // question (a refused event is one by construction). ok is false for anything
-// else, since an event that does not verify is evidence of nothing.
+// else, since an event that does not verify is evidence of nothing. An
+// interaction at a place where the log holds a rotation is not a rival either.
 //
 // This is the one test of "is this a signed conflict": the witness applies it
 // to an event it refuses, and CorroborateThrough applies it to what a witness
@@ -135,6 +136,12 @@ func signedRival(log *keri.SignedKELResult, raw, message []byte) (ev *keri.Event
 	}
 	held = log.StateAt(ev.SN)
 	if held == nil {
+		return nil, nil, nil, false
+	}
+	// A rotation at a place supersedes an interaction there (recovery, as in
+	// keripy): a key the owner has since rotated away from can still sign an
+	// interaction at that place, and that is not evidence the owner was two-faced.
+	if (held.Ilk() == "rot" || held.Ilk() == "drt") && ev.Ilk != "rot" && ev.Ilk != "drt" {
 		return nil, nil, nil, false
 	}
 	return ev, v, held, true

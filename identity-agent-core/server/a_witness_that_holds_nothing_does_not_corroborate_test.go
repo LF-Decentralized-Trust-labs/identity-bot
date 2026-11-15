@@ -65,13 +65,28 @@ func TestAWitnessHoldingTheEventsIsCountedHeld(t *testing.T) {
 func TestAWitnessHoldingADifferentEventContradicts(t *testing.T) {
 	w := newStandInWitness(t)
 	c, icp := freshClaim(t, w)
-	rot := signedRotation(t, c)
 	icpSAID := eventSAIDOf(t, icp[0])
+	mine := signedInteractionAt(t, c, 1, icpSAID, "mine", c.signers[0])
 	rival := signedInteractionAt(t, c, 1, icpSAID, "rival", c.signers[0])
 	w.held[c.aid] = []map[string]interface{}{icp[0], rival}
-	got := agentWithNoIdentity(t).askTheWitnesses(c.aid, []map[string]interface{}{icp[0], rot})
+	got := agentWithNoIdentity(t).askTheWitnesses(c.aid, []map[string]interface{}{icp[0], mine})
 	if !got.Contradicted || got.Corroborated() {
 		t.Fatalf("a different event at the same place was not a contradiction: %+v", got)
+	}
+}
+
+// A rotation in the claimed log supersedes an interaction at its place, as in
+// keripy, so a witness showing an interaction there, signed by the key the
+// rotation replaced, is not a contradiction.
+func TestAWitnessShowingAnInteractionTheClaimedRotationReplacedDoesNotContradict(t *testing.T) {
+	w := newStandInWitness(t)
+	c, icp := freshClaim(t, w)
+	rot := signedRotation(t, c)
+	rival := signedInteractionAt(t, c, 1, eventSAIDOf(t, icp[0]), "rival", c.signers[0])
+	w.held[c.aid] = []map[string]interface{}{icp[0], rival}
+	got := agentWithNoIdentity(t).askTheWitnesses(c.aid, []map[string]interface{}{icp[0], rot})
+	if got.Contradicted || got.Corroborated() {
+		t.Fatalf("an interaction the rotation replaced refused or corroborated the claim: %+v", got)
 	}
 }
 
