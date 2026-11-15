@@ -648,3 +648,36 @@ func TestAfterARotationTheWitnessesInForceAreTheOnesAsked(t *testing.T) {
 		t.Fatalf("a rotated log held by the witnesses in force did not corroborate: %+v", got)
 	}
 }
+
+// A location is the witness's own, for an http or https address, on the location
+// route; a notice is not a location and a location is not a notice.
+func TestALocationIsReadOnlyAsWhatItIs(t *testing.T) {
+	w := witnessesOf(2)
+	key, seed := w.keys[0], w.seeds[w.keys[0]]
+	reply := func(eid, url string, as []byte) SignedReply {
+		raw, err := BuildWitnessLocation(eid, url, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		sig, _ := login.SignString(string(raw), as)
+		return SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), Signature: sig}
+	}
+	if _, err := VerifyWitnessLocation(reply(key, "https://w.example", seed), key); err != nil {
+		t.Fatalf("a good location was refused: %v", err)
+	}
+	if _, err := VerifyWitnessLocation(reply(w.keys[1], "https://w.example", seed), key); err == nil {
+		t.Fatal("a location for another witness was taken")
+	}
+	if _, err := VerifyWitnessLocation(reply(key, "ftp://w.example", seed), key); err == nil {
+		t.Fatal("an address that is not http or https was taken")
+	}
+	notice, _ := BuildKeyStateNotice("EAid", 1, "ESaid0000000000000000000000000000000000000", time.Now())
+	sig, _ := login.SignString(string(notice), seed)
+	if _, err := VerifyWitnessLocation(SignedReply{RpyB64: base64.StdEncoding.EncodeToString(notice), Signature: sig}, key); err == nil {
+		t.Fatal("a key state notice was taken for a location")
+	}
+	loc := reply(key, "https://w.example", seed)
+	if _, err := VerifyKeyStateNotice(loc, key, "EAid", time.Now()); err == nil {
+		t.Fatal("a location was taken for a key state notice")
+	}
+}

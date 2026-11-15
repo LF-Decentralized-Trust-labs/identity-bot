@@ -226,7 +226,7 @@ func VerifyWitnessLocation(ans SignedReply, witnessKey string) (WitnessLocation,
 	if err := json.Unmarshal(rep.Data, &d); err != nil || d.EID != witnessKey {
 		return WitnessLocation{}, fmt.Errorf("the location is not this witness's own")
 	}
-	if !strings.HasPrefix(d.URL, "https://") && !strings.HasPrefix(d.URL, "http://") {
+	if !strings.HasPrefix(d.URL, d.Scheme+"://") || (d.Scheme != "https" && d.Scheme != "http") {
 		return WitnessLocation{}, fmt.Errorf("the location %q is not an address this will ask", d.URL)
 	}
 	return WitnessLocation{URL: strings.TrimRight(d.URL, "/")}, nil

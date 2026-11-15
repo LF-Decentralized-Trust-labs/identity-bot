@@ -208,6 +208,16 @@ func corroborateThrough(client *http.Client, pool []BootstrapWitness, ownerAID s
 	// log that cannot be rebuilt was not verified by its bytes and cannot be
 	// corroborated.
 	rebuilt, ok := drivers.RecordsFromVerifiedBytes(presented)
+	// Each witness once: asking one twice must not count it twice.
+	seen := map[string]bool{}
+	var distinct []string
+	for _, k := range keys {
+		if !seen[k] {
+			seen[k] = true
+			distinct = append(distinct, k)
+		}
+	}
+	keys = distinct
 	out := Corroboration{Designated: len(keys)}
 	if len(keys) == 0 || !ok || len(rebuilt) == 0 {
 		return out
