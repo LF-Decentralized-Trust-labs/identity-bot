@@ -283,6 +283,100 @@ func (s *CoreServer) handleCeremonyEvent(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// ceremonyStatusForToken is where the ceremony the invite code belongs to has
+// got to, in any state. Callers hold ceremonyMu.
+func (s *CoreServer) ceremonyStatusForToken(token string) (string, bool) {
+	c, err := s.loadCeremony()
+	if err != nil || c == nil || token == "" {
+		return "", false
+	}
+	for i := range c.Invited {
+		if c.Invited[i].TokenDigest != "" && enrolsecret.Equal(token, c.Invited[i].TokenDigest) {
+			return c.Status, true
+		}
+	}
+	return "", false
+}
+
+// handleCeremonyTerms tells an invited owner's device who is taking part and on
+// what terms, so the person is shown them before anything is signed and the
+// device can hold the rotation to exactly them. Everything it says about the
+// owners is what each of them handed over when they accepted; the event's own
+// fields (identifier, place in the log, seals, witnesses) are read from the
+// bytes waiting to be signed. Public, reached by the invite code.
+func (s *CoreServer) handleCeremonyTerms(w http.ResponseWriter, r *http.Request) {
+	ceremonyMu.Lock()
+	defer ceremonyMu.Unlock()
+	token := chi.URLParam(r, "token")
+	c, _, code, err := s.ceremonyForToken(token)
+	if err != nil {
+		// Not signing yet, or over: an owner's device that is waiting needs to tell
+		// "the others have not all accepted" from "it was made" from "it was
+		// dropped", so the state is said to the one holding a code of the
+		// ceremony and to nobody else.
+		if status, ok := s.ceremonyStatusForToken(token); ok {
+			jsonreply.Write(w, http.StatusOK, map[string]any{"status": status})
+			return
+		}
+		writeError(w, code, "Nothing to sign", err.Error())
+		return
+	}
+	members, err := c.members()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "The ceremony record is unreadable", err.Error())
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(c.PendingRawB64)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "The ceremony record is unreadable", err.Error())
+		return
+	}
+	var ev struct {
+		I  string            `json:"i"`
+		S  string            `json:"s"`
+		P  string            `json:"p"`
+		Bt string            `json:"bt"`
+		Br []string          `json:"br"`
+		Ba []string          `json:"ba"`
+		A  []json.RawMessage `json:"a"`
+	}
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		writeError(w, http.StatusInternalServerError, "The ceremony record is unreadable", err.Error())
+		return
+	}
+	type owner struct {
+		Name    string   `json:"name"`
+		AID     string   `json:"aid"`
+		Key     string   `json:"key"`
+		Next    []string `json:"next"`
+		NextKey string   `json:"next_key,omitempty"`
+		After   []string `json:"after,omitempty"`
+		Signed  bool     `json:"signed"`
+	}
+	owners := make([]owner, 0, len(members))
+	for _, m := range members {
+		owners = append(owners, owner{
+			Name: m.Invitee.Name, AID: m.Invitee.PairwiseAID, Key: m.Invitee.PublicKey,
+			Next: m.Next, NextKey: m.Invitee.NextPublicKey, After: m.After,
+			Signed: m.Invitee.SignedStage == c.Stage,
+		})
+	}
+	ownNext := ""
+	if !c.HandOver {
+		if d, err := keri.NextDigest(c.OwnNextPublicKey); err == nil {
+			ownNext = d
+		}
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]any{
+		"status": c.Status,
+		"stage":  c.Stage, "hand_over": c.HandOver, "threshold": c.Threshold,
+		"aid": ev.I, "sn": ev.S, "prior": ev.P, "d": c.PendingSAID,
+		"own_key": c.OwnPublicKey, "own_next_digest": ownNext,
+		"toad": ev.Bt, "cuts": ev.Br, "adds": ev.Ba, "anchors": ev.A,
+		"owners": owners,
+	})
+}
+
 // handleCeremonySignature takes an owner's signature or signatures over the
 // event in front of them. The engine adds the event when the signatures it
 // holds meet both thresholds; until then it holds them. A signature that does
@@ -299,7 +393,7 @@ func (s *CoreServer) handleCeremonySignature(w http.ResponseWriter, r *http.Requ
 	}
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
-	c, _, code, err := s.ceremonyForToken(chi.URLParam(r, "token"))
+	c, who, code, err := s.ceremonyForToken(chi.URLParam(r, "token"))
 	if err != nil {
 		writeError(w, code, "Nothing to sign", err.Error())
 		return
@@ -329,6 +423,15 @@ func (s *CoreServer) handleCeremonySignature(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		writeEventError(w, err)
 		return
+	}
+	// Remembered so the person who started the ceremony can see whose device
+	// has signed and whose has not, rather than only that it is waiting.
+	if who != nil {
+		who.SignedStage = c.Stage
+		if err := s.saveCeremony(c); err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not record the ceremony", err.Error())
+			return
+		}
 	}
 	if res.Status == "waiting_for_signatures" {
 		jsonreply.Write(w, http.StatusAccepted, map[string]any{"status": res.Status, "signed": res.Signed, "keys": res.Keys})

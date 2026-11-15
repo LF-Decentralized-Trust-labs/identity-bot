@@ -242,9 +242,17 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	if err != nil {
 		return nil, fmt.Errorf("the organization's answer: %w", err)
 	}
+	// An organisation that answers "accepted" has put this owner into an
+	// ownership ceremony, which is not over until every owner's device has
+	// signed: the person is taken on to that, not to claiming a machine.
+	var said struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(answer, &said)
+	inCeremony := said.Status == "accepted"
 	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{
 		base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI,
-		publishedPath: publishedPathFrom(answer),
+		publishedPath: publishedPathFrom(answer), ceremony: inCeremony,
 	})
 
 	org := p.OrgName
@@ -259,6 +267,7 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		"invited_by":        strings.TrimRight(ctx.Base, "/"),
 		"machine_owner_aid": machineOwnerAID,
 		"employer":          org,
+		"ceremony":          inCeremony,
 		"role":              "Super Admin",
 		"pairwise_aid":      rel.PairwiseAID,
 		"status":            "active", // the signer is active immediately

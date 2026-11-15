@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -55,6 +56,7 @@ func aCeremonyOfTwoDevices(t *testing.T, handOver, pq bool) *aCeremonyWorld {
 	w := &aCeremonyWorld{s: s, a: signerSeeds(3, 10), c: signerSeeds(3, 20), r: chi.NewRouter()}
 	w.r.Get("/api/signer/invites/{token}/ceremony-event", s.handleCeremonyEvent)
 	w.r.Post("/api/signer/invites/{token}/ceremony-signature", s.handleCeremonySignature)
+	w.r.Get("/api/signer/invites/{token}/ceremony-terms", s.handleCeremonyTerms)
 
 	invitee := func(name, aid, token string, k []aSigner, seedBase int) CeremonyInvitee {
 		inv := CeremonyInvitee{Name: name, TokenDigest: enrolsecret.Digest(token), PairwiseAID: aid,
@@ -283,5 +285,140 @@ func TestACeremonyTakesNoSignatureItCannotCheck(t *testing.T) {
 	}
 	if c := w.ceremony(t); c.Status != ceremonySigning {
 		t.Errorf("the ceremony moved to %q", c.Status)
+	}
+}
+
+// A device is shown who is taking part before it signs, and the person who
+// started the ceremony is told whose device has signed: the terms name each
+// owner in the order the event lists them, and move on to the second rotation
+// with nobody yet marked as having signed it.
+func TestTheTermsNameEachOwnerAndWhoHasSigned(t *testing.T) {
+	w := aCeremonyOfTwoDevices(t, true, false)
+	terms := func(token string) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		w.r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/signer/invites/"+token+"/ceremony-terms", nil))
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	// What a device that is waiting is told: the ceremony's state, and no terms
+	// to sign until there is something to sign.
+	if code, _ := terms("not-a-code"); code != http.StatusNotFound {
+		t.Fatalf("terms were given for a code that belongs to no ceremony: %d", code)
+	}
+	code, out := terms("tok-a")
+	if code != http.StatusOK || out["stage"] != stageFirst || out["hand_over"] != true || out["sn"] != "1" {
+		t.Fatalf("the first rotation's terms: %d %v", code, out)
+	}
+	owners := out["owners"].([]any)
+	if len(owners) != 2 || owners[0].(map[string]any)["aid"] != deviceA && owners[0].(map[string]any)["aid"] != deviceC {
+		t.Fatalf("owners %v", owners)
+	}
+	if owners[0].(map[string]any)["aid"].(string) > owners[1].(map[string]any)["aid"].(string) {
+		t.Errorf("the owners are not listed by identifier: %v", owners)
+	}
+	for _, o := range owners {
+		if o.(map[string]any)["signed"] != false {
+			t.Errorf("an owner is marked as having signed before anyone has: %v", o)
+		}
+	}
+	raw1, d1, _ := w.fetch(t, "tok-a")
+	if code, _ := w.sign(t, "tok-a", d1, w.a[0].at(t, raw1, 1, -1)); code != http.StatusAccepted {
+		t.Fatalf("signing: %d", code)
+	}
+	signed := map[string]bool{}
+	_, out = terms("tok-c")
+	for _, o := range out["owners"].([]any) {
+		m := o.(map[string]any)
+		signed[m["name"].(string)] = m["signed"].(bool)
+	}
+	if !signed["A"] || signed["C"] {
+		t.Errorf("after only A signed the terms say %v", signed)
+	}
+	if got := w.ceremony(t).Invited; len(got) != 2 {
+		t.Fatalf("%v", got)
+	}
+	// Once the second rotation is the one waiting, nobody has signed it yet.
+	if code, _ := w.sign(t, "tok-c", d1, w.c[0].at(t, raw1, 2, -1)); code != http.StatusCreated {
+		t.Fatalf("signing: %d", code)
+	}
+	_, out = terms("tok-a")
+	if out["stage"] != stageSecond || out["sn"] != "2" {
+		t.Fatalf("second rotation terms: %v", out)
+	}
+	for _, o := range out["owners"].([]any) {
+		if o.(map[string]any)["signed"] != false {
+			t.Errorf("an owner is marked as having signed the second rotation already: %v", o)
+		}
+	}
+}
+
+// A ceremony whose devices never sign can be given up on while nothing is in
+// the log, and cannot be started over meanwhile; once a hand-over's first
+// rotation is in the log it cannot be dropped, because the owners hold control
+// beside this agent's key and the only way out is to finish.
+func TestACeremonyWaitingForSignaturesCanBeAbandonedOnlyBeforeAnythingIsInTheLog(t *testing.T) {
+	abandon := func(w *aCeremonyWorld) int {
+		rec := httptest.NewRecorder()
+		w.s.handleAbandonCeremony(rec, httptest.NewRequest(http.MethodDelete, "/api/owners/ceremony", nil))
+		return rec.Code
+	}
+	start := func(w *aCeremonyWorld) int {
+		rec := httptest.NewRecorder()
+		w.s.handleStartCeremony(rec, httptest.NewRequest(http.MethodPost, "/api/owners/ceremony",
+			strings.NewReader(`{"invite":["X"]}`)))
+		return rec.Code
+	}
+
+	w := aCeremonyOfTwoDevices(t, true, false)
+	if code := start(w); code != http.StatusConflict {
+		t.Errorf("a second ceremony was started while the first waits for signatures: %d", code)
+	}
+	if code := abandon(w); code != http.StatusOK {
+		t.Fatalf("a ceremony waiting for the first rotation's signatures could not be abandoned: %d", code)
+	}
+	if c := w.ceremony(t); c.Status != ceremonyAbandoned {
+		t.Errorf("the ceremony is %q after being abandoned", c.Status)
+	}
+
+	w = aCeremonyOfTwoDevices(t, true, false)
+	raw1, d1, _ := w.fetch(t, "tok-a")
+	w.sign(t, "tok-a", d1, w.a[0].at(t, raw1, 1, -1))
+	if code, _ := w.sign(t, "tok-c", d1, w.c[0].at(t, raw1, 2, -1)); code != http.StatusCreated {
+		t.Fatalf("the first rotation was not signed: %d", code)
+	}
+	if code := abandon(w); code != http.StatusConflict {
+		t.Errorf("a hand-over whose first rotation is in the log was abandoned: %d", code)
+	}
+	if c := w.ceremony(t); c.Status != ceremonySigning || c.Stage != stageSecond {
+		t.Errorf("the half-way hand-over is %q at %q", c.Status, c.Stage)
+	}
+}
+
+// A device waiting on a ceremony is told where it has got to, but only the
+// device holding one of its codes, and nothing to sign until there is something.
+func TestADeviceIsToldWhereTheCeremonyHasGotTo(t *testing.T) {
+	w := aCeremonyOfTwoDevices(t, false, false)
+	read := func(token string) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		w.r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/signer/invites/"+token+"/ceremony-terms", nil))
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	if code, out := read("tok-a"); code != 200 || out["status"] != ceremonySigning || out["stage"] != stageFirst {
+		t.Fatalf("while signing: %d %v", code, out)
+	}
+	c := w.ceremony(t)
+	c.Status, c.Stage, c.PendingRawB64 = ceremonyApplied, "", ""
+	ceremonyMu.Lock()
+	_ = w.s.saveCeremony(c)
+	ceremonyMu.Unlock()
+	code, out := read("tok-a")
+	if code != 200 || out["status"] != ceremonyApplied || out["owners"] != nil {
+		t.Fatalf("once applied: %d %v", code, out)
+	}
+	if code, _ := read("somebody-elses"); code != http.StatusNotFound {
+		t.Fatalf("a stranger was told how the ceremony stands: %d", code)
 	}
 }

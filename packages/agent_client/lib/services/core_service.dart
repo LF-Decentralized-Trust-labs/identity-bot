@@ -1967,13 +1967,19 @@ class CoreService {
   ///
   /// Nothing changes until every one of them has scanned. threshold omitted
   /// means all of them must sign afterwards.
-  Future<OwnerCeremony> startOwnerCeremony(List<String> invite, {int? threshold}) async {
+  ///
+  /// [handOver] ends the ceremony with this agent's own key out of control: the
+  /// owners' devices sign two rotations, and afterwards this agent holds and
+  /// derives no key of the identity.
+  Future<OwnerCeremony> startOwnerCeremony(List<String> invite,
+      {int? threshold, bool handOver = false}) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/owners/ceremony'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'invite': invite,
         if (threshold != null) 'threshold': threshold,
+        if (handOver) 'hand_over': true,
       }),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
@@ -2379,6 +2385,30 @@ class CoreService {
         reason.isNotEmpty
             ? reason
             : 'The inviting app could not be asked: ${response.statusCode}');
+  }
+
+  /// Asks this device's own agent to make the signature its key owes over a
+  /// rotation of an ownership ceremony it accepted. [generation] is 0 for the
+  /// first rotation and 1 for the second of a hand-over. The agent signs only a
+  /// rotation of the organisation that invited it that reveals that key.
+  Future<List<int>> signACeremonyRotation(String inviteToken,
+      {required int generation, required List<int> raw}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/redeemed-invites/ceremony-signature'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'invite_token': inviteToken,
+        'generation': generation,
+        'raw_b64': base64Encode(raw),
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(response.body.trim().isNotEmpty
+          ? response.body.trim()
+          : 'This device\u2019s agent would not sign: ${response.statusCode}');
+    }
+    return base64Decode(
+        (jsonDecode(response.body) as Map<String, dynamic>)['signature_b64'] as String);
   }
 
   Future<Map<String, dynamic>> adoptAgent({
@@ -3455,6 +3485,13 @@ class OwnerCeremony {
   /// The rotation that made it real, so this and the key log can be reconciled.
   final String rotationSaid;
 
+  /// This ceremony drops the identity's own key: see [CoreService.startOwnerCeremony].
+  final bool handOver;
+
+  /// While [isSigning], which rotation is waiting for the owners' devices: "rot1"
+  /// or "rot2".
+  final String stage;
+
   const OwnerCeremony({
     required this.id,
     this.threshold = 0,
@@ -3462,9 +3499,18 @@ class OwnerCeremony {
     this.status = '',
     this.detail = '',
     this.rotationSaid = '',
+    this.handOver = false,
+    this.stage = '',
   });
 
   bool get isCollecting => status == 'collecting';
+
+  /// Everyone has accepted and the rotation is waiting for their devices to sign it.
+  bool get isSigning => status == 'signing';
+
+  /// Whose device has still to sign the rotation waiting.
+  List<CeremonyInvitee> get yetToSign =>
+      invited.where((i) => i.signedStage != stage).toList();
   bool get isApplied => status == 'applied';
   bool get hasFailed => status == 'failed';
 
@@ -3481,6 +3527,8 @@ class OwnerCeremony {
         status: json['status'] ?? '',
         detail: json['detail'] ?? '',
         rotationSaid: json['rotation_said'] ?? '',
+        handOver: json['hand_over'] == true,
+        stage: json['stage'] ?? '',
       );
 }
 
@@ -3498,12 +3546,16 @@ class CeremonyInvitee {
   final String publicKey;
   final String acceptedAt;
 
+  /// The rotation ("rot1" or "rot2") this person's device last signed.
+  final String signedStage;
+
   const CeremonyInvitee({
     this.name = '',
     this.inviteUrl = '',
     this.pairwiseAid = '',
     this.publicKey = '',
     this.acceptedAt = '',
+    this.signedStage = '',
   });
 
   bool get accepted => pairwiseAid.isNotEmpty && publicKey.isNotEmpty;
@@ -3514,6 +3566,7 @@ class CeremonyInvitee {
         pairwiseAid: json['pairwise_aid'] ?? '',
         publicKey: json['public_key'] ?? '',
         acceptedAt: json['accepted_at'] ?? '',
+        signedStage: json['signed_stage'] ?? '',
       );
 }
 

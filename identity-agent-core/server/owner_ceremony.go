@@ -126,6 +126,9 @@ type CeremonyInvitee struct {
 	// are asked for only in a hand-over.
 	AfterNextPublicKey         string `json:"after_next_public_key,omitempty"`
 	AfterNextPostQuantumDigest string `json:"after_next_post_quantum_digest,omitempty"`
+	// SignedStage is the rotation ("rot1" or "rot2") this owner's device last
+	// signed, so who is still to sign can be shown.
+	SignedStage string `json:"signed_stage,omitempty"`
 }
 
 // Accepted reports whether this person has taken part yet.

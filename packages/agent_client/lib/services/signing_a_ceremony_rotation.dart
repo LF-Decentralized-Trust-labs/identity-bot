@@ -32,9 +32,22 @@ class CeremonyEventRefused implements Exception {
   String toString() => 'this rotation was not signed: $reason';
 }
 
+/// Makes the signature a device's key owes over the exact bytes of a rotation.
+typedef CeremonySigner = Future<List<int>> Function(Uint8List raw);
+
+/// A [CeremonySigner] for a key whose seed this app holds.
+CeremonySigner signingWithSeed(Uint8List seed) => (raw) async {
+      final key = ed.newKeyFromSeed(seed);
+      try {
+        return ed.sign(key, raw);
+      } finally {
+        key.bytes.fillRange(0, key.bytes.length, 0);
+      }
+    };
+
 /// Fetches the rotation an ownership ceremony is waiting on from the core at
 /// [baseUrl] (the one the invite named), checks it against [expected], signs it
-/// with [signingSeed] and returns the signature (identity-agent-core
+/// with [sign] and returns the signature (identity-agent-core
 /// `owner_ceremony_rotation.go`). [token] is the invite code this device
 /// redeemed with.
 ///
@@ -48,7 +61,7 @@ Future<CeremonySigned> signTheCeremonyRotation(
   String baseUrl, {
   required String token,
   required CeremonyStage stage,
-  required Uint8List signingSeed,
+  required CeremonySigner sign,
   required KeyMath km,
   required ExpectedEvent expected,
 }) async {
@@ -78,13 +91,7 @@ Future<CeremonySigned> signTheCeremonyRotation(
     throw CeremonyEventRefused(
         'the core named the event ${body['d']}, which is not the one it sent (${ev.d})');
   }
-  final key = ed.newKeyFromSeed(signingSeed);
-  final List<int> sig;
-  try {
-    sig = ed.sign(key, raw);
-  } finally {
-    key.bytes.fillRange(0, key.bytes.length, 0);
-  }
+  final sig = await sign(raw);
   final cesr = await km.indexEd25519Signature(sig,
       index: place.index, ondex: place.ondex, currentOnly: place.currentOnly);
   final res = await client.post(

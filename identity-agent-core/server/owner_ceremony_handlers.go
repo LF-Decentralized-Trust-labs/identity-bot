@@ -163,13 +163,16 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
 
-	if current, lerr := s.loadCeremony(); lerr == nil && current != nil && current.Status == ceremonyCollecting {
+	if current, lerr := s.loadCeremony(); lerr == nil && current != nil && (current.Status == ceremonyCollecting || current.Status == ceremonySigning) {
 		// One at a time. Two overlapping ceremonies would each rotate from a key
 		// set the other had already replaced, and the second would fail at the
 		// end — after everybody had signed.
+		waiting := "still waiting on: " + strings.Join(current.Outstanding(), ", ")
+		if current.Status == ceremonySigning {
+			waiting = "everybody has accepted and it is waiting for their devices to sign"
+		}
 		writeError(w, http.StatusConflict, "A ceremony is already under way",
-			fmt.Sprintf("still waiting on: %s. Abandon it first if it is stale.",
-				strings.Join(current.Outstanding(), ", ")))
+			waiting+". Abandon it first if it is stale.")
 		return
 	}
 
@@ -236,8 +239,15 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Could not read the ceremony", err.Error())
 		return
 	}
-	if c == nil || c.Status != ceremonyCollecting {
+	if c == nil || (c.Status != ceremonyCollecting && c.Status != ceremonySigning) {
 		writeError(w, http.StatusConflict, "Nothing to abandon", "no ceremony is under way")
+		return
+	}
+	if c.Status == ceremonySigning && c.Stage == stageSecond {
+		// The first rotation is already in the log: the owners hold control with
+		// this agent's key beside them, and what is left is for them to finish.
+		writeError(w, http.StatusConflict, "The hand-over is half way",
+			"the first rotation is already in the log, so it cannot be dropped now: the owners' devices still have to sign the second")
 		return
 	}
 	c.Status = ceremonyAbandoned

@@ -30,6 +30,7 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 		// who has no use for it.
 		r.Post("/invites/{token}/redeem", s.handleRedeemSignerInvite)
 		r.Get("/invites/{token}/ceremony-event", s.handleCeremonyEvent)
+		r.Get("/invites/{token}/ceremony-terms", s.handleCeremonyTerms)
 		r.Post("/invites/{token}/ceremony-signature", s.handleCeremonySignature)
 	})
 }

@@ -172,7 +172,7 @@ void main() {
       final (client, seen) = await core(await rotation(CeremonyStage.first));
       final out = await signTheCeremonyRotation(client, 'http://core', token: 'tok',
           stage: CeremonyStage.first,
-          signingSeed: seedOf('alice0'),
+          sign: signingWithSeed(seedOf('alice0')),
           km: km,
           expected: await expectedAs(alice, CeremonyStage.first));
       expect(out.nextStage, 'rot2');
@@ -187,7 +187,7 @@ void main() {
       await expectLater(
           signTheCeremonyRotation(client, 'http://core', token: 'tok',
               stage: CeremonyStage.first,
-              signingSeed: seedOf('alice0'),
+              sign: signingWithSeed(seedOf('alice0')),
               km: km,
               expected: await expectedAs(alice, CeremonyStage.first)),
           throwsA(isA<CeremonyEventRefused>()));
@@ -199,7 +199,7 @@ void main() {
       await expectLater(
           signTheCeremonyRotation(client, 'http://core', token: 'tok',
               stage: CeremonyStage.second,
-              signingSeed: seedOf('alice1'),
+              sign: signingWithSeed(seedOf('alice1')),
               km: km,
               expected: await expectedAs(alice, CeremonyStage.second)),
           throwsA(isA<CeremonyEventRefused>()));
