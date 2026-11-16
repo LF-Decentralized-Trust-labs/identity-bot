@@ -1630,6 +1630,74 @@
       }
     },
     {
+      "name": "a utility app that names the retired sandbox isolation",
+      "outcome": "refused",
+      "row": "isolation",
+      "why": "the older sandboxed-app kind is retired; a utility app names no isolation",
+      "manifest": {
+        "id": "ledger-sync",
+        "name": "Ledger Sync",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "compiled",
+        "display_method": "terminal",
+        "network_mode": "isolated",
+        "kind": "app",
+        "sub_type": "go-binary",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "required",
+        "store": {
+          "format": "none",
+          "size_mb": 0
+        },
+        "placement": "shared_machine",
+        "front_and_back_end": {
+          "back_end_port": 9000,
+          "device_front_ends": []
+        },
+        "secrets": [],
+        "when_down": {
+          "person_sees": "last_known_data",
+          "queue_requests": false
+        },
+        "backup": {
+          "what": []
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "binary": {
+          "path": "/opt/ledger-sync/ledger-sync",
+          "args": [],
+          "environment": {}
+        },
+        "isolation": "sandbox"
+      }
+    },
+    {
       "name": "an app with no name",
       "outcome": "refused",
       "row": "name",

@@ -7,7 +7,7 @@ one endpoint speaking the Model Context Protocol (MCP):
 POST <agent base URL>/api/mcp
 ```
 
-The endpoint belongs to the AI-agent add-on, which needs the sandboxed-apps
+The endpoint belongs to the AI-agent add-on, which needs the capability-gateway
 add-on and includes it. Both are kept outside this repository and plug into the
 core through package `addon`; this document is the contract they serve. An
 Identity Agent serves `/api/mcp` only when the app it runs in includes that

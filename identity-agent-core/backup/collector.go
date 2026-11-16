@@ -211,21 +211,6 @@ func (c *Collector) collectTier2(bundle *PayloadBundle) error {
 // Now it sweeps, and only an explicit, reasoned exclusion is left out. See
 // everything_this_device_holds.go.
 func (c *Collector) collectTier3(bundle *PayloadBundle, opts CollectOptions) ([]ExternalDataPointer, error) {
-	// The sandbox index: what apps existed, without their payloads. Carried as
-	// its own section because it is a summary the sweep deliberately excludes
-	// the underlying files for.
-	sandboxDir := filepath.Join(c.DataDir, "sandbox")
-	if entries, err := os.ReadDir(sandboxDir); err == nil {
-		names := []string{}
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		if err := c.addJSONSection(bundle, "sandbox_index",
-			map[string]interface{}{"entries": names}); err != nil {
-			return nil, err
-		}
-	}
-
 	skipped, err := c.collectEveryOtherFile(bundle)
 	if err != nil {
 		return nil, err

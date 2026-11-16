@@ -74,7 +74,7 @@ func TestTheExclusionDoesNotReachTheIdentitysOwnData(t *testing.T) {
 		// chain begins. A restore without it would make every signed row look
 		// forged.
 		"invocation_signer.json",
-		"sandbox.db",
+		"activity.db",
 	}
 
 	for _, f := range carried {

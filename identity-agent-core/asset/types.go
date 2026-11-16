@@ -112,6 +112,17 @@ type Asset struct {
 	// was made before it could say, which is not the same as offering none
 	// (ADR-072 §3, older apps): such an app signs people in as it always did.
 	FrontEndsDeclared bool `json:"front_ends_declared,omitempty"`
+	// RelayID is the utility app's relay identifier, as its owner's Identity Agent
+	// recorded it (HandleSetRelayID). A sign-in challenge for the utility app carries it,
+	// signed (login.ChallengeBundle.RelayID), so a front end handed a link that names
+	// another relay identifier can see the challenge is not for it. Empty until recorded.
+	RelayID string `json:"relay_id,omitempty"`
+	// BackEnd is the address of the utility app's back end, as its owner's Identity
+	// Agent recorded it (HandleSetBackEnd): lower case, no trailing slash. A sign-in
+	// challenge for the app carries it beside the relay identifier, signed
+	// (login.ChallengeBundle.BackEnd), and the person's Identity Agent keeps it with
+	// the sign-in, which is where it sends an end to the session. Empty until recorded.
+	BackEnd string `json:"back_end,omitempty"`
 	// InstalledApp is who the owner says the installed front end is, which the
 	// Identity Agent holds a hardware attestation to (ADR-072 section 4).
 	InstalledApp InstalledAppIdentity `json:"installed_app_identity,omitempty"`

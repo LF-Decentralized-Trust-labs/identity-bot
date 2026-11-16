@@ -60,6 +60,17 @@ func SignHead(identityAgent string, pack func(m *didcomm.JWM) (*didcomm.Envelope
 // OpenHead checks a head statement against the messaging keys of the Identity
 // Agent that signed it, and returns what it says.
 func OpenHead(signer *didcomm.DID, env *didcomm.Envelope) (HeadStatement, error) {
+	if env == nil {
+		return HeadStatement{}, errors.New("the head statement is empty")
+	}
+	if signer == nil {
+		return HeadStatement{}, errors.New("no signer to check the head statement against")
+	}
+	// Only the statement and its two signatures are signed; the rest of the
+	// envelope is refused, so no byte of the head can change unnoticed.
+	if err := exactSignedEnvelope(env, signer.AID); err != nil {
+		return HeadStatement{}, err
+	}
 	jwm, err := didcomm.UnpackSigned(signer, env)
 	if err != nil {
 		return HeadStatement{}, err

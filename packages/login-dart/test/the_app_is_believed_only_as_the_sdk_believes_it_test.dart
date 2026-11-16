@@ -95,6 +95,8 @@ void main() {
               sig: c['sig'],
               pointer: c['pointer'],
               ownThumbprint: c['own_thumbprint'] as String,
+              rid: c['rid'] as String,
+              api: c['api'] as String,
               now: DateTime.fromMillisecondsSinceEpoch(c['now_ms'] as int,
                   isUtc: true)), (r) {
         final got = r as Map<String, dynamic>;
@@ -175,6 +177,8 @@ void main() {
             sig: c['sig'],
             pointer: c['pointer'],
             ownThumbprint: c['own_thumbprint'] as String,
+              rid: c['rid'] as String,
+              api: c['api'] as String,
             now: DateTime.fromMillisecondsSinceEpoch(c['now_ms'] as int,
                 isUtc: true),
             frontEnd: 'installed_app'),

@@ -121,6 +121,8 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		SessionToken:         sessionToken,
 		BrowserKey:           browserKey,
 		FrontEnd:             frontEnd,
+		RelayID:              found.RelayID,
+		BackEnd:              found.BackEnd,
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,

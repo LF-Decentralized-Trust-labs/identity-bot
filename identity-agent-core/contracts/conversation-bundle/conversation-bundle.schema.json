@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "identity-agent-core/contracts/conversation-bundle/conversation-bundle.schema.json",
   "title": "An exported conversation between AI agents, IA-CONVERSATION-BUNDLE-V1 (ADR-047)",
-  "description": "Everything needed to check a conversation with nothing else: its countersigned entries and their words, the key logs of every identity that signed any part of it, the credentials each entry rests on with their transaction logs, the governance log rows, and the anchors that fix the record in a key log. A reader refuses a field the format does not have, and more than one bundle. Every base64 value in a bundle is standard base64 with padding, decoded strictly. Key logs, key events, credentials (ACDC) and their transaction events follow KERI; what this format adds on top is said under each definition. The reference checker is identity-agent-core/cmd/verify-conversation.",
+  "description": "Everything needed to check a conversation with nothing else: its countersigned entries and their words, the key logs of every identity that signed any part of it, the credentials each entry rests on with their transaction logs, the governance log rows, and the anchors that fix the record in a key log. A reader refuses a field the format does not have, a key written twice in one object, a key spelled in another case than this schema spells it, and more than one bundle: the file has one spelling, so every parser reads the same bundle from it, which no schema can say and so is said here. Every base64 value in a bundle is standard base64 with padding, decoded strictly. Key logs, key events, credentials (ACDC) and their transaction events follow KERI; what this format adds on top is said under each definition. The reference checker is identity-agent-core/cmd/verify-conversation.",
   "$ref": "#/$defs/bundle",
   "$defs": {
     "bundle": {
@@ -110,7 +110,7 @@
           }
         },
         "head": {
-          "$ref": "../agent-message/agent-message.schema.json#/$defs/envelope",
+          "$ref": "#/$defs/signed_envelope",
           "description": "the Identity Agent's signed head statement, for a conversation an app keeps (ADR-068, contracts/trail): an envelope of type trail-head, signed with the messaging key that countersigns a person's entries, whose body is {conversation, count, head, ia_time} and whose id is trail-head:<conversation>:<count>. A reader holds the entries to it; absent, a bundle cannot rule out an end cut off"
         }
       }
@@ -125,7 +125,7 @@
       "additionalProperties": false,
       "properties": {
         "envelope": {
-          "$ref": "../agent-message/agent-message.schema.json#/$defs/envelope"
+          "$ref": "#/$defs/signed_envelope"
         },
         "body": {
           "type": "string",
@@ -136,6 +136,66 @@
           "description": "the salt of the fingerprint of body, base64: present exactly when the words of a person's statement entry are"
         }
       }
+    },
+    "signed_envelope": {
+      "description": "A signed envelope as a bundle carries one, for an entry the Identity Agent countersigned and for its head statement: the general signed envelope of contracts/agent-message, held to what such an envelope is written with and nothing else. Only its plaintext and its two signatures are signed, so it carries those three, each in its one spelling (base64url with no padding, no line breaks), a protected header of exactly alg none, enc none and skid, the identity that signed it, and none of the rest an envelope can have: no apu or apv, no sender key log, no ciphertext, iv or recipients. A reader refuses one that carries more, or spells a value another way, because a byte changed there would change the file and nothing it proves.",
+      "allOf": [
+        {
+          "$ref": "../agent-message/agent-message.schema.json#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "plaintext",
+            "ed_sig",
+            "mldsa_sig"
+          ],
+          "properties": {
+            "protected": {
+              "type": "object",
+              "required": [
+                "alg",
+                "enc",
+                "skid"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "alg": {
+                  "const": "none"
+                },
+                "enc": {
+                  "const": "none"
+                },
+                "skid": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "description": "the identity that signed it"
+                }
+              }
+            },
+            "sender_kel": false,
+            "plaintext": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$",
+              "description": "the signed text, the canonical JSON of the message, base64url with no padding, the unused bits of its last character zero (the one spelling of the bytes)"
+            },
+            "ed_sig": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$",
+              "description": "the Ed25519 signature, base64url with no padding, the unused bits of its last character zero (the one spelling of the bytes)"
+            },
+            "mldsa_sig": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$",
+              "description": "the ML-DSA-65 signature, base64url with no padding, the unused bits of its last character zero (the one spelling of the bytes)"
+            }
+          }
+        }
+      ]
     },
     "key_log": {
       "type": "object",

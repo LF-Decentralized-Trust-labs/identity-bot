@@ -323,6 +323,9 @@ func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T
 	wit.mu.Lock()
 	wit.held[minted.AID] = owner.kelToPresent(minted.AID)
 	wit.mu.Unlock()
+	// And receipted every event of it, which is what taking them from their
+	// controller gives: a claim to an identity nobody witnessed is not proof.
+	wit.receipts(t, minted.AID)
 	if len(wit.held[minted.AID]) == 0 {
 		t.Fatal("the minted identity has no key log to be witnessed")
 	}

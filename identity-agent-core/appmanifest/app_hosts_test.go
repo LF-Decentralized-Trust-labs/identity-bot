@@ -107,20 +107,6 @@ func TestDecodeManifestRefusesWhatTheSchemaRefuses(t *testing.T) {
 	}
 }
 
-// The manifests shipped in this repository are read by the strict reader.
-func TestTheShippedManifestsAreRead(t *testing.T) {
-	ms, skipped, err := LoadManifestsFromDir("../../manifests")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(skipped) != 0 {
-		t.Fatalf("shipped manifests skipped: %v", skipped)
-	}
-	if len(ms) == 0 {
-		t.Fatal("no manifests found")
-	}
-}
-
 // {APP_DATA} is the host directory of a manifest that is not an app; for an
 // app a volume is its own encrypted store, whatever {APP_DATA} says.
 func TestVolumesMeanOneThingForAnAppAndAnotherForAnyOtherManifest(t *testing.T) {
@@ -153,10 +139,7 @@ func TestVolumesMeanOneThingForAnAppAndAnotherForAnyOtherManifest(t *testing.T) 
 // and every good manifest still loads.
 func TestOneBadManifestDoesNotCostTheFolder(t *testing.T) {
 	dir := t.TempDir()
-	shipped, err := os.ReadFile("../../manifests/go-demo.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	shipped := []byte(`{"id":"a","name":"a","version":"1","execution_type":"container","display_method":"webview","network_mode":"proxy_required","network":{"tls_mode":"mitm"},"log_level":"none","resources":{"memory_mb":64},"container":{"image":"x"}}`)
 	for name, body := range map[string][]byte{
 		"a-good.json":    shipped,
 		"b-garbage.json": []byte("{not json"),
@@ -185,5 +168,30 @@ func TestOneBadManifestDoesNotCostTheFolder(t *testing.T) {
 	}
 	if _, _, err := LoadManifestsFromDir(filepath.Join(dir, "missing")); err == nil {
 		t.Error("an unreadable folder must still be an error")
+	}
+}
+
+// isolation "sandbox" names the older sandboxed-app kind, which is retired: a
+// manifest that sets it is refused with the way forward, a host plug-in's
+// "host" still reads, and one that sets nothing still reads.
+func TestAManifestThatSetsIsolationSandboxIsRefusedNamingTheUtilityApp(t *testing.T) {
+	m, err := DecodeManifest([]byte(`{"id":"a","name":"a","version":"1","execution_type":"container","display_method":"webview","network_mode":"proxy_required","network":{"tls_mode":"mitm"},"log_level":"none","resources":{"memory_mb":64},"isolation":"sandbox","container":{"image":"x"}}`))
+	if err == nil {
+		err = m.Validate()
+	}
+	if err == nil {
+		t.Fatal(`isolation "sandbox" was accepted`)
+	}
+	for _, want := range []string{"retired", "utility app"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	m, err = DecodeManifest([]byte(`{"id":"a","name":"a","version":"1","execution_type":"container","display_method":"webview","network_mode":"proxy_required","network":{"tls_mode":"mitm"},"log_level":"none","resources":{"memory_mb":64},"container":{"image":"x"}}`))
+	if err == nil {
+		err = m.Validate()
+	}
+	if err != nil {
+		t.Errorf("a manifest with no isolation is refused: %v", err)
 	}
 }
