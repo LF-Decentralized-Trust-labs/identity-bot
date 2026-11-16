@@ -66,6 +66,10 @@ export interface LoginChallenge {
    *  Identity Agent recorded it (ADR-072 Amendment 7). Signed, so a front end
    *  handed a link naming another relay identifier can see the challenge is not for it. */
   rid?: string;
+  /** The address of the utility app's back end, as its owner's Identity Agent recorded
+   *  it (ADR-072 Amendment 8). Signed, so a front end handed a link naming another
+   *  back end can see the challenge is not for it. */
+  api?: string;
   callback_url: string;
   session_token: string;
   sig?: string;

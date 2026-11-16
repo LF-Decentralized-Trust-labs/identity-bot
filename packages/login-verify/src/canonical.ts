@@ -186,7 +186,7 @@ const ASSERTION_FIELDS = new Set([
 const CHALLENGE_FIELDS = new Set([
   "v", "t", "site_aid", "site_oobi", "audience", "nonce", "dt", "expiry",
   "requested_disclosures", "requested_credentials", "requested_score",
-  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "front_end", "rid", "callback_url", "session_token", "sig",
+  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "front_end", "rid", "api", "callback_url", "session_token", "sig",
 ]);
 const REQUESTED_CREDENTIAL_FIELDS = new Set(["schema_said", "required"]);
 const REQUESTED_SCORE_FIELDS = new Set(["min_band", "min_score", "required"]);
@@ -287,6 +287,8 @@ export function canonicalChallengeBody(challenge: LoginChallenge): string {
   if (str(c.front_end, "front_end") !== "") parts.push(textField("front_end", c.front_end));
   // The relay identifier of the utility app a sign-in is for (ADR-072 Amendment 7), omitted when none is recorded.
   if (str(c.rid, "rid") !== "") parts.push(textField("rid", c.rid));
+  // The back-end address of that utility app (ADR-072 Amendment 8), omitted when none is recorded.
+  if (str(c.api, "api") !== "") parts.push(textField("api", c.api));
   parts.push(textField("callback_url", c.callback_url), textField("session_token", c.session_token));
   return `{${parts.join(",")}}`;
 }
