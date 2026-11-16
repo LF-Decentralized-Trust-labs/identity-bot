@@ -1434,6 +1434,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 			s.mountEmployeeRoutes(r)
 			s.mountSignerRoutes(r)
 		}
+		s.mountBindingRoutes(r)
 		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)

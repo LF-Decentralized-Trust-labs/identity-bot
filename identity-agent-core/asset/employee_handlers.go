@@ -50,7 +50,7 @@ func (h *Handler) HandleRevokeEmployeeInvite(w http.ResponseWriter, r *http.Requ
 func (h *Handler) HandleGetEmployeeInviteInfo(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	inv, ok := h.Store.GetEmployeeInvite(token)
-	if !ok || inv.Revoked {
+	if !ok || inv.Revoked || inv.Purpose != "" {
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusBadRequest)
 		return
 	}

@@ -310,10 +310,37 @@ type EmployeeInvite struct {
 	// IsSigner marks the organisation-founding invite (t=4): redeeming it makes the
 	// individual an ACTIVE super-admin immediately (they're a founding signer,
 	// there's no one above them to approve), and requires a vouch signature.
-	IsSigner  bool      `json:"is_signer,omitempty"`
-	UseCount  int       `json:"use_count"`
-	CreatedAt time.Time `json:"created_at"`
-	Revoked   bool      `json:"revoked"`
+	IsSigner bool `json:"is_signer,omitempty"`
+	// Purpose is "" for an invitation to be an employee or a signer, and
+	// PurposeBinding for one to join an identifier to a record (ADR-080). An
+	// invite of one purpose is not accepted as the other.
+	Purpose string `json:"purpose,omitempty"`
+	// BindRole is the role a binding invite joins an identifier in: person or owner.
+	BindRole string `json:"bind_role,omitempty"`
+	// RecordIdentifiers are the identifiers the record already holds, one of
+	// which the redeemer must sign with.
+	RecordIdentifiers []string  `json:"record_identifiers,omitempty"`
+	UseCount          int       `json:"use_count"`
+	CreatedAt         time.Time `json:"created_at"`
+	Revoked           bool      `json:"revoked"`
+}
+
+// PurposeBinding marks an invite to join an identifier to a record.
+const PurposeBinding = "binding"
+
+// Binding is one identifier joined to a record by a person's statement signed
+// with both keys (ADR-080). Statement is the signed bytes and the two
+// signatures are kept so the joining can be shown to be theirs.
+type Binding struct {
+	Record       string    `json:"record"`
+	New          string    `json:"new"`
+	Role         string    `json:"role"`
+	Site         string    `json:"site"`
+	InviteDigest string    `json:"invite"`
+	Statement    string    `json:"statement"`
+	RecordSig    string    `json:"record_sig"`
+	NewSig       string    `json:"new_sig"`
+	At           time.Time `json:"at"`
 }
 
 // Employee is a first-class org roster entry — employment is org-scoped, not

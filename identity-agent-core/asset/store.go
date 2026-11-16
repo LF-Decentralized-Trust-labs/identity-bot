@@ -22,6 +22,7 @@ type Store struct {
 	requestsPath   string
 	empInvitesPath string
 	employeesPath  string
+	bindingsPath   string
 	// enrolSecrets holds the digests of unused enrolment secrets; the records
 	// in asset_enrolments.json say what each was issued for.
 	enrolSecrets *enrolsecret.Store
@@ -33,6 +34,7 @@ type Store struct {
 	requests     []AssetAccessRequest
 	empInvites   map[string]EmployeeInvite
 	employees    map[string]Employee // keyed by PairwiseAID
+	bindings     []Binding
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -44,6 +46,7 @@ func NewStore(dataDir string) (*Store, error) {
 		requestsPath:   filepath.Join(dataDir, "asset_requests.json"),
 		empInvitesPath: filepath.Join(dataDir, "employee_invites.json"),
 		employeesPath:  filepath.Join(dataDir, "employees.json"),
+		bindingsPath:   filepath.Join(dataDir, "identifier_bindings.json"),
 		enrolSecrets:   enrolsecret.Open(filepath.Join(dataDir, "asset_enrolment_secrets.json")),
 		assets:         map[string]Asset{},
 		invites:        map[string]AssetInvite{},
@@ -158,6 +161,7 @@ func (s *Store) load() error {
 		{s.requestsPath, &s.requests, false},
 		{s.empInvitesPath, &s.empInvites, true},
 		{s.employeesPath, &s.employees, false},
+		{s.bindingsPath, &s.bindings, false},
 	} {
 		err := readJSON(f.path, f.v)
 		errs = append(errs, err)

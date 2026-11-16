@@ -56,6 +56,17 @@ func (s *RelationshipStore) Get(siteAID string) (SiteRelationship, bool) {
 	return r, ok
 }
 
+// All lists every relationship, in no particular order.
+func (s *RelationshipStore) All() []SiteRelationship {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]SiteRelationship, 0, len(s.items))
+	for _, r := range s.items {
+		out = append(out, r)
+	}
+	return out
+}
+
 func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

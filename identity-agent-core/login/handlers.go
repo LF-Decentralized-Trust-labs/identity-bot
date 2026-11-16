@@ -428,6 +428,12 @@ func SignAssertion(a *Assertion, seed []byte) error {
 // from the same keys it was minted with. Either way the log is checked here
 // before it leaves, so a relationship that cannot prove its own identifier
 // fails now, with a reason, rather than at the site as a refused sign-in.
+// RelationshipKeyLog is relationshipKeyLog for a caller outside the package: the
+// key log that proves a relationship's identifier, for a statement signed with its key.
+func (h *Handler) RelationshipKeyLog(rel *SiteRelationship, seed []byte) (string, error) {
+	return h.relationshipKeyLog(rel, seed)
+}
+
 func (h *Handler) relationshipKeyLog(rel *SiteRelationship, seed []byte) (string, error) {
 	var raw []byte
 	if rel.InceptionB64 != "" {

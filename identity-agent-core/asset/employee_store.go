@@ -80,10 +80,21 @@ func (s *Store) IncrementEmployeeInviteUse(token string) error {
 // nothing, if the use cannot be saved. ReleaseEmployeeInvite hands the use back
 // when the redemption then fails.
 func (s *Store) ReserveEmployeeInvite(token string, signer bool) (EmployeeInvite, error) {
+	return s.reserveInvite(token, signer, "")
+}
+
+// ReserveBindingInvite is ReserveEmployeeInvite for an invite to join an
+// identifier to a record. An invite is accepted only for its own purpose, so a
+// binding invite cannot be redeemed to become an employee, nor the reverse.
+func (s *Store) ReserveBindingInvite(token string) (EmployeeInvite, error) {
+	return s.reserveInvite(token, false, PurposeBinding)
+}
+
+func (s *Store) reserveInvite(token string, signer bool, purpose string) (EmployeeInvite, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.findEmployeeInviteLocked(token)
-	if !ok || s.empInvites[id].Revoked || (signer && !s.empInvites[id].IsSigner) {
+	if !ok || s.empInvites[id].Revoked || (signer && !s.empInvites[id].IsSigner) || s.empInvites[id].Purpose != purpose {
 		return EmployeeInvite{}, ErrInviteNotFound
 	}
 	inv := s.empInvites[id]

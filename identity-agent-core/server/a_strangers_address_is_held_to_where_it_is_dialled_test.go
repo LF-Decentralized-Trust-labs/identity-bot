@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/login"
 	"identity-agent-core/witness"
 )
 
@@ -51,7 +52,15 @@ func TestAnAddressAStrangerChoosesNeverReachesAnInternalService(t *testing.T) {
 	ask, _ := json.Marshal(signerPayload{OrgName: "O", OrgAID: "EORGAID", SiteAID: "EORGAID", InviteToken: "tok"})
 	emp, _ := json.Marshal(map[string]string{"invite_token": "tok", "org_aid": "EORGAID", "site_aid": "EORGAID"})
 
+	bind, _ := json.Marshal(bindSitePayload{OrgAID: "EORGAID", SiteAID: "ESITE", RecordSiteAID: "EREC", Role: "person", InviteToken: "tok"})
+	if _, err := h.GetOrCreateRelationship("EREC", &login.ChallengeBundle{SiteAID: "EREC", SiteOOBI: "http://127.0.0.1:1/oobi/EREC"}); err != nil {
+		t.Skipf("no relationship to join from: %v", err)
+	}
+
 	calls := map[string]func(){
+		"the binding invite's redeem": func() {
+			_, _ = bindSiteAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: bind, T: 5}, ScanDecision{Approved: true})
+		},
 		"the Ask fetch": func() { _, _ = s.buildAskContext(name + "/i/tok") },
 		"the signer invite's redeem": func() {
 			_, _ = addSignerAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: ask, T: 4}, ScanDecision{Approved: true})

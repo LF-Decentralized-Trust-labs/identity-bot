@@ -170,7 +170,12 @@ var publicRoutes = map[string]string{
 	// not apply until EVERY invitee has accepted. It cannot displace the owner
 	// the identity named at inception either — the log answers before any file
 	// does, so re-sealing changes nothing.
-	"POST /api/signer/invites/{token}/redeem": "an invited owner's agent accepts, committing the keys they will sign with",
+	// The person's own Identity Agent redeems an invite to join a site. The invite is
+	// single use, and what it accepts is a statement only that person's two keys can
+	// make, each checked against its own key log, so what a stranger holding the
+	// code can do is nothing they could not do by sending a statement that is refused.
+	"POST /api/binding/invites/{token}/redeem": "a person's agent says two of their identifiers are one person, with a statement signed by both keys",
+	"POST /api/signer/invites/{token}/redeem":  "an invited owner's agent accepts, committing the keys they will sign with",
 
 	// A machine enrolling itself with the key it generated. It is not the owner
 	// and never will be — that is the point of it holding its own key — so it
