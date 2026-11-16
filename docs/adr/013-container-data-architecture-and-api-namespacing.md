@@ -4,6 +4,7 @@
 - **Date:** 2026-03-13
 - **Supersedes:** Nothing (extends ADR-026 and ADR-012)
 - **Related:** ADR-026 (Data Domain Architecture), ADR-012 (Sandboxed App Registry)
+- **Amended:** 2026-11-15 — Decisions 1 and 2 and the `/sandbox/` and `/apps/` namespaces of Decision 3 described the older sandboxed-app kind, which is retired; the model-call route is `/api/llm/v1`, behind a grant (see §Amendment, 2026-11-15)
 - **Amended:** 2026-10-30 — the runtime that serves these routes is an add-on kept outside this repository; this record keeps what an app relies on (see §Note, 2026-10-30)
 
 ---
@@ -40,6 +41,16 @@ The Identity Agent's Go HTTP server handled requests on paths that had no consis
 ## Note, 2026-10-30: the contract stays, the runtime is an add-on
 
 The code that serves `/sandbox/` and `/apps/`, captures conversations and translates them for a chat app is part of the sandboxed-apps add-on, which an app built on the core includes or not, and which is kept outside this repository. This record keeps what an app is written against: where it sends model calls, where it is loaded from, the namespaces by caller, and the API schema each app's manifest names (`api_schema`, a field of `appmanifest.AppManifest`). The descriptions of how the runtime does each of these are removed here.
+
+---
+
+## Amendment, 2026-11-15: the older sandboxed-app kind is retired
+
+The Identity Agent starts no container of its own, so no container calls it from inside, and nothing loads a utility app's display through it. Decisions 1 and 2, and the `/sandbox/` and `/apps/` rows of Decision 3, are kept below as the record of what was built and are superseded:
+
+- **Model calls.** The model-call filter stays in the Identity Agent. Its route is `/api/llm/v1` on the Identity Agent's HTTP port, in the `/api/` namespace. A caller holding no grant for `model.call` is refused and served nothing. A utility app's back end can reach it with a signed request once the route is declared for that utility app's key, which it is not yet. It answers no browser origin (ADR-006). The conversation capture of Decision 1 is not part of it.
+- **Display and chat reads.** There is no display reverse proxy and no `/apps/{app_id}/` route.
+- **Namespaces.** Two remain by caller: `/api/` and `/public/`.
 
 ---
 
@@ -116,8 +127,6 @@ Each endpoint entry in the schema specifies:
 | File | Role |
 |------|------|
 | `identity-agent-core/appmanifest/manifest.go` | `api_schema` and the rest of the manifest |
-| `manifests/openwebui.json` | `OPENAI_API_BASE_URL` points to `/sandbox/llm/v1`; `api_schema` field set |
-| `manifests/schemas/openwebui-api.json` | Full API schema document for Open WebUI |
 
 ---
 

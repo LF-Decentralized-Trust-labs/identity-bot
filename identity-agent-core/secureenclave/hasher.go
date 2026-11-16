@@ -76,14 +76,14 @@ func (r *Registry) ChainHash() (string, map[string]string, error) {
 
 // DefaultRegistry wires the standard identity-agent component chain. The KERI
 // engine is compiled into the Go backend binary, so it is covered by the
-// go_backend hash rather than hashed as a component of its own.
+// go_backend hash rather than hashed as a component of its own. It carries no
+// sandboxed-apps component: the Identity Agent starts no container or program of its own.
 func DefaultRegistry(dataDir string) *Registry {
 	reg := NewRegistry()
 	reg.Register("go_backend", fileHasher(resolveBinaryPath()))
 	if path := resolveAuthProviderBinary(); path != "" {
 		reg.Register("auth_provider", fileHasher(path))
 	}
-	reg.Register("sandbox_apps", sandboxAppsHasher(dataDir))
 	return reg
 }
 
@@ -124,37 +124,6 @@ func fileHasher(path string) ComponentHasher {
 			return "", err
 		}
 		sum := blake3.Sum256(data)
-		return hex.EncodeToString(sum[:]), nil
-	}
-}
-
-func sandboxAppsHasher(dataDir string) ComponentHasher {
-	manifestsDir := filepath.Join(".", "manifests")
-	if dataDir != "" {
-		manifestsDir = filepath.Join(dataDir, "..", "manifests")
-	}
-	return func() (string, error) {
-		entries, err := os.ReadDir(manifestsDir)
-		if err != nil {
-			// Non-fatal when sandbox manifests are absent.
-			sum := blake3.Sum256([]byte("sandbox_apps:empty"))
-			return hex.EncodeToString(sum[:]), nil
-		}
-		var parts []string
-		for _, ent := range entries {
-			if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
-				continue
-			}
-			path := filepath.Join(manifestsDir, ent.Name())
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return "", err
-			}
-			digest := blake3.Sum256(data)
-			parts = append(parts, ent.Name()+"="+hex.EncodeToString(digest[:]))
-		}
-		sort.Strings(parts)
-		sum := blake3.Sum256([]byte(strings.Join(parts, "\n")))
 		return hex.EncodeToString(sum[:]), nil
 	}
 }
