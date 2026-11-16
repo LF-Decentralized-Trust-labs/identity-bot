@@ -705,6 +705,70 @@
       "reason": "written as an identifier is"
     },
     {
+      "name": "one key written a second way: in plain base64",
+      "rule": "key-form",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "Eorg",
+          "site": "Esite",
+          "record": "Erecord",
+          "new": "Enew",
+          "invite": "Dinvite",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BD8ksKI0-RfE25F2isJ9GmPgu-3D5IXgAS0EK3CEu7V_ehFwWW5Qkx40FM6j-KJ-P32huNyLSMGPqOQjaFYewME",
+        "new_key": "NAzYPFCpUq6ripr1k00Cb84F62N0CYnK1SbhldKCrkY=",
+        "new_sig": "0BD8ksKI0-RfE25F2isJ9GmPgu-3D5IXgAS0EK3CEu7V_ehFwWW5Qkx40FM6j-KJ-P32huNyLSMGPqOQjaFYewME"
+      },
+      "expect": {
+        "Org": "Eorg",
+        "Site": "Esite",
+        "Invite": "Dinvite"
+      },
+      "keys": {
+        "Enew": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "not written as a key is"
+    },
+    {
+      "name": "a key under another code",
+      "rule": "key-form",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "Eorg",
+          "site": "Esite",
+          "record": "Erecord",
+          "new": "Enew",
+          "invite": "Dinvite",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BD8ksKI0-RfE25F2isJ9GmPgu-3D5IXgAS0EK3CEu7V_ehFwWW5Qkx40FM6j-KJ-P32huNyLSMGPqOQjaFYewME",
+        "new_key": "BPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "new_sig": "0BBlGbC9AyyQyiA7467O9ofd6fK8VrodWDgiL4S2oZVM_FGfWOMihPubLu2x3QvzFIuqOiXfhnOekmIHj-MGxMkL"
+      },
+      "expect": {
+        "Org": "Eorg",
+        "Site": "Esite",
+        "Invite": "Dinvite"
+      },
+      "keys": {
+        "Enew": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "not written as a key is"
+    },
+    {
       "name": "a key written with a space",
       "rule": "key-form",
       "link": {
@@ -766,7 +830,134 @@
       },
       "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
       "valid": false,
-      "reason": "not a key"
+      "reason": "not written as a key is"
+    }
+  ],
+  "invites": [
+    {
+      "name": "an invite from an organization whose name holds \u0026 \u003c \u003e and non-ASCII text",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "Enotes",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "person",
+        "invite": "Dinvite",
+        "redeem_url": "https://org.example/api/binding/invites/abc123/redeem"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"Enotes\",\"record_site\":\"Echat\",\"role\":\"person\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://org.example/api/binding/invites/abc123/redeem\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BDnnmjHj4E0lcFPDno3f2mCIjUiK6hWiE6ke6FFyXujf-nOo1xzeN71U0r2vtL7mZ6Ehj78-2kHyl3VXk2GJgIN",
+      "valid": true
+    },
+    {
+      "name": "signed by another key",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "Enotes",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "person",
+        "invite": "Dinvite",
+        "redeem_url": "https://org.example/api/binding/invites/abc123/redeem"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"Enotes\",\"record_site\":\"Echat\",\"role\":\"person\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://org.example/api/binding/invites/abc123/redeem\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BCpSVusg-ydB0KcHsNDO7n3ES4rGFWQKy-BY5h2-yXLqk5uDX8XmUlyWepN1e4amVEVsftY4i0fkTh5zl86e4UN",
+      "valid": false,
+      "rule": "signature"
+    },
+    {
+      "name": "a role that is neither a person nor the owner",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "Enotes",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "admin",
+        "invite": "Dinvite",
+        "redeem_url": "https://org.example/api/binding/invites/abc123/redeem"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"Enotes\",\"record_site\":\"Echat\",\"role\":\"admin\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://org.example/api/binding/invites/abc123/redeem\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BDNLeGiUL1M3pBC7I7YaqzVlkguRxJXjLjMGPLRpXtSndAAoeFr9-HAPF-6X6AATT7t7KvMzDB7U1rKIorXPGoD",
+      "valid": false,
+      "rule": "form"
+    },
+    {
+      "name": "a redeem address with a query",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "Enotes",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "person",
+        "invite": "Dinvite",
+        "redeem_url": "https://org.example/api/binding/invites/abc123/redeem?a=1\u0026b=2"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"Enotes\",\"record_site\":\"Echat\",\"role\":\"person\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://org.example/api/binding/invites/abc123/redeem?a=1\\u0026b=2\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BD0p9kMft_4Y5t3Ai6u_Jxx1vR_Bbb0cUGTZXn6hCpTdVgGd8K3TwMMs_Vd9w1WF89b0u7dD7mznN8rrI5n1sYJ",
+      "valid": false,
+      "rule": "form"
+    },
+    {
+      "name": "a redeem address with a non-ASCII character",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "Enotes",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "person",
+        "invite": "Dinvite",
+        "redeem_url": "https://org.example/é/redeem"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"Enotes\",\"record_site\":\"Echat\",\"role\":\"person\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://org.example/é/redeem\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BAF4RBbR1Jrp1bJJaMxp--Z8WKJjwelG3eJ6tD2qfpeTexNRZNHLtUSccZPY7H57S5m-RhC95tz-naXZdqmLP8M",
+      "valid": false,
+      "rule": "form"
+    },
+    {
+      "name": "an identifier that is not written as one",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "E site",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "person",
+        "invite": "Dinvite",
+        "redeem_url": "https://org.example/api/binding/invites/abc123/redeem"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"E site\",\"record_site\":\"Echat\",\"role\":\"person\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://org.example/api/binding/invites/abc123/redeem\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BBwXpk8u7lJvD5xzEi0oWW4X8nXdFLxfoHaHMtO5cjeJCppxeve01jYfOzVRYiE-uRjvGnx6E1kLkIsekZUlKEE",
+      "valid": false,
+      "rule": "form"
+    },
+    {
+      "name": "the redeem address changed after the organization signed",
+      "inputs": {
+        "org": "Eorg",
+        "org_name": "Smith \u0026 Sons \u003cÜnïcode\u003e 日本",
+        "site": "Enotes",
+        "site_name": "Notes",
+        "record_site": "Echat",
+        "role": "person",
+        "invite": "Dinvite",
+        "redeem_url": "https://elsewhere.example/api/binding/invites/abc123/redeem"
+      },
+      "key": "DEl-KQUO9d-_pTnAkXYKne-WX1aYNOOXSRe_kDCyd4bS",
+      "signed": "{\"v\":\"ORGASK1\",\"org\":\"Eorg\",\"site\":\"Enotes\",\"record_site\":\"Echat\",\"role\":\"person\",\"invite\":\"Dinvite\",\"redeem_url\":\"https://elsewhere.example/api/binding/invites/abc123/redeem\",\"org_name_sha256\":\"5e0ff4fe4fc22af1517c2de8575c6351336ad2502642ee4ecf28b8a5d5934143\",\"site_name_sha256\":\"8a7525b1492fb84833f5c4a69b30f4bfbb134f9b666b61a2c1872d63d234c085\"}",
+      "signature": "0BDnnmjHj4E0lcFPDno3f2mCIjUiK6hWiE6ke6FFyXujf-nOo1xzeN71U0r2vtL7mZ6Ehj78-2kHyl3VXk2GJgIN",
+      "valid": false,
+      "rule": "signature"
     }
   ]
 }

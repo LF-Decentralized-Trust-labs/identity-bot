@@ -23,7 +23,7 @@ The words must not be free text: a notice that could say anything is one more pl
 
 ## What stays the Identity Agent's word
 
-That a notice was **delivered** to the person (shown on their screen) is the Identity Agent's and the person's app's, not shown by the record: the trail shows that it was written. Whether something may then be kept (for example, a note about a person after they were told) is the Identity Agent's rule and is not decided here.
+That a notice was **delivered** to the person (shown on their screen) is the Identity Agent's and the front end of the person's Identity Agent's, not shown by the record: the trail shows that it was written. Whether something may then be kept (for example, a note about a person after they were told) is the Identity Agent's rule and is not decided here.
 
 ## Consequences
 

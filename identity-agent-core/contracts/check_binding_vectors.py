@@ -63,23 +63,51 @@ def refusal(link, expect, keys):
         return "site"
     if st["invite"] != expect["Invite"]:
         return "invite"
-    if link["record_key"] == link["new_key"]:
+    raws = []
+    for key, sig in ((link["record_key"], link["record_sig"]), (link["new_key"], link["new_sig"])):
+        if not key or not sig:
+            return "missing-signature"
+        try:
+            raws.append(base.qb64_raw("D", key, 32))  # the one spelling of a key: qb64, code D, canonical
+        except ValueError:
+            return "key-form"
+    if raws[0] == raws[1]:
         return "same-key"
     msg = signed_bytes(st)
     for who, ident, key, sig in (("record-signature", st["record"], link["record_key"], link["record_sig"]),
                                  ("new-signature", st["new"], link["new_key"], link["new_sig"])):
-        if not key or not sig:
-            return "missing-signature"
-        if key.strip() != key:
-            return "key-form"
-        try:
-            base.qb64_raw("D", key, 32)
-        except ValueError:
-            return "key-form"
         if keys.get(ident) != key:
             return "key-not-of-identifier"
         if not sig_ok(key, sig, msg):
             return who
+    return None
+
+
+INVITE_ORDER = ("v", "org", "site", "record_site", "role", "invite", "redeem_url", "org_name_sha256", "site_name_sha256")
+URL = re.compile(r"^https?://[A-Za-z0-9._~:/%-]{1,500}$")
+HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def invite_form(i):
+    """The form an organization signs, built from its inputs: the two names go in as the SHA-256 of their UTF-8 bytes."""
+    import hashlib
+    return {"v": "ORGASK1", "org": i["org"], "site": i["site"], "record_site": i["record_site"], "role": i["role"],
+            "invite": i["invite"], "redeem_url": i["redeem_url"],
+            "org_name_sha256": hashlib.sha256(i["org_name"].encode("utf-8")).hexdigest(),
+            "site_name_sha256": hashlib.sha256(i["site_name"].encode("utf-8")).hexdigest()}
+
+
+def invite_refusal(v):
+    f = invite_form(v["inputs"])
+    if f["role"] not in ("person", "owner") or not all(IDENT.match(f[k]) for k in ("org", "site", "record_site", "invite")) \
+            or not URL.match(f["redeem_url"]) or not (HEX.match(f["org_name_sha256"]) and HEX.match(f["site_name_sha256"])):
+        return "form"
+    # ASCII only, so no writer escapes anything.
+    signed = json.dumps({k: f[k] for k in INVITE_ORDER}, separators=(",", ":")).encode()
+    if v["signed"] != signed.decode():
+        return "signed-string"
+    if not sig_ok(v["key"], v["signature"], signed):
+        return "signature"
     return None
 
 
@@ -97,9 +125,14 @@ def main():
         elif got is not None and v["rule"] != got:
             print("MISMATCH %s: python refuses by rule %r, the file says %r" % (v["name"], got, v["rule"]))
             bad += 1
+    for v in doc.get("invites", []):
+        got = invite_refusal(v)
+        if (got is None) != v["valid"] or (got is not None and got != v["rule"]):
+            print("MISMATCH invite %s: python says %r, the file says valid=%s rule=%r" % (v["name"], got, v["valid"], v.get("rule")))
+            bad += 1
     if bad:
         sys.exit(1)
-    print("%d binding vectors agree" % len(doc["vectors"]))
+    print("%d binding vectors and %d invites agree" % (len(doc["vectors"]), len(doc.get("invites", []))))
 
 
 main()

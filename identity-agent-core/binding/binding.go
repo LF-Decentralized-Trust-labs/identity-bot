@@ -11,12 +11,12 @@
 package binding
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
@@ -130,27 +130,39 @@ func (l Link) Verify(e Expect) error {
 	case s.Invite != e.Invite:
 		return errors.New("this binding answers another invite")
 	}
-	if l.RecordKey == l.NewKey {
+	// Both keys, each written exactly as a qb64 Ed25519 key is (code D), before anything else is asked of either:
+	// a key in another spelling would otherwise stand for the same key twice.
+	rawRecord, err := rawKey("the record's", l.RecordKey, l.RecordSig)
+	if err != nil {
+		return err
+	}
+	rawNew, err := rawKey("the new identifier's", l.NewKey, l.NewSig)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(rawRecord, rawNew) {
 		return errors.New("the two identifiers have one key between them: a binding is signed by two keys")
 	}
 	body := string(s.SignedBytes())
-	if err := checkOne("the record's", s.Record, l.RecordKey, l.RecordSig, body, e); err != nil {
+	if err := checkOne("the record's", s.Record, l.RecordKey, l.RecordSig, rawRecord, body, e); err != nil {
 		return err
 	}
-	return checkOne("the new identifier's", s.New, l.NewKey, l.NewSig, body, e)
+	return checkOne("the new identifier's", s.New, l.NewKey, l.NewSig, rawNew, body, e)
 }
 
-func checkOne(who, identifier, key, sig, body string, e Expect) error {
+// rawKey is a key's 32 bytes, read only from the one spelling a key has: qb64, code D, canonical.
+func rawKey(who, key, sig string) ([]byte, error) {
 	if key == "" || sig == "" {
-		return fmt.Errorf("%s key has not signed: a binding is signed with both keys", who)
+		return nil, fmt.Errorf("%s key has not signed: a binding is signed with both keys", who)
 	}
-	if strings.TrimSpace(key) != key {
-		return fmt.Errorf("%s key is not written as a key is", who)
-	}
-	raw, _, err := iacrypto.DecodeEd25519Key(key, false)
+	raw, err := iacrypto.DecodeQB64("D", key, 32)
 	if err != nil {
-		return fmt.Errorf("%s key is not a key: %w", who, err)
+		return nil, fmt.Errorf("%s key is not written as a key is: %w", who, err)
 	}
+	return raw, nil
+}
+
+func checkOne(who, identifier, key, sig string, raw []byte, body string, e Expect) error {
 	if err := e.KeyIsCurrent(identifier, key); err != nil {
 		return fmt.Errorf("%s key is not a key of %s: %w", who, identifier, err)
 	}

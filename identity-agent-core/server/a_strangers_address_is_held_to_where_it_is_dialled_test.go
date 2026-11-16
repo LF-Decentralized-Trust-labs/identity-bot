@@ -56,8 +56,10 @@ func TestAnAddressAStrangerChoosesNeverReachesAnInternalService(t *testing.T) {
 	orgSeed := make([]byte, ed25519.SeedSize)
 	bind, _ := json.Marshal(bindSitePayload{OrgAID: "EORGAID", SiteAID: "ESITE", RecordSiteAID: "EREC", Role: "person", InviteToken: "tok",
 		RedeemURL: name + "/api/binding/invites/tok/redeem"})
-	orgSig, _ := login.SignAsk(bind, orgSeed)
-	bind, _ = injectField(bind, "org_sig", orgSig)
+	var bm map[string]interface{}
+	_ = json.Unmarshal(bind, &bm)
+	bm["site_aid"], bm["record_site_aid"], bm["org_aid"] = "ESITE", "EREC", "EORGAID"
+	bind = signedAsOrganisation(t, bm, orgSeed)
 	if _, err := h.GetOrCreateRelationship("EREC", &login.ChallengeBundle{SiteAID: "EREC", SiteOOBI: "http://127.0.0.1:1/oobi/EREC"}); err != nil {
 		t.Skipf("no relationship to join from: %v", err)
 	}

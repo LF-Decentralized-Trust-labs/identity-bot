@@ -3,6 +3,7 @@ package binding
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/contractcheck"
+	"identity-agent-core/login"
 )
 
 func seedOf(name string) []byte {
@@ -145,8 +147,21 @@ func refusals() []refused {
 			w.input.Invite = w.stmt.Invite
 			return w.link()
 		}, "written as an identifier is"},
+		{"one key written a second way: in plain base64", "key-form", func(w *world) Link {
+			w.keys["Enew"] = keyOf(w.t, "record")
+			l, _ := Sign(w.stmt, seedOf("record"), seedOf("record"))
+			raw, _, _ := iacrypto.DecodeEd25519Key(l.NewKey, false)
+			l.NewKey = base64.StdEncoding.EncodeToString(raw)
+			return l
+		}, "not written as a key is"},
+		{"a key under another code", "key-form", func(w *world) Link {
+			l := w.link()
+			raw, _, _ := iacrypto.DecodeEd25519Key(l.NewKey, false)
+			l.NewKey, _ = iacrypto.MatterFixedQB64("B", raw)
+			return l
+		}, "not written as a key is"},
 		{"a key written with a space", "key-form", func(w *world) Link { l := w.link(); l.NewKey += " "; return l }, "not written as a key"},
-		{"a key that is not a key", "key-form", func(w *world) Link { l := w.link(); l.NewKey = "nonsense"; return l }, "not a key"},
+		{"a key that is not a key", "key-form", func(w *world) Link { l := w.link(); l.NewKey = "nonsense"; return l }, "not written as a key is"},
 	}
 }
 
@@ -181,8 +196,74 @@ type vector struct {
 type vectorExpect struct{ Org, Site, Invite string }
 
 type vectorFile struct {
-	Description string   `json:"description"`
-	Vectors     []vector `json:"vectors"`
+	Description string         `json:"description"`
+	Vectors     []vector       `json:"vectors"`
+	Invites     []inviteVector `json:"invites"`
+}
+
+// inviteInputs is what an organisation puts in an invite. The signed form is made from them, with the two names as the
+// SHA-256 of their UTF-8 bytes.
+type inviteInputs struct {
+	Org        string `json:"org"`
+	OrgName    string `json:"org_name"`
+	Site       string `json:"site"`
+	SiteName   string `json:"site_name"`
+	RecordSite string `json:"record_site"`
+	Role       string `json:"role"`
+	Invite     string `json:"invite"`
+	RedeemURL  string `json:"redeem_url"`
+}
+
+// inviteVector is one organisation-signed invite: the inputs, the key that is the organisation's current key, the
+// string signed, the signature, and whether it is accepted (and by which rule it is not).
+type inviteVector struct {
+	Name      string       `json:"name"`
+	Inputs    inviteInputs `json:"inputs"`
+	Key       string       `json:"key"`
+	Signed    string       `json:"signed"`
+	Signature string       `json:"signature"`
+	Valid     bool         `json:"valid"`
+	Rule      string       `json:"rule,omitempty"`
+}
+
+func formOf(in inviteInputs) Invite {
+	return NewInvite(in.Org, in.OrgName, in.Site, in.SiteName, in.RecordSite, in.Role, in.Invite, in.RedeemURL)
+}
+
+func makeInviteVectors(t *testing.T) []inviteVector {
+	good := inviteInputs{Org: "Eorg", OrgName: "Smith & Sons <Ünïcode> 日本", Site: "Enotes", SiteName: "Notes", RecordSite: "Echat",
+		Role: RolePerson, Invite: "Dinvite", RedeemURL: "https://org.example/api/binding/invites/abc123/redeem"}
+	key := keyOf(t, "org")
+	signed := func(in inviteInputs, seed string) (Invite, string) {
+		f := formOf(in)
+		sig, err := login.SignString(string(f.SignedBytes()), seedOf(seed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f, sig
+	}
+	vec := func(name string, in inviteInputs, seed, rule string) inviteVector {
+		f, sig := signed(in, seed)
+		return inviteVector{Name: name, Inputs: in, Key: key, Signed: string(f.SignedBytes()), Signature: sig, Valid: rule == "", Rule: rule}
+	}
+	with := func(change func(*inviteInputs)) inviteInputs { in := good; change(&in); return in }
+	out := []inviteVector{
+		vec("an invite from an organization whose name holds & < > and non-ASCII text", good, "org", ""),
+		vec("signed by another key", good, "other", "signature"),
+		vec("a role that is neither a person nor the owner", with(func(i *inviteInputs) { i.Role = "admin" }), "org", "form"),
+		vec("a redeem address with a query", with(func(i *inviteInputs) { i.RedeemURL += "?a=1&b=2" }), "org", "form"),
+		vec("a redeem address with a non-ASCII character", with(func(i *inviteInputs) { i.RedeemURL = "https://org.example/é/redeem" }), "org", "form"),
+		vec("an identifier that is not written as one", with(func(i *inviteInputs) { i.Site = "E site" }), "org", "form"),
+	}
+	// Altered after it was signed: the organisation signed the good one, and the redeem address was then changed.
+	f, sig := signed(good, "org")
+	moved := good
+	moved.RedeemURL = "https://elsewhere.example/api/binding/invites/abc123/redeem"
+	_ = f
+	g := formOf(moved)
+	out = append(out, inviteVector{Name: "the redeem address changed after the organization signed", Inputs: moved, Key: key,
+		Signed: string(g.SignedBytes()), Signature: sig, Valid: false, Rule: "signature"})
+	return out
 }
 
 const vectorsPath = "binding-vectors.json"
@@ -197,6 +278,7 @@ func makeVectors(t *testing.T) vectorFile {
 		l := c.make(w)
 		f.Vectors = append(f.Vectors, vector{c.name, c.rule, l, vectorExpect{w.input.Org, w.input.Site, w.input.Invite}, w.keys, string(l.Statement.SignedBytes()), false, c.want})
 	}
+	f.Invites = makeInviteVectors(t)
 	return f
 }
 
@@ -241,4 +323,35 @@ func TestThePublishedVectorsAreWhatTheCodeMakesAndEveryOneIsJudgedAsItSays(t *te
 // An implementation written from the ADR, in another language, agrees with the vector file.
 func TestAnIndependentImplementationAgreesWithTheBindingVectors(t *testing.T) {
 	contractcheck.IndependentlyWith(t, "../contracts/check_binding_vectors.py", vectorsPath, "blake3")
+}
+
+func TestEveryPublishedInviteIsJudgedAsItSays(t *testing.T) {
+	raw, err := os.ReadFile(vectorsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f vectorFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Invites) == 0 {
+		t.Fatal("no invites are published")
+	}
+	for _, v := range f.Invites {
+		pub, _, err := iacrypto.DecodeEd25519Key(v.Key, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		form := formOf(v.Inputs)
+		if v.Signed != string(form.SignedBytes()) {
+			t.Errorf("%s: the signed string is not what the inputs make", v.Name)
+		}
+		err = VerifyInvite(form, v.Signature, pub)
+		if (err == nil) != v.Valid {
+			t.Errorf("%s: valid=%v, got %v", v.Name, v.Valid, err)
+		}
+		if err != nil && form.Check() != nil != (v.Rule == "form") {
+			t.Errorf("%s: refused by the wrong rule: %v", v.Name, err)
+		}
+	}
 }

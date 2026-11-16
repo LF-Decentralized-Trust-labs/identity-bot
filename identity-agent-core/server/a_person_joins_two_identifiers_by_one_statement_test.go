@@ -14,8 +14,10 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/binding"
+	"identity-agent-core/endpoint"
 	"identity-agent-core/enrolsecret"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 
@@ -122,16 +124,25 @@ func (w *joinWorld) askFor(token, role, site, recordSite string) []byte {
 	var m map[string]interface{}
 	_ = json.Unmarshal(b, &m)
 	m["t"] = 5
-	b, _ = json.Marshal(m)
 	seed, err := w.org.identitySigningSeed()
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	sig, err := login.SignAsk(b, seed)
+	return signedAsOrganisation(w.t, m, seed)
+}
+
+// signedAsOrganisation adds the organisation's signature to the Ask the fields describe, in the form the mint signs.
+func signedAsOrganisation(t *testing.T, m map[string]interface{}, seed []byte) []byte {
+	t.Helper()
+	str := func(k string) string { v, _ := m[k].(string); return v }
+	delete(m, "org_sig")
+	sig, err := binding.SignInvite(binding.NewInvite(str("org_aid"), str("org_name"), str("site_aid"), str("site_name"), str("record_site_aid"),
+		str("role"), enrolsecret.Digest(str("invite_token")), str("redeem_url")), seed)
 	if err != nil {
-		w.t.Fatal(err)
+		t.Fatal(err)
 	}
-	b, _ = injectField(b, "org_sig", sig)
+	m["org_sig"] = sig
+	b, _ := json.Marshal(m)
 	return b
 }
 
@@ -471,17 +482,10 @@ func resign(t *testing.T, ask []byte, seed []byte, change func(map[string]interf
 	t.Helper()
 	var m map[string]interface{}
 	_ = json.Unmarshal(ask, &m)
-	delete(m, "org_sig")
 	if change != nil {
 		change(m)
 	}
-	b, _ := json.Marshal(m)
-	sig, err := login.SignAsk(b, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ = injectField(b, "org_sig", sig)
-	return b
+	return signedAsOrganisation(t, m, seed)
 }
 
 // Anybody can name a real organisation and its real sites. Only the organisation can sign for itself.
@@ -652,5 +656,113 @@ func TestAnInviteMintedByTheOrganisationCanBeScannedAndApproved(t *testing.T) {
 	}
 	if hits.Load() != 1 || len(org.Bindings()) != 1 {
 		t.Fatalf("the organisation took %d statements and keeps %d joinings", hits.Load(), len(org.Bindings()))
+	}
+}
+
+// A real organisation: founded here with the engine, its key log served at its own address, and nothing standing in for
+// the check that the key it signs an invite with is the current key in that log. (What stays stood in is only that the
+// organisation delegated the two sites, which has no real site to read here, and the person's contact for its local address.)
+func TestAnInviteFromARealFoundedOrganisationIsAcceptedThroughItsOwnKeyLog(t *testing.T) {
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
+	aMachineThatMayFound(t)
+	org := witnessWithSeed(t, 1)
+	org.KeriDriver = keriengine.New()
+	org.engineSigns()
+	org.EndpointService = endpoint.New(nil, 0)
+	st, err := asset.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	org.assetHandler = &asset.Handler{Store: st}
+	router := org.buildRouter()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
+		if strings.HasSuffix(rq.URL.Path, "/redeem") {
+			hits.Add(1)
+		}
+		router.ServeHTTP(rw, rq)
+	}))
+	defer srv.Close()
+	org.EndpointService.SetOverrideURL(srv.URL)
+
+	founding, _ := json.Marshal(ourFounding(t, org))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, local("POST", "/api/inception", string(founding)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("founding the organisation: %d %s", rec.Code, rec.Body)
+	}
+	orgID, _ := org.DataStore.GetIdentity()
+
+	w := &joinWorld{t: t, org: org, orgURL: srv.URL, hits: &hits, runs: map[string]bool{}}
+	p := w.aPerson("ECHAT")
+	p.organisationKeyOf = nil // the real path: the organisation's key from its own log
+	w.runs["ENOTES"], w.runs["ECHAT"] = true, true
+	w.runs[orgID.AID] = true
+	if err := p.DataStore.SaveContact(store.ContactRecord{AID: orgID.AID, OobiURL: srv.URL + "/public/oobi/" + orgID.AID}); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"site_aid":"ENOTES","site_oobi":"http://127.0.0.1:1/oobi/ENOTES","record_site_aid":"ECHAT","record_site_oobi":"http://127.0.0.1:1/oobi/ECHAT","role":"person","record_identifiers":["` + w.identifierOf(p, "ECHAT") + `"]}`
+	rec = httptest.NewRecorder()
+	org.handleCreateBindingInvite(rec, httptest.NewRequest(http.MethodPost, "/api/binding/invites", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("minting: %d %s", rec.Code, rec.Body)
+	}
+	var minted struct{ URL string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &minted)
+	post := func(h http.HandlerFunc, payload string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		h(rr, httptest.NewRequest(http.MethodPost, "/api/scan", strings.NewReader(payload)))
+		return rr
+	}
+	dec := post(p.handleScanDecode, `{"url":"`+minted.URL+`"}`)
+	if dec.Code != http.StatusOK {
+		t.Fatalf("an invite signed with the real organisation key was refused: %d %s", dec.Code, dec.Body)
+	}
+	var pv GenericPreview
+	_ = json.Unmarshal(dec.Body.Bytes(), &pv)
+	if ex := post(p.handleScanExecute, `{"url":"`+minted.URL+`","approved":true,"ask_digest":"`+pv.AskDigest+`"}`); ex.Code != http.StatusOK {
+		t.Fatalf("approving: %d %s", ex.Code, ex.Body)
+	}
+	if hits.Load() != 1 || len(org.Bindings()) != 1 {
+		t.Fatalf("%d statements, %d joinings", hits.Load(), len(org.Bindings()))
+	}
+}
+
+// The statement and both key logs are not sent in the clear.
+func TestTheStatementIsNotSentToAnAddressThatIsNotHttps(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("ECHAT")
+	ask := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", w.identifierOf(p, "ECHAT"))
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "") // an owner who has not said local sites are fine
+	if _, err := w.approve(p, ask, true); err == nil || !strings.Contains(err.Error(), "not https") {
+		t.Fatalf("a statement was sent over http: %v", err)
+	}
+	if w.hits.Load() != 0 {
+		t.Fatal("something was sent")
+	}
+}
+
+// A mint that cannot sign leaves no invite behind, and the owner's list holds employment invites only.
+func TestAMintThatCannotSignLeavesNoInviteAndTheEmployeeListIsEmploymentOnly(t *testing.T) {
+	w := newJoinWorld(t)
+	w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", "EA") // a binding invite already kept
+	if err := w.org.assetHandler.Store.CreateEmployeeInvite(asset.EmployeeInvite{Token: "emp", Role: "Admin", MaxUses: 1}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	w.org.assetHandler.HandleListEmployeeInvites(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if strings.Contains(rec.Body.String(), "binding") || !strings.Contains(rec.Body.String(), "Admin") {
+		t.Fatalf("the employee invite list: %s", rec.Body)
+	}
+	before := len(w.org.assetHandler.Store.ListEmployeeInvites())
+	body := `{"site_aid":"E bad site","record_site_aid":"EC","role":"person","record_identifiers":["EA"]}`
+	rec = httptest.NewRecorder()
+	w.org.EndpointService = endpoint.New(nil, 0)
+	w.org.handleCreateBindingInvite(rec, httptest.NewRequest(http.MethodPost, "/api/binding/invites", strings.NewReader(body)))
+	if rec.Code == http.StatusOK {
+		t.Fatalf("an invite that cannot be signed was minted: %s", rec.Body)
+	}
+	if after := len(w.org.assetHandler.Store.ListEmployeeInvites()); after != before {
+		t.Fatalf("a failed mint left %d invites behind", after-before)
 	}
 }

@@ -37,7 +37,15 @@ func (h *Handler) HandleCreateEmployeeInvite(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) HandleListEmployeeInvites(w http.ResponseWriter, r *http.Request) {
-	h.writeJSON(w, h.Store.ListEmployeeInvites(), http.StatusOK)
+	// Employment and signer invites only: an invite to join an identifier to a record is another thing, with
+	// the identifiers of a record in it, and has its own routes.
+	out := []EmployeeInvite{}
+	for _, inv := range h.Store.ListEmployeeInvites() {
+		if inv.Purpose == "" {
+			out = append(out, inv)
+		}
+	}
+	h.writeJSON(w, out, http.StatusOK)
 }
 
 func (h *Handler) HandleRevokeEmployeeInvite(w http.ResponseWriter, r *http.Request) {

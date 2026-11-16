@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -121,18 +122,17 @@ func (s *CoreServer) theOrganisationAsked(ask []byte, p bindSitePayload) error {
 	if err != nil {
 		return fmt.Errorf("the organization's own key could not be established: %w", err)
 	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(ask, &m); err != nil {
+	form := binding.NewInvite(p.OrgAID, p.OrgName, p.SiteAID, p.SiteName, p.RecordSiteAID, p.Role, enrolsecret.Digest(p.InviteToken), p.RedeemURL)
+	if err := binding.VerifyInvite(form, p.OrgSig, key); err != nil {
 		return err
-	}
-	delete(m, "org_sig")
-	without, _ := json.Marshal(m)
-	if ok, err := login.VerifyAsk(without, p.OrgSig, key); err != nil || !ok {
-		return errors.New("the organization did not sign this request")
 	}
 	u, err := url.Parse(p.RedeemURL)
 	if err != nil || u.Host == "" || !strings.HasSuffix(u.Path, "/api/binding/invites/"+p.InviteToken+"/redeem") {
 		return errors.New("the request does not say where the organization takes the statement")
+	}
+	// The statement and both key logs are not sent in the clear, unless this owner has said local sites are fine.
+	if u.Scheme != "https" && os.Getenv("IA_ALLOW_LOCAL_SITES") != "1" {
+		return errors.New("the organization takes the statement at an address that is not https")
 	}
 	return nil
 }
@@ -346,12 +346,14 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 	if prof, _ := s.DataStore.GetProfile(); prof != nil {
 		orgName = firstOf(prof.OrgName, prof.FullName)
 	}
+	// Everything that can fail is done before the invite is kept, so a refusal leaves no invite behind.
 	inv := asset.EmployeeInvite{
 		Token: genInviteToken(), Purpose: asset.PurposeBinding, BindRole: req.Role, MaxUses: 1,
 		SiteAID: req.SiteAID, SiteOOBI: req.SiteOOBI, RecordIdentifiers: req.RecordIdentifiers,
 	}
-	if err := s.assetHandler.Store.CreateEmployeeInvite(inv); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	orgSeed, oerr := s.identitySigningSeed()
+	if oerr != nil {
+		http.Error(w, "this organization's identity key is not held here, so it cannot sign an invite from here: "+oerr.Error(), http.StatusConflict)
 		return
 	}
 	_, signerOOBI, seed, err := s.mintPairwise("binding")
@@ -370,16 +372,14 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 		"signer_oobi": signerOOBI,
 		"redeem_url":  publicURL + "/api/binding/invites/" + inv.Token + "/redeem",
 	})
+	// The pairwise key signs the whole, as for any Ask. The organisation's signature is added to it first.
 	// The organisation signs with its own identity key first, so a person's Identity Agent can tell the
 	// Ask is its own and where it takes the statement; the pairwise key then signs the whole, as for any Ask.
-	orgSeed, oerr := s.identitySigningSeed()
+	redeemURL := publicURL + "/api/binding/invites/" + inv.Token + "/redeem"
+	orgSig, oerr := binding.SignInvite(binding.NewInvite(id.AID, orgName, req.SiteAID, req.SiteName, req.RecordSiteAID, req.Role,
+		enrolsecret.Digest(inv.Token), redeemURL), orgSeed)
 	if oerr != nil {
-		http.Error(w, "the organization's key could not sign the invite: "+oerr.Error(), http.StatusInternalServerError)
-		return
-	}
-	orgSig, oerr := login.SignAsk(ask, orgSeed)
-	if oerr != nil {
-		http.Error(w, oerr.Error(), http.StatusInternalServerError)
+		http.Error(w, "the invite could not be signed: "+oerr.Error(), http.StatusBadRequest)
 		return
 	}
 	if withOrg, ierr := injectField(ask, "org_sig", orgSig); ierr == nil {
@@ -399,6 +399,10 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 		return
 	}
 	askToken := hex.EncodeToString(tb)
+	if err := s.assetHandler.Store.CreateEmployeeInvite(inv); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	mintedAsks.Lock()
 	mintedAsks.m[askToken] = ask
 	mintedAsks.Unlock()
