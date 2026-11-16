@@ -52,7 +52,7 @@ and a leap second. (The hour may be one digit.)
 ## A list
 
 A `list` is what a person signs to have a utility app's back end list their own
-conversations across every utility app that keeps one (ADR-072 Amendment 7). It is
+conversations across every utility app that keeps one (ADR-072 Amendment 9). It is
 for no conversation, to nobody, answers nothing and carries no words: `conversation` is the fixed
 value `list`, which is not the form a conversation's id takes (every id begins `c_`); `to`,
 `in_reply_to`, `range_first` and `range_last` are empty; and the fingerprint is the salted
@@ -61,7 +61,7 @@ fingerprint of empty words, so a statement with no salt is never taken. Its
 and is never kept in one.
 
 A list also names its `audience`: the asset id of the one utility app that presents it
-(ADR-072 Amendment 8). A statement with an audience is signed as `IA-PERSON-MSG-V2`, the
+(ADR-072 Amendment 10). A statement with an audience is signed as `IA-PERSON-MSG-V2`, the
 same lines as V1 in the same order and then the `audience` as a last line; every other kind is
 V1, unchanged. The header differs, so neither signature is read as the other. A list is
 refused by the Identity Agent when its audience is not the utility app that presents it.

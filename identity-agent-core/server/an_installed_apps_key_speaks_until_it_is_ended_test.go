@@ -973,7 +973,7 @@ func TestEndingASignInTheOwnerAlreadyEndedDropsItFromTheListAndSaysSo(t *testing
 	}
 }
 
-// A list may be signed under an installed app's key (ADR-072 Amendment 8): the
+// A list may be signed under an installed app's key (ADR-072 Amendment 10): the
 // key is found by its person wherever it signed in, though it has no lapse
 // time, and an Apple App Attest key's list is its assertion over the list, held
 // to the program the owner names for that asset, never a plain signature.

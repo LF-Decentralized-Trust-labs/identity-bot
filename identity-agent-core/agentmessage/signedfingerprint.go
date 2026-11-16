@@ -125,7 +125,7 @@ const (
 	PersonKindLimit = "limit"
 	// PersonKindList is a person asking a utility app's back end to list their
 	// own conversations across every utility app that keeps one (ADR-072
-	// Amendment 7). It is for no conversation, to nobody, answers nothing and
+	// Amendment 9). It is for no conversation, to nobody, answers nothing and
 	// carries no words: the statement is never an entry of a trail.
 	PersonKindList = "list"
 )
@@ -163,7 +163,7 @@ type PersonStatement struct {
 	// Audience is the utility app's asset id a list statement is for: the
 	// one that presents it. It is inside the signed bytes (IA-PERSON-MSG-V2),
 	// so a list signed for one utility app is no list for another (ADR-072
-	// Amendment 8). Only a list carries one, and every list does; every other
+	// Amendment 10). Only a list carries one, and every list does; every other
 	// kind is signed as IA-PERSON-MSG-V1 exactly as before.
 	Audience           string `json:"audience,omitempty"`
 	Nonce              string `json:"nonce"`

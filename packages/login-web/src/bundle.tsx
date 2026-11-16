@@ -23,9 +23,10 @@ import { SignInButton } from "./SignInButton.js";
 import { appFetch, appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink, SessionEnded, type AppLink, type AppSession } from "./app.js";
 import { signInProblem } from "./signInProblem.js";
 import { signPersonStatement } from "./personStatement.js";
+import { mountSessions } from "./sessionsPanel.js";
 
 // A hosted page has no unpinned read of a link: `readAppLink` is the pinned one.
-export { appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem, signPersonStatement };
+export { appSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem, signPersonStatement, mountSessions };
 
 export interface SignInHandlers {
   /** The person approved and the session is kept; call the app as them now. */

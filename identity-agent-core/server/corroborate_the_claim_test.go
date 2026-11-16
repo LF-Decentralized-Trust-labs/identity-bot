@@ -1,13 +1,23 @@
 package server
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/witness"
 )
 
@@ -62,13 +72,43 @@ func newStandInWitness(t *testing.T) *standInWitness {
 		}
 		json.NewEncoder(rw).Encode(map[string]any{"ok": true})
 	})
+	// What it holds, said the way a witness says it now: a key state notice
+	// signed by the witness's own key. The copy of the log below is what it
+	// serves besides, and is not what it is believed by.
+	mux.HandleFunc("/witness/ksn/", func(rw http.ResponseWriter, r *http.Request) {
+		aid := r.URL.Path[len("/witness/ksn/"):]
+		w.mu.Lock()
+		kel := w.held[aid]
+		w.mu.Unlock()
+		sn, said := len(kel)-1, ""
+		if sn >= 0 {
+			said = standInDigest(kel[sn])
+		}
+		raw, err := buildNoticeOf(w.key, aid, sn, said, time.Now())
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		sig, _ := login.SignString(string(raw), bytes.Repeat([]byte{7}, 32))
+		json.NewEncoder(rw).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: w.key, Signature: sig})
+	})
 	mux.HandleFunc("/witness/kel/", func(rw http.ResponseWriter, r *http.Request) {
 		aid := r.URL.Path[len("/witness/kel/"):]
+		// One event of the log, as a witness hands it over by place.
+		place := -1
+		if i := strings.Index(aid, "/event/"); i >= 0 {
+			place, _ = strconv.Atoi(aid[i+len("/event/"):])
+			aid = aid[:i]
+		}
 		w.mu.Lock()
 		kel, ok := w.held[aid]
 		w.mu.Unlock()
-		if !ok {
+		if !ok || (place >= len(kel)) {
 			http.NotFound(rw, r)
+			return
+		}
+		if place >= 0 {
+			json.NewEncoder(rw).Encode(kel[place])
 			return
 		}
 		json.NewEncoder(rw).Encode(map[string]any{"aid": aid, "kel": kel, "count": len(kel)})
@@ -92,15 +132,13 @@ func newStandInWitness(t *testing.T) *standInWitness {
 func TestAHistoryWithARotationWithheldIsRefused(t *testing.T) {
 	w := newStandInWitness(t)
 	s := agentWithNoIdentity(t)
+	c := newRotatingControllerWitnessedBy(t, "claimant", w.key)
 
-	presented := withBytes(map[string]interface{}{"t": "icp", "i": "EClaimant", "s": "0", "d": "EInception", "b": []interface{}{w.key}})
-	// The witness saw a rotation the claim did not show.
-	w.held["EClaimant"] = []map[string]interface{}{
-		{"t": "icp", "i": "EClaimant", "s": "0", "b": []interface{}{w.key}},
-		{"t": "rot", "i": "EClaimant", "s": "1"},
-	}
+	presented := []map[string]interface{}{inceptionRecordOf(c)}
+	// The witness saw a rotation the claim did not show, and hands it over.
+	w.held[c.aid] = []map[string]interface{}{inceptionRecordOf(c), signedRotation(t, c)}
 
-	got := s.askTheWitnesses("EClaimant", presented)
+	got := s.askTheWitnesses(c.aid, presented)
 	if !got.Contradicted {
 		t.Fatalf("a witness holding a longer history than the claim showed did not "+
 			"contradict it: %+v", got)
@@ -114,20 +152,57 @@ func TestAHistoryWithARotationWithheldIsRefused(t *testing.T) {
 //
 // Without this a check that contradicted everything would pass the test above
 // and make every honest claim fail.
-func TestAWholeHistoryIsCorroborated(t *testing.T) {
+func TestAWholeHistoryIsHeldButAnUnreceiptedOneIsNotCorroborated(t *testing.T) {
 	w := newStandInWitness(t)
 	s := agentWithNoIdentity(t)
+	c := newRotatingControllerWitnessedBy(t, "claimant", w.key)
 
-	kel := withBytes(map[string]interface{}{"t": "icp", "i": "EClaimant", "s": "0", "d": "EInception", "b": []interface{}{w.key}})
-	w.held["EClaimant"] = []map[string]interface{}{{"t": "icp", "i": "EClaimant", "s": "0", "d": "EInception", "b": []interface{}{w.key}}}
+	kel := []map[string]interface{}{inceptionRecordOf(c)}
+	w.held[c.aid] = []map[string]interface{}{inceptionRecordOf(c)}
 
-	got := s.askTheWitnesses("EClaimant", kel)
+	got := s.askTheWitnesses(c.aid, kel)
 	if got.Contradicted {
 		t.Fatalf("an honest, complete history was contradicted: %s", got.Why)
 	}
-	if !got.Corroborated() {
-		t.Fatalf("a reachable witness holding exactly this history did not corroborate it: %+v", got)
+	// The witness states, signed and now, that this is the newest event it
+	// holds. That is the live half. The log states no threshold and carries no
+	// receipts, so the other half is missing and it is not corroborated: that a
+	// witness says it holds an event is not that the event was witnessed. The
+	// whole of it, receipted and held, is TestAVerifierCorroboratesAWholeHistoryThroughARealWitness.
+	if got.Held != 1 || got.ReceiptsMet || got.Corroborated() {
+		t.Fatalf("a log with no receipts was corroborated, or its witness not counted: %+v", got)
 	}
+}
+
+// inceptionRecordOf is the controller's inception as a verifier is shown it: the
+// published bytes and the controller's signature.
+func inceptionRecordOf(c *rotatingController) map[string]interface{} {
+	return map[string]interface{}{"raw_bytes_b64": base64.StdEncoding.EncodeToString(c.icpRaw), "cesr_signature": c.icpSig}
+}
+
+// signedRotation is the controller's real rotation to its next key, signed by it.
+func signedRotation(t *testing.T, c *rotatingController) map[string]interface{} {
+	t.Helper()
+	p1, _ := c.signers[1].PublicKey()
+	p2, _ := c.signers[2].PublicKey()
+	rot, err := c.eng.Rotate(drivers.RotationRequest{Name: c.name, NewPublicKey: p1, NewNextPublicKey: p2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(rot.RawBytesB64)
+	return map[string]interface{}{"raw_bytes_b64": rot.RawBytesB64, "cesr_signature": sign(t, c.signers[1], raw)}
+}
+
+// signedInteractionAt is an interaction at sn after prior, signed by by, that
+// carries tag so that two of them differ.
+func signedInteractionAt(t *testing.T, c *rotatingController, sn int, prior, tag string, by keri.Signer) map[string]interface{} {
+	t.Helper()
+	raw, err := keri.BuildInteraction(keri.InteractionInput{Prefix: c.aid, PriorSAID: prior, SN: sn,
+		Data: []json.RawMessage{json.RawMessage(`{"d":"E` + tag + `"}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]interface{}{"raw_bytes_b64": base64.StdEncoding.EncodeToString(raw), "cesr_signature": sign(t, by, raw)}
 }
 
 // A witness that cannot be reached leaves the history uncorroborated. It does
@@ -298,4 +373,52 @@ func TestAMachineWithNoWitnessAvailableStillFounds(t *testing.T) {
 	if id, _ := machine.DataStore.GetIdentity(); id == nil {
 		t.Fatal("it founded nothing")
 	}
+}
+
+// standInDigest is the digest of an event a stand-in holds: its own d, or the d
+// in the bytes it was held as. "" when it has none, which a witness cannot say.
+func standInDigest(ev map[string]interface{}) string {
+	if d, _ := ev["d"].(string); d != "" {
+		return d
+	}
+	if b, _ := ev["raw_bytes_b64"].(string); b != "" {
+		raw, _ := base64.StdEncoding.DecodeString(b)
+		var in struct {
+			D string `json:"d"`
+		}
+		_ = json.Unmarshal(raw, &in)
+		return in.D
+	}
+	return ""
+}
+
+// receipts has the stand-in receipt every event it holds for aid that it holds
+// as bytes, as a witness that took them from their controller would: indexed
+// signatures over the event's bytes, at its place (0) in a list of one.
+func (w *standInWitness) receipts(t *testing.T, aid string) {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, rec := range w.held[aid] {
+		b, _ := rec["raw_bytes_b64"].(string)
+		raw, err := base64.StdEncoding.DecodeString(b)
+		if err != nil || len(raw) == 0 {
+			t.Fatalf("an event the stand-in cannot receipt, held without its bytes: %v", rec)
+		}
+		sig, err := drivers.SignEventReceipt(raw, bytes.Repeat([]byte{7}, 32), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec["witness_receipts"] = []interface{}{map[string]interface{}{"witness": w.key, "cesr_signature": sig}}
+	}
+}
+
+// buildNoticeOf is a notice by witnessKey that states the log of aid as at place
+// sn with digest said, for stand-in witnesses that hold no whole log.
+func buildNoticeOf(witnessKey, aid string, sn int, said string, at time.Time) ([]byte, error) {
+	rec := witnessproto.NoKeyState(aid)
+	if sn >= 0 {
+		rec.S, rec.D = strconv.FormatInt(int64(sn), 16), said
+	}
+	return witnessproto.BuildKeyStateNotice(witnessKey, rec, at)
 }

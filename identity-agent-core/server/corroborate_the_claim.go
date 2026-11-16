@@ -1,11 +1,6 @@
 package server
 
-import (
-	"net/http"
-	"time"
-
-	"identity-agent-core/witness"
-)
+import "identity-agent-core/witness"
 
 // Asking somebody other than the claimant whether this history is the whole
 // history. The check itself is witness.Corroborate (one implementation, shared
@@ -21,5 +16,5 @@ var witnessKeysIn = witness.WitnessKeysIn
 // askTheWitnesses checks a presented log against the parties it says were
 // watching, each found by its designated key in this Identity Agent's registry.
 func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]interface{}) corroboration {
-	return witness.Corroborate(&http.Client{Timeout: 8 * time.Second}, witness.BootstrapPool(), ownerAID, presented)
+	return witness.Corroborate(nil, witness.BootstrapPool(), ownerAID, presented)
 }

@@ -1,0 +1,11 @@
+{
+ "note": "Committed vectors for a backup key slot, for implementations to check their slots against. v1 = a sealed_x25519_v1 slot (ADR-029): info identity-agent-backup-seal-shared-v1, no AAD. v2 = a sealed_x25519_v2 slot (ADR-029, amendment): info identity-agent-backup-seal-shared-v2, AAD = the 16-byte file id. Slot = eph_pub(32)|nonce(12)|AES-256-GCM(wrapped bek + tag)(48); KEK = HKDF-SHA256(X25519(eph,recip), salt=eph_pub|recip_pub, 32). Every value hex.",
+ "recipient_private": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+ "recipient_public": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
+ "ephemeral_private": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40",
+ "nonce": "4142434445464748494a4b4c",
+ "content_key": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+ "file_id": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7",
+ "slot_v1": "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b4142434445464748494a4b4c180f9ced8eeae24cb607c9c6f7971ee7be5d3850f056f286f144e7cac88e00a22c876837aacf8cc0f2c48935e17bf3c4",
+ "slot_v2": "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b4142434445464748494a4b4cf3a5f18017d1483de1d8f7424cdaff10f2ebe70c8ab708430108efee30182e867028b65de85ca0d44490a5e169297dfc"
+}

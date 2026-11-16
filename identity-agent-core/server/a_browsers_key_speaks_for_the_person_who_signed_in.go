@@ -188,7 +188,7 @@ func (b *browserKeys) Whose(asset, thumbprint string, now time.Time) (string, bo
 // a different identifier at each asset (ADR-066), so the person and the key
 // together name one record, and a key that speaks for another person, or not at
 // all, finds none. It is how a list the person signed for one utility app,
-// under the key of another's sign-in, is read (ADR-072 Amendment 8).
+// under the key of another's sign-in, is read (ADR-072 Amendment 10).
 func (b *browserKeys) Find(person, thumbprint string, now time.Time) (browserKeyRecord, bool) {
 	browserKeysLock.Lock()
 	defer browserKeysLock.Unlock()

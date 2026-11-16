@@ -168,7 +168,7 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 			return refuse(errors.New("the statement is for another request than this one"))
 		case st.Audience != app.Asset:
 			// The statement names the one utility app it is for, and only that
-			// utility app's back end may present it (ADR-072 Amendment 8).
+			// utility app's back end may present it (ADR-072 Amendment 10).
 			return refuse(errors.New("the statement is for another utility app than the one that presented it"))
 		}
 	} else if isControl {

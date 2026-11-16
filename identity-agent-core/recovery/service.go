@@ -12,8 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -892,29 +890,26 @@ func (s *Service) checkBeforeWriting(payload *RestoredPayload) (*checkedPayload,
 	// path, so every one is resolved here. A name that does not land inside
 	// the data directory refuses the archive rather than being discovered
 	// part-way through writing the others.
-	for name, raw := range payload.Bundle.Sections {
-		rel, ok := backup.FilePathOfSection(name)
-		if !ok {
-			if strings.HasPrefix(name, backup.FileSectionPrefix) {
-				return nil, fmt.Errorf(
-					"this archive names a file section with an unusable path: %q", name)
-			}
-			continue
-		}
-		// Never a path the backup deliberately leaves out, whatever an archive
-		// says: which machines may act, which tokens are good and which bodies
-		// are an AI agent's are decided after a restore, not restored, and the
-		// identity database comes back only through its own section, migrated
-		// and checked. The same list the backup leaves them out by, so the two
-		// cannot drift. Passed over rather than refused, so an archive written
-		// before a rule was added still restores.
-		if why := backup.NotRestored(rel); why != "" {
-			log.Printf("[recovery] not restoring %s from the archive: %s", filepath.ToSlash(rel), why)
-			continue
-		}
-		checked.files = append(checked.files, fileSection{rel: rel, raw: raw})
+	//
+	// Never a path the backup deliberately leaves out, whatever an archive
+	// says: which machines may act, which tokens are good and which bodies
+	// are an AI agent's are decided after a restore, not restored, and the
+	// identity database comes back only through its own section, migrated
+	// and checked. The same list the backup leaves them out by, so the two
+	// cannot drift. Passed over rather than refused, so an archive written
+	// before a rule was added still restores. An older archive's sandbox.db
+	// is restored as activity.db, unless the archive carries activity.db too
+	// (FilesToRestore says why). The files come back sorted by path.
+	files, left, err := backup.FilesToRestore(payload.Bundle.Sections)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(checked.files, func(i, j int) bool { return checked.files[i].rel < checked.files[j].rel })
+	for _, f := range left {
+		log.Printf("[recovery] not restoring %s from the archive: %s", f.Path, f.Reason)
+	}
+	for _, f := range files {
+		checked.files = append(checked.files, fileSection{rel: f.Rel, raw: f.Raw})
+	}
 
 	// The database, unpacked and brought to this build's schema — here, before
 	// the seed is written, rather than during the restore.

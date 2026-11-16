@@ -172,7 +172,7 @@ This data lives exclusively on the backend server. It is not replicated to the c
 | Message and email store | Full message bodies, attachments, threads | Volume: potentially hundreds of thousands of records |
 | Activity log | Full audit trail of all agent operations | High write volume, low mobile value |
 | AI memory store (`ai-memory.db`) | Conversation history, FTS5 index | Size and compute dependency |
-| Marketplace data | App manifests, container state, sandbox logs | Desktop-only feature |
+| Marketplace data | App manifests, container state, sandbox logs | Retired 2026-11-15: the Identity Agent starts no container or program of its own for utility apps, so it keeps none of this |
 | Watcher records | Observed third-party AID key states | High volume, reference data |
 | Large credential payloads | Full ACDC content for large credentials | Size |
 

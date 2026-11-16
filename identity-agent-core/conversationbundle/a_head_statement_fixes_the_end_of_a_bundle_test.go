@@ -1,6 +1,7 @@
 package conversationbundle
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -285,6 +286,57 @@ func TestEntriesAreReadByPlaceNotByPositionInTheBundle(t *testing.T) {
 	for i, m := range v.r.Messages {
 		if m.Seq != i+1 {
 			t.Fatalf("message %d is at place %d", i+1, m.Seq)
+		}
+	}
+}
+
+// A head statement is the one envelope of a bundle that says what the end is.
+// Only its text and two signatures are signed, so every other field of the
+// envelope, and any second spelling of a signed one, must be refused: a byte
+// changed there would change the file and nothing it proves.
+func TestAHeadStatementEnvelopeCarriesNothingUnsigned(t *testing.T) {
+	c := newConversation(t)
+	writeMixed(c)
+	n := len(c.chain)
+	good := c.bundle(false)
+	good.Head = c.signHead(t, "c1", n, c.chain[n-1].Hash, c.now)
+	if v := c.checkHead(good); len(v.r.Faults) != 0 {
+		t.Fatalf("the genuine head has faults: %s", openingFaults(v))
+	}
+	flip := func(s string) string { // another spelling: change the last character's unused bits
+		return s[:len(s)-1] + string(s[len(s)-1]^0x01)
+	}
+	cases := map[string]func(e *didcomm.Envelope){
+		"another algorithm":     func(e *didcomm.Envelope) { e.Protected.Alg = "authcrypt" },
+		"another encryption":    func(e *didcomm.Envelope) { e.Protected.Enc = "x" },
+		"another sender":        func(e *didcomm.Envelope) { e.Protected.Skid = "EAnother" },
+		"no sender":             func(e *didcomm.Envelope) { e.Protected.Skid = "" },
+		"an extra header field": func(e *didcomm.Envelope) { e.Protected.Apu = "x" },
+		"a recipient reference": func(e *didcomm.Envelope) { e.Protected.Apv = "x" },
+		"another mode":          func(e *didcomm.Envelope) { e.Mode = "authcrypt" },
+		"a ciphertext":          func(e *didcomm.Envelope) { e.Ciphertext = "AAAA" },
+		"recipients": func(e *didcomm.Envelope) {
+			var m map[string]any
+			raw, _ := json.Marshal(e)
+			_ = json.Unmarshal(raw, &m)
+			m["recipients"] = []any{map[string]any{}}
+			raw, _ = json.Marshal(m)
+			*e = didcomm.Envelope{}
+			_ = json.Unmarshal(raw, e)
+		},
+		"an iv":                    func(e *didcomm.Envelope) { e.IV = "AAAA" },
+		"a sender key log":         func(e *didcomm.Envelope) { e.SenderKEL = []map[string]interface{}{{"t": "icp"}} },
+		"another spelling of text": func(e *didcomm.Envelope) { e.Plain = flip(e.Plain) },
+		"another spelling of ed":   func(e *didcomm.Envelope) { e.EdSig = flip(e.EdSig) },
+		"another spelling of dsa":  func(e *didcomm.Envelope) { e.DsaSig = flip(e.DsaSig) },
+	}
+	for name, change := range cases {
+		b := c.bundle(false)
+		env := *good.Head
+		change(&env)
+		b.Head = &env
+		if v := c.checkHead(b); len(v.r.Faults) == 0 {
+			t.Errorf("%s in the head statement's envelope was not caught", name)
 		}
 	}
 }

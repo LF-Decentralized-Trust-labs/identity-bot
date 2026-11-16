@@ -5,7 +5,7 @@
  * `signed-fingerprint-vectors.json` by `person-statement-vectors.test.mjs`.
  *
  * A utility app's hosted page signs with it what its person says (`ask`), closes or reopens a conversation, and lists
- * their conversations for one other utility app (`list`, which names that app as its audience, ADR-072 Amendment 8).
+ * their conversations for one other utility app (`list`, which names that app as its audience, ADR-072 Amendment 10).
  * The key is the browser's, non-extractable, in this page's own IndexedDB: nothing here can read it out, only sign.
  */
 import { blake3Qb64, matterFixedQb64 } from "@identity-agent/login-verify/browser";
