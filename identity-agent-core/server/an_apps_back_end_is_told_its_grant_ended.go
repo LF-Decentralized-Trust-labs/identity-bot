@@ -20,7 +20,7 @@ import (
 	"identity-agent-core/asset"
 )
 
-// Revocation is pushed (ADR-072 section 6, Amendment 9). When an installed app's
+// Revocation is pushed (ADR-072 section 6, Amendment 10). When an installed app's
 // grant ends, by any road (the person, the owner, the owner switching the front end
 // off, a member removed, the app itself), the core tells the app's back end, so it
 // ends that person's sessions at once instead of at its next standing check.

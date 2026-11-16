@@ -27,7 +27,7 @@ import (
 	"identity-agent-core/relay/relaytest"
 )
 
-// ADR-072 Amendment 9: when an installed app's grant ends, the core tells the
+// ADR-072 Amendment 10: when an installed app's grant ends, the core tells the
 // app's back end through the relay, signed with the app's asset key, and the back
 // end ends that person's sessions at once. These tests run the real relay
 // (relaytest) and a back end that dials into it and claims a public name, as a
