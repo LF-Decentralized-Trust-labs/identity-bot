@@ -10548,6 +10548,346 @@
         "signature_algorithm": null
       },
       "row": "front_and_back_end.installed_app_identity"
+    },
+    {
+      "name": "an app that backs up and says how long each backup is kept",
+      "outcome": "accepted",
+      "why": "backup.keep_days is a whole number of days, 1 to 3650, given with what is backed up",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store"
+          ],
+          "every_hours": 24,
+          "keep_days": 30
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app that keeps a backup for no days",
+      "outcome": "refused",
+      "why": "backup.keep_days is at least 1",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store"
+          ],
+          "every_hours": 24,
+          "keep_days": 0
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "backup.keep_days"
+    },
+    {
+      "name": "an app that keeps a backup for more than ten years",
+      "outcome": "refused",
+      "why": "backup.keep_days is at most 3650",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store"
+          ],
+          "every_hours": 24,
+          "keep_days": 3651
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "backup.keep_days"
+    },
+    {
+      "name": "an app that backs up nothing but says how long it keeps a backup",
+      "outcome": "refused",
+      "why": "backup.keep_days is left out when what is empty",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [],
+          "keep_days": 30
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "backup.keep_days"
     }
   ]
 }
