@@ -39,10 +39,16 @@ const (
 )
 
 func sealSharedKEKV2(shared, ephemeralPub, recipientPub []byte) ([]byte, error) {
+	return sharedKEK(shared, ephemeralPub, recipientPub, SealSharedInfoV2)
+}
+
+// sharedKEK is the key that wraps a content key for one recipient: HKDF-SHA256 of the X25519 result, salted with
+// the ephemeral public key then the recipient's, under the label of the kind of thing being sealed.
+func sharedKEK(shared, ephemeralPub, recipientPub []byte, label string) ([]byte, error) {
 	salt := append(append([]byte{}, ephemeralPub...), recipientPub...)
 	kek := make([]byte, 32)
-	if _, err := hkdf.New(sha256.New, shared, salt, []byte(SealSharedInfoV2)).Read(kek); err != nil {
-		return nil, fmt.Errorf("hkdf seal shared v2: %w", err)
+	if _, err := hkdf.New(sha256.New, shared, salt, []byte(label)).Read(kek); err != nil {
+		return nil, fmt.Errorf("hkdf %s: %w", label, err)
 	}
 	return kek, nil
 }
@@ -56,8 +62,8 @@ func gcmFor(kek []byte) (cipher.AEAD, error) {
 }
 
 // sealBEKForFile seals a backup key to a recipient's public key, bound to fileID. The ephemeral private
-// half is dropped as in SealBEK, so the machine writing the file cannot reopen it. It is not exported: the core
-// publishes the format, its vectors and its checker (UnsealBEKForFile), and nothing in the core writes these slots.
+// half is dropped as in SealBEK, so the machine writing the file cannot reopen it. It is not exported: SealSlotForFile
+// is the one way to make a slot, and UnsealBEKForFile is its checker.
 func sealBEKForFile(recipientPub, bek, fileID []byte) (ephemeralPub, wrapped, nonce []byte, err error) {
 	ephPriv, err := randomBytes(X25519KeyLen)
 	if err != nil {

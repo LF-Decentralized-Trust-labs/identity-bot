@@ -130,6 +130,21 @@ func (h hostWrapper) IssueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 func (h hostWrapper) IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool {
 	return h.s.issuedUnderFirstVersionTooLate(rec)
 }
+func (h hostWrapper) BackupSealKeyOf(appAID string, epoch uint32) ([]byte, error) {
+	return h.s.backupSealKeyOf(appAID, epoch)
+}
+func (h hostWrapper) BackupSlotOpens(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte) (int, bool, error) {
+	return h.s.backupSlotOpens(appAID, maxEpoch, fileID, slots)
+}
+func (h hostWrapper) ResealBackupSlot(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, toAppAID string, toEpoch uint32) ([]byte, error) {
+	return h.s.resealBackupSlot(appAID, maxEpoch, fileID, slots, toAppAID, toEpoch)
+}
+func (h hostWrapper) SealBackupOpenReply(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, restoreKey, digest []byte) ([]byte, int, error) {
+	return h.s.sealBackupOpenReply(appAID, maxEpoch, fileID, slots, restoreKey, digest)
+}
+func (h hostWrapper) IsOwnBackupSealKey(pub []byte, epochs map[string]uint32) bool {
+	return h.s.isOwnBackupSealKey(pub, epochs)
+}
 func (h hostWrapper) KeyCanSign() error    { return h.s.keyCanSign() }
 func (h hostWrapper) KeyIsElsewhere() bool { return h.s.keyIsElsewhere() }
 func (h hostWrapper) MessagingKeysOf(aid string) (*didcomm.DID, error) {
