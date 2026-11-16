@@ -1968,8 +1968,8 @@ class CoreService {
   /// Nothing changes until every one of them has scanned. threshold omitted
   /// means all of them must sign afterwards.
   ///
-  /// [handOver] ends the ceremony with this agent's own key out of control: the
-  /// owners' devices sign two rotations, and afterwards this agent holds and
+  /// [handOver] ends the ceremony with this Identity Agent's own key out of control: the
+  /// owners' devices sign two rotations, and afterwards this Identity Agent holds and
   /// derives no key of the identity.
   Future<OwnerCeremony> startOwnerCeremony(List<String> invite,
       {int? threshold, bool handOver = false}) async {
@@ -2387,9 +2387,9 @@ class CoreService {
             : 'The inviting app could not be asked: ${response.statusCode}');
   }
 
-  /// Asks this device's own agent to make the signature its key owes over a
+  /// Asks this device's own Identity Agent to make the signature its key owes over a
   /// rotation of an ownership ceremony it accepted. [generation] is 0 for the
-  /// first rotation and 1 for the second of a hand-over. The agent signs only a
+  /// first rotation and 1 for the second of a hand-over. The Identity Agent signs only a
   /// rotation of the organisation that invited it that reveals that key.
   Future<List<int>> signACeremonyRotation(String inviteToken,
       {required int generation, required List<int> raw}) async {
@@ -2405,7 +2405,7 @@ class CoreService {
     if (response.statusCode != 200) {
       throw Exception(response.body.trim().isNotEmpty
           ? response.body.trim()
-          : 'This device\u2019s agent would not sign: ${response.statusCode}');
+          : 'This device\u2019s Identity Agent would not sign: ${response.statusCode}');
     }
     return base64Decode(
         (jsonDecode(response.body) as Map<String, dynamic>)['signature_b64'] as String);

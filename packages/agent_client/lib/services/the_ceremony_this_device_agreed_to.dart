@@ -46,7 +46,7 @@ class CeremonyTermsOwner {
 }
 
 /// What an ownership ceremony says it is about to do, as the organisation's
-/// agent tells an invited owner's device: who is taking part, how many must sign
+/// Identity Agent tells an invited owner's device: who is taking part, how many must sign
 /// afterwards, whether the organisation's own key is being dropped, and the
 /// rotation waiting.
 class CeremonyTerms {
@@ -333,8 +333,8 @@ class CeremonyReading {
 /// An invited owner's side of an ownership ceremony: reading what it is to
 /// agree to, and signing the rotation only when it is exactly that.
 ///
-/// The organisation's agent is reached at [orgUrl], the address the invitation
-/// was redeemed at; the key that signs is this device's own agent's, asked
+/// The organisation's Identity Agent is reached at [orgUrl], the address the invitation
+/// was redeemed at; the key that signs is this device's own Identity Agent's, asked
 /// through [signWithDeviceKey], so the key never leaves it.
 class CeremonyDevice {
   CeremonyDevice({
@@ -344,10 +344,10 @@ class CeremonyDevice {
     CeremonyAgreements? agreements,
   }) : agreements = agreements ?? SecureCeremonyAgreements();
 
-  /// Reaches the organisation's agent.
+  /// Reaches the organisation's Identity Agent.
   final http.Client client;
 
-  /// Asks this device's own agent for the signature its key owes
+  /// Asks this device's own Identity Agent for the signature its key owes
   /// (`CoreService.signACeremonyRotation`).
   final Future<List<int>> Function(String token,
       {required int generation, required List<int> raw}) signWithDeviceKey;

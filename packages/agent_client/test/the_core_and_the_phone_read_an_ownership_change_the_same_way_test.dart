@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 import 'support/the_core.dart';
 
 void main() {
-  // The fixture is what the organisation's agent really answered for a hand-over
+  // The fixture is what the organisation's Identity Agent really answered for a hand-over
 // of two devices (identity-agent-core/server, a test there keeps its fields
 // matching), at each of its two rotations.
   test('the core\'s real terms and rotations are what the phone expects', () async {

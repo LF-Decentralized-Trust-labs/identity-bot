@@ -658,18 +658,53 @@ share, so the terms name none. Where the post-quantum digest cannot be derived
 the share commits its classical digest alone, as an ordinary rotation does.
 
 *The layout is fixed, so every signer can check it.* The owners are ordered by
-their identifiers, compared as ASCII strings, ascending. Owner *i* (from 0)
-then has, in a hand-over (where the identity's own key is not kept):
+their identifiers, compared as ASCII strings, ascending. Owner *i* (from 0) is
+placed as follows, in a hand-over and in a ceremony that keeps the identity's own
+key alike, except where the text says which.
 
-- in stage one, `k[i]` = their current classical key, and `n[2i]`, `n[2i+1]` =
-  their next classical and next post-quantum digests. They sign at index *i*,
-  ondex *2i* (code `A` for owner 0, `2A` for the others);
-- in stage two, `k[2i]`, `k[2i+1]` = their classical and post-quantum keys, with
-  `n` laid out as in stage one, so index and ondex are equal (code `A`).
+The first rotation:
 
-Where the identity keeps its own key, its key leads `k` and its group of one
-or two digests leads `n`, so owner *i* is at `k[i+1]`, its digests in `n` come
-after the identity's group, and it signs current-only at index *i*+1.
+- `k` is the identity's own key, then each owner's current classical key, so
+  owner *i* is at `k[i+1]`. The identity's own key leads in every ceremony: it is
+  the key the last event committed to, and no verifier accepts a rotation
+  without it. It signs at index 0.
+- `n` is, in a ceremony that keeps the identity's own key, the identity's own
+  group of one or two digests first, then each owner's group in order: that
+  owner's next classical digest, then its next post-quantum digest where its
+  device sent one. A hand-over has no identity group and `n` starts with owner 0.
+- Owner *i* signs at index *i*+1 and is current-only: its key was not committed
+  to by the last event, so its signature carries no ondex.
+
+The second rotation, which only a hand-over has:
+
+- `k` is one revealed classical key per owner, in order, so owner *i* is at
+  `k[i]`, and `n` is each owner's own next group in order, as that owner named
+  it for after the hand-over. The identity's own key does not appear.
+- Owner *i* signs at index *i*, and its ondex is the position, in the first
+  rotation's `n`, of the classical digest it committed there: the number of
+  digests ahead of its group. When every owner before it committed two digests
+  that is 2*i*, so index and ondex are equal only for owner 0 and differ for
+  every later owner (code `A` for owner 0, `2A` for the others).
+
+*Interim note.* The post-quantum stage two of this section (below), which
+reveals both an owner's classical and its post-quantum key (`k[2i]`,
+`k[2i+1]`, index and ondex equal), is not what an ownership ceremony emits
+today. Tried: revealing both keys per owner in the ceremony's second rotation.
+Switched because no CESR code is assigned for a post-quantum public key or its
+indexed signature (the post-quantum stage two below states this), so such an event
+cannot be written. The
+canonical path for now is the classical-only second rotation above. When codes
+are assigned, a ceremony's second rotation reveals two keys per owner and an
+implementation that reads either layout will need to tell them apart by the
+codes in the signatures.
+
+An owner's device that accepts with no post-quantum digest is held to its
+classical key alone in the next-keys threshold. Because the signing side
+requires the post-quantum commitment the Identity Agent derives for that owner
+to be present in the event it is asked to sign, such a device would then refuse
+to sign any first rotation this core offers; a device that is to sign here
+therefore sends a post-quantum digest, though the acceptance check does not
+require one.
 
 *The thresholds*, exactly as keripy 1.3.6 serialises them (generated with its
 `Tholder` and checked against which signers satisfy them):

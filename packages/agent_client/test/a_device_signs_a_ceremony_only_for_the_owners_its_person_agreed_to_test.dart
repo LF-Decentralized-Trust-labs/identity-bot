@@ -60,7 +60,7 @@ void main() {
         'signed': signed,
       };
 
-  /// The terms and the rotation the org's agent would offer at a stage.
+  /// The terms and the rotation the organisation's Identity Agent would offer at a stage.
   Future<(Map<String, Object?>, List<int>)> offer(String stage,
       {String second = 'bob',
       String? priorOf,
@@ -99,7 +99,7 @@ void main() {
     }, raw);
   }
 
-  /// An organisation's agent that serves [terms] and the event, and records
+  /// An organisation's Identity Agent that serves [terms] and the event, and records
   /// what it is sent.
   (MockClient, List<http.Request>) org(Map<String, Object?> terms, List<int> raw) {
     final seen = <http.Request>[];

@@ -54,7 +54,7 @@ class AnOwnershipChange {
 /// other people's signatures in between. Without this record a phone that left
 /// the screen, or was restarted, could never sign the second rotation, and the
 /// first would already be in the log. In secure storage because the code in it
-/// is what lets this phone's agent sign for that one change.
+/// is what lets this phone's Identity Agent sign for that one change.
 ///
 /// **Readable after the first unlock, and not before.** A background look runs
 /// while the phone is usually locked, and a keychain item kept "only while
