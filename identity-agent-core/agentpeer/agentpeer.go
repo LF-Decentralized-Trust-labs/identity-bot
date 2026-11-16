@@ -1,6 +1,6 @@
 // Package agentpeer is a message from an AI agent one Identity Agent holds to an
 // AI agent another Identity Agent holds, as the two Identity Agents carry it
-// (ADR-080). Whoever holds each Identity Agent, a person or an organisation, the
+// (ADR-085). Whoever holds each Identity Agent, a person or an organisation, the
 // message and its checks are the same.
 //
 // The envelope between two contacts already proves which Identity Agent sent a

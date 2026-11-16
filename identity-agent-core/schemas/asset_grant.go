@@ -274,7 +274,7 @@ func mustAssetGrant(k assetGrantKind) *AssetGrant {
 //     of its own. Messaging an AI agent that ANOTHER Identity Agent holds is a
 //     different capability, agent.message.peer, whose constraint on "contact"
 //     names those Identity Agents (and optionally on "agent" the AI agents),
-//     and which no other capability widens (ADR-080). Conversation limits are the Identity Agent's, applied to
+//     and which no other capability widens (ADR-085). Conversation limits are the Identity Agent's, applied to
 //     every conversation, and grant nothing (ADR-047).
 var aiAgentGrantKind = assetGrantKind{
 	assetType: "ai_agent",

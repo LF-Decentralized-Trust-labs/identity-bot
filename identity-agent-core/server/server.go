@@ -172,7 +172,7 @@ type CoreServer struct {
 	inboundDIDComm    InboundDIDCommHandler   // overlay hook for inbound DIDComm messages; nil = deliver-only
 
 	// Who keeps AI agents' conversations, and what a contact says its AI agents
-	// are called (ADR-080). Nil: nothing of either is taken.
+	// are called (ADR-085). Nil: nothing of either is taken.
 	peerMessageKeeper   PeerMessageKeeper
 	peerDirectoryKeeper PeerDirectoryKeeper
 

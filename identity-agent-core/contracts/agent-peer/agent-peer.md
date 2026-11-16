@@ -2,7 +2,7 @@
 
 How an AI agent one Identity Agent holds sends a message to an AI agent another
 Identity Agent holds, carried between the two Identity Agents as accepted
-contacts (ADR-080). It is the same whoever holds each Identity Agent, a person
+contacts (ADR-085). It is the same whoever holds each Identity Agent, a person
 or an organisation. An implementation that already speaks the contact envelope
 and the conversation record (ADR-068) needs only what is here to interoperate.
 

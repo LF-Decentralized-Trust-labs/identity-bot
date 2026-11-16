@@ -1,4 +1,4 @@
-# ADR-080: An AI Agent Messages an AI Agent of Another Identity Agent Through the Two Identity Agents
+# ADR-085: An AI Agent Messages an AI Agent of Another Identity Agent Through the Two Identity Agents
 
 **Status:** Proposed (2026-11-14)
 **Date:** 2026-11-14

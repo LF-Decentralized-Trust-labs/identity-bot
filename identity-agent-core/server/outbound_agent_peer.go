@@ -11,7 +11,7 @@ import (
 )
 
 // SendAgentPeerMessage sends a message from an AI agent this Identity Agent
-// holds to an AI agent a contact's Identity Agent holds (ADR-080): this Identity
+// holds to an AI agent a contact's Identity Agent holds (ADR-085): this Identity
 // Agent signs the statement with its own messaging keys and carries it, with
 // the words, inside the envelope the two already use as contacts.
 //
@@ -19,8 +19,8 @@ import (
 // the statement is well formed. Whether the AI agent may message that contact
 // is the AI agent's grant and the owner's rule for that contact, which whoever
 // keeps the AI agents this Identity Agent holds applies before it calls this
-// (ADR-080, decision 7). An error is returned when nothing was sent. A contact
-// that takes the message and then refuses it is not heard of (ADR-080,
+// (ADR-085, decision 7). An error is returned when nothing was sent. A contact
+// that takes the message and then refuses it is not heard of (ADR-085,
 // decision 8).
 func (s *CoreServer) SendAgentPeerMessage(to string, st agentpeer.Statement, words string) error {
 	identity, err := s.DataStore.GetIdentity()

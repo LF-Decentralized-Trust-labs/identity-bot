@@ -116,7 +116,7 @@
       "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
     },
     "party": {
-      "description": "An AI agent's identifier, person: followed by a person's identifier, or peer: followed by another Identity Agent's identifier, a slash and the identifier of an AI agent it holds (ADR-080).",
+      "description": "An AI agent's identifier, person: followed by a person's identifier, or peer: followed by another Identity Agent's identifier, a slash and the identifier of an AI agent it holds (ADR-085).",
       "type": "string",
       "minLength": 1
     },
@@ -549,7 +549,7 @@
       }
     },
     "peer_proof": {
-      "description": "What another Identity Agent signed to say an AI agent it holds sent these words to one this Identity Agent holds (ADR-080, contracts/agent-peer/agent-peer.md, identity-agent-core/agentpeer): the KERI exchange message it signed, without the words and without the salt of their fingerprint. Checked with that Identity Agent's messaging keys. The record must say what it signed: from as peer:<that Identity Agent>/<its AI agent>, to the AI agent, kind, message_id and in_reply_to as the exchange message has them, and body_hash equal to its fingerprint.",
+      "description": "What another Identity Agent signed to say an AI agent it holds sent these words to one this Identity Agent holds (ADR-085, contracts/agent-peer/agent-peer.md, identity-agent-core/agentpeer): the KERI exchange message it signed, without the words and without the salt of their fingerprint. Checked with that Identity Agent's messaging keys. The record must say what it signed: from as peer:<that Identity Agent>/<its AI agent>, to the AI agent, kind, message_id and in_reply_to as the exchange message has them, and body_hash equal to its fingerprint.",
       "type": "object",
       "required": ["exn", "pq_sig"],
       "additionalProperties": false,

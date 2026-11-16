@@ -150,7 +150,7 @@ func CheckOpeningGrant(limits map[string]interface{}, to string) error {
 }
 
 // CheckPeerOpeningGrant is CheckOpeningGrant for an opening toward an AI agent
-// another Identity Agent holds (ADR-080): the grant must name that contact (and
+// another Identity Agent holds (ADR-085): the grant must name that contact (and
 // the AI agent, when it names any) under agent.message.peer, and state the same
 // rate.
 func CheckPeerOpeningGrant(limits map[string]interface{}, contact, agent string) error {
@@ -184,7 +184,7 @@ func IsPerson(party string) (string, bool) {
 }
 
 // PeerPrefix marks a party that is an AI agent ANOTHER Identity Agent holds
-// (ADR-080): "peer:" then that Identity Agent's identifier, a slash and the AI
+// (ADR-085): "peer:" then that Identity Agent's identifier, a slash and the AI
 // agent's. This Identity Agent holds no keys for it, so the entries it speaks in
 // are countersigned by this Identity Agent, as a person's are, and carry the
 // other Identity Agent's signed statement (PeerProof).
@@ -608,7 +608,7 @@ type Record struct {
 	// chain, holds a person's entry whichever way they signed it.
 	PersonProof *PersonProof `json:"person_proof,omitempty"`
 	// PeerProof is the other Identity Agent's own statement, for an entry an AI
-	// agent another Identity Agent holds sent (ADR-080). Checked with that
+	// agent another Identity Agent holds sent (ADR-085). Checked with that
 	// Identity Agent's keys (CheckPeerProof), which this record does not carry.
 	PeerProof *PeerProof `json:"peer_proof,omitempty"`
 	// Refusal is why the Identity Agent refused a person's write before

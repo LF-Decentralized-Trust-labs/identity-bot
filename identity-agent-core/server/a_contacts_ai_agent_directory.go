@@ -10,7 +10,7 @@ import (
 	"identity-agent-core/didcomm"
 )
 
-// The AI agents a contact says this Identity Agent may reach (ADR-080), as
+// The AI agents a contact says this Identity Agent may reach (ADR-085), as
 // that contact sends them. The core checks the sender is an accepted contact and
 // that the list can be shown as it stands (agentpeer.Directory.Check), and hands
 // it to whoever keeps the AI agents this Identity Agent holds, which keeps it for writing and showing "name@alias". Whether a

@@ -759,7 +759,7 @@ func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
 	}
 	if rec.PeerProof != nil {
 		// An AI agent another Identity Agent holds opens a conversation of this
-		// Identity Agent's making with its ask to one this one holds (ADR-080).
+		// Identity Agent's making with its ask to one this one holds (ADR-085).
 		if _, _, peer := agentmessage.IsPeer(rec.From); !peer || rec.Depth != 1 || rec.Seq != 1 || rec.Kind != agentmessage.KindAsk {
 			v.fault(where, "a conversation opened from another Identity Agent begins with its AI agent's ask, as the first entry, at depth 1")
 		}
@@ -889,7 +889,7 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 // Identity Agent holds is checked with that Identity Agent's messaging keys,
 // which the bundle must carry tied to its key log like any countersigner's; the
 // bundle can show that Identity Agent's keys, never that the AI agent it holds
-// sent the words (the Identity Agent answers for them, ADR-080).
+// sent the words (the Identity Agent answers for them, ADR-085).
 func (v *verifier) checkSender(rec agentmessage.Record) error {
 	if rec.PeerProof == nil || rec.Outcome != nil {
 		return rec.CheckSenderProof()
@@ -902,7 +902,7 @@ func (v *verifier) checkSender(rec agentmessage.Record) error {
 	if !ok {
 		return fmt.Errorf("the bundle carries no messaging keys tied to the key log of %s, which signed for the AI agent it holds", holder)
 	}
-	v.cannotRuleOut("An entry from an AI agent another Identity Agent holds is signed by that Identity Agent, not by the AI agent: it proves the Identity Agent says the AI agent sent these words, and nothing about which machine or brain produced them (ADR-080).")
+	v.cannotRuleOut("An entry from an AI agent another Identity Agent holds is signed by that Identity Agent, not by the AI agent: it proves the Identity Agent says the AI agent sent these words, and nothing about which machine or brain produced them (ADR-085).")
 	return rec.CheckPeerProof(did, v.b.Root)
 }
 
@@ -962,7 +962,7 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 	_ = json.Unmarshal(grant.attrs["capabilities"], &caps)
 	if contact, agent, peer := agentmessage.IsPeer(rec.To); peer {
 		// An ask to an AI agent another Identity Agent holds rests on its own
-		// capability, which names that contact (ADR-080), and so must the grant
+		// capability, which names that contact (ADR-085), and so must the grant
 		// of an AI agent that opened the chain it is in. A conversation another
 		// Identity Agent's AI agent opened is never passed on to a third: an ask to
 		// one inside it is a fault (the sender's own policy, which a trail can

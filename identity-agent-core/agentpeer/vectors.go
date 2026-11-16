@@ -22,7 +22,7 @@ type VectorSet struct {
 	// Keys are the two Identity Agents' messaging keys, from published seeds:
 	// Ed25519 from its 32-byte seed (RFC 8032) and ML-DSA-65 from its 32-byte
 	// seed (FIPS 204). Each Identity Agent's identifier is the identifier its
-	// contacts know it by; its key log vouches for these keys (ADR-080).
+	// contacts know it by; its key log vouches for these keys (ADR-085).
 	Keys    map[string]VectorKeys `json:"keys"`
 	Signed  []SignedCase          `json:"signed"`
 	Refused []RefusedCase         `json:"refused"`

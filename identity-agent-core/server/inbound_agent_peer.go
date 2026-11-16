@@ -11,7 +11,7 @@ import (
 	"identity-agent-core/didcomm"
 )
 
-// A message from an AI agent another Identity Agent holds (ADR-080), arriving
+// A message from an AI agent another Identity Agent holds (ADR-085), arriving
 // inside the envelope between the two Identity Agents as contacts.
 //
 // What this does and does not decide. The envelope has said which Identity
@@ -68,7 +68,7 @@ func (agentPeerMessage) Perform(s *CoreServer, in InboundMessage) error {
 
 // isAcceptedContact refuses an Identity Agent that is not a contact this one has
 // accepted: a message or a directory between AI agents travels only between
-// contacts (ADR-080).
+// contacts (ADR-085).
 func (s *CoreServer) isAcceptedContact(aid string) error {
 	contact, err := s.DataStore.GetContact(aid)
 	if err != nil || contact == nil {

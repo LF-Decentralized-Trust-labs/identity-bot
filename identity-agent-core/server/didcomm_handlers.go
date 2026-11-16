@@ -788,7 +788,7 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	// A message between AI agents that two Identity Agents hold is the
 	// exception: its words are kept by whatever keeps those AI agents'
 	// conversations, under the owner's rule for that contact, and nowhere else
-	// (ADR-068, ADR-080). Copying it here would keep a second plaintext of an ask the rule refused, for every
+	// (ADR-068, ADR-085). Copying it here would keep a second plaintext of an ask the rule refused, for every
 	// controller to read, with no limit on how many a contact could send.
 	if jwm.Type == didcomm.TypeAgentPeerMessage {
 		s.recordTraffic(skid, jwm.ID, "", "didcomm.message.received", "ok", jwm.Type+" to "+kid, nil)

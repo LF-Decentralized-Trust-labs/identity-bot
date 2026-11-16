@@ -3,7 +3,7 @@ package agentpeer
 import "fmt"
 
 // CapabilityMessagePeer is the grant entry that lets an AI agent message an AI
-// agent that ANOTHER Identity Agent holds (ADR-080). It is not
+// agent that ANOTHER Identity Agent holds (ADR-085). It is not
 // agent.message.send widened: that one means "an AI agent this same Identity
 // Agent holds" and must never silently mean another Identity Agent's too. Nobody holds this one unless a grant names it.
 const CapabilityMessagePeer = "agent.message.peer"

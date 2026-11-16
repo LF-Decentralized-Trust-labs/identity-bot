@@ -8,7 +8,7 @@ import (
 
 // A directory is the AI agents one Identity Agent holds that a contact may
 // reach, by the names this Identity Agent gives them, so the contact can write
-// "name@alias" (ADR-080). It tells the contact nothing about any
+// "name@alias" (ADR-085). It tells the contact nothing about any
 // other AI agent. The envelope it arrives in says which Identity Agent it is
 // from; it holds no signature of its own, because it grants nothing: what a
 // contact may reach is the owner's rule, held and checked by the Identity Agent
