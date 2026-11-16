@@ -17,7 +17,7 @@ The naive approach is to hardcode the list of share actions in the Flutter UI. T
 For a self-hosted, user-controlled identity agent this is particularly unacceptable because:
 
 1. Users self-host and self-install. There is no forced update mechanism.
-2. The Data Manager (a sandboxed app service provider) needs to be able to extend and configure the agent's capabilities without modifying the core Identity Agent binary.
+2. The Data Manager (a utility app service provider) needs to be able to extend and configure the Identity Agent's capabilities without modifying the core Identity Agent binary.
 3. Different deployments may want different action sets enabled for their users.
 
 ---

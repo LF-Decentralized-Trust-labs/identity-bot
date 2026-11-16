@@ -296,12 +296,12 @@ func ApplyMigrations(db *sql.DB) error {
 		}
 
 		if m.PreCheck != nil && !m.PreCheck(db) {
-			log.Printf("[sandbox] Skipping migration %d (pre-check: columns already renamed): %s", m.Version, m.Description)
+			log.Printf("[activity] Skipping migration %d (pre-check: columns already renamed): %s", m.Version, m.Description)
 			db.Exec("INSERT INTO schema_migrations (version, description) VALUES (?, ?)", m.Version, m.Description)
 			continue
 		}
 
-		log.Printf("[sandbox] Applying migration %d: %s", m.Version, m.Description)
+		log.Printf("[activity] Applying migration %d: %s", m.Version, m.Description)
 
 		tx, err := db.Begin()
 		if err != nil {
@@ -322,7 +322,7 @@ func ApplyMigrations(db *sql.DB) error {
 			return fmt.Errorf("failed to commit migration %d: %w", m.Version, err)
 		}
 
-		log.Printf("[sandbox] Migration %d applied successfully", m.Version)
+		log.Printf("[activity] Migration %d applied successfully", m.Version)
 	}
 
 	return nil

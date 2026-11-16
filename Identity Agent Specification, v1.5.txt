@@ -188,6 +188,7 @@ Provides the agent with a "Digital Eye" and the ability to interact with legacy 
    * Standardization: Organization Apps must use the standard Identity Agent Protocol (IAP) to interact with consumers. This ensures that regardless of the software vendor, the interaction renders as a standard Consent Card on the user's device.
 * B2C Interaction Logic: Organizations must use the standard Consent Card workflow; they cannot force data extraction.
 5. Application Lifecycle & Sandboxing
+[Amended 2026-11-15: the Identity Agent launches no utility apps as child processes. The "Jailer" model below, in which apps are launched as sandboxed child processes of the Identity Agent, is the older sandboxed-app kind and is retired; a utility app runs on a machine of its own (ADR-072), and the manifest and consent workflow below apply to it. See ADR-012 Amendment 6.]
 * The App Manifest: Every app must include a manifest.json defining its Requested Capabilities (Required Pipes) and requested Sub-Policy.
 * Installation Workflow: The user reviews a plain-English summary of the Manifest. Upon consent, the system generates a constrained Capability Sub-Policy for that specific App ID.
 * The "Jailer" Execution Model: Apps are launched as Sandboxed Child Processes. 

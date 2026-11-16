@@ -3,14 +3,27 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
 )
+
+func eventSAIDOf(t *testing.T, rec map[string]interface{}) string {
+	t.Helper()
+	raw, _ := base64.StdEncoding.DecodeString(rec["raw_bytes_b64"].(string))
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev.SAID
+}
 
 // What a registered witness hands back as "conflicting" is not believed as
 // served. One broken or hostile witness must not be able to refuse an honest
@@ -59,14 +72,24 @@ func TestOnlyAValidlySignedRivalRefusesAClaimInTheCore(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(map[string]interface{}{"kel": presented, "conflicting": tc.conflicting})
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(body) }))
+			// The witness's live answer: signed, now, that the newest event is the held one.
+			heldSAID := eventSAIDOf(t, heldIxn)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/witness/ksn/") {
+					raw, _ := buildNoticeOf(bob.witnessKey, c.aid, 2, heldSAID, time.Now())
+					key, sig, _ := bob.svc.SignReceipt(string(raw))
+					_ = json.NewEncoder(w).Encode(witnessproto.SignedReply{RpyB64: base64.StdEncoding.EncodeToString(raw), WitnessAID: key, Signature: sig})
+					return
+				}
+				_, _ = w.Write(body)
+			}))
 			t.Cleanup(srv.Close)
 			pointTheBootstrapPoolAt(t, bob.witnessKey, srv.URL)
 			got := agentWithNoIdentity(t).askTheWitnesses(c.aid, presented)
 			if got.Contradicted != tc.refused {
 				t.Fatalf("contradicted = %v, want %v: %+v", got.Contradicted, tc.refused, got)
 			}
-			if !tc.refused && !got.Corroborated() {
+			if !tc.refused && (got.Held != 1 || got.Contradicted) {
 				t.Fatalf("an honest claim was refused over an invalid entry: %+v", got)
 			}
 		})

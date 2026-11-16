@@ -376,8 +376,11 @@ func (m *AppManifest) Validate() error {
 			return fmt.Errorf("supported_platforms[%d].binary is required", i)
 		}
 	}
-	if m.Isolation != "" && m.Isolation != "sandbox" && m.Isolation != "host" {
-		return fmt.Errorf("isolation must be 'sandbox' or 'host', got '%s'", m.Isolation)
+	if m.Isolation == "sandbox" {
+		return fmt.Errorf("isolation: \"sandbox\" is retired: the Identity Agent starts no container or program of its own. Write a utility app instead, with kind \"app\" (ADR-012 Amendment 5)")
+	}
+	if m.Isolation != "" && m.Isolation != "host" {
+		return fmt.Errorf("isolation must be 'host' (or absent), got '%s'", m.Isolation)
 	}
 	if m.IsApp() && m.Isolation == "host" {
 		return fmt.Errorf("isolation: an app runs in its own sandbox and is never a host plug-in")

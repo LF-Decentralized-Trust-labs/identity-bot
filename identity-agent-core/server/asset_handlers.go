@@ -114,6 +114,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Put("/{id}/front-ends", s.assetHandler.HandlePutFrontEnds)
 		r.Put("/{id}/front-ends/offered", s.assetHandler.HandleSetOfferedFrontEnds)
 		r.Put("/{id}/relay-id", s.assetHandler.HandleSetRelayID)
+		r.Put("/{id}/back-end", s.assetHandler.HandleSetBackEnd)
 		r.Get("/{id}/app-key-grants", s.handleListAppKeyGrants)
 		r.Delete("/{id}/app-key-grants/{key}", s.handleEndAppKeyGrant)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
