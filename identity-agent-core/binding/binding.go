@@ -1,5 +1,5 @@
 // Package binding is the statement by which a person joins two of their
-// identifiers to one record at a site, and the check that it is theirs (ADR-080).
+// identifiers to one record at a site, and the check that it is theirs (ADR-082).
 //
 // A person has a different identifier at every site they deal with. Where a site
 // (a utility app a person's organisation runs, say) must keep something under one
@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"identity-agent-core/iacrypto"
@@ -49,6 +50,11 @@ type Statement struct {
 	// Role is person, or owner for the one who owns the organisation.
 	Role string `json:"role"`
 }
+
+// identifierForm is what every field naming an identifier or a digest must look like: the characters of a
+// qb64 value and nothing else. That keeps the signed bytes plain ASCII, so every implementation writes them
+// the same way (a character a JSON writer may escape is never in them).
+var identifierForm = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 // Link is a statement with the two signatures, each with the key that made it.
 type Link struct {
@@ -110,6 +116,9 @@ func (l Link) Verify(e Expect) error {
 		return errors.New("a binding names a person or the owner")
 	case s.Org == "" || s.Site == "" || s.Record == "" || s.New == "" || s.Invite == "":
 		return errors.New("a binding names the organisation, the site, both identifiers and the invite")
+	case !identifierForm.MatchString(s.Org) || !identifierForm.MatchString(s.Site) || !identifierForm.MatchString(s.Record) ||
+		!identifierForm.MatchString(s.New) || !identifierForm.MatchString(s.Invite):
+		return errors.New("every identifier and the invite are written as an identifier is: letters, digits, - and _")
 	case s.Record == s.New:
 		return errors.New("a binding joins two identifiers, not one to itself")
 	case e.Org == "" || e.Site == "" || e.Invite == "" || e.KeyIsCurrent == nil:
@@ -120,6 +129,9 @@ func (l Link) Verify(e Expect) error {
 		return errors.New("this binding is for another site")
 	case s.Invite != e.Invite:
 		return errors.New("this binding answers another invite")
+	}
+	if l.RecordKey == l.NewKey {
+		return errors.New("the two identifiers have one key between them: a binding is signed by two keys")
 	}
 	body := string(s.SignedBytes())
 	if err := checkOne("the record's", s.Record, l.RecordKey, l.RecordSig, body, e); err != nil {

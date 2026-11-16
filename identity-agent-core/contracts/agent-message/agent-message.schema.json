@@ -114,7 +114,7 @@
         "outcome",
         "notice"
       ],
-      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068). notice is the Identity Agent's own word to a person, by code, in fixed words (ADR-081)."
+      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068). notice is the Identity Agent's own word to a person, by code, in fixed words (ADR-083)."
     },
     "party": {
       "description": "An AI agent's identifier, or person: followed by a person's identifier.",
@@ -599,7 +599,7 @@
       }
     },
     "notice": {
-      "description": "What the Identity Agent told a person in a conversation (ADR-081). It is an entry of its own, of kind notice, from the Identity Agent, to a person, with no in_reply_to, no sender's proof and the hash of no words; the countersignature is the proof. It names a code and never carries text: every reader shows the words the code has. A conversation holds one notice of a code for a person, and none after it is closed.",
+      "description": "What the Identity Agent told a person in a conversation (ADR-083). It is an entry of its own, of kind notice, from the Identity Agent, to a person, with no in_reply_to, no sender's proof and the hash of no words; the countersignature is the proof. It names a code and never carries text: every reader shows the words the code has. A conversation holds one notice of a code for a person, and none after it is closed.",
       "type": "object",
       "required": [
         "code"

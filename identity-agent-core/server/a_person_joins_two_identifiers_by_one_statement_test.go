@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/enrolsecret"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -67,6 +68,16 @@ func (w *joinWorld) aPerson(sites ...string) *CoreServer {
 			w.t.Fatal(err)
 		}
 	}
+	p.organisationKeyOf = func(_, aid string) ([]byte, error) {
+		if aid != "EOURS" {
+			return nil, errors.New("not the organization this stands in for")
+		}
+		seed, err := w.org.identitySigningSeed()
+		if err != nil {
+			return nil, err
+		}
+		return ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey), nil
+	}
 	p.siteIsDelegatedBy = func(site, _, org, _ string) error {
 		if site == org || w.runs[site] {
 			return nil
@@ -95,8 +106,32 @@ func (w *joinWorld) anInvite(token, role, site, recordSite string, record ...str
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	b, _ := json.Marshal(bindSitePayload{OrgName: "Org", OrgAID: "EOURS", OrgOOBI: w.orgURL, SiteAID: site, SiteOOBI: "http://127.0.0.1:1/oobi/" + site,
-		SiteName: "Notes", RecordSiteOOBI: "http://127.0.0.1:1/oobi/" + recordSite, RecordSiteAID: recordSite, Role: role, InviteToken: token})
+	return w.askFor(token, role, site, recordSite)
+}
+
+// askFor is the Ask the organisation's mint makes for an invite: the organisation signs it with its own key,
+// naming where it takes the statement.
+func (w *joinWorld) askFor(token, role, site, recordSite string) []byte {
+	w.t.Helper()
+	b, _ := json.Marshal(map[string]string{
+		"v": "ASK1", "org_name": "Org", "org_aid": "EOURS", "org_oobi": w.orgURL + "/public/oobi/EOURS",
+		"site_aid": site, "site_oobi": "http://127.0.0.1:1/oobi/" + site, "site_name": "Notes",
+		"record_site_aid": recordSite, "record_site_oobi": "http://127.0.0.1:1/oobi/" + recordSite,
+		"role": role, "invite_token": token, "redeem_url": w.orgURL + "/api/binding/invites/" + token + "/redeem",
+	})
+	var m map[string]interface{}
+	_ = json.Unmarshal(b, &m)
+	m["t"] = 5
+	b, _ = json.Marshal(m)
+	seed, err := w.org.identitySigningSeed()
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	sig, err := login.SignAsk(b, seed)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	b, _ = injectField(b, "org_sig", sig)
 	return b
 }
 
@@ -428,5 +463,194 @@ func TestAPersonsIdentityAgentServesWhatTheyJoinedWithNoOrganisationStore(t *tes
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/login/joined", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"role":"person"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+// resign replaces the organisation's signature on an Ask with another key's, or lets a change be made first.
+func resign(t *testing.T, ask []byte, seed []byte, change func(map[string]interface{})) []byte {
+	t.Helper()
+	var m map[string]interface{}
+	_ = json.Unmarshal(ask, &m)
+	delete(m, "org_sig")
+	if change != nil {
+		change(m)
+	}
+	b, _ := json.Marshal(m)
+	sig, err := login.SignAsk(b, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = injectField(b, "org_sig", sig)
+	return b
+}
+
+// Anybody can name a real organisation and its real sites. Only the organisation can sign for itself.
+func TestAnAskNamingAnOrganisationThatDidNotSignItIsRefusedAndNothingIsSent(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("ECHAT")
+	a := w.identifierOf(p, "ECHAT")
+	genuine := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", a)
+	stranger := make([]byte, ed25519.SeedSize)
+	stranger[0] = 7
+	var m map[string]interface{}
+	_ = json.Unmarshal(genuine, &m)
+	for name, ask := range map[string][]byte{
+		"signed by another key":          resign(t, genuine, stranger, nil),
+		"with no organisation signature": func() []byte { delete(m, "org_sig"); b, _ := json.Marshal(m); return b }(),
+		"a redeem address changed after": func() []byte {
+			var n map[string]interface{}
+			_ = json.Unmarshal(genuine, &n)
+			n["redeem_url"] = "http://127.0.0.1:1/api/binding/invites/tok1/redeem"
+			b, _ := json.Marshal(n)
+			return b
+		}(),
+		"a redeem address for another invite": resign(t, genuine, mustSeed(t, w), func(m map[string]interface{}) { m["redeem_url"] = w.orgURL + "/api/binding/invites/other/redeem" }),
+	} {
+		if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: 5}); err == nil {
+			t.Errorf("%s: shown to the person", name)
+		}
+		if _, err := w.approve(p, ask, true); err == nil {
+			t.Errorf("%s: signed", name)
+		}
+	}
+	if w.hits.Load() != 0 {
+		t.Fatal("a statement was sent for an Ask the organisation did not sign")
+	}
+	if _, ok := p.loginHandler.Store.Get("ENOTES"); ok {
+		t.Fatal("an identifier was made for it")
+	}
+}
+
+func mustSeed(t *testing.T, w *joinWorld) []byte {
+	t.Helper()
+	seed, err := w.org.identitySigningSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return seed
+}
+
+// A genuine Ask carried by somebody else's host still sends the statement only where the organisation said.
+func TestAGenuineAskServedFromAnotherHostSendsTheStatementOnlyToTheOrganisation(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("ECHAT")
+	genuine := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", w.identifierOf(p, "ECHAT"))
+	var relayed atomic.Int32
+	relay := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/redeem") {
+			relayed.Add(1)
+			return
+		}
+		_, _ = rw.Write(genuine) // the relay serves the Ask it copied
+	}))
+	defer relay.Close()
+	ctx, err := p.buildAskContext(relay.URL + "/i/tok1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (bindSiteAsk{}).Execute(p, ctx, ScanDecision{Approved: true}); err != nil {
+		t.Fatal(err)
+	}
+	if relayed.Load() != 0 {
+		t.Fatal("the statement went to the host that served the Ask")
+	}
+	if w.hits.Load() != 1 {
+		t.Fatalf("the organisation took %d statements, want 1", w.hits.Load())
+	}
+}
+
+// With nothing standing in, the organisation's key is read from its own log, and one that cannot be read signs nothing.
+func TestAnOrganisationWhoseKeyLogCannotBeReadIsNotTakenForItself(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("ECHAT")
+	ask := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", w.identifierOf(p, "ECHAT"))
+	p.organisationKeyOf = nil // the real check: w.orgURL serves no log for EOURS
+	if _, err := w.approve(p, ask, true); err == nil || !strings.Contains(err.Error(), "own key could not be established") {
+		t.Fatalf("an organization whose log could not be read was accepted: %v", err)
+	}
+	if w.hits.Load() != 0 {
+		t.Fatal("something was sent")
+	}
+}
+
+// The Ask the organisation's own route mints is the one a person scans: it is decoded and approved through the
+// scan routes, which check its signature before anything else, not handed to the handler directly.
+func TestAnInviteMintedByTheOrganisationCanBeScannedAndApproved(t *testing.T) {
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
+	org := adoptingOwner(t)
+	st, err := asset.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	org.assetHandler = &asset.Handler{Store: st}
+	var hits atomic.Int32
+	r := chi.NewRouter()
+	r.Route("/api", func(r chi.Router) { org.mountBindingRoutes(r) })
+	r.Get("/public/oobi/{aid}", org.handleOobiServe)
+	r.Get("/i/{token}", func(rw http.ResponseWriter, rq *http.Request) {
+		b, ok := getMintedAsk(chi.URLParam(rq, "token"))
+		if !ok {
+			http.NotFound(rw, rq)
+			return
+		}
+		_, _ = rw.Write(b)
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
+		if strings.HasSuffix(rq.URL.Path, "/redeem") {
+			hits.Add(1)
+		}
+		r.ServeHTTP(rw, rq)
+	}))
+	defer srv.Close()
+	org.EndpointService.SetOverrideURL(srv.URL)
+
+	w := &joinWorld{t: t, org: org, orgURL: srv.URL, hits: &hits, runs: map[string]bool{}}
+	p := w.aPerson("ECHAT")
+	w.runs["ENOTES"], w.runs["ECHAT"] = true, true
+	orgID, _ := org.DataStore.GetIdentity()
+	// The owner added this organisation as a contact at its (local) address, which is what lets its
+	// introductions be read from here; nothing else about the signature check is stood in for.
+	if err := p.DataStore.SaveContact(store.ContactRecord{AID: orgID.AID, OobiURL: srv.URL + "/public/oobi/" + orgID.AID}); err != nil {
+		t.Fatal(err)
+	}
+	p.organisationKeyOf = func(_, aid string) ([]byte, error) {
+		if aid != orgID.AID {
+			return nil, errors.New("not the organization")
+		}
+		seed, err := org.identitySigningSeed()
+		if err != nil {
+			return nil, err
+		}
+		return ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey), nil
+	}
+	body := `{"site_aid":"ENOTES","site_oobi":"http://127.0.0.1:1/oobi/ENOTES","record_site_aid":"ECHAT","record_site_oobi":"http://127.0.0.1:1/oobi/ECHAT","role":"person","record_identifiers":["` + w.identifierOf(p, "ECHAT") + `"]}`
+	rec := httptest.NewRecorder()
+	org.handleCreateBindingInvite(rec, httptest.NewRequest(http.MethodPost, "/api/binding/invites", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("minting: %d %s", rec.Code, rec.Body)
+	}
+	var minted struct{ URL string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &minted)
+
+	post := func(h http.HandlerFunc, payload string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		h(rr, httptest.NewRequest(http.MethodPost, "/api/scan", strings.NewReader(payload)))
+		return rr
+	}
+	dec := post(p.handleScanDecode, `{"url":"`+minted.URL+`"}`)
+	if dec.Code != http.StatusOK {
+		t.Fatalf("the minted invite could not be scanned: %d %s", dec.Code, dec.Body)
+	}
+	var pv GenericPreview
+	_ = json.Unmarshal(dec.Body.Bytes(), &pv)
+	if pv.Action != "bind_site" || !strings.Contains(dec.Body.String(), "Joining as") {
+		t.Fatalf("%s", dec.Body)
+	}
+	ex := post(p.handleScanExecute, `{"url":"`+minted.URL+`","approved":true,"ask_digest":"`+pv.AskDigest+`"}`)
+	if ex.Code != http.StatusOK {
+		t.Fatalf("the minted invite could not be approved: %d %s", ex.Code, ex.Body)
+	}
+	if hits.Load() != 1 || len(org.Bindings()) != 1 {
+		t.Fatalf("the organisation took %d statements and keeps %d joinings", hits.Load(), len(org.Bindings()))
 	}
 }

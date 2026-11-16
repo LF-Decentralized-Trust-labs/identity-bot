@@ -1,7 +1,7 @@
-# ADR-082: An App States How Long It Keeps a Backup, and That One Number Is What a Person Is Told
+# ADR-084: An App States How Long It Keeps a Backup, and That One Number Is What a Person Is Told
 
-**Status:** Proposed (2026-11-16)
-**Date:** 2026-11-16
+**Status:** Proposed (2026-11-15)
+**Date:** 2026-11-15
 **Deciders:** to be decided; the manifest field is public contract once this ships
 **Amends:** ADR-012 Amendment 5 (the `backup` row of an app manifest)
 

@@ -312,7 +312,7 @@ type EmployeeInvite struct {
 	// there's no one above them to approve), and requires a vouch signature.
 	IsSigner bool `json:"is_signer,omitempty"`
 	// Purpose is "" for an invitation to be an employee or a signer, and
-	// PurposeBinding for one to join an identifier to a record (ADR-080). An
+	// PurposeBinding for one to join an identifier to a record (ADR-082). An
 	// invite of one purpose is not accepted as the other.
 	Purpose string `json:"purpose,omitempty"`
 	// BindRole is the role a binding invite joins an identifier in: person or owner.
@@ -329,7 +329,7 @@ type EmployeeInvite struct {
 const PurposeBinding = "binding"
 
 // Binding is one identifier joined to a record by a person's statement signed
-// with both keys (ADR-080). Statement is the signed bytes and the two
+// with both keys (ADR-082). Statement is the signed bytes and the two
 // signatures are kept so the joining can be shown to be theirs.
 type Binding struct {
 	Record       string    `json:"record"`

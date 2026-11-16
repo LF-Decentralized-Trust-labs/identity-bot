@@ -128,6 +128,23 @@ func refusals() []refused {
 		{"names neither a person nor the owner", "role", func(w *world) Link { w.stmt.Role = "admin"; return w.link() }, "person or the owner"},
 		{"another version of the statement", "version", func(w *world) Link { w.stmt.V = "BIND2"; return w.link() }, "not a statement of a binding"},
 		{"a check told nothing to expect", "not-told", func(w *world) Link { w.input = Expect{}; return w.link() }, "not told"},
+		{"two identifiers that share one key: one signature stands for both", "same-key", func(w *world) Link {
+			w.keys["Enew"] = keyOf(w.t, "record")
+			l, _ := Sign(w.stmt, seedOf("record"), seedOf("record"))
+			return l
+		}, "one key between them"},
+		{"a field with a character a JSON writer may escape", "identifier-form", func(w *world) Link { w.stmt.Org = "E<org>"; w.input.Org = "E<org>"; return w.link() }, "written as an identifier is"},
+		{"a field with a space", "identifier-form", func(w *world) Link { w.stmt.Site = "E site"; w.input.Site = "E site"; return w.link() }, "written as an identifier is"},
+		{"a field with a line separator", "identifier-form", func(w *world) Link {
+			w.stmt.New = "E\u2028new"
+			w.keys[w.stmt.New] = keyOf(w.t, "new")
+			return w.link()
+		}, "written as an identifier is"},
+		{"a field longer than an identifier", "identifier-form", func(w *world) Link {
+			w.stmt.Invite = strings.Repeat("D", 129)
+			w.input.Invite = w.stmt.Invite
+			return w.link()
+		}, "written as an identifier is"},
 		{"a key written with a space", "key-form", func(w *world) Link { l := w.link(); l.NewKey += " "; return l }, "not written as a key"},
 		{"a key that is not a key", "key-form", func(w *world) Link { l := w.link(); l.NewKey = "nonsense"; return l }, "not a key"},
 	}
@@ -171,7 +188,7 @@ type vectorFile struct {
 const vectorsPath = "binding-vectors.json"
 
 func makeVectors(t *testing.T) vectorFile {
-	f := vectorFile{Description: "A binding joins two identifiers to one record by one statement signed with both keys over the same bytes (ADR-080). signed is the string both keys sign: the statement's fields in this order, as JSON with no spaces. keys is the key log the checker consults; expect is what it was told. Signatures are Ed25519, CESR qb64 (0B); keys are CESR qb64 (D)."}
+	f := vectorFile{Description: "A binding joins two identifiers to one record by one statement signed with both keys over the same bytes (ADR-082). signed is the string both keys sign: the statement's fields in this order, as JSON with no spaces. keys is the key log the checker consults; expect is what it was told. Signatures are Ed25519, CESR qb64 (0B); keys are CESR qb64 (D)."}
 	w := newWorld(t)
 	good := w.link()
 	f.Vectors = append(f.Vectors, vector{"accepted", "", good, vectorExpect{"Eorg", "Esite", "Dinvite"}, w.keys, string(good.Statement.SignedBytes()), true, ""})

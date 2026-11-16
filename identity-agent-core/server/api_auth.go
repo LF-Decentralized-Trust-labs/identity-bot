@@ -174,7 +174,7 @@ var publicRoutes = map[string]string{
 	// single use, and what it accepts is a statement only that person's two keys can
 	// make, each checked against its own key log, so what a stranger holding the
 	// code can do is nothing they could not do by sending a statement that is refused.
-	"POST /api/binding/invites/{token}/redeem": "a person's agent says two of their identifiers are one person, with a statement signed by both keys",
+	"POST /api/binding/invites/{token}/redeem": "a person's Identity Agent says two of their identifiers are one person, with a statement signed by both keys",
 	"POST /api/signer/invites/{token}/redeem":  "an invited owner's agent accepts, committing the keys they will sign with",
 
 	// A machine enrolling itself with the key it generated. It is not the owner

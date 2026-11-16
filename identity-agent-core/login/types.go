@@ -133,7 +133,7 @@ type SiteRelationship struct {
 	// Empty for relationships made before it was kept; those are rebuilt.
 	InceptionB64 string `json:"inception_b64,omitempty"`
 	// Bound is set when this person joined this relationship's identifier to a
-	// record they already had, by a statement signed with both keys (ADR-080).
+	// record they already had, by a statement signed with both keys (ADR-082).
 	Bound *BoundRecord `json:"bound,omitempty"`
 }
 

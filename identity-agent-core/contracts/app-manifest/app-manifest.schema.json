@@ -956,7 +956,7 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 3650,
-          "description": "How many whole days a backup is kept before it is removed (ADR-082). Left out when 'what' is empty. An app that backs up and leaves it out states no limit."
+          "description": "How many whole days a backup is kept before it is removed (ADR-084). Left out when 'what' is empty. An app that backs up and leaves it out states no limit."
         }
       },
       "if": {

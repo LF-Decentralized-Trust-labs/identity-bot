@@ -166,6 +166,8 @@ type CoreServer struct {
 	// siteIsDelegatedBy replaces the login handler's check that a site is an organisation's,
 	// for a test that has no log to read.
 	siteIsDelegatedBy func(siteAID, siteOOBI, orgAID, orgOOBI string) error
+	// organisationKeyOf replaces reading an organisation's key from its key log, for a test that serves none.
+	organisationKeyOf func(oobi, aid string) ([]byte, error)
 	// redeemedInvites remembers where, and as whom, this agent redeemed an invite,
 	// so it can later ask the inviting app what it published for it.
 	redeemedInvites   redeemedInviteBook

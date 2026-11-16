@@ -1,7 +1,7 @@
-# ADR-081: An Identity Agent Tells a Person Something in a Conversation, in Words Fixed by a Code
+# ADR-083: An Identity Agent Tells a Person Something in a Conversation, in Words Fixed by a Code
 
-**Status:** Proposed (2026-11-16)
-**Date:** 2026-11-16
+**Status:** Proposed (2026-11-15)
+**Date:** 2026-11-15
 **Deciders:** to be decided; the kind is public wire once this ships, and a checker of a trail refuses an entry of it that breaks the rules below
 **Amends:** ADR-068 (a conversation's trail keeps who said what, never the words): the Identity Agent is now also a party that says something, in fixed words that the trail holds as a code
 **Builds on:** ADR-077 (an entry of a conversation is checked by a bundle)

@@ -573,7 +573,7 @@ type Record struct {
 	// Outcome, on an entry of kind KindOutcome, is how an earlier entry ended.
 	Outcome *Outcome `json:"outcome,omitempty"`
 	// Notice, on an entry of kind KindNotice, is what the Identity Agent told a
-	// person, by code (ADR-081).
+	// person, by code (ADR-083).
 	Notice *Notice `json:"notice,omitempty"`
 
 	// What the Identity Agent vouches for.

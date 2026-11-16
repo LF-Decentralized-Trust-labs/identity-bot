@@ -109,7 +109,7 @@
       "code": 5,
       "key": "bind_site",
       "name": "Join a site with one identity",
-      "summary": "An organization asks a person to say that their identifier at one of the organization's sites and an identifier they already have with the organization are the same person; the person's agent signs one statement with both keys.",
+      "summary": "An organization asks a person to say that their identifier at one of the organization's sites and an identifier they already have with the organization are the same person; the person's Identity Agent signs one statement with both keys.",
       "who_mints": "organization",
       "status": "active",
       "version": "1.0",
@@ -123,11 +123,14 @@
         "record_site_aid": { "type": "string", "required": true, "kind": "open" },
         "record_site_oobi": { "type": "string", "required": true, "kind": "open" },
         "role": { "type": "string", "required": true, "kind": "open" },
-        "invite_token": { "type": "string", "required": true, "kind": "open" }
+        "invite_token": { "type": "string", "required": true, "kind": "open" },
+        "signer_oobi": { "type": "string", "required": true, "kind": "open" },
+        "redeem_url": { "type": "string", "required": true, "kind": "open" },
+        "org_sig": { "type": "string", "required": true, "kind": "open" }
       },
       "preview_contract": { "title": "Join {site} as the same person you are to {org}.", "conveys": ["org", "site"] },
       "discloses": [],
-      "outcome": "The individual's agent derives its identifier for the site, signs one statement naming both identifiers, the organization, the site and the invite with the key of each, and sends it to the organization, which checks both signatures. Declining signs nothing. The linking is the point of it, so the individual is told it cannot be undone except by leaving.",
+      "outcome": "The individual's Identity Agent derives its identifier for the site, signs one statement naming both identifiers, the organization, the site and the invite with the key of each, and sends it to the organization, which checks both signatures. Declining signs nothing. The linking is the point of it, so the individual is told it cannot be undone except by leaving.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }

@@ -6,7 +6,7 @@ import (
 )
 
 // KindNotice is the Identity Agent telling a person something in a conversation,
-// in words that are fixed (ADR-081). It is the Identity Agent's own entry, like an
+// in words that are fixed (ADR-083). It is the Identity Agent's own entry, like an
 // outcome: it carries no sender's proof, and the countersignature is the whole
 // proof. It names a code, never words, so the trail keeps what was said without
 // keeping any text (ADR-068), and every reader shows the same words for a code.

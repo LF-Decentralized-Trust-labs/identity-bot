@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ import (
 )
 
 // A person joins two of their identifiers to one record by one statement signed
-// with both keys (ADR-080). This file has both sides: the organisation's, which
+// with both keys (ADR-082). This file has both sides: the organisation's, which
 // mints the invite and checks the statement, and the person's, the Ask (t=5)
 // that asks them and signs.
 
@@ -45,6 +46,12 @@ type bindSitePayload struct {
 	RecordSiteOOBI string `json:"record_site_oobi"`
 	Role           string `json:"role"`
 	InviteToken    string `json:"invite_token"`
+	// RedeemURL is where the statement goes. It is the organisation's own word (it is inside
+	// OrgSig), so a host that merely served the Ask cannot choose it.
+	RedeemURL string `json:"redeem_url"`
+	// OrgSig is the organisation's signature, with the key its own key log shows is current,
+	// over the Ask as it was before the base-layer signature and this one were added.
+	OrgSig string `json:"org_sig"`
 }
 
 func (p bindSitePayload) read(ctx AskContext) (bindSitePayload, error) {
@@ -74,6 +81,9 @@ func (bindSiteAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error
 	if _, ok := s.loginHandler.Store.Get(p.RecordSiteAID); !ok {
 		return GenericPreview{}, errors.New("you have no identifier at the place this joins you from, so there is nothing to join this to")
 	}
+	if err := s.theOrganisationAsked(ctx.AskBytes, p); err != nil {
+		return GenericPreview{}, err
+	}
 	if err := s.bothSitesAreTheOrganisations(p); err != nil {
 		return GenericPreview{}, err
 	}
@@ -82,9 +92,49 @@ func (bindSiteAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error
 	return GenericPreview{
 		T: 5, Action: "bind_site", Title: "Join " + site,
 		Subtitle: org + " asks you to join " + site + " as the same person you are to them", Counterparty: p.OrgAID,
-		Details: []PreviewDetail{{Label: "Organization", Value: org}, {Label: "Site", Value: site}},
+		Details: []PreviewDetail{{Label: "Organization", Value: org}, {Label: "Site", Value: site}, {Label: "Joining as", Value: roleWords(p.Role)}},
 		Warning: org + " will know that you here and you where you already deal with them are the same person. This cannot be undone except by leaving.",
 	}, nil
+}
+
+// keyOfOrganisation is the organisation's current signing key, read from its own key log
+// (the log must validate and derive the identifier), never from the host that served the Ask.
+func (s *CoreServer) keyOfOrganisation(oobi, aid string) ([]byte, error) {
+	if s.organisationKeyOf != nil {
+		return s.organisationKeyOf(oobi, aid)
+	}
+	if oobi == "" {
+		return nil, errors.New("the request names no introduction for the organization")
+	}
+	return login.KeyFromOOBI(s.peerClient(15*time.Second, oobi), oobi, aid)
+}
+
+// theOrganisationAsked refuses an Ask the organisation it names did not sign, and one whose
+// redeem address is not the one it signed for this invite. Without it anybody could serve an Ask
+// naming a real organisation and its real sites and collect the person's statement, which proves two of
+// their identifiers are one person to a party they never agreed to tell.
+func (s *CoreServer) theOrganisationAsked(ask []byte, p bindSitePayload) error {
+	if p.OrgSig == "" {
+		return errors.New("this request is not signed by the organization it names, so it may not be from it")
+	}
+	key, err := s.keyOfOrganisation(p.OrgOOBI, p.OrgAID)
+	if err != nil {
+		return fmt.Errorf("the organization's own key could not be established: %w", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(ask, &m); err != nil {
+		return err
+	}
+	delete(m, "org_sig")
+	without, _ := json.Marshal(m)
+	if ok, err := login.VerifyAsk(without, p.OrgSig, key); err != nil || !ok {
+		return errors.New("the organization did not sign this request")
+	}
+	u, err := url.Parse(p.RedeemURL)
+	if err != nil || u.Host == "" || !strings.HasSuffix(u.Path, "/api/binding/invites/"+p.InviteToken+"/redeem") {
+		return errors.New("the request does not say where the organization takes the statement")
+	}
+	return nil
 }
 
 // bothSitesAreTheOrganisations refuses a request that names, as the organisation's, an identifier
@@ -102,6 +152,13 @@ func (s *CoreServer) bothSitesAreTheOrganisations(p bindSitePayload) error {
 		return fmt.Errorf("the site is not one this organization runs: %w", err)
 	}
 	return nil
+}
+
+func roleWords(role string) string {
+	if role == binding.RoleOwner {
+		return "the owner of the organization"
+	}
+	return "a person"
 }
 
 func firstOf(a, b string) string {
@@ -122,6 +179,9 @@ func (bindSiteAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[s
 	}
 	if s.loginHandler == nil {
 		return nil, errors.New("joining a site needs the login engine to derive the relationship")
+	}
+	if err := s.theOrganisationAsked(ctx.AskBytes, p); err != nil {
+		return nil, err
 	}
 	if err := s.bothSitesAreTheOrganisations(p); err != nil {
 		return nil, err
@@ -160,7 +220,8 @@ func (bindSiteAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[s
 		return nil, err
 	}
 	body, _ := json.Marshal(bindingRedeem{Link: link, RecordKeyLog: recLog, NewKeyLog: newLog})
-	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/binding/invites/" + p.InviteToken + "/redeem"
+	// To where the organisation said, never to the host that served the Ask.
+	redeemURL := p.RedeemURL
 	resp, err := siteClient(15*time.Second, redeemURL).Post(redeemURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("send the statement: %w", err)
@@ -293,7 +354,7 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_, _, seed, err := s.mintPairwise("binding")
+	_, signerOOBI, seed, err := s.mintPairwise("binding")
 	if err != nil {
 		if refuseIfRootSeedRefused(w, err) {
 			return
@@ -306,7 +367,24 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 		"org_oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID),
 		"site_aid": req.SiteAID, "site_oobi": req.SiteOOBI, "site_name": req.SiteName,
 		"record_site_aid": req.RecordSiteAID, "record_site_oobi": req.RecordSiteOOBI, "role": req.Role, "invite_token": inv.Token,
+		"signer_oobi": signerOOBI,
+		"redeem_url":  publicURL + "/api/binding/invites/" + inv.Token + "/redeem",
 	})
+	// The organisation signs with its own identity key first, so a person's Identity Agent can tell the
+	// Ask is its own and where it takes the statement; the pairwise key then signs the whole, as for any Ask.
+	orgSeed, oerr := s.identitySigningSeed()
+	if oerr != nil {
+		http.Error(w, "the organization's key could not sign the invite: "+oerr.Error(), http.StatusInternalServerError)
+		return
+	}
+	orgSig, oerr := login.SignAsk(ask, orgSeed)
+	if oerr != nil {
+		http.Error(w, oerr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if withOrg, ierr := injectField(ask, "org_sig", orgSig); ierr == nil {
+		ask = withOrg
+	}
 	sig, serr := login.SignAsk(ask, seed)
 	if serr != nil {
 		http.Error(w, serr.Error(), http.StatusInternalServerError)
@@ -442,4 +520,14 @@ func (s *CoreServer) RecordOf(id string) []string {
 		return []string{id}
 	}
 	return s.assetHandler.Store.RecordOf(id)
+}
+
+// injectField adds a string field to an Ask JSON object.
+func injectField(askBytes []byte, name, value string) ([]byte, error) {
+	var m map[string]interface{}
+	if err := json.Unmarshal(askBytes, &m); err != nil {
+		return nil, err
+	}
+	m[name] = value
+	return json.Marshal(m)
 }

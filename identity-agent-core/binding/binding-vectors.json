@@ -1,5 +1,5 @@
 {
-  "description": "A binding joins two identifiers to one record by one statement signed with both keys over the same bytes (ADR-080). signed is the string both keys sign: the statement's fields in this order, as JSON with no spaces. keys is the key log the checker consults; expect is what it was told. Signatures are Ed25519, CESR qb64 (0B); keys are CESR qb64 (D).",
+  "description": "A binding joins two identifiers to one record by one statement signed with both keys over the same bytes (ADR-082). signed is the string both keys sign: the statement's fields in this order, as JSON with no spaces. keys is the key log the checker consults; expect is what it was told. Signatures are Ed25519, CESR qb64 (0B); keys are CESR qb64 (D).",
   "vectors": [
     {
       "name": "accepted",
@@ -542,6 +542,167 @@
       "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
       "valid": false,
       "reason": "not told"
+    },
+    {
+      "name": "two identifiers that share one key: one signature stands for both",
+      "rule": "same-key",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "Eorg",
+          "site": "Esite",
+          "record": "Erecord",
+          "new": "Enew",
+          "invite": "Dinvite",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BD8ksKI0-RfE25F2isJ9GmPgu-3D5IXgAS0EK3CEu7V_ehFwWW5Qkx40FM6j-KJ-P32huNyLSMGPqOQjaFYewME",
+        "new_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "new_sig": "0BD8ksKI0-RfE25F2isJ9GmPgu-3D5IXgAS0EK3CEu7V_ehFwWW5Qkx40FM6j-KJ-P32huNyLSMGPqOQjaFYewME"
+      },
+      "expect": {
+        "Org": "Eorg",
+        "Site": "Esite",
+        "Invite": "Dinvite"
+      },
+      "keys": {
+        "Enew": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "one key between them"
+    },
+    {
+      "name": "a field with a character a JSON writer may escape",
+      "rule": "identifier-form",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "E\u003corg\u003e",
+          "site": "Esite",
+          "record": "Erecord",
+          "new": "Enew",
+          "invite": "Dinvite",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BAaNFHpxVR1XtcTEf2bDvLA3T67T9NuFl79fygan58HPDGw7xB3UAmg01x28A_MnAaTrlT8dxjaN8T0iXCrSjwF",
+        "new_key": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "new_sig": "0BD-JthtmIIIius_AAVY8BVumzb8WDi_Jq0EGyS8_fM5C-pEUIOen4-2pQwyVO2QllOwEmJ31MSVvQiYPVMvQ8sM"
+      },
+      "expect": {
+        "Org": "E\u003corg\u003e",
+        "Site": "Esite",
+        "Invite": "Dinvite"
+      },
+      "keys": {
+        "Enew": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"E\\u003corg\\u003e\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "written as an identifier is"
+    },
+    {
+      "name": "a field with a space",
+      "rule": "identifier-form",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "Eorg",
+          "site": "E site",
+          "record": "Erecord",
+          "new": "Enew",
+          "invite": "Dinvite",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BCya0m-7a_LkYxreqlVOsJixGfYIYaJ0OeILb9bMlpz94W7Rlas5vRs4YyDfilChMs8vQ1jgCrMWZWmE8GKIAMB",
+        "new_key": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "new_sig": "0BDR-SJr9956h9WUmmIDYMK1H7En-WfuooNtb3xN27YiR0cgKysVcYqvRS6RGvhllWvdIV7-EVglsz0CspEDtDkA"
+      },
+      "expect": {
+        "Org": "Eorg",
+        "Site": "E site",
+        "Invite": "Dinvite"
+      },
+      "keys": {
+        "Enew": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"E site\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "written as an identifier is"
+    },
+    {
+      "name": "a field with a line separator",
+      "rule": "identifier-form",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "Eorg",
+          "site": "Esite",
+          "record": "Erecord",
+          "new": "E\u2028new",
+          "invite": "Dinvite",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BCZkqtIDOmNX-ll7HM6YiY2sQpqlej-fCsr-4lxQ60fx4rZJLwJCIq2hmNWNs_xjr40M8e_rUdUfWl5bX1mh5sB",
+        "new_key": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "new_sig": "0BDFm-lpWNSfiCCjdnPU0sKiC5ZaKTou0bsh7mx8EwxvLY1ae18hLe_oQxRMsw8aJ-cLCTlbeqd8LdbF1UuIYLAA"
+      },
+      "expect": {
+        "Org": "Eorg",
+        "Site": "Esite",
+        "Invite": "Dinvite"
+      },
+      "keys": {
+        "Enew": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "E\u2028new": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"E\\u2028new\",\"invite\":\"Dinvite\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "written as an identifier is"
+    },
+    {
+      "name": "a field longer than an identifier",
+      "rule": "identifier-form",
+      "link": {
+        "statement": {
+          "v": "BIND1",
+          "org": "Eorg",
+          "site": "Esite",
+          "record": "Erecord",
+          "new": "Enew",
+          "invite": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+          "role": "person"
+        },
+        "record_key": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G",
+        "record_sig": "0BBJddleV03Z4m_zuIXFIPt20-Q4RRdnzFqXfFqvGkTNBG90cFDdClk1TWIWrbgcqphet0PpBe140fSmRGGexo0D",
+        "new_key": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "new_sig": "0BAlU0fq2sf3UdtV7ygNldKrmncm30cILf1HTAR3DtZapUyrbE8k40Bedocr4rTc0CrqLKVJMyGVZFUTGNd_XVoM"
+      },
+      "expect": {
+        "Org": "Eorg",
+        "Site": "Esite",
+        "Invite": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+      },
+      "keys": {
+        "Enew": "DPt8wGFuB8wnR3ySbp0fzuLxt9livrHgwA2k7pmwDpxI",
+        "Eother": "DEWDeTzVYFFSDe8rbFXyu-N2ntBiUBXGwQ4QbpVr3U5c",
+        "Erecord": "DDQM2DxQqVKuq4qa9ZNNAm_OBetjdAmJytUm4ZXSgq5G"
+      },
+      "signed": "{\"v\":\"BIND1\",\"org\":\"Eorg\",\"site\":\"Esite\",\"record\":\"Erecord\",\"new\":\"Enew\",\"invite\":\"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD\",\"role\":\"person\"}",
+      "valid": false,
+      "reason": "written as an identifier is"
     },
     {
       "name": "a key written with a space",
