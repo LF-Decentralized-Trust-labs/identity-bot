@@ -191,3 +191,10 @@ What remains is knowing which measurement *should* be accepted for a given
 service — a statement about whom you trust to publish it. That is a smaller
 thing to trust than the whole chain, and naming it is better than leaving it to
 be discovered.
+
+## An image never updates itself
+
+A sealed image is measured, so it never changes in place: an update is a new image with a new measurement.
+`check-no-self-update.sh` runs inside the build and fails it if the root holds unattended-upgrades or needrestart,
+their programs, any enabled apt timer (in /etc, or shipped enabled in /usr/lib), or apt's periodic settings turned on.
+It looks for these by name. Debian's apt package enables its own daily timers, so the build removes those first. `test-check-no-self-update.sh` runs the check against small fake roots.

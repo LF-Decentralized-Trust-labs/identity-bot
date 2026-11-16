@@ -62,9 +62,13 @@ export interface LoginChallenge {
    *  `installed_app` (ADR-072 §2, amended). Signed; the assertion repeats it,
    *  so the person approves a named kind. */
   front_end?: string;
+  /** The relay identifier of the utility app a sign-in is for, as its owner's
+   *  Identity Agent recorded it (ADR-072 Amendment 7). Signed, so a front end
+   *  handed a link naming another relay identifier can see the challenge is not for it. */
+  rid?: string;
   /** For an installed app whose key the core proved in hardware: the platform
    *  the proof showed (`android`, `apple` or `tpm`) and the label the installed
-   *  app gave its device, which nothing proves (ADR-072 Amendment 7). Signed;
+   *  app gave its device, which nothing proves (ADR-072 Amendment 8). Signed;
    *  shown on the person's consent, not repeated in the assertion. */
   device_platform?: string;
   device_name?: string;

@@ -131,6 +131,7 @@ func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom s
 		SessionToken:         sessionToken,
 		BrowserKey:           browserKey,
 		FrontEnd:             frontEnd,
+		RelayID:              found.RelayID,
 	}
 	// Only a proved installed app's key names a device: the platform is the
 	// proof's, not the request's.

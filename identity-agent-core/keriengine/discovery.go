@@ -7,6 +7,8 @@ import (
 	"identity-agent-core/drivers"
 
 	keri "github.com/grapeid/keri-go"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 )
 
 // Discovery and presentation.
@@ -74,7 +76,7 @@ func (e *Engine) EndpointLocation(req *drivers.DriverEndpointLocationRequest) (*
 }
 
 // replyTimestamp is when a statement was made, which is what lets a recipient
-// tell a newer one from an older one.
+// tell a newer one from an older one, written as KERI dates a reply.
 func replyTimestamp() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.000000-07:00")
+	return witnessproto.ReplyDate(time.Now())
 }
