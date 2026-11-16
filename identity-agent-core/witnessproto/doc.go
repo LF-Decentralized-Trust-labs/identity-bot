@@ -29,8 +29,19 @@
 //     witness build and check it with one implementation, tested against
 //     keripy's own receipts ([KeripyWitnessReceiptVectors]);
 //
-//   - [WitnessesAfter]: the witness list in force after an event, which a
-//     receipt's index is a place in.
+//   - [WitnessesAfter]: the witness list in force after an event, following
+//     br and ba, which a receipt's index is a place in;
+//
+//   - [KeyStateRecordOf], [SignedKeyStateNotice] and [VerifyKeyStateNotice]:
+//     the key state notice, KERI's /ksn/{witness} reply in which a witness
+//     states, signed and dated, how far it holds an identifier's key log
+//     (ADR-016);
+//
+//   - [SignedWitnessLocation] and [VerifyWitnessLocation]: a witness's own
+//     signed /loc/scheme reply, saying where it is reached (ADR-016).
+//
+// The key state notice and the location are pinned against keripy by
+// testdata/keripy_key_state_notice.json.
 //
 // The digest is pinned by kel-digest-vectors.json, which is part of this
 // package so that any other implementation can test itself against the same
