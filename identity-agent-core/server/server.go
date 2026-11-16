@@ -3453,6 +3453,20 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 	jsonreply.Write(w, http.StatusOK, result)
 }
 
+// ownAddress is where this agent knows itself to be reached: through the relay
+// it came by, or the endpoint it has been given. Never what the request says it
+// was addressed to, which anybody can write; "" when this agent knows no
+// address of its own.
+func (es *CoreServer) ownAddress(r *http.Request) string {
+	if url, ok := es.relayedAddress(r); ok {
+		return url
+	}
+	if es.EndpointService != nil {
+		return es.EndpointService.CurrentURL()
+	}
+	return ""
+}
+
 func (es *CoreServer) getPublicURL(r *http.Request) string {
 	// An agent that has not wired its endpoint service yet still has to be able
 	// to answer. This is reached before onboarding on a freshly installed

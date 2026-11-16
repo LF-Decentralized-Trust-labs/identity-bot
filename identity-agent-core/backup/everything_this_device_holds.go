@@ -5,8 +5,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/atomicfile"
 )
 
@@ -35,9 +37,12 @@ const FileSectionPrefix = "file:"
 //
 // Written as one function so the whole policy is readable in one place. Every
 // branch names what would go wrong if it were carried.
+//
+// Names are compared in lower case: the file systems of macOS and Windows do
+// not tell Sandbox.DB from sandbox.db, so neither does this list.
 func skipReason(rel string) string {
-	base := filepath.Base(rel)
-	slashed := filepath.ToSlash(rel)
+	base := strings.ToLower(filepath.Base(rel))
+	slashed := strings.ToLower(filepath.ToSlash(rel))
 
 	// This agent's own working directories, where a backup or a restore
 	// unpacks a plaintext copy of a database while it works.
@@ -200,11 +205,21 @@ func skipReason(rel string) string {
 		return "a recovery in progress; it holds a sealed archive and belongs to this device"
 	}
 
-	// Container images and app payloads: large, and re-fetched rather than
-	// recovered. The sandbox INDEX is carried separately so a person can see
-	// what they had.
+	// Container images and programs an older build kept for its
+	// sandboxed apps. Large, and nothing this build runs reads them.
 	if strings.HasPrefix(slashed, "sandbox/") {
-		return "sandbox payload; re-fetched rather than restored, and the index is carried instead"
+		return "container images and programs an older build kept for its sandboxed apps; nothing restores them"
+	}
+
+	// The activity log's old name. A build with this rule renames sandbox.db
+	// to activity.db when it opens the log, so a sandbox.db beside an
+	// activity.db is a stale copy an older build left, after a downgrade and
+	// an upgrade again. Carried, it would be restored over the log, which is
+	// carried in its own right as activity.db. The sweep carries a sandbox.db
+	// that has no activity.db beside it (collectEveryOtherFile), because then
+	// it is the only copy of the log: the rename was refused, for one.
+	if slashed == activitylog.LegacyFileName {
+		return "the activity log's old name, left by an older build; the log is carried as activity.db"
 	}
 
 	// Reproducible by definition.
@@ -234,6 +249,12 @@ func (c *Collector) collectEveryOtherFile(bundle *PayloadBundle) ([]SkippedFile,
 		return nil, nil
 	}
 	var skipped []SkippedFile
+
+	// Whether the log is here under its own name. Without it, a sandbox.db is
+	// the only copy of the log (its rename was refused, or never ran), so it
+	// is carried, and a restore writes it as activity.db.
+	_, lerr := os.Lstat(filepath.Join(c.DataDir, activitylog.FileName))
+	logIsHere := lerr == nil
 
 	err := filepath.WalkDir(c.DataDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil && os.IsNotExist(err) {
@@ -265,7 +286,11 @@ func (c *Collector) collectEveryOtherFile(bundle *PayloadBundle) ([]SkippedFile,
 		// to exclude anyway. Found by running a collection against a copy of a
 		// real agent's data directory, which is the first thing here that ever
 		// had live sidecars in it.
-		if reason := skipReason(rel); reason != "" {
+		reason := skipReason(rel)
+		if reason != "" && isTheLegacyLog(rel) && !logIsHere {
+			reason = ""
+		}
+		if reason != "" {
 			skipped = append(skipped, SkippedFile{Path: filepath.ToSlash(rel),
 				Reason: reason, Size: sizeIfStillThere(d)})
 			return nil
@@ -369,8 +394,9 @@ func FilePathOfSection(name string) (string, bool) {
 	// IsLocal rather than a check for "..": on Windows it also refuses a
 	// device name such as NUL or CON, which is no file at all, and a colon,
 	// which names a drive or an alternate stream of another file.
+	// "." is the data directory itself, which no file restores to.
 	clean := filepath.Clean(filepath.FromSlash(rel))
-	if !filepath.IsLocal(clean) {
+	if !filepath.IsLocal(clean) || clean == "." {
 		return "", false
 	}
 	return clean, true
@@ -379,6 +405,92 @@ func FilePathOfSection(name string) (string, bool) {
 // NotRestored says why a restore leaves rel alone, or "" when it puts it
 // back: whatever the backup deliberately leaves out is never written by a
 // restore either, whatever an archive carries. One list for both, skipReason.
+//
+// The one exception is the activity log's old name. A backup never carries a
+// sandbox.db, but an archive an older build wrote carries the log under that
+// name, and FilesToRestore decides where it goes.
 func NotRestored(rel string) string {
+	if isTheLegacyLog(rel) {
+		return ""
+	}
 	return skipReason(rel)
+}
+
+// sameFile is how two paths under the data directory are compared: the file
+// systems of macOS and Windows do not tell case apart.
+func sameFile(rel string) string {
+	return strings.ToLower(filepath.ToSlash(filepath.Clean(rel)))
+}
+
+// isTheLegacyLog reports whether rel names the activity log's old name.
+func isTheLegacyLog(rel string) bool { return sameFile(rel) == activitylog.LegacyFileName }
+
+// FileToRestore is a file section a restore writes, at Rel under the data
+// directory.
+type FileToRestore struct {
+	Rel string
+	Raw []byte
+}
+
+// TheLogIsCarriedUnderItsOwnName is why a restore leaves out an archive's
+// sandbox.db when the same archive carries activity.db.
+const TheLogIsCarriedUnderItsOwnName = "the activity log's old name, in an archive that also carries the log as activity.db; it is a stale copy, and restoring it would replace the log"
+
+// FilesToRestore resolves an archive's sections into the files a restore
+// writes, sorted by path, and the file sections it leaves out with the reason
+// for each. A file section whose name is not a path inside the data directory,
+// or two that name the same file (compared with forward slashes and in lower
+// case, as macOS and Windows compare them), refuse the whole archive, before
+// anything is written.
+//
+// An archive an older build wrote carries the activity log as sandbox.db, and
+// it is restored as activity.db, the log's own name, so it replaces the log
+// rather than sitting beside it unread. Only when the archive does not also
+// carry activity.db: then sandbox.db is a stale copy an older build left
+// beside the log, and since the files are written in path order it would be
+// written last, over the real log. So it is left out, and said.
+func FilesToRestore(sections map[string][]byte) ([]FileToRestore, []SkippedFile, error) {
+	type section struct {
+		rel string
+		raw []byte
+	}
+	var resolved []section
+	named := map[string]string{}
+	for name, raw := range sections {
+		rel, ok := FilePathOfSection(name)
+		if !ok {
+			if strings.HasPrefix(name, FileSectionPrefix) {
+				return nil, nil, fmt.Errorf("this archive names a file section with an unusable path: %q", name)
+			}
+			continue
+		}
+		if other, dup := named[sameFile(rel)]; dup {
+			return nil, nil, fmt.Errorf("this archive names one file twice: %q and %q", other, name)
+		}
+		named[sameFile(rel)] = name
+		resolved = append(resolved, section{rel: rel, raw: raw})
+	}
+	_, carriesTheLog := named[activitylog.FileName]
+
+	var files []FileToRestore
+	var left []SkippedFile
+	for _, s := range resolved {
+		rel, raw := s.rel, s.raw
+		if isTheLegacyLog(rel) {
+			if carriesTheLog {
+				left = append(left, SkippedFile{Path: activitylog.LegacyFileName,
+					Reason: TheLogIsCarriedUnderItsOwnName, Size: int64(len(raw))})
+				continue
+			}
+			rel = activitylog.FileName
+		}
+		if why := NotRestored(rel); why != "" {
+			left = append(left, SkippedFile{Path: filepath.ToSlash(rel), Reason: why, Size: int64(len(raw))})
+			continue
+		}
+		files = append(files, FileToRestore{Rel: rel, Raw: raw})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+	sort.Slice(left, func(i, j int) bool { return left[i].Path < left[j].Path })
+	return files, left, nil
 }

@@ -1,4 +1,4 @@
-# ADR 012: Sandboxed App Registry (Plugins)
+# ADR 012: App Manifest (formerly the Sandboxed App Registry)
 
 **Date:** 2025-07-14
 **Status:** Accepted
@@ -7,6 +7,7 @@
 **Amended:** 2026-03-13 — URL namespace convention established; LLM proxy moved to `/sandbox/llm/v1/`; display reverse proxy added (see §Amendment 3)
 **Amended:** 2026-10-24 — The display proxy no longer forwards capability calls or the caller's credentials, and serves the owner's conversations only to the owner; a forwarded capability call tells the app who called (see §Amendment 4)
 **Amended:** 2026-10-30 — The runtime that installs and runs apps is an add-on kept outside this repository; this record now keeps only the contract an app is written against (see §Note, 2026-10-30)
+**Amended:** 2026-11-15 — The older sandboxed-app kind, a container or program the Identity Agent itself starts on its own computer, is retired: its URL namespace, display proxy and Agent API are removed, and the model-call route is `/api/llm/v1` behind a grant (see §Amendment 6)
 **Amended:** 2026-11-02 — `kind` `"app"` now means an app beside an Identity Agent, which declares its name, release, resources, encrypted machine, store, placement, front end and back end, secrets, behaviour when down, backup and outbound hosts; a manifest missing a row or breaking its rule is refused (see §Amendment 5)
 
 
@@ -25,10 +26,12 @@ What stays is what an app's maker relies on, whichever runtime installs the app:
 
 An Identity Agent may let its owner run third-party apps beside it, each confined to what its manifest declares. The discovery surface for them is the App Registry (not a marketplace). An app is either an OCI container (a web or GUI application) or a compiled binary (a small tool), and its maker writes one manifest that any runtime for sandboxed apps reads the same way. "Sandbox plugin" names the software a manifest describes.
 
-The example manifests in `manifests/` cover the kinds of app: Chromium (a GUI app streamed to a web view), Open WebUI (a web chat app that makes model calls), OpenClaw (a larger container app), and the Go demo app (a compiled binary, `sandbox-apps/go-demo/`).
+The example manifests this record once pointed at (Chromium, Open WebUI, OpenClaw and a Go demo program) are removed with the older kind (Amendment 6); each comes back, where it does, as a utility app.
 
 
 ## Amendment 3: URL Namespace Convention + Display Reverse Proxy (2026-03-13)
+
+*Superseded by Amendment 6: this describes the older sandboxed-app kind, which is retired.*
 
 ### What changed
 
@@ -54,6 +57,8 @@ An app's web display is loaded through the Identity Agent at `/apps/{app_id}/`, 
 ---
 
 ## Amendment 4: The display proxy is not a way to a capability or to the owner's conversations, and an app is told who called (2026-10-24)
+
+*Superseded by Amendment 6: this describes the older sandboxed-app kind, which is retired.*
 
 The "forward everything else" in Amendment 3 no longer holds in full.
 
@@ -81,7 +86,7 @@ The "forward everything else" in Amendment 3 no longer holds in full.
 | `encrypted_machine` | `required`: a runtime refuses to start the app on any machine that has not proved its memory is encrypted (ADR-035). `preferred`: a runtime places the app on a machine that has proved it if one is free; if none is, it starts the app on one that has not, **records that in the owner's view of the app in plain words**, and neither refuses nor stays silent. `not_needed`: placed anywhere, nothing recorded. A machine that cannot prove it counts as not encrypted. A missing row is never read as any of the three. |
 | `store` | The app's own encrypted store, `{"format", "size_mb"}`. `format` is a token (a lower-case letter, then lower-case letters, digits, `-` or `_`, at most 32) naming the layout, such as `sqlite`; `none` says the app keeps no store. `size_mb` is the size it asks for in MiB, at most 16777216, in addition to `resources.disk_mb`; it is 0 exactly when the format is `none`. The runtime keeps the store encrypted and the app never holds its key. |
 | `placement` | Optional. `own_machine` (a machine of its own) or `shared_machine` (one that runs other apps). Absent means `own_machine`. There is no value for inside the Identity Agent, and any other value is refused. |
-| `front_and_back_end` | What the app serves. `static_front_end_url`: a static front end served from a fixed web address, `https://` then a lower-case host name (no wildcard, no IP address), optionally `:port`, optionally a path; no user, query or fragment. `back_end_port`: the TCP port (1 to 65535) of a back end on the app machine, reached only through the relay (no inbound port is open on that machine). At least one of the two is declared. `device_front_ends`: the front ends a person uses, `installed_app` and/or `browser`, each at most once, empty if there is none; a static front end is loaded by a browser, so `browser` must be listed with one. `installed_app_identity` (optional, and only where `installed_app` is listed): which installed program is the app's own, so a hardware attestation of its key can be held to it (ADR-072 Amendment 3): `android_package` with `android_signers` (SHA-256 digests of its signing certificates, 64 lower-case hex each), `apple_app_id` (`<team id>.<bundle id>`), and `tpm_keys` (the owner accepts a key in a physical TPM chip, which proves the key is in the computer's chip and not which program holds it; a virtual or cloud TPM, whose key the hypervisor's operator can read, is accepted only where the owner has also said `virtual_tpm_keys`, ADR-072 Amendment 11; `virtual_tpm_keys` without `tpm_keys` is refused, and the Identity Agent enforces that in code when the identity is saved and when a key is checked, since the schema cannot). The owner passes it to the Identity Agent when the app is made or enrolled; it is never supplied by the app's back end. |
+| `front_and_back_end` | What the app serves. `static_front_end_url`: a static front end served from a fixed web address, `https://` then a lower-case host name (no wildcard, no IP address), optionally `:port`, optionally a path; no user, query or fragment. `back_end_port`: the TCP port (1 to 65535) of a back end on the app machine, reached only through the relay (no inbound port is open on that machine). At least one of the two is declared. `device_front_ends`: the front ends a person uses, `installed_app` and/or `browser`, each at most once, empty if there is none; a static front end is loaded by a browser, so `browser` must be listed with one. `installed_app_identity` (optional, and only where `installed_app` is listed): which installed program is the app's own, so a hardware attestation of its key can be held to it (ADR-072 Amendment 3): `android_package` with `android_signers` (SHA-256 digests of its signing certificates, 64 lower-case hex each), `apple_app_id` (`<team id>.<bundle id>`), and `tpm_keys` (the owner accepts a key in a physical TPM chip, which proves the key is in the computer's chip and not which program holds it; a virtual or cloud TPM, whose key the hypervisor's operator can read, is accepted only where the owner has also said `virtual_tpm_keys`, ADR-072 Amendment 12; `virtual_tpm_keys` without `tpm_keys` is refused, and the Identity Agent enforces that in code when the identity is saved and when a key is checked, since the schema cannot). The owner passes it to the Identity Agent when the app is made or enrolled; it is never supplied by the app's back end. |
 | `secrets` | The names of the credentials the app needs: a list of unique names (a lower-case letter, then lower-case letters, digits or `_`, at most 64 characters, at most 64 names). The Identity Agent holds each credential and uses it for the app when the app asks; the value is never handed to the app and never in the manifest. An empty list says none are needed; a missing row is refused. |
 | `when_down` | What happens while the app is down. `person_sees`: `notice` (the person is told it is unavailable) or `last_known_data` (the app's own front end shows the last data it provided, read-only and marked out of date; the Identity Agent never shows it). `queue_requests`: whether requests made meanwhile are held until it is back (`true`) or answered at once as unavailable (`false`). `queue_max_seconds`, 1 to 86400, how long a request is held, present exactly when `queue_requests` is true. |
 | `backup` | What of the app is backed up and how often. `what`: `store` and/or `settings`, each at most once; secrets are never part of an app's backup; an empty list says nothing is backed up. `every_hours`: whole hours between backups, 1 to 8760, present exactly when `what` is not empty. |
@@ -101,6 +106,8 @@ A manifest whose `kind` is not `"app"` that carries any of `release_digest`, `en
 
 ### 1. Supported App Types (V1)
 
+*Superseded by Amendment 6: this describes the older sandboxed-app kind, which is retired.*
+
 | Type | Examples | How It Runs | Display Method |
 |------|---------|-------------|---------------|
 | **Container (web UI)** | Open WebUI, OpenClaw | An OCI image whose display is an HTTP port | A web view, loaded through `/apps/{app_id}/` |
@@ -113,6 +120,8 @@ A manifest whose `kind` is not `"app"` that carries any of `release_digest`, `en
 An app's manifest says how far its traffic may go: `network_mode` says whether it must go through the Identity Agent, may, has no network at all, or reaches only the Identity Agent. `tls_mode` says whether its encrypted traffic may be inspected (`mitm`, under a certificate authority the app is given) or only its destination's name read (`sni_only`). `allowed_domains` and `blocked_domains` take `*.` wildcards. An app is never given an API key the owner keeps.
 
 ### 5. Agent API Endpoint — Internal Service Alias
+
+*Superseded by Amendment 6: this describes the older sandboxed-app kind, which is retired.*
 
 An app reaches the Identity Agent at the address in `IDENTITY_AGENT_API`, which it is given when it starts and must not assume: `http://agent.internal:{port}` inside a container, where `agent.internal` names the computer the Identity Agent runs on, and `http://127.0.0.1:{port}` for a compiled binary. The port is chosen for each running app, so an app reads it from the environment.
 
@@ -183,18 +192,32 @@ The manifest has since gained the plug-in fields (`kind`, `sub_type`, `provides`
 
 ### 15. Desktop-Only
 
+*Superseded by Amendment 6: this describes the older sandboxed-app kind, which is retired.*
+
 Sandboxed apps run on desktop computers. The phone core includes no add-on, so no phone runs them.
+
+## Amendment 6 (2026-11-15): the older sandboxed-app kind is retired
+
+The Identity Agent starts no container or program of its own, except host plug-ins (`isolation: "host"`), which stay until they have a home as utility apps. What this record called a sandboxed app, an OCI container or a compiled program that the Identity Agent itself starts on its own computer, behind its own egress proxy and with no identity or grant of its own, is retired. A utility app has its own enrolled identity and App Body key and runs on a machine of its own (ADR-072). `kind: "app"` (Amendment 5) is the manifest of one, and is the only manifest this record now describes.
+
+What this removes, and what stays:
+
+- **Removed:** the `/sandbox/` URL namespace and the sandbox-to-Identity-Agent calls it carried; the display reverse proxy at `/apps/{app_id}/` and the Amendment 4 rules about it; the per-instance Agent API of §5; the Open WebUI, Chromium, OpenClaw and Go demo example manifests and the example program; `isolation: "sandbox"`, which `appmanifest` now refuses with a message naming the utility app; the attested component `sandbox_apps`; and the backup section `sandbox_index`, which a restore of an older archive reads and ignores.
+- **Renamed:** the log database `sandbox.db` is `activity.db`, renamed in place on first open; a restore of an older archive writes it under the new name, unless the archive also carries `activity.db`, in which case its `sandbox.db` is a stale copy and is left out. This is one way once a new build has run: an older build started afterwards opens an empty `sandbox.db`, so a downgrade renames `activity.db` back first.
+- **Renamed, and kept:** the model-call filter, which stays inside the Identity Agent, is `/api/llm/v1`, and it is refused to any caller without a grant for `model.call`. A utility app's back end can reach it with a signed request once the route is declared for that utility app's key, which it is not yet. It sets no browser origin (ADR-006).
+- **Stays until host plug-ins have a home as utility apps:** `isolation: "host"`, the routes that install and run one, and the program the add-on starts on the host for each.
+
+The sections above that describe the removed kind, the Context's examples, Amendments 3 and 4, §1, §5 and §15, are kept as the record of what was built and are superseded here. The manifest (§9, Amendment 5), `appcall` and the grant constraints are what a utility app's maker still relies on.
 
 ## Key Files
 
 - `identity-agent-core/appmanifest/` — the manifest and its rules
 - `identity-agent-core/appcall/` — how an app is called and checks who called
 - `identity-agent-core/permission/resource_constraints.go` — how a grant limits a capability's arguments
-- `manifests/` — example manifests: Chromium, OpenClaw, Open WebUI, the Go demo app
-- `sandbox-apps/go-demo/` — an example compiled app
 
 ## References
 
 - [ADR 001](001-core-architecture-stack.md) — Core architecture (Go backend, Flutter frontend)
 - [ADR 003](003-adaptive-architecture.md) — Adaptive architecture and operating modes
-- [ADR 013](013-container-data-architecture-and-api-namespacing.md) — URL namespaces by caller
+- [ADR 013](013-container-data-architecture-and-api-namespacing.md) — URL namespaces by caller (superseded for the removed kind by Amendment 6)
+- ADR 072 — utility apps

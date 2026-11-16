@@ -189,6 +189,8 @@ def check(m):
     bad = shape(m, "manifest", "")
     if bad:
         return bad
+    if "isolation" in m and m["isolation"] != "host":
+        return refuse("isolation", "only a host plug-in names its isolation; 'sandbox' is retired")
     if m.get("kind") != "app":
         for r in APP_ROWS:
             if r in m:
@@ -197,8 +199,8 @@ def check(m):
     name = m.get("name")
     if not isinstance(name, str) or all(c in WHITE_SPACE for c in name):
         return refuse("name", "no character that is not white space")
-    if m.get("isolation") == "host":
-        return refuse("isolation", "an app is never a host plug-in")
+    if "isolation" in m:
+        return refuse("isolation", "a utility app is never a host plug-in, and names no isolation")
     # The release and its one name.
     kind = m.get("execution_type")
     algorithm = "sha256" if kind == "container" else "blake3"

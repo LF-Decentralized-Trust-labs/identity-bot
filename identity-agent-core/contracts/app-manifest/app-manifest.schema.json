@@ -158,10 +158,9 @@
         },
         "isolation": {
           "enum": [
-            "sandbox",
             "host"
           ],
-          "description": "'host' is refused for an app."
+          "description": "Named only by a host plug-in. An app names no isolation. 'sandbox', the older sandboxed-app kind, is retired and refused."
         },
         "release_digest": {
           "type": "string",
@@ -228,12 +227,14 @@
               "when_down",
               "backup"
             ],
+            "not": {
+              "required": [
+                "isolation"
+              ]
+            },
             "properties": {
               "name": {
                 "pattern": "[^\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]"
-              },
-              "isolation": {
-                "const": "sandbox"
               },
               "supported_platforms": {
                 "maxItems": 0

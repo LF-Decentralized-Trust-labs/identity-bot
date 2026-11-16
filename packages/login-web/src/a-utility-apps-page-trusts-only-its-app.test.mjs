@@ -38,8 +38,8 @@ await refuses(checkAppKeyLog(app.aid, b64u(JSON.stringify({ raw_events_b64: [], 
 // the challenge
 const thumb = browserKeyThumbprint({ x: b64u(new Uint8Array(32).fill(1)), y: b64u(new Uint8Array(32).fill(2)) });
 const challenge = (over = {}, id = app) => {
-  const body = JSON.stringify({ v: "ASK1", t: 1, site_aid: app.aid, browser_key: thumb, rid: relay.aid, expiry: new Date(Date.now() + 600_000).toISOString(), session_token: "tok", ...over });
-  return { aid: app.aid, key: app.key, body, sig: ed25519SigQb64(new Uint8Array(id.sign(enc.encode(body)))), rid: relay.aid, pointer: "https://ia.example/i/tok", ownThumbprint: thumb };
+  const body = JSON.stringify({ v: "ASK1", t: 1, site_aid: app.aid, browser_key: thumb, rid: relay.aid, api: "https://tasks.example", expiry: new Date(Date.now() + 600_000).toISOString(), session_token: "tok", ...over });
+  return { aid: app.aid, key: app.key, body, sig: ed25519SigQb64(new Uint8Array(id.sign(enc.encode(body)))), rid: relay.aid, api: "https://tasks.example", pointer: "https://ia.example/i/tok", ownThumbprint: thumb };
 };
 assert.equal((await checkAppChallenge(challenge())).session_token, "tok");
 assert.equal((await checkAppChallenge(challenge({ front_end: "browser" }))).front_end, "browser");
@@ -48,6 +48,9 @@ await refuses(checkAppChallenge(challenge({ browser_key: "x".repeat(43) })), /th
 await refuses(checkAppChallenge(challenge({ site_aid: relay.aid })), /another utility app/, "another app's challenge");
 // A crafted link with the real identifier and key log but another relay identifier and back end:
 // the challenge is signed for the app's own relay identifier, so the page refuses it.
+await refuses(checkAppChallenge({ ...challenge(), api: "https://evil.example" }), /another back end/, "a link that names another back end");
+await refuses(checkAppChallenge(challenge({ api: "https://evil.example" })), /another back end/, "a challenge signed for another back end");
+await refuses(checkAppChallenge(challenge({ api: undefined })), /another back end/, "a challenge that names no back end");
 await refuses(checkAppChallenge({ ...challenge(), rid: identity().aid }), /another relay identifier/, "a link that names another relay identifier");
 await refuses(checkAppChallenge(challenge({ rid: identity().aid })), /another relay identifier/, "a challenge signed for another relay identifier");
 await refuses(checkAppChallenge(challenge({ rid: undefined })), /another relay identifier/, "a challenge that names no relay identifier");

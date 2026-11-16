@@ -52,7 +52,7 @@ Receipts already stored were signed under the old rule and verify under the old 
 
 - **Writers emit only the current form.** The Go agent's `ReceiveSignedEvent` issues the five-field `rct` and an indexed signature over the event bytes. Nothing issues the old form again.
 - **Readers accept both, told apart by the signature itself** (an indexed `A` signature is the current form, an unindexed `0B` is the old one), so no stored receipt is re-issued or re-signed and a witness that still sends the old form keeps working. The old form is verified exactly as before, over the SAID string.
-- **The old reader is removed** once no witness in service still sends the old form. It is not kept as a permanent second format.
+- **The old reader is removed** in the first release after every witness in service issues the current form: the hosted witness and every operator in the registry of witness operators. That is the condition, not a date. Until then the old form is accepted and not re-issued. It is not kept as a permanent second format.
 - **Other implementations of a witness** must adopt the same form. Until one does, it keeps writing the old form, which readers accept, and receipts our agent issues are not checked by it.
 
 A current-form receipt has to be checked against the event it signed, so a receipt is stored alongside nothing but its signature and is verified wherever the event is at hand: when counting receipts against a key log, when a bundle is verified, and when a receipt is first saved with its event. Read back with no event, a stored receipt is checked only for being a well-formed indexed signature by a witness that is its own key.

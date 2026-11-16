@@ -20,7 +20,7 @@ import (
 	"identity-agent-core/asset"
 )
 
-// Revocation is pushed (ADR-072 section 6, Amendment 10). When an installed app's
+// Revocation is pushed (ADR-072 section 6, Amendment 11). When an installed app's
 // grant ends, by any road (the person, the owner, the owner switching the front end
 // off, a member removed, the app itself), the core tells the app's back end, so it
 // ends that person's sessions at once instead of at its next standing check.
@@ -38,7 +38,7 @@ import (
 // to its standing check, which asks whether the key still speaks (within a minute).
 //
 // Only an installed app's grant is pushed: a front end that lapses within a working
-// day keeps no address, and is left to the back end's standing check (Amendment 9,
+// day keeps no address, and is left to the back end's standing check (Amendment 10,
 // "Not built").
 
 const grantEndedPath = "/identity-agent/grant-ended"

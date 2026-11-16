@@ -187,7 +187,65 @@ the asker's nonce, so the answer is fresh and the witness's own. A controller as
 before sending, and sends only what the witness lacks; a witness that has confirmed holding
 the log as far as it goes, by its tip or its receipts, is not asked again until there is
 more to send, or until an hour has passed, so a witness that has fallen behind is noticed
-and filled again; a witness's signed tip is believed as it stands, lower than before too. `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
+and filled again; a witness's signed tip is believed as it stands, lower than before too. 
+`GET /witness/ksn/{aid}` answers the same question as KERI asks it: a key state notice, in the form fixed under "The key state notice and a witness's location" below, naming the witness that signs it (not the identifier asked about). For a log that is not held, or that the asker may not read, the record names only the identifier, so the two cannot be told apart. `GET /witness/loc/{witness_aid}` is the witness's own signed statement of where it is reached.
+
+**Which freshness answer is used where.** There are two, and each is used for what it is good for.
+- *The key state notice* is what `witness.Corroborate` asks, because a claim is checked by
+  whoever receives it, including a verifier outside this project, and the notice is what a
+  KERI witness serves to anybody. It carries no nonce from the asker (KERI's reply has none),
+  so it is fresh by its date, within five minutes of now.
+- *The nonce-signed tip* (`GET /witness/kel/{aid}/tip?nonce=…`) is used only where the asker
+  must have an answer made for this one question and no other: a controller about to send
+  its key log, and the check of a measurement list (ADR-078), which asks each witness with a
+  nonce it generated and used once, so no earlier answer, however recently signed, can be
+  played back to it. Nothing else asks for a tip.
+
+A verifier that checks a presented key log (`witness.Corroborate`) believes a witness only through the
+notice: the signature must be the key it asked, the route must name that key, and the date
+must be within five minutes of now. The key log a witness serves over plain HTTP is not an
+answer, since any server can serve one; it is read only for receipts and signed conflicting
+events, which prove themselves. Corroboration also needs receipts from at least `bt` of the
+witnesses in force at every establishment event, counted by `drivers.WitnessingByEvent`.
+`Corroborate` first checks the log it is given as a signed key log (every event signed by the
+key in force) and that `ownerAID` is that log's identifier, and says why when it is not
+(`Corroboration.Unverified`), because an outside verifier calls it with whatever it was handed.
+
+**One witness cannot refuse a genuine claim by saying so.** A notice that states a longer
+history than was presented, or a different event at a place of it, is a statement and no more;
+a witness that is broken, or a server holding its key, can make one. It refuses the claim only
+when the witness also shows the event it states (`GET /witness/kel/{aid}/event/{sn}`: the event
+after the presented log's last, or the event at the place it differs) and that event is validly
+signed by the keys the presented log puts in force. A witness whose notice departs and that shows
+no such event has not answered, and the others decide.
+
+`GET /witness/loc/{witness_aid}` is the witness's own `/loc/scheme` reply, signed with the same
+key, for the address the agent knows itself by and never the one a request names; the registry
+of witness operators is only where to look for it. The location is read only for an http or
+https address; one with another scheme is refused for its scheme. An address the witness names
+that is loopback, link-local, private, shared, reserved, or a name that resolves to one, is not
+used (the registry's hint is asked instead); a registry that itself writes a local address as the
+hint may be answered by a local one. Requests to a witness follow no redirect, and the client `witness.Corroborate` makes
+when it is given none refuses to dial an internal address, so a witness cannot send this machine
+to its own services. A caller that gives its own client keeps its own dial rules: the redirect
+refusal and the address check on a signed location still apply, but a name that resolves
+differently when dialled is that client's to guard against.
+
+**Limits.** The witnesses are asked at once, under one deadline of twenty seconds for all of
+them together, so witnesses that never answer cost the deadline once, not once each; one that
+has not answered by then has failed to answer. At most 64 witnesses are asked; any beyond are
+counted as not answering. A witness whose notice departs from the presented log has its event
+read twice before it is taken to have shown nothing.
+
+**`/end/role` is not read.** KERI's `/end/role/add` states that a controller authorises an
+endpoint provider in a role. The witnesses of an identifier are already named by the
+controller's own signed establishment events, in the `b` list and its `br` and `ba` changes,
+which is what keripy itself reads to find the witnesses of a log (`kever.wits`) and what the
+receipts are counted against. A role reply would state again what a signed event states, and
+could only agree with it or disagree, so reading one adds a second source and no authority the
+events do not already have. The location, which an event cannot state, is read.
+
+`GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
 exactly as its controller published and signed it; the asker checks it extends its own
 key log and is signed by the identity's key before believing it. An event is sent to
 exactly the witnesses it names, and a send that runs in the background is not cut short
@@ -197,8 +255,11 @@ by its caller returning.
 
 Two signed statements a witness makes about itself are defined in the `witnessproto`
 module, so that a witness or watcher outside this core and the core itself build and
-check them with one implementation. No route in the core serves or asks for them yet;
-this fixes their form.
+check them with one implementation. The core serves them (`GET /witness/ksn/{aid}`,
+`GET /witness/loc/{witness_aid}`) and `witness.Corroborate` asks for them: the witnesses it
+asks are those in force at the end of the log, following `br` and `ba`, each found at the
+address its own signed location states, with the registry's address only a hint for where to
+fetch it.
 
 **The key state notice** is KERI's reply `/ksn/{witness}`: the route names the witness
 that signs it, not the identifier it is about, as keripy's does, and the reply carries
@@ -233,6 +294,33 @@ Where this departs from keripy, so nobody takes it for more:
   does this: a notice recorded just before a rotation can be replayed for up to five
   minutes. Where an answer must be made for one question and no other, the nonce-signed
   tip above is the one to ask.
+- **A witness that does not serve `/witness/ksn/{aid}` counts as not answering**, so a log
+  whose witnesses are all such services is not corroborated until they do.
+- **Receipts to the threshold are asked of establishment events only.** keripy also
+  waits for them on an interaction. A log whose last events are interactions is
+  corroborated by its latest establishment event's receipts and by the witnesses' signed
+  answers about the tip.
+  Requiring them of every event was considered and not adopted: a receipt for the newest
+  interactions may simply not have arrived yet, so a genuine claim made soon after an
+  interaction would be refused for lateness, while the witnesses' signed answers about
+  the tip already say whether they hold it. Revisit if a witness-side change makes
+  interaction receipts prompt.
+- **The signatures checked for one witness at one event are bounded per source.** A served
+  record can carry about a megabyte of receipts naming designated witnesses, and keripy has
+  no such bound (it keeps one indexed signature per witness index and drops those that
+  fail). Receipts are pooled from the presented log and from each witness's answer, which
+  do not trust each other, so the allowance is kept per source and witness: at most four
+  receipts with the shape of a genuine one (an indexed signature that decodes, at the
+  witness's own place in the list) are signature-checked from one source for one witness,
+  and text that is not such a receipt costs nothing. A source can spend only its own
+  allowance, so one hostile witness cannot keep another's receipt from counting; what a
+  source holds beyond its allowance is not counted, which loses nothing an honest witness
+  gives (one receipt per event). The core and both page readers apply the same bound,
+  held together by the "witnessed" cases of `packages/login-web/test-vectors/seal.json`.
+- **A rotation at a place supersedes an interaction there, as in keripy.** An interaction
+  at that place signed by a key the owner has since rotated away from is not taken as a
+  rival, by the witness or by the one corroborating, so it cannot make a genuine claim
+  refused.
 - **`f` is written equal to `s`.** keripy's `f` is the first-seen ordinal, which differs
   from `s` only after a recovery rotation has superseded events; the record here follows
   one chain.

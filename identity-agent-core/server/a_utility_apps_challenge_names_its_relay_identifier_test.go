@@ -45,3 +45,32 @@ func TestAnAppWithNoRecordedRelayIdentifierKeepsItsChallenge(t *testing.T) {
 		t.Fatalf("a relay identifier nobody recorded was signed: %q", rid)
 	}
 }
+
+// Fails without the address in the signed challenge: the back end a link names could
+// not be held to what the owner recorded, and the person's Identity Agent would not
+// know where a session it approved lives.
+func TestTheChallengeIsSignedForTheBackEndRecordedForTheApp(t *testing.T) {
+	w := anAppOffering(t, []string{"browser"}, nil)
+	a, _, _ := w.org.assetHandler.Store.GetAsset("the-website")
+	a.RelayID, a.BackEnd = aRelayID, "https://tasks.example.com"
+	if err := w.org.assetHandler.Store.UpsertAsset(a); err != nil {
+		t.Fatal(err)
+	}
+	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, aBrowserKey, "browser", w.srv.URL, false)
+	if code != 0 {
+		t.Fatalf("no challenge: %d %s", code, msg)
+	}
+	bundle := w.org.challenges[token]
+	body := login.CanonicalChallengeBody(bundle)
+	if bundle.BackEnd != "https://tasks.example.com" || !strings.Contains(body, `"rid":"`+aRelayID+`","api":"https://tasks.example.com","callback_url"`) {
+		t.Fatalf("the back end is not in the signed text, after the relay identifier: %s", body)
+	}
+}
+
+func TestAnAppWithNoRecordedBackEndKeepsItsChallenge(t *testing.T) {
+	w := anAppOffering(t, []string{"browser"}, nil)
+	token, _, _, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "", nil, aBrowserKey, "browser", w.srv.URL, false)
+	if b := w.org.challenges[token]; b.BackEnd != "" || strings.Contains(login.CanonicalChallengeBody(b), `"api"`) {
+		t.Fatalf("a back end nobody recorded was signed: %q", b.BackEnd)
+	}
+}

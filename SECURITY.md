@@ -42,12 +42,11 @@ We follow **coordinated disclosure**: we will work with you on a timeline that p
 - The Dart client for the core's API (`packages/agent_client/`)
 - The Go backend (`identity-agent-core/`), including the `keri-go` KERI engine
   compiled into it
-- The sandbox marketplace runtime (Podman + compiled binary runtimes)
 - Official release binaries published by the project
 
 ### Out of scope
 
-- Third-party applications installed via the sandbox marketplace (report to the app publisher)
+- Third-party utility apps that run beside an Identity Agent (report to the utility app's publisher)
 - Issues in upstream dependencies without exploitable impact in the Identity Agent context (report upstream)
 - Hypothetical attacks requiring implausible prerequisites (e.g., "attacker has root access to the device already")
 - Social engineering attacks against project contributors
