@@ -572,6 +572,9 @@ type Record struct {
 	CiphertextHash string `json:"ciphertext_hash,omitempty"`
 	// Outcome, on an entry of kind KindOutcome, is how an earlier entry ended.
 	Outcome *Outcome `json:"outcome,omitempty"`
+	// Notice, on an entry of kind KindNotice, is what the Identity Agent told a
+	// person, by code (ADR-081).
+	Notice *Notice `json:"notice,omitempty"`
 
 	// What the Identity Agent vouches for.
 	GrantSAID      string     `json:"grant_said,omitempty"`
@@ -587,6 +590,12 @@ type Record struct {
 // it agrees with what the record says.
 func (r Record) CheckSenderProof() error {
 	switch {
+	case r.Outcome != nil && r.Notice != nil:
+		return errors.New("an entry is an outcome or a notice, not both")
+	case r.Notice != nil:
+		return r.checkNotice()
+	case r.Kind == KindNotice:
+		return errors.New("a notice names what it says")
 	case r.Outcome != nil:
 		return r.checkOutcome()
 	case r.Kind == KindOutcome:

@@ -124,6 +124,28 @@ func (v *verifier) checkPersonStatement(where string, rec agentmessage.Record, a
 	}
 }
 
+// checkNotice checks the Identity Agent's word to a person: its own entry, to a
+// person, in a conversation that is open, and given to one person once in a
+// conversation, so that nothing can repeat it into a flood.
+func (v *verifier) checkNotice(where string, rec agentmessage.Record, m *Message) {
+	v.person()
+	m.Sender = "identity agent"
+	if rec.From != v.b.Root {
+		v.fault(where, "a notice is the Identity Agent's, and this one is from %s", rec.From)
+	}
+	if v.closed {
+		v.fault(where, "a notice was recorded in a conversation that had been closed and not reopened")
+	}
+	key := rec.To + " " + rec.Notice.Code
+	if v.noticed[key] {
+		v.fault(where, "%s was already given that notice in this conversation, which gives it once", rec.To)
+	}
+	if v.noticed == nil {
+		v.noticed = map[string]bool{}
+	}
+	v.noticed[key] = true
+}
+
 // checkOutcome checks the Identity Agent's note of how an entry ended: it is
 // the Identity Agent's own, about an entry of a person's that was pending, and
 // it ends it once.

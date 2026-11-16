@@ -227,6 +227,8 @@ type verifier struct {
 	// endedAsk is every ask that ended unanswered, by a close or a lost body,
 	// and has been given its one outcome.
 	endedAsk map[string]bool
+	// noticed is every notice the Identity Agent gave, by person and code: it gives each once in a conversation.
+	noticed map[string]bool
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -832,7 +834,7 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		return rec, true
 	}
 	once := []string{}
-	if rec.Outcome != nil {
+	if rec.Outcome != nil || rec.Notice != nil {
 		// Nothing a sender signed: the countersignature is the whole proof.
 	} else if rec.PersonProof != nil {
 		once = append(once, "signature "+rec.PersonProof.Signature)
@@ -858,6 +860,8 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		return rec, true
 	}
 	switch {
+	case rec.Notice != nil:
+		v.checkNotice(where, rec, m)
 	case rec.Outcome != nil:
 		v.checkOutcome(where, rec, m)
 	case rec.PersonProof != nil:
@@ -1477,9 +1481,9 @@ func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args 
 // that comes after a close is kept and is no fault: it never reopens the
 // conversation.
 func (v *verifier) checkControl(where string, rec agentmessage.Record, body []byte) {
-	if rec.Refusal != "" || rec.Outcome != nil {
-		// A refusal records an attempt that changed nothing, and an outcome is
-		// the Identity Agent's note about an earlier entry.
+	if rec.Refusal != "" || rec.Outcome != nil || rec.Notice != nil {
+		// A refusal records an attempt that changed nothing, an outcome is the
+		// Identity Agent's note about an earlier entry, and a notice is its word to a person.
 		return
 	}
 	switch {

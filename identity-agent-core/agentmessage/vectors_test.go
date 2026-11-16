@@ -137,6 +137,7 @@ func TestTheMessageSchemaDescribesTheseTypes(t *testing.T) {
 		"person_statement": PersonStatement{},
 		"person_proof":     PersonProof{},
 		"outcome":          Outcome{},
+		"notice":           Notice{},
 		"person_message":   PersonMessage{},
 		"envelope":         didcomm.Envelope{},
 		"jwm":              didcomm.JWM{},
