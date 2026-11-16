@@ -85,7 +85,7 @@ type readWitnessedAnswer struct {
 func ReadWitnessedLog(rid string, answers []WitnessAnswer) (*WitnessedLog, error) {
 	receipts := map[string][]WitnessReceipt{}
 	var logs []readWitnessedAnswer
-	for _, a := range answers {
+	for n, a := range answers {
 		if a.AID != rid || len(a.KEL) == 0 || len(a.KEL) > MaxWitnessedLogEvents {
 			continue
 		}
@@ -132,7 +132,7 @@ func ReadWitnessedLog(rid string, answers []WitnessAnswer) (*WitnessedLog, error
 				if !IsEventSignedReceipt(r.Sig) {
 					continue
 				}
-				receipts[l.said[i]] = append(receipts[l.said[i]], WitnessReceipt{WitnessAID: r.Witness, CesrSignature: r.Sig})
+				receipts[l.said[i]] = append(receipts[l.said[i]], WitnessReceipt{WitnessAID: r.Witness, CesrSignature: r.Sig, Source: n + 1})
 			}
 		}
 		logs = append(logs, l)

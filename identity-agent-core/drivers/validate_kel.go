@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -62,6 +63,11 @@ type ValidateKELInput struct {
 type WitnessReceipt struct {
 	WitnessAID    string
 	CesrSignature string
+	// Source is where the receipt came from: 0 for the log as presented, and
+	// one number for each witness answer it was read from. Receipts of one
+	// source are bounded among themselves (maxReceiptChecksPerWitness), so a
+	// source that fills its list can spend nothing but its own allowance.
+	Source int
 }
 
 // EventWitnessing is how well corroborated one event is.
@@ -456,6 +462,14 @@ func Designates(designated []string, witnessAID string) bool {
 	return false
 }
 
+// maxReceiptChecksPerWitness bounds the signatures checked, at one event, among
+// the receipts of one source that name one designated witness. A genuine witness
+// issues one receipt per event, so a small allowance covers every honest case.
+// What a source holds beyond it is not counted, whoever it names: the bound is a
+// limit on what one source can cost, and the page readers apply the same one
+// (packages/login-web/test-vectors/seal.json, "witnessed").
+const maxReceiptChecksPerWitness = 4
+
 // WitnessingByEvent is the witnessing report for every event of a key log,
 // by the event's identifier: one walk of the log for all of them, where
 // WitnessingOf walks it once per event asked about.
@@ -533,14 +547,32 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 		// under a second spelling of its identifier, which is how a single
 		// party becomes a quorum.
 		counted := map[string]bool{}
+		// Each signature check costs CPU, and a served record can carry about a
+		// megabyte of receipts, each naming a designated witness. The allowance is
+		// kept per source and witness, never across sources: receipts are pooled
+		// from answers that do not trust each other, and one that could spend
+		// another's allowance could keep a genuine receipt from being counted.
+		// A check is charged only for a receipt that already has the shape of a
+		// genuine one (an indexed signature that decodes, at the witness's own
+		// place), so text that is not a receipt costs nothing and uses up nothing.
+		type spender struct {
+			source int
+			key    string
+		}
+		tried := map[spender]int{}
 		for _, r := range in.Receipts[ev.SAID] {
 			if !Designates(designated, r.WitnessAID) {
 				continue
 			}
 			key, ok := WitnessKey(r.WitnessAID)
-			if !ok || counted[key] {
+			if !ok || counted[key] || !receiptHasItsShape(designated, r) {
 				continue
 			}
+			from := spender{r.Source, key}
+			if tried[from] >= maxReceiptChecksPerWitness {
+				continue
+			}
+			tried[from]++
 			if err := VerifyEventReceipt(r.WitnessAID, raw, ev.SAID, r.CesrSignature, designated); err != nil {
 				continue
 			}
@@ -600,4 +632,19 @@ func AppendEvent(rawEvents [][]byte, next []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("the event (sequence %d) does not follow the last event of the key log (sequence %d)", ev.SN, last.SN)
 	}
 	return append(append([][]byte(nil), rawEvents...), next), nil
+}
+
+// receiptHasItsShape is whether a receipt is worth a signature check: a receipt
+// signed over the event is an indexed signature that decodes, indexed at the
+// witness's own place in the list. The earlier form, over the digest, has no
+// index to look at.
+func receiptHasItsShape(designated []string, r WitnessReceipt) bool {
+	if !IsEventSignedReceipt(r.CesrSignature) {
+		return len(r.CesrSignature) == 88 && strings.HasPrefix(r.CesrSignature, "0B")
+	}
+	if CheckReceiptShape(r.WitnessAID, r.CesrSignature) != nil {
+		return false
+	}
+	_, index, _, err := iacrypto.DecodeIndexedEd25519SignatureQB64(r.CesrSignature)
+	return err == nil && WitnessPosition(designated, r.WitnessAID) == index
 }

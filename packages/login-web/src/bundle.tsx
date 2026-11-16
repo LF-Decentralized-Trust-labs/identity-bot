@@ -23,6 +23,7 @@ import { SignInButton } from "./SignInButton.js";
 import { appFetch, appSession as plainAppSession, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink, SessionEnded, StatementNotSigned, statementWords, type AppLink, type AppSession } from "./app.js";
 import { signInProblem } from "./signInProblem.js";
 import { modalPresenter, previewStatementState } from "./StatementModal.js";
+import { mountSessions } from "./sessionsPanel.js";
 
 /** The signed-in half of the page. Its `signStatement` shows the person the SDK's own wait screen
  *  (ADR-080); no page builds one. */
@@ -30,7 +31,7 @@ export const appSession: typeof plainAppSession = (link, opts = {}) =>
   plainAppSession(link, { ...opts, statementPresenter: opts.statementPresenter ?? modalPresenter() });
 
 // A hosted page has no unpinned read of a link: `readAppLink` is the pinned one.
-export { previewStatementState, StatementNotSigned, statementWords, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem };
+export { previewStatementState, StatementNotSigned, statementWords, loadPinnedApp, pinnedAppLink, readPinnedApp, readPinnedAppLink as readAppLink, readPinnedAppLink, SessionEnded, signInProblem, mountSessions };
 
 export interface SignInHandlers {
   /** The person approved and the session is kept; call the app as them now. */

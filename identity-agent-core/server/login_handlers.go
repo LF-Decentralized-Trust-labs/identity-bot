@@ -37,6 +37,9 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 			// The person's own list of the installed apps they approved, and ending one.
 			r.Get("/installed-apps", s.loginHandler.HandleInstalledAppSignIns)
 			r.Post("/installed-apps/end", s.loginHandler.HandleEndInstalledAppSignIn)
+			// The person's own record of the browser sign-ins they approved at utility apps.
+			r.Get("/browser-sign-ins", s.loginHandler.HandleBrowserSignIns)
+			r.Post("/browser-sign-ins/forget", s.loginHandler.HandleForgetBrowserSignIn)
 		}
 		// Issue a signed login challenge for an asset (available even without a
 		// per-user loginHandler).

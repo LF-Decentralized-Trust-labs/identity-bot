@@ -252,6 +252,7 @@ var controllerOwnerOnly = map[string]string{
 	"PUT /api/assets/{id}/front-ends/offered": "this declares, once, which front ends a utility app made before it could say offers",
 	// The relay identifier a utility app's sign-in challenges name is the owner's to record.
 	"PUT /api/assets/{id}/relay-id": "this sets the relay identifier a utility app's sign-in challenges are signed for",
+	"PUT /api/assets/{id}/back-end": "this sets the back-end address a utility app's sign-in challenges are signed for",
 	// A grant that never lapses is the owner's to end, from the device holding the key.
 	"DELETE /api/assets/{id}/app-key-grants/{key}": "ending a person's installed-app grant takes away what the owner allowed",
 

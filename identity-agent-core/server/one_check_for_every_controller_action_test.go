@@ -215,6 +215,7 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"PUT /api/assets/{id}/front-ends",
 		"PUT /api/assets/{id}/front-ends/offered",
 		"PUT /api/assets/{id}/relay-id",
+		"PUT /api/assets/{id}/back-end",
 		"DELETE /api/assets/{id}/app-key-grants/{key}",
 		// The lock of a logged-out identity (ADR-074): a peer never opens or
 		// closes this device's identity.

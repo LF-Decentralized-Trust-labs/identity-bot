@@ -60,6 +60,10 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 	if c.RelayID != "" {
 		parts = append(parts, jsonField("rid", c.RelayID))
 	}
+	// Omitted when empty, like rid.
+	if c.BackEnd != "" {
+		parts = append(parts, jsonField("api", c.BackEnd))
+	}
 	parts = append(parts,
 		jsonField("callback_url", nfc(c.CallbackURL)),
 		jsonField("session_token", c.SessionToken),

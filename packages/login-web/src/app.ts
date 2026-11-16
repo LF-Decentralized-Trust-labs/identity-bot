@@ -105,15 +105,13 @@ export const LINK_MAX_AHEAD_SECONDS = 24 * 60 * 60;
  *  one a page can act on, or was made longer ago than `LINK_MAX_AGE_SECONDS` (as of `now`, ms). */
 export function readAppLink(hash: string, now = Date.now()): AppLink {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
-  const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: (p.get("api") ?? "").replace(/\/+$/, ""), seal: p.get("seal") ?? "", min: p.get("min") ?? "" };
+  const link = { aid: p.get("aid") ?? "", kel: p.get("kel") ?? "", rid: p.get("rid") ?? "", api: readLinkBackEnd(p.get("api") ?? "") ?? "", seal: p.get("seal") ?? "", min: p.get("min") ?? "" };
   if (!link.aid || !link.kel) throw new Error("the link names no utility app and key log");
   if (!link.rid) throw new Error("the link names no relay identifier to check the utility app's answers against");
   if (!link.seal) throw new Error("the link names no sealing key to seal calls to the utility app with");
   const wit = readWitnessAddresses(p.get("wit"));
   if (!readMinimum(link.min)) throw new Error("the link names no latest key log event the utility app's relay identifier must have reached");
-  if (!/^https:\/\//.test(link.api) && !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(link.api)) {
-    throw new Error("the link names no back end to sign in at");
-  }
+  if (!link.api) throw new Error("the link names no back end to sign in at");
   const iat = /^[1-9][0-9]{9,10}$/.test(p.get("iat") ?? "") ? Number(p.get("iat")) : null;
   if (iat === null) throw new Error("the link names no time it was made");
   const age = now / 1000 - iat;
@@ -150,11 +148,52 @@ export interface PinnedApp {
 
 const IDENTIFIER = /^[A-Za-z0-9_-]{20,100}$/;
 
-/** An https address (or one on this machine, for development) whose scheme and host are written
- *  in lower case, with no query, fragment or trailing slash. */
-function backEndAddress(api: string): boolean {
-  const m = /^(https:\/\/[^\s/?#]+|http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?)(\/[^\s?#]*)?$/.exec(api);
-  return !!m && m[1] === m[1].toLowerCase() && !api.endsWith("/");
+const RESERVED_SUFFIXES = [".local", ".localhost", ".internal", ".lan", ".home.arpa", ".corp", ".intranet", ".localdomain"];
+
+/** A lower-case DNS name of at least two labels, whose last label is not all digits (so not an IPv4
+ *  address) and which no suffix reserved for a private network ends. */
+function aPublicName(host: string): boolean {
+  if (!host || host.length > 253 || !host.includes(".")) return false;
+  const labels = host.split(".");
+  if (!labels.every((l) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) return false;
+  // No real top-level name starts with a digit; a last label that does (all digits, or 0x and hex
+  // digits) is read as an IPv4 address by browsers and system resolvers.
+  if (!/^[a-z]/.test(labels[labels.length - 1])) return false;
+  return !RESERVED_SUFFIXES.some((s) => host.endsWith(s) || host === s.slice(1));
+}
+
+function aPort(p: string): boolean {
+  return /^[1-9][0-9]{0,4}$/.test(p) && Number(p) <= 65535;
+}
+
+/** The address of a utility app's back end, as the Identity Agent core accepts it
+ *  (identity-agent-core/backendaddr; the cases both agree on are in
+ *  packages/login-verify/test-vectors/back-end-addresses.json): https and a public name in lower
+ *  case (no IP address, no name with no dot, none under a private suffix), a port that is one,
+ *  and an optional path with no dot or empty segment, no query, fragment, user name or trailing
+ *  slash. A page has no build mode, so it also accepts http on this machine, for development. */
+export function backEndAddress(api: string): boolean {
+  if (typeof api !== "string" || api.length === 0 || api.length > 2048) return false;
+  const m = /^(https|http):\/\/([^/]*)(\/.*)?$/s.exec(api);
+  if (!m) return false;
+  const [, scheme, hostport, path = ""] = m;
+  const i = hostport.indexOf(":");
+  const host = i < 0 ? hostport : hostport.slice(0, i);
+  if (i >= 0 && !aPort(hostport.slice(i + 1))) return false;
+  if (scheme === "http" ? host !== "127.0.0.1" && host !== "localhost" : !aPublicName(host)) return false;
+  if (path === "") return true;
+  if (path.endsWith("/") || !/^(\/([A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})*)+$/.test(path)) return false;
+  return path.slice(1).split("/").every((seg) => {
+    const s = seg.replace(/%2e/gi, ".");
+    return seg !== "" && s !== "." && s !== "..";
+  });
+}
+
+/** What a link's `api` is read as: trailing slashes dropped, then the address rule applied.
+ *  Null for a link that names none, or none a back end may be named by. */
+export function readLinkBackEnd(api: string): string | null {
+  const stripped = api.replace(/\/+$/, "");
+  return backEndAddress(stripped) ? stripped : null;
 }
 
 /** The pin a page's configuration (its parsed `config.json`) carries under `app`:
@@ -318,6 +357,9 @@ export interface ChallengeCheck {
   /** The relay identifier the link this page was opened with names (`link.rid`): the
    *  challenge must be signed for that one (ADR-072 Amendment 7). */
   rid: string;
+  /** The back-end address the link names (`link.api`, its trailing slash already
+   *  dropped): the challenge must be signed for that one too (ADR-072 Amendment 8). */
+  api: string;
   /** The code to show the person. */
   pointer: string;
   /** This page's own browser-key thumbprint. */
@@ -355,6 +397,10 @@ export async function checkAppChallenge(c: ChallengeCheck): Promise<CheckedChall
   // another relay identifier, and so another back end, is not the one the app's
   // Identity Agent signed this for, and a challenge that names none is refused the same.
   if (typeof c.rid !== "string" || c.rid === "" || ch.rid !== c.rid) fail("the challenge is signed for another relay identifier than the link names");
+  // The back end the link names is signed beside it (Amendment 8), for the same reason:
+  // a link that carries the real relay identifier but another address would otherwise
+  // send every call there. A challenge that names none is refused the same.
+  if (typeof c.api !== "string" || c.api === "" || ch.api !== c.api) fail("the challenge is signed for another back end than the link names");
   // The kind is in the signed body when the Identity Agent names one (ADR-072
   // Amendment 2). A page is a browser; a challenge naming another is not its own.
   if (ch.front_end !== undefined && ch.front_end !== "browser") fail("the challenge is for another kind of front end");
@@ -871,7 +917,7 @@ export async function appFetch(
     if (isStart && r.status >= 200 && r.status < 300) {
       const s = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
       skew = serverSkew(s.server_time);
-      const c = await checkAppChallenge({ aid: link.aid, key: appKey, body: s.canonical_body, sig: s.sig, rid: link.rid, pointer: s.relay_or_qr_url, ownThumbprint: mine.thumbprint, now: Date.now() + skew });
+      const c = await checkAppChallenge({ aid: link.aid, key: appKey, body: s.canonical_body, sig: s.sig, rid: link.rid, api: link.api, pointer: s.relay_or_qr_url, ownThumbprint: mine.thumbprint, now: Date.now() + skew });
       // The app's own name for this sign-in is what each later proof is bound to.
       started = { token: s.session_token, expiry: Date.parse(c.expiry) };
     }

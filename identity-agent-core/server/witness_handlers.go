@@ -29,6 +29,9 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	r.Post("/witness/cover", s.handleWitnessCover)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
 	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
+	r.Get("/witness/ksn/{signer_aid}", s.handleWitnessKeyState)
+	r.Get("/witness/loc/{witness_aid}", s.handleWitnessLocation)
+	r.Options("/witness/ksn/{signer_aid}", handleWitnessKelPreflight)
 	r.Options("/witness/kel/{signer_aid}", handleWitnessKelPreflight)
 	r.Options("/witness/kel/{signer_aid}/tip", handleWitnessKelPreflight)
 	r.Get("/witness/kel/{signer_aid}/event/{sn}", s.handleWitnessKelEvent)
@@ -219,6 +222,56 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, tip)
+}
+
+// handleWitnessKeyState answers how far this witness holds an identity's key
+// log as a KERI key state notice (the reply /ksn/{witness}), dated and signed with
+// the witness's own key, so whoever asks can tell the answer is this witness's
+// and is live. Asked of anybody, answered as for a log not held unless the
+// asker may read it (witness.MayRead), exactly as the tip is.
+func (s *CoreServer) handleWitnessKeyState(w http.ResponseWriter, r *http.Request) {
+	answerOnlyToThisAsker(w)
+	if !s.witnessReadLimiter().allow(callerKey(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
+	aid := chi.URLParam(r, "signer_aid")
+	s.letAPageRead(w, r, aid)
+	ans, err := s.WitnessService.KeyStateNotice(aid, s.WitnessService.MayRead(aid, r))
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "the key state notice could not be signed", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, ans)
+}
+
+// handleWitnessLocation serves this witness's own /loc/scheme reply: the
+// address it is reached at, signed with the key it witnesses under. It answers
+// only for that key, so what it says cannot be a statement about anybody else.
+func (s *CoreServer) handleWitnessLocation(w http.ResponseWriter, r *http.Request) {
+	if !s.witnessReadLimiter().allow(callerKey(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
+	ours, err := s.WitnessService.OurWitnessAID()
+	if err != nil || ours == "" || ours != chi.URLParam(r, "witness_aid") {
+		notHeld(w)
+		return
+	}
+	// Signed only for an address this agent knows itself to have. What a
+	// request says it was addressed to is whatever its sender wrote, and a
+	// witness that signed that would hand out its signature over any address.
+	url := s.ownAddress(r)
+	if url == "" {
+		notHeld(w)
+		return
+	}
+	ans, err := s.WitnessService.WitnessLocationNotice(url)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "the location could not be signed", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, ans)
 }
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {

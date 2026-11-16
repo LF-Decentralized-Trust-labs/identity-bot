@@ -178,14 +178,17 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 	// Authorship is established. Completeness is a different question, and this
 	// is where it is asked — see corroborate_the_claim.go.
 	c := s.askTheWitnesses(req.OwnerAID, req.OwnerKEL)
+	if c.Unverified != "" {
+		return fmt.Errorf("this history cannot be corroborated: %s", c.Unverified)
+	}
 	if c.Contradicted {
 		return fmt.Errorf("this history is not the whole history: %s", c.Why)
 	}
 	if !c.Corroborated() && s.mustBeCorroborated() {
 		return fmt.Errorf("nobody other than the claimant could confirm %s's history "+
-			"(%d witnesses named, %d reachable, %d held the events, %d were empty, %d behind, %d failed). A machine that somebody else set up can "+
+			"(%d witnesses named, %d answered signed, %d held the events and %d are needed, %d were empty, %d behind, %d failed; receipts to the threshold at every establishment event: %v). A machine that somebody else set up can "+
 			"always reach a witness, so being unable to is a reason to refuse rather than "+
-			"to proceed", req.OwnerAID, c.Designated, c.Asked, c.Held, c.Empty, c.Behind, c.Failed)
+			"to proceed", req.OwnerAID, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
 	}
 	if !c.Corroborated() {
 		// Recorded, not refused. This is a computer somebody is sitting at: it
@@ -193,9 +196,9 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 		// log exists for. Refusing would make a machine unable to be set up in
 		// exactly the situation setting it up is most normal.
 		log.Printf("[pairing] claimed by %s on an UNCORROBORATED history (%d witnesses named, "+
-			"%d reachable, %d held the events, %d empty, %d behind, %d failed) — accepted because this machine was offered from its own screen, "+
+			"%d answered signed, %d held the events of %d needed, %d empty, %d behind, %d failed, receipts met: %v) — accepted because this machine was offered from its own screen, "+
 			"where the person is present; a hosted machine would refuse",
-			req.OwnerAID, c.Designated, c.Asked, c.Held, c.Empty, c.Behind, c.Failed)
+			req.OwnerAID, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
 	}
 	return nil
 }

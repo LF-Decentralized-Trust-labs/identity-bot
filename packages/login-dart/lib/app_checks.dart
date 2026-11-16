@@ -181,8 +181,8 @@ class AppLink {
       throw const TrustRefused(
           'the link names no latest key log event the utility app\'s relay identifier must have reached');
     }
-    if (!RegExp(r'^https://').hasMatch(api) &&
-        !RegExp(r'^http://(127\.0\.0\.1|localhost)[:/]').hasMatch(api)) {
+    final backEnd = readLinkBackEnd(api);
+    if (backEnd == null) {
       throw const TrustRefused('the link names no back end to sign in at');
     }
     final iatText = p['iat'] ?? '';
@@ -201,9 +201,82 @@ class AppLink {
       throw const TrustRefused(
           'this link is dated later than this device\'s clock says it is now: set the date and time on this device, or ask the utility app\'s owner for a new link');
     }
-    return AppLink(p['aid']!, p['kel']!, rid,
-        api.replaceAll(RegExp(r'/+$'), ''), seal, min, wit);
+    return AppLink(p['aid']!, p['kel']!, rid, backEnd, seal, min, wit);
   }
+}
+
+// ---- a back end's address ----------------------------------------------------
+
+const _reservedSuffixes = [
+  '.local',
+  '.localhost',
+  '.internal',
+  '.lan',
+  '.home.arpa',
+  '.corp',
+  '.intranet',
+  '.localdomain'
+];
+
+/// A lower-case DNS name of at least two labels, whose last label is not all
+/// digits (so not an IPv4 address) and which no suffix reserved for a private
+/// network ends.
+bool _aPublicName(String host) {
+  if (host.isEmpty || host.length > 253 || !host.contains('.')) return false;
+  final labels = host.split('.');
+  final label = RegExp(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$');
+  if (!labels.every(label.hasMatch)) return false;
+  // No real top-level name starts with a digit; a last label that does (all
+  // digits, or 0x and hex digits) is read as an IPv4 address by browsers.
+  if (!RegExp(r'^[a-z]').hasMatch(labels.last)) return false;
+  return !_reservedSuffixes
+      .any((s) => host.endsWith(s) || host == s.substring(1));
+}
+
+bool _aPort(String p) =>
+    RegExp(r'^[1-9][0-9]{0,4}$').hasMatch(p) && int.parse(p) <= 65535;
+
+/// Whether [api] is an address a utility app's back end may be named by, as
+/// the Identity Agent core accepts it (identity-bot
+/// `identity-agent-core/backendaddr`; the cases they agree on are in
+/// `packages/login-verify/test-vectors/back-end-addresses.json`): https and a
+/// public name in lower case (no IP address, no name with no dot, none under a
+/// private suffix), a port that is one, and an optional path with no dot or
+/// empty segment, no query, fragment, user name or trailing slash. A front end
+/// has no build mode, so it also accepts http on this machine, for development.
+bool backEndAddress(String api) {
+  if (api.isEmpty || api.length > 2048) return false;
+  final m = RegExp(r'^(https|http)://([^/]*)(/.*)?$', dotAll: true).firstMatch(api);
+  if (m == null) return false;
+  final scheme = m.group(1)!;
+  final hostport = m.group(2)!;
+  final path = m.group(3) ?? '';
+  final i = hostport.indexOf(':');
+  final host = i < 0 ? hostport : hostport.substring(0, i);
+  if (i >= 0 && !_aPort(hostport.substring(i + 1))) return false;
+  if (scheme == 'http'
+      ? host != '127.0.0.1' && host != 'localhost'
+      : !_aPublicName(host)) {
+    return false;
+  }
+  if (path.isEmpty) return true;
+  if (path.endsWith('/') ||
+      !RegExp(r"^(/([A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})*)+$")
+          .hasMatch(path)) {
+    return false;
+  }
+  return path.substring(1).split('/').every((seg) {
+    final s = seg.replaceAll(RegExp('%2e', caseSensitive: false), '.');
+    return seg != '' && s != '.' && s != '..';
+  });
+}
+
+/// What a link's `api` is read as: trailing slashes dropped, then the address
+/// rule applied. Null for a link that names none, or none a back end may be
+/// named by.
+String? readLinkBackEnd(String api) {
+  final stripped = api.replaceAll(RegExp(r'/+$'), '');
+  return backEndAddress(stripped) ? stripped : null;
 }
 
 // ---- the app's key log -----------------------------------------------------
@@ -274,7 +347,7 @@ Uint8List checkKeyLog(String aid, String encoded) {
 
 /// The challenge the signed text says, or a [TrustRefused]: signed by the app's
 /// key, for the app, naming this device's own key and the relay identifier [rid]
-/// the link names, not lapsed. [body] is the
+/// and back end [api] the link names, not lapsed. [body] is the
 /// exact text the signature covers; it is read only after the signature has
 /// been checked.
 Map<String, dynamic> checkChallenge({
@@ -285,6 +358,7 @@ Map<String, dynamic> checkChallenge({
   required Object? pointer,
   required String ownThumbprint,
   required String rid,
+  required String api,
   required DateTime now,
   String frontEnd = 'browser',
 }) {
@@ -318,6 +392,11 @@ Map<String, dynamic> checkChallenge({
   // app's Identity Agent signed this for, and one that names none is refused the same.
   if (c['rid'] != rid) {
     fail('the challenge is signed for another relay identifier than the link names');
+  }
+  // The back end the link names is signed beside it (Amendment 8); one that names
+  // none is refused the same.
+  if (c['api'] != api) {
+    fail('the challenge is signed for another back end than the link names');
   }
   // The kind is in the signed body when the Identity Agent names one (ADR-072
   // Amendment 2): a challenge naming another kind than ours is not ours.
