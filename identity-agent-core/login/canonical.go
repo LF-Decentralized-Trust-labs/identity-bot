@@ -56,6 +56,10 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 	if c.FrontEnd != "" {
 		parts = append(parts, jsonField("front_end", c.FrontEnd))
 	}
+	// Omitted when empty, so a challenge for anything but a utility app keeps its form.
+	if c.RelayID != "" {
+		parts = append(parts, jsonField("rid", c.RelayID))
+	}
 	parts = append(parts,
 		jsonField("callback_url", nfc(c.CallbackURL)),
 		jsonField("session_token", c.SessionToken),

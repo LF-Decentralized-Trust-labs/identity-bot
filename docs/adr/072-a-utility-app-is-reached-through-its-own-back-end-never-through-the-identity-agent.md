@@ -156,12 +156,13 @@ sequenceDiagram
 - the owner's setting of which front ends an app offers may be used through, and its enforcement when a sign-in starts and again when it is approved (Amendment 2)
 - an installed front end's hardware key, proved by a hardware attestation the core verifies, and its app-key grant, which lasts until it is ended and which the person and the owner can end (Amendment 3)
 - sealed front-end traffic: the format, test vectors, the page's side in TypeScript and in Dart (`packages/login-dart`, which every installed front end uses), and the Go side (Amendment 4)
-- revocation of an installed app's grant pushed to the app's back end, signed with the app's key (Amendment 9)
+- revocation of an installed app's grant pushed to the app's back end, signed with the app's key (Amendment 10)
 - a relay identifier's witnesses, the owner's declaration that makes a witness hold its log, and the page's and Dart's reading of the log from them, with test vectors (Amendment 5)
+- the relay identifier in a utility app's sign-in challenge, the owner's record of it, and the page's and Dart's check of it against the link, with test vectors (Amendment 7)
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
-- an installed front end's hardware key proved on **Windows**: the credential round trip is built (Amendment 7) and Microsoft's trusted TPM root list is pinned (Amendment 7, 2026-11-14); no real TPM has been tried
+- an installed front end's hardware key proved on **Windows**: the credential round trip is built (Amendment 8) and Microsoft's trusted TPM root list is pinned (Amendment 8, 2026-11-14); no real TPM has been tried
 - an app claiming its own relay name
 - the back end carrying a front end's signed request to the core
 - an app's approval request for one action
@@ -312,7 +313,22 @@ Section 2 step 2 had the link name the app. A page took the app's identifier, th
 
 The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedApp`, `pinAppLink`, `readPinnedAppLink`, `pinnedAppLink`). The test is `a-page-signs-in-only-to-the-app-it-is-pinned-to.test.mjs`.
 
-## Amendment 7 (2026-11-14): a TPM's credential round trip is built, and no manufacturer is trusted yet
+## Amendment 7 (2026-11-13): the sign-in challenge is signed for the app's relay identifier
+
+Amendment 6 pins a hosted page to its app, so a crafted link cannot move that page to another relay identifier or back end. A front end with no pin takes the link as it comes: every installed front end, and any page built on `readAppLink` alone. Nothing the Identity Agent signed named the relay identifier, so a link carrying the real identifier (`aid`) and key log (`kel`) but another relay identifier (`rid`) and back end (`api`) let such a front end's sign-in through: the other back end passed the challenge to the real Identity Agent and back, the person approved it, and the front end then sealed every later call for the link's relay identifier and took every answer signed by it. Whoever wrote the link read and answered all of it.
+
+**The challenge names the relay identifier.** The owner's Identity Agent records a utility app's relay identifier (`PUT /api/assets/{id}/relay-id`, owner only, or `asset.Handler.SetRelayID` from whatever learns it) and puts it in the signed challenge as `rid`, after `front_end` and before `callback_url`. It may be recorded again, as an app given a new relay identifier needs. It is left out when none is recorded, so a challenge for anything else keeps its form. The Go and TypeScript canonical forms and `core-canonical-and-spellings.json` carry it.
+
+**A front end requires it to equal the link's.** `checkAppChallenge` (`packages/login-web/src/app.ts`) and `checkChallenge` (`packages/login-dart/lib/app_checks.dart`) take the relay identifier the link names and refuse a challenge whose `rid` is another, or is missing. A missing one is refused because a challenge that names none says nothing about which relay identifier the app stands behind: taking it would leave every app whose identifier is not recorded open to the link above. `app-checks.json` holds the cases, run in TypeScript and Dart alike. On a pinned page the check repeats what the pin already holds; it is kept there so the page and an installed front end run one check.
+
+**Rollout.** Two older parties break, in this order, and the order of rollout follows from them:
+
+1. **The person's Identity Agent.** It reads a challenge strictly. One built before this change refuses a challenge carrying `rid` as unreadable, so the sign-in is refused. A utility app's owner therefore records relay identifiers only once the Identity Agents of the people who sign in to it understand `rid`.
+2. **The front end.** One built on this change refuses a challenge with no `rid`, so it is shipped only once its app's owner records the relay identifier. A front end built before this change ignores `rid` and goes on working, unprotected, until it is updated.
+
+**What this does not close.** The link's `api` is still not signed. While the front end holds the relay identifier's current key log, that is enough: every answer is checked against that log (Amendments 1 and 4) and every call is sealed to the key it vouches for, so a back end at another address can carry the traffic or drop it but cannot read it or answer it. It is not enough when the front end takes an older log from the link: a holder of a key the identifier has rotated away from, such as a removed machine, can write a link with an older `min` and no `wit`, and a front end that has never seen a newer log takes its sealing key and its answers. That is the open case Amendment 5 lists as "a link that names no witness", now the way in for a back end at another address; the challenge naming the relay identifier does not close it. A relay identifier that is replaced is safe only from when the new one is recorded: whatever records it must do so in the same step as the replacement, or a link naming the old one still matches the challenge until it does.
+
+## Amendment 8 (2026-11-14): a TPM's credential round trip is built, and no manufacturer is trusted yet
 
 *Amended 2026-11-14. This builds the core's half of the TPM credential exchange that Amendment 3 said was not built. Edits above: one line of "Not built". Nothing else above is changed.*
 
@@ -326,19 +342,19 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 
 **A TPM proves the key and not the program.** As Amendment 3 says, the owner must have accepted `tpm_keys` for the asset. On Windows the key's blob is kept under the person's profile, encrypted to them with DPAPI, and a program running as the same person can ask the TPM to sign with it.
 
-## Amendment 8 (2026-11-14): an app's back end serves an installed front end
+## Amendment 9 (2026-11-14): an app's back end serves an installed front end
 
 *Amended 2026-11-14. This builds the back-end half Amendment 3 left to the hosts: the routes an installed front end calls, and what the back end keeps for its grant. Nothing above is changed.*
 
-**Routes.** An installed front end signs in through the routes a page does, with three more, all sealed like the rest. `POST /signin/installed-key/ask` returns the ask its hardware makes evidence for (`{ask, asset_id, challenge, expires}`); `POST /signin/installed-key/credential` returns, for a TPM, the credential its TPM must open (Amendment 7), or the Identity Agent's own words for why not; `POST /signin/session` takes `frontEnd: installed_app` with the hardware's `proof`, which the back end passes on unread. A start naming the kind with no proof, a browser's start carrying one, an ask this back end did not give, and a platform that cannot vouch for a key are refused before the Identity Agent is asked. The Identity Agent's own reason for refusing the evidence reaches the front end.
+**Routes.** An installed front end signs in through the routes a page does, with three more, all sealed like the rest. `POST /signin/installed-key/ask` returns the ask its hardware makes evidence for (`{ask, asset_id, challenge, expires}`); `POST /signin/installed-key/credential` returns, for a TPM, the credential its TPM must open (Amendment 8), or the Identity Agent's own words for why not; `POST /signin/session` takes `frontEnd: installed_app` with the hardware's `proof`, which the back end passes on unread. A start naming the kind with no proof, a browser's start carrying one, an ask this back end did not give, and a platform that cannot vouch for a key are refused before the Identity Agent is asked. The Identity Agent's own reason for refusing the evidence reaches the front end.
 
 **What the back end keeps.** A grant is the session for an installed key, and it has no lapse: it ends when the person signs out (and the back end tells the Identity Agent so the key's grant there ends too), when the person is no longer let in, or when the owner switches the installed front end off, which the back end finds at its standing check (once a minute) and not at each call. An Apple key proves each call by an App Attest assertion over the proof's hash, checked for the owner's application identifier, which the back end learns with the ask; a plain signature is never read as one's, and no other platform's proof is an assertion. Grants are kept across a restart as they were.
 
 **Not built.** The Identity Agent does not tell the back end when the owner or the person ends a grant there: the back end finds out at its standing check, which asks whether the key still speaks for the person (within a minute), not at each call. Revocation push for it remains Amendment 3's "not settled". Nothing here has run against a real device or a real TPM manufacturer's chain.
 
-## Amendment 9 (2026-11-15): the core tells an app's back end when an installed app's grant ends
+## Amendment 10 (2026-11-15): the core tells an app's back end when an installed app's grant ends
 
-*Amended 2026-11-15. This builds the push section 6 describes, for an installed app's grant; Amendments 3 and 8 listed it as not built. Edits above, each made by this amendment: one line of "What is built" added, and "revocation pushed to the app" removed from "Not built". Nothing else above is changed.*
+*Amended 2026-11-15. This builds the push section 6 describes, for an installed app's grant; Amendments 3 and 9 listed it as not built. Edits above, each made by this amendment: one line of "What is built" added, and "revocation pushed to the app" removed from "Not built". Nothing else above is changed.*
 
 **What is pushed, and when.** When an installed app's grant ends by any road (the person ends it, the owner ends it, the owner switches the installed front end off, a member is removed, or the app's own back end signs the person out), the core tells the app's back end, after the grant is already gone from the core. The back end ends every session and app-key grant it holds for that person at that key at once, instead of at its next standing check.
 
@@ -346,7 +362,7 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 
 **What is sent.** One JSON body: `v`, `asset` (the app's identifier), `key` (the front end key's thumbprint), `person` (as the app knows them), `issued` (UTC, to the second) and `signature`, Ed25519 by the app's asset key over `identity-agent grant-ended v1`, then the four fields, one to a line. The key is the one that already signs the app's challenges, which the app's back end holds the identifier of. The back end refuses a notice for another asset, one it cannot check, one with a field it does not define, and one dated more than five minutes from its clock. A notice is signed over what it names and when, not over one grant, so within five minutes a relay that kept one could post it again. The back end therefore ends only the sessions it began at or before the notice's `issued` time, never one begun after it, so a repeated or late notice cannot end the session of a person who signed in again. `GrantEndedHandler` hands the back end that time as the cutoff. The core signs one notice, dated when the grant ended, and sends that same notice on every attempt, so a late retry cannot reach a session begun after the grant ended; it also sends no retry for a key that has been given a grant again, which covers a sign-in within the same second. Ending is idempotent. The shape and the check are `packages/login-go/grant_ended.go` (`VerifyGrantEnded`, `GrantEndedHandler`), and the core's signer and login-go's check both run `packages/login-web/test-vectors/grant-ended.json`.
 
-**What the back end may rely on, and not.** The notice is sent by the core once, then again after 2, 10 and 60 seconds if the back end cannot take it (a 5xx, a timeout or no answer; the retries are kept in memory, so a restart of the core drops them); a 4xx other than 408 and 429 is the back end's refusal and is not repeated, and is logged by the core. A notice can be lost, so the back end's standing check (Amendment 8) stays: the core's refusal at each use is the guarantee, and the push is what makes the back end's own sessions end at once when it is reachable.
+**What the back end may rely on, and not.** The notice is sent by the core once, then again after 2, 10 and 60 seconds if the back end cannot take it (a 5xx, a timeout or no answer; the retries are kept in memory, so a restart of the core drops them); a 4xx other than 408 and 429 is the back end's refusal and is not repeated, and is logged by the core. A notice can be lost, so the back end's standing check (Amendment 9) stays: the core's refusal at each use is the guarantee, and the push is what makes the back end's own sessions end at once when it is reachable.
 
 **What the relay can see.** That a notice was posted to the app and when; the body is signed and not sealed, so the relay can read the key's thumbprint and the person's pairwise identifier. A relay already sees which app a person reaches and when; it learns here that a grant ended. Sealing the notice to the back end's sealing key (Amendment 4) needs the core to know that key, which it does not today.
 
@@ -356,9 +372,9 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 - A grant recorded before this had no address and is never pushed; it ends at the standing check as before.
 - Nothing here has run against a real device, a real relay operator, or an installed front end.
 
-## Amendment 10 (2026-11-15): a utility app's owner may opt in to virtual and cloud TPMs
+## Amendment 11 (2026-11-15): a utility app's owner may opt in to virtual and cloud TPMs
 
-*Amended 2026-11-15. Amendment 7 pins Microsoft's trusted TPM root list for physical chips only and refuses a virtual or cloud TPM by name. This adds the owner's separate opt-in for one. Nothing above is changed for an owner who does not make it.*
+*Amended 2026-11-15. Amendment 8 pins Microsoft's trusted TPM root list for physical chips only and refuses a virtual or cloud TPM by name. This adds the owner's separate opt-in for one. Nothing above is changed for an owner who does not make it.*
 
 **A declaration of its own.** `installed_app_identity` gains `virtual_tpm_keys` (`asset.InstalledAppIdentity.VirtualTPMKeys`). It is never implied by `tpm_keys`, and it is accepted only together with it: a virtual TPM is accepted only where a physical one is, so naming `virtual_tpm_keys` alone is refused when the identity is saved, and a stored identity that somehow names only it accepts no TPM. Where the owner has made both declarations, the Identity Agent accepts a key whose endorsement key is certified by an issuer pinned as virtual (`tpmvirtual`), and only through that pinned issuer directly above the leaf: an issuer a front end sends is trusted as neither class. Where the owner has not, the refusal is as before.
 
@@ -368,4 +384,4 @@ The TypeScript is `packages/login-web/src/app.ts` (`readPinnedApp`, `loadPinnedA
 
 **The credential exchange and the proof are asked alike.** `MakeTPMCredentialClasses` and `VerifyTPMKeyCertifyClasses` take the owner's answer as a parameter, and `MakeTPMCredential` and `VerifyTPMKeyCertify` stay physical-only, so a caller that did not ask for virtual TPMs cannot get them; an opted-in sign-in is not stopped at the exchange's first step, and a refused one is stopped before the TPM is asked to do anything.
 
-**Not changed.** A TPM, virtual or physical, proves the key and not the program (Amendment 7). A virtual TPM adds that its host can read the key. No real virtual machine's TPM has been seen by this code: the tests use issuers made for them, and a test checks that every issuer pinned as virtual chains to a pinned root, so an owner who opts in does not meet "no chain".
+**Not changed.** A TPM, virtual or physical, proves the key and not the program (Amendment 8). A virtual TPM adds that its host can read the key. No real virtual machine's TPM has been seen by this code: the tests use issuers made for them, and a test checks that every issuer pinned as virtual chains to a pinned root, so an owner who opts in does not meet "no chain".

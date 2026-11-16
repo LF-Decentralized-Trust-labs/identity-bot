@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"identity-agent-core/enrolsecret"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -469,6 +470,73 @@ func (h *Handler) HandleSetOfferedFrontEnds(w http.ResponseWriter, r *http.Reque
 	}
 	h.writeJSON(w, frontEndsOf(a), http.StatusOK)
 }
+
+// HandleSetRelayID records a utility app's relay identifier, which its sign-in
+// challenges then carry, signed (ADR-072 Amendment 7). PUT /api/assets/{id}/relay-id
+// {"relay_id": "E…"}. Owner only. The record itself is SetRelayID, which an add-on
+// that learns the identifier calls directly.
+func (h *Handler) HandleSetRelayID(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RelayID string `json:"relay_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeJSON(w, map[string]string{"error": "bad request: relay_id is required, an identifier of 44 characters"}, http.StatusBadRequest)
+		return
+	}
+	a, err := h.SetRelayID(chi.URLParam(r, "id"), body.RelayID)
+	switch {
+	case errors.Is(err, ErrRelayIDShape):
+		h.writeJSON(w, map[string]string{"error": "bad request: relay_id is required, an identifier of 44 characters"}, http.StatusBadRequest)
+	case errors.Is(err, ErrNotFound):
+		h.writeJSON(w, map[string]string{"error": "not found"}, http.StatusNotFound)
+	case errors.Is(err, ErrNotAnApp):
+		h.writeJSON(w, map[string]string{"error": "only a utility app has a relay identifier"}, http.StatusBadRequest)
+	case err != nil:
+		h.writeJSON(w, map[string]string{"error": "the relay identifier could not be saved"}, http.StatusInternalServerError)
+	default:
+		h.writeJSON(w, map[string]string{"relay_id": a.RelayID}, http.StatusOK)
+	}
+}
+
+var (
+	// ErrRelayIDShape is a relay identifier that is not 44 characters of the identifier alphabet.
+	ErrRelayIDShape = errors.New("a relay identifier is 44 characters")
+	// ErrNotFound is an asset that is not held.
+	ErrNotFound = errors.New("not found")
+	// ErrNotAnApp is an asset that is not a utility app.
+	ErrNotAnApp = errors.New("only a utility app has a relay identifier")
+)
+
+// SetRelayID records the relay identifier of the utility app assetID. It may be set
+// again, as a utility app that is replaced is given a new identifier; challenges
+// already issued keep the old one. The route and an add-on both come here, so the
+// shape check and the write are in one place.
+func (h *Handler) SetRelayID(assetID, relayID string) (*Asset, error) {
+	if !relayIDShape.MatchString(relayID) {
+		return nil, ErrRelayIDShape
+	}
+	frontEndsMu.Lock()
+	defer frontEndsMu.Unlock()
+	a, found, err := h.Store.GetAsset(assetID)
+	switch {
+	case err != nil:
+		return nil, err
+	case !found:
+		return nil, ErrNotFound
+	case a.AssetType != "app":
+		return nil, ErrNotAnApp
+	}
+	a.RelayID = relayID
+	a.UpdatedAt = time.Now().UTC()
+	if err := h.Store.UpsertAsset(a); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// relayIDShape is a self-addressing identifier as written in this system: 44
+// characters of the URL-safe alphabet, the first a derivation code.
+var relayIDShape = regexp.MustCompile(`^[A-Z][A-Za-z0-9_-]{43}$`)
 
 func (h *Handler) appForFrontEnds(id string) (a Asset, ok bool, status int, msg string) {
 	a, found, err := h.Store.GetAsset(id)
