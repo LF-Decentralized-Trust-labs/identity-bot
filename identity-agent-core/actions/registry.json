@@ -121,6 +121,7 @@
         "site_oobi": { "type": "string", "required": true, "kind": "open" },
         "site_name": { "type": "string", "required": false, "kind": "open" },
         "record_site_aid": { "type": "string", "required": true, "kind": "open" },
+        "record_site_oobi": { "type": "string", "required": true, "kind": "open" },
         "role": { "type": "string", "required": true, "kind": "open" },
         "invite_token": { "type": "string", "required": true, "kind": "open" }
       },

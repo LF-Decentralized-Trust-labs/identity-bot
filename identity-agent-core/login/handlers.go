@@ -236,6 +236,24 @@ func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle, site VerifiedI
 	return nil
 }
 
+// SiteIsDelegatedBy says whether siteAID is the organisation's own identifier or a site the
+// organisation delegated, read from the site's own verified log and the organisation's
+// (verifyDelegationAnchor). It is how a person's Identity Agent knows that an identifier an
+// organisation names as one of its sites is one, before anything is said about it.
+func (h *Handler) SiteIsDelegatedBy(siteAID, siteOOBI, orgAID, orgOOBI string) error {
+	if siteAID == "" || orgAID == "" {
+		return fmt.Errorf("a site and an organisation are both needed")
+	}
+	if siteAID == orgAID {
+		return nil
+	}
+	site, err := h.resolveSite(siteOOBI, siteAID)
+	if err != nil {
+		return fmt.Errorf("the site's log does not establish it: %w", err)
+	}
+	return h.verifyDelegationAnchor(&ChallengeBundle{SiteAID: siteAID, RelationshipAnchorAID: orgAID, RelationshipAnchorOOBI: orgOOBI}, site)
+}
+
 // verifyChallengeSig checks the challenge against the site's key from its own
 // verified log, and returns that verified identity so nothing about the site
 // is fetched and read a second time.

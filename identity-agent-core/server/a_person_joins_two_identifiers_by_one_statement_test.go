@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,7 @@ type joinWorld struct {
 	orgURL string
 	hits   *atomic.Int32 // what reached the organisation's redeem route
 	people []*CoreServer
+	runs   map[string]bool // the sites the organisation delegated, which a test has no logs to show
 }
 
 func newJoinWorld(t *testing.T) *joinWorld {
@@ -34,6 +36,7 @@ func newJoinWorld(t *testing.T) *joinWorld {
 	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
 	w := &joinWorld{t: t, hits: new(atomic.Int32)}
 	w.org = agentWithDerivedIdentity(t)
+	w.runs = map[string]bool{"EOURS": true}
 	st, err := asset.NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +67,12 @@ func (w *joinWorld) aPerson(sites ...string) *CoreServer {
 			w.t.Fatal(err)
 		}
 	}
+	p.siteIsDelegatedBy = func(site, _, org, _ string) error {
+		if site == org || w.runs[site] {
+			return nil
+		}
+		return errors.New("not delegated")
+	}
 	w.people = append(w.people, p)
 	return p
 }
@@ -79,6 +88,7 @@ func (w *joinWorld) identifierOf(p *CoreServer, site string) string {
 // anInvite is what the organisation holds for an invite it made, and the Ask that carries it.
 func (w *joinWorld) anInvite(token, role, site, recordSite string, record ...string) (askBytes []byte) {
 	w.t.Helper()
+	w.runs[site], w.runs[recordSite] = true, true
 	err := w.org.assetHandler.Store.CreateEmployeeInvite(asset.EmployeeInvite{
 		Token: token, Purpose: asset.PurposeBinding, BindRole: role, MaxUses: 1, SiteAID: site, RecordIdentifiers: record,
 	})
@@ -86,7 +96,7 @@ func (w *joinWorld) anInvite(token, role, site, recordSite string, record ...str
 		w.t.Fatal(err)
 	}
 	b, _ := json.Marshal(bindSitePayload{OrgName: "Org", OrgAID: "EOURS", OrgOOBI: w.orgURL, SiteAID: site, SiteOOBI: "http://127.0.0.1:1/oobi/" + site,
-		SiteName: "Notes", RecordSiteAID: recordSite, Role: role, InviteToken: token})
+		SiteName: "Notes", RecordSiteOOBI: "http://127.0.0.1:1/oobi/" + recordSite, RecordSiteAID: recordSite, Role: role, InviteToken: token})
 	return b
 }
 
@@ -365,5 +375,58 @@ func TestTheOwnersJoinNeedsTheOwnersOwnKeyAndNobodyElseCanTakeTheRole(t *testing
 	}
 	if !found {
 		t.Fatalf("%v", w.org.Bindings())
+	}
+}
+
+// An organisation may name only its own sites. Otherwise it could name, as the place the record's
+// identifier is from, any site the person holds an identifier at, and the statement would hand it that one.
+func TestAPersonIsNeverAskedToJoinFromASiteTheOrganisationDoesNotRun(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("EBANK")
+	bank := w.identifierOf(p, "EBANK")
+	ask := w.anInvite("tok1", binding.RolePerson, "ENOTES", "EBANK", bank)
+	delete(w.runs, "EBANK") // the organisation does not run the bank
+	if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: 5}); err == nil || !strings.Contains(err.Error(), "not one this organization runs") {
+		t.Fatalf("shown a request that names somebody else's site as the organisation's: %v", err)
+	}
+	if _, err := w.approve(p, ask, true); err == nil {
+		t.Fatal("signed with an identifier at a site the organisation does not run")
+	}
+	if w.hits.Load() != 0 {
+		t.Fatal("the person's identifier at another site was sent")
+	}
+	if _, ok := p.loginHandler.Store.Get("ENOTES"); ok {
+		t.Fatal("an identifier was made")
+	}
+	// And the new side: a site that is not the organisation's is not one an identifier is made at.
+	w.runs["EBANK"] = true
+	ask = w.anInvite("tok2", binding.RolePerson, "EBANK2", "EBANK", bank)
+	delete(w.runs, "EBANK2")
+	if _, err := w.approve(p, ask, true); err == nil || !strings.Contains(err.Error(), "site is not one") {
+		t.Fatalf("an identifier was made at a site the organisation does not run: %v", err)
+	}
+	// With no stand-in, the real check reads the site's own log, and a site that serves none is refused.
+	p.siteIsDelegatedBy = nil
+	if _, err := w.approve(p, w.anInvite("tok3", binding.RolePerson, "ENOTES3", "EBANK", bank), true); err == nil {
+		t.Fatal("a site that shows no log of being delegated was taken for the organisation's")
+	}
+}
+
+// A person's Identity Agent holds no organisation's store, and still serves the list of what they joined.
+func TestAPersonsIdentityAgentServesWhatTheyJoinedWithNoOrganisationStore(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("ECHAT")
+	if p.assetHandler != nil {
+		t.Fatal("the person's Identity Agent was given an organisation's store")
+	}
+	if _, err := w.approve(p, w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", w.identifierOf(p, "ECHAT")), true); err != nil {
+		t.Fatal(err)
+	}
+	r := chi.NewRouter()
+	r.Route("/api", func(r chi.Router) { p.mountBindingRoutes(r) })
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/login/joined", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"role":"person"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }

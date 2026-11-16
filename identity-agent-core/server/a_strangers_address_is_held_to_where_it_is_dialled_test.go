@@ -59,6 +59,7 @@ func TestAnAddressAStrangerChoosesNeverReachesAnInternalService(t *testing.T) {
 
 	calls := map[string]func(){
 		"the binding invite's redeem": func() {
+			s.siteIsDelegatedBy = func(_, _, _, _ string) error { return nil } // reach the redeem, which is what is under test
 			_, _ = bindSiteAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: bind, T: 5}, ScanDecision{Approved: true})
 		},
 		"the Ask fetch": func() { _, _ = s.buildAskContext(name + "/i/tok") },

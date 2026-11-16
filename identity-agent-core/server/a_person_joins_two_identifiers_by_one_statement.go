@@ -41,8 +41,10 @@ type bindSitePayload struct {
 	SiteOOBI      string `json:"site_oobi"`
 	SiteName      string `json:"site_name"`
 	RecordSiteAID string `json:"record_site_aid"`
-	Role          string `json:"role"`
-	InviteToken   string `json:"invite_token"`
+	// RecordSiteOOBI is where the log of the record's site is introduced.
+	RecordSiteOOBI string `json:"record_site_oobi"`
+	Role           string `json:"role"`
+	InviteToken    string `json:"invite_token"`
 }
 
 func (p bindSitePayload) read(ctx AskContext) (bindSitePayload, error) {
@@ -72,6 +74,9 @@ func (bindSiteAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error
 	if _, ok := s.loginHandler.Store.Get(p.RecordSiteAID); !ok {
 		return GenericPreview{}, errors.New("you have no identifier at the place this joins you from, so there is nothing to join this to")
 	}
+	if err := s.bothSitesAreTheOrganisations(p); err != nil {
+		return GenericPreview{}, err
+	}
 	org := firstOf(p.OrgName, p.OrgAID)
 	site := firstOf(p.SiteName, p.SiteAID)
 	return GenericPreview{
@@ -80,6 +85,23 @@ func (bindSiteAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error
 		Details: []PreviewDetail{{Label: "Organization", Value: org}, {Label: "Site", Value: site}},
 		Warning: org + " will know that you here and you where you already deal with them are the same person. This cannot be undone except by leaving.",
 	}, nil
+}
+
+// bothSitesAreTheOrganisations refuses a request that names, as the organisation's, an identifier
+// that is not. Without it an organisation could name any site the person holds an identifier at
+// as the place the record's identifier is from, and the statement would hand that identifier to it.
+func (s *CoreServer) bothSitesAreTheOrganisations(p bindSitePayload) error {
+	check := s.siteIsDelegatedBy
+	if check == nil {
+		check = s.loginHandler.SiteIsDelegatedBy
+	}
+	if err := check(p.RecordSiteAID, p.RecordSiteOOBI, p.OrgAID, p.OrgOOBI); err != nil {
+		return fmt.Errorf("the place this joins you from is not one this organization runs: %w", err)
+	}
+	if err := check(p.SiteAID, p.SiteOOBI, p.OrgAID, p.OrgOOBI); err != nil {
+		return fmt.Errorf("the site is not one this organization runs: %w", err)
+	}
+	return nil
 }
 
 func firstOf(a, b string) string {
@@ -100,6 +122,9 @@ func (bindSiteAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[s
 	}
 	if s.loginHandler == nil {
 		return nil, errors.New("joining a site needs the login engine to derive the relationship")
+	}
+	if err := s.bothSitesAreTheOrganisations(p); err != nil {
+		return nil, err
 	}
 	// The record's identifier must be one this person already holds. It is looked up
 	// and never made: making one would sign for an identifier nobody had.
@@ -188,6 +213,8 @@ type bindingRedeem struct {
 }
 
 func (s *CoreServer) mountBindingRoutes(r chi.Router) {
+	// The list a person's Identity Agent serves is theirs, and they hold no organisation's store.
+	r.Get("/login/joined", s.handleListWhatIJoined)
 	if s.assetHandler == nil {
 		return
 	}
@@ -199,7 +226,6 @@ func (s *CoreServer) mountBindingRoutes(r chi.Router) {
 		// single use, and what it takes is a statement only the person's two keys can make.
 		r.Post("/invites/{token}/redeem", s.handleRedeemBindingInvite)
 	})
-	r.Get("/login/joined", s.handleListWhatIJoined)
 }
 
 type bindingInviteRequest struct {
@@ -207,6 +233,7 @@ type bindingInviteRequest struct {
 	SiteOOBI          string   `json:"site_oobi"`
 	SiteName          string   `json:"site_name"`
 	RecordSiteAID     string   `json:"record_site_aid"`
+	RecordSiteOOBI    string   `json:"record_site_oobi"`
 	RecordIdentifiers []string `json:"record_identifiers"`
 	Role              string   `json:"role"`
 }
@@ -278,7 +305,7 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 		"v": "ASK1", "t": 5, "org_name": orgName, "org_aid": id.AID,
 		"org_oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID),
 		"site_aid": req.SiteAID, "site_oobi": req.SiteOOBI, "site_name": req.SiteName,
-		"record_site_aid": req.RecordSiteAID, "role": req.Role, "invite_token": inv.Token,
+		"record_site_aid": req.RecordSiteAID, "record_site_oobi": req.RecordSiteOOBI, "role": req.Role, "invite_token": inv.Token,
 	})
 	sig, serr := login.SignAsk(ask, seed)
 	if serr != nil {
