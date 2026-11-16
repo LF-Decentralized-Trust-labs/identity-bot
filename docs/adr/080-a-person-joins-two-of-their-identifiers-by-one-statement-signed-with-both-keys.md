@@ -1,0 +1,42 @@
+# ADR-080: A Person Joins Two of Their Identifiers to One Record by One Statement Signed With Both Keys
+
+**Status:** Proposed (2026-11-16)
+**Date:** 2026-11-16
+**Deciders:** to be decided; the statement, the Ask and the two routes below become public wire once this ships, and another party checks the statement
+**Builds on:** ADR-045 (an asset has an identity and a grant), ADR-072 (a utility app is reached through its own back end), ADR-077 (a conversation's entries are checked by a bundle)
+
+---
+
+## Context
+
+A person has a different identifier at every site they deal with, so that no two sites can tell they are the same person. That is the point of it, and it is also a cost. A site that has to keep something under one record for a person who reaches it by more than one identifier (a utility app that keeps notes about a person, where the person is known to the organisation by one identifier and signs in to the utility app by another) has no way to know they are the same person. Guessing from timing, or from an identifier the site never saw, is not a link. It has to be something the person says.
+
+Saying it removes the unlinkability, toward that organisation, for those two identifiers. So the person has to be asked, and has to be shown what it does, and has to be the only one who can say it. Two failures have to be closed:
+
+- Someone who holds only the **new** identifier must not be able to have it joined to a record that is not theirs: they would then read what is filed under that record.
+- Someone who holds only the **record's** identifier must not be able to join another person's identifier to it for the same reason in reverse.
+
+So the statement is signed by **both** keys, over the same bytes.
+
+## Decision
+
+1. **One statement, both keys.** The statement is JSON with these fields, in this order, no spaces: `v` (`BIND1`), `org` (the identifier of the organisation that asked), `site` (the site the new identifier is the person's at), `record` (an identifier the record already holds, or the one it starts from), `new` (the identifier being joined), `invite` (the digest of the single-use invite it answers, never the code) and `role` (`person`, or `owner` for the one who owns the organisation). Both the key of `record` and the key of `new` sign exactly those bytes. A link is the statement, the two keys (qb64) and the two signatures (qb64, code `0B`).
+2. **What a checker refuses.** A link that is not signed by both keys; one in which the same signature stands for both; one whose bytes were changed after signing; one that joins an identifier to itself; one naming an organisation, site or invite other than the one the checker expects; one that omits a field; and one in which either key is not a current key of the identifier it is named for, read from that identifier's own key log (the key log travels with the statement, as it does with a sign-in: `login.KeyFromKeyLog`). The checker is told what to expect; the link never says what to expect.
+3. **Any identifier already in the record may sign for it.** A person who has already joined an identifier to a record may later sign with that identifier, instead of the one the record started from, as `record`. The organisation accepts a link only if `record` is one of the identifiers its invite names, or is already joined (directly or through others) to one of them. Joining is read in either direction, so a record that was joined to another with both keys is one record.
+4. **Two records of one person become one by the same statement.** Where `new` is already part of another record, the link is the person saying the two are one, and both keys signed it. Nothing else merges records.
+5. **The invite is one more Ask type.** `t=5`, `bind_site`, minted by the organisation, carries the organisation, the site, the place the record's identifier is from (`record_site_aid`), the role and the invite code. The person's Identity Agent derives its identifier for the site, signs with that key and with the key it already holds for `record_site_aid`, and sends the link to `POST /api/binding/invites/{code}/redeem` on the organisation. It **never makes** an identifier for `record_site_aid`: one it does not hold is refused before the person is asked, and nothing is signed for it.
+6. **The person approves.** The consent screen says what it does: that the organisation will know the person at the site and where they already deal with it are the same person, and that this cannot be undone except by leaving. "Not now" signs nothing and sends nothing, and the person's Identity Agent makes no identifier for the site.
+7. **Single use, and nothing spent by a refusal.** The invite is redeemed once. It is reserved before the statement is read and handed back if the statement is refused, so a forged statement cannot use up an invite and a taken one cannot be taken twice. An invite is accepted only for its own purpose: an employment invite cannot be redeemed as a binding invite and the reverse, and an employment lookup does not describe a binding invite.
+8. **The owner joins the same way, and a local owner cannot.** The owner's identifier is the one the organisation's identity settled on. The organisation mints an owner invite naming only that identifier, and checks again at redeem that it is still the owner. An organisation whose owner is not an identifier of its own that it holds a key log for (it is its own authority, which is the local case) **refuses to mint one**: it cannot assert an identifier it cannot check a key of. The owner, at the owner's own Identity Agent, approves on the same screen.
+9. **What each side keeps.** The organisation keeps each joining (record, new, role, site, the signed bytes and both signatures), lists them to its owner (`GET /api/binding/links`), and exposes them to an extension in the same process (`Bindings`, `RecordOf`). The person's Identity Agent keeps, on the relationship the new identifier is, the organisation, the role, the identifier it joined to and when, and lists them to its owner (`GET /api/login/joined`), so a person can see every place they have said two identifiers are one.
+
+## What this does not decide
+
+Which organisations, sites and roles need a binding at all is a product's decision (a utility app's membership source decides it), not the protocol's. An employee whom the organisation already identifies by one identifier at every site it runs does not need one. What a site then keeps under the record is that site's.
+
+## Consequences
+
+- New package `binding` (the statement, `Sign`, `Link.Verify`), its published vectors `binding/binding-vectors.json` (accepted and one refusal per rule), and an independent checker, `contracts/check_binding_vectors.py`, written from this text and not from the Go.
+- `actions/registry.json` gains `bind_site` (5). `asset.EmployeeInvite` gains `Purpose`, `BindRole` and `RecordIdentifiers`; the store gains the joinings; `login.SiteRelationship` gains `Bound`.
+- Three routes: `POST /api/binding/invites` (owner), `GET /api/binding/links` (owner), `POST /api/binding/invites/{code}/redeem` (open: the code is the credential, and what it takes is a statement only two keys can make), and `GET /api/login/joined` (owner) on a person's Identity Agent.
+- A reader that knows only the earlier Ask types refuses `t=5`, as it refuses any type it does not know.
