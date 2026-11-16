@@ -38,6 +38,23 @@ func decode(s string) ([]byte, error) {
 	return base64.StdEncoding.Strict().DecodeString(s)
 }
 
+// exactSignedEnvelope is nil when env is a signed envelope that carries only
+// the signed text and its two signatures, each in its one encoding, from signer.
+// Every other field an envelope can have is signed by nothing, so one that is
+// present, or a different value in one, would change the file and nothing it
+// proves.
+func exactSignedEnvelope(env *didcomm.Envelope, signer string) error {
+	exact := didcomm.Envelope{Mode: "signed", Protected: didcomm.ProtectedHeader{Alg: "none", Enc: "none", Skid: signer},
+		Plain: env.Plain, EdSig: env.EdSig, DsaSig: env.DsaSig}
+	if !reflect.DeepEqual(*env, exact) {
+		return errors.New("the envelope carries more than the signed text and its signatures")
+	}
+	if !canonicalURL(env.Plain) || !canonicalURL(env.EdSig) || !canonicalURL(env.DsaSig) {
+		return errors.New("the signed text or a signature is not encoded as it was signed")
+	}
+	return nil
+}
+
 // canonicalURL reports whether s is the one unpadded base64url encoding of
 // the bytes it decodes to.
 func canonicalURL(s string) bool {
@@ -783,13 +800,8 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 	}
 	// Only the entry and its two signatures are signed. Anything else an
 	// envelope can carry is refused, so nothing in the bundle goes unchecked.
-	exact := didcomm.Envelope{Mode: "signed", Protected: didcomm.ProtectedHeader{Alg: "none", Enc: "none", Skid: signer},
-		Plain: e.Envelope.Plain, EdSig: e.Envelope.EdSig, DsaSig: e.Envelope.DsaSig}
-	if !reflect.DeepEqual(*e.Envelope, exact) {
-		v.fault(where, "the envelope carries more than the countersigned entry and its signatures")
-	}
-	if !canonicalURL(e.Envelope.Plain) || !canonicalURL(e.Envelope.EdSig) || !canonicalURL(e.Envelope.DsaSig) {
-		v.fault(where, "the countersigned entry is not encoded as it was signed")
+	if err := exactSignedEnvelope(e.Envelope, signer); err != nil {
+		v.fault(where, "%v", err)
 	}
 	rec, err := agentmessage.Open(did, e.Envelope)
 	if err != nil {
