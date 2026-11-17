@@ -112,10 +112,9 @@
         "close",
         "reopen",
         "limit",
-        "outcome",
-        "notice"
+        "outcome"
       ],
-      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, addendum (more to say about an ask already answered by a reply, no answer owed, ADR-081), and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068). notice is the Identity Agent's own word to a person, by code, in fixed words (ADR-083)."
+      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, addendum (more to say about an ask already answered by a reply, no answer owed, ADR-081), and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
     },
     "party": {
       "description": "An AI agent's identifier, person: followed by a person's identifier, or peer: followed by another Identity Agent's identifier, a slash and the identifier of an AI agent it holds (ADR-085).",
@@ -342,9 +341,6 @@
         },
         "outcome": {
           "$ref": "#/$defs/outcome"
-        },
-        "notice": {
-          "$ref": "#/$defs/notice"
         }
       }
     },
@@ -615,22 +611,6 @@
         "reason": {
           "type": "string",
           "description": "required for not-kept and not-delivered, absent for committed. not-delivered follows a committed entry once, when the message was not delivered before the delivery queue's age ran out. closed-unanswered names an AI agent's ask (its message id) that was still unanswered when its conversation closed; it has no reason, is addressed to the AI agent that owed the answer, and ends an ask once (ADR-077). body-lost names an AI agent's ask that was unanswered when the body that held it was lost or archived; it gives a reason, is addressed to the one who asked, and ends the ask once, in a conversation still open"
-        }
-      }
-    },
-    "notice": {
-      "description": "What the Identity Agent told a person in a conversation (ADR-083). It is an entry of its own, of kind notice, from the Identity Agent, to a person, with no in_reply_to, no sender's proof and the hash of no words; the countersignature is the proof. It names a code and never carries text: every reader shows the words the code has. A conversation holds one notice of a code for a person, and none after it is closed.",
-      "type": "object",
-      "required": [
-        "code"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "enum": [
-            "notes-kept-about-you"
-          ],
-          "description": "notes-kept-about-you: notes may be kept about the person by the organisation's AI agents, and they can see and delete them. The words are fixed: 'Notes may be kept about you by the AI agents of this organisation. You will be invited to a page where you can see them and delete them.'"
         }
       }
     }

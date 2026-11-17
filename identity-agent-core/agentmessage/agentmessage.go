@@ -624,9 +624,6 @@ type Record struct {
 	CiphertextHash string `json:"ciphertext_hash,omitempty"`
 	// Outcome, on an entry of kind KindOutcome, is how an earlier entry ended.
 	Outcome *Outcome `json:"outcome,omitempty"`
-	// Notice, on an entry of kind KindNotice, is what the Identity Agent told a
-	// person, by code (ADR-083).
-	Notice *Notice `json:"notice,omitempty"`
 
 	// What the Identity Agent vouches for.
 	GrantSAID      string     `json:"grant_said,omitempty"`
@@ -677,14 +674,8 @@ func (r Record) CheckPeerProof(sender *didcomm.DID, self string) error {
 // here it fails closed: use CheckPeerProof.
 func (r Record) CheckSenderProof() error {
 	switch {
-	case r.Outcome != nil && r.Notice != nil:
-		return errors.New("an entry is an outcome or a notice, not both")
 	case r.PeerProof != nil && r.Outcome == nil:
 		return errors.New("an entry from an AI agent another Identity Agent holds is checked with that Identity Agent's keys")
-	case r.Notice != nil:
-		return r.checkNotice()
-	case r.Kind == KindNotice:
-		return errors.New("a notice names what it says")
 	case r.Outcome != nil:
 		return r.checkOutcome()
 	case r.Kind == KindOutcome:

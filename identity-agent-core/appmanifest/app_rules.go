@@ -21,7 +21,6 @@ const (
 	longestFormat     = 32
 	largestQueueSecs  = 86400
 	largestBackupGap  = 8760
-	largestKeepDays   = 3650
 )
 
 // appRowPresent names the first row of an app that the manifest carries, or
@@ -295,16 +294,10 @@ func (m *AppManifest) validateBackup() error {
 		if b.EveryHours != nil {
 			return fmt.Errorf("backup.every_hours: left out when nothing is backed up")
 		}
-		if b.KeepDays != nil {
-			return fmt.Errorf("backup.keep_days: left out when nothing is backed up")
-		}
 		return nil
 	}
 	if b.EveryHours == nil || *b.EveryHours < 1 || *b.EveryHours > largestBackupGap {
 		return fmt.Errorf("backup.every_hours: required, 1 to %d, when something is backed up", largestBackupGap)
-	}
-	if b.KeepDays != nil && (*b.KeepDays < 1 || *b.KeepDays > largestKeepDays) {
-		return fmt.Errorf("backup.keep_days: 1 to %d whole days when given", largestKeepDays)
 	}
 	return nil
 }

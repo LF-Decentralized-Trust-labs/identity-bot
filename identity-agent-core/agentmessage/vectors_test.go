@@ -152,7 +152,6 @@ func TestTheMessageSchemaDescribesTheseTypes(t *testing.T) {
 		"person_proof":     PersonProof{},
 		"peer_proof":       PeerProof{},
 		"outcome":          Outcome{},
-		"notice":           Notice{},
 		"person_message":   PersonMessage{},
 		"envelope":         didcomm.Envelope{},
 		"jwm":              didcomm.JWM{},
