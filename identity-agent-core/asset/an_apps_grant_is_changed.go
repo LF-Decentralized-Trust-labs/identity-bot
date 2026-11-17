@@ -1,13 +1,9 @@
 package asset
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
-
-// ErrNotAnApp is a change to an app's grant asked for an asset that is not one.
-var ErrNotAnApp = errors.New("that asset is not an app")
 
 // AppAsChanged is an app as it would be if its grant gave capabilities, within
 // constraints (nil keeps the limits it has), checked as a grant is when the app
