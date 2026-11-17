@@ -37,6 +37,11 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 	if err != nil || identity == nil {
 		return nil, fmt.Errorf("this agent has no identity to sign as")
 	}
+	// An identity handed to its owners' devices is not signed for here, whatever
+	// its record still says of the key this Identity Agent once held.
+	if identity.HandedOver {
+		return nil, errKeyElsewhere
+	}
 	// Two different failures, told apart because they call for different
 	// things. A seed stored here that cannot be read right now (a keychain or
 	// enclave not available to this process) is a fault to report, and the
