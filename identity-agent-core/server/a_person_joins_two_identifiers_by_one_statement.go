@@ -102,7 +102,7 @@ func (bindSiteAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error
 		T: ActionBindSite, Action: "bind_site", Title: "Join " + site,
 		Subtitle: org + " asks you to join " + site + " as the same person you are to them", Counterparty: p.OrgAID,
 		Details: []PreviewDetail{{Label: "Organization", Value: org}, {Label: "Site", Value: site}, {Label: "Joining as", Value: roleWords(p.Role)}},
-		Warning: org + " will know that you here and you where you already deal with them are the same person. This cannot be undone except by leaving.",
+		Warning: org + " will know that you here and you where you already deal with them are the same person, and will keep a statement you signed that proves it to anyone it shows it to. This cannot be undone except by leaving.",
 	}, nil
 }
 

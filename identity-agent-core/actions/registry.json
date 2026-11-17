@@ -158,7 +158,7 @@
       },
       "preview_contract": { "title": "Join {site} as the same person you are to {org}.", "conveys": ["org", "site"] },
       "discloses": [],
-      "outcome": "The individual's Identity Agent derives its identifier for the site, signs one statement naming both identifiers, the organization, the site and the invite with the key of each, and sends it to the organization, which checks both signatures. Declining signs nothing. The linking is the point of it, so the individual is told it cannot be undone except by leaving.",
+      "outcome": "The individual's Identity Agent derives its identifier for the site, signs one statement naming both identifiers, the organization, the site and the invite with the key of each, and sends it to the organization, which checks both signatures. Declining signs nothing. The linking is the point of it, so the individual is told that the organization keeps a statement that proves it to anyone it shows it to, and that it cannot be undone except by leaving.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }
