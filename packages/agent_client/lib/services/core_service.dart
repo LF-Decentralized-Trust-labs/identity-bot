@@ -609,6 +609,12 @@ class ScanDecodeResult {
   final String defaultTier;
   final String warning; // amber caution line, if any
 
+  /// What the person is asked to sign, for an Ask that asks for a signature
+  /// (action 6, ADR-080); null for every other. It is shown as what they are
+  /// signing and never filed among [details], the data they share: approving it
+  /// shares nothing.
+  final ScanPreviewStatement? statement;
+
   /// Digest of the exact Ask bytes this preview describes. Pass it back to
   /// [CoreService.scanExecute] so the core can prove it is acting on the
   /// request the user actually approved.
@@ -626,6 +632,7 @@ class ScanDecodeResult {
     this.tierOptions = const [],
     this.defaultTier = '',
     this.warning = '',
+    this.statement,
     this.askDigest = '',
   });
 
@@ -648,9 +655,43 @@ class ScanDecodeResult {
           const [],
       defaultTier: json['default_tier']?.toString() ?? '',
       warning: json['warning']?.toString() ?? '',
+      statement: json['statement'] is Map<String, dynamic>
+          ? ScanPreviewStatement.fromJson(json['statement'] as Map<String, dynamic>)
+          : null,
       askDigest: json['ask_digest']?.toString() ?? '',
     );
   }
+}
+
+/// A statement shown to be signed (the Go `PreviewStatement`): a registered
+/// form's reading ([rows], possibly none) beside the exact text ([verbatim]),
+/// which is what is signed.
+class ScanPreviewStatement {
+  final String heading; // "Your approval of a decision"
+  final String form; // the registered form's name, or '' for plain text
+  final List<ScanPreviewDetail> rows;
+  final String verbatim;
+  final String signerNote; // "Only your signature makes … count this as yours."
+
+  const ScanPreviewStatement({
+    required this.heading,
+    this.form = '',
+    this.rows = const [],
+    required this.verbatim,
+    this.signerNote = '',
+  });
+
+  factory ScanPreviewStatement.fromJson(Map<String, dynamic> json) =>
+      ScanPreviewStatement(
+        heading: json['heading']?.toString() ?? '',
+        form: json['form']?.toString() ?? '',
+        rows: (json['rows'] as List<dynamic>?)
+                ?.map((e) => ScanPreviewDetail.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        verbatim: json['verbatim']?.toString() ?? '',
+        signerNote: json['signer_note']?.toString() ?? '',
+      );
 }
 
 /// The contacts an agent's watcher cross-checks key logs with.

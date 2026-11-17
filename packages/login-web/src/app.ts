@@ -964,6 +964,44 @@ export interface AppSession {
   key(): Promise<BrowserKey>;
   /** The app's clock less this device's, ms; known after the first call. */
   skewMs(): number;
+  /** Asks the signed-in person to sign `text` with their own Identity Agent, on their own device
+   *  (ADR-080), and resolves with `{signature, signer_aid, kel_sn}` once they approve. The person
+   *  is shown a pointer and every state of the wait (`statementWords`); no page draws its own.
+   *  Rejects with `StatementNotSigned` (declined, expired, cancelled, refused or failed, in a sentence)
+   *  and with `SessionEnded` when the session has ended. `title` is a decision's sentence, which a
+   *  decision-approval statement carries only the hash of, so the person's device can show it checked. */
+  signStatement(text: string, opts?: SignStatementOptions): Promise<SignedStatement>;
+}
+
+/** What a person's Identity Agent signed, as the page hands it to the app to check. `kel_sn` is the
+ *  KERI sequence number of the latest establishment event of the signer's key log. */
+export interface SignedStatement {
+  signature: string;
+  signer_aid: string;
+  kel_sn: number;
+}
+
+/** The screen a statement's wait is shown on. `show` is told every change; `close` ends it. The default
+ *  screen is the one `IdentityAgentApp` draws (`bundle.tsx`). */
+export interface StatementPresenter {
+  show(view: StatementView, actions: { cancel(): void; again(): void }): void;
+  close(): void;
+}
+
+export interface SignStatementOptions {
+  title?: string;
+  /** Overrides the session's screen, for a page that must draw its own. It shows the same views. */
+  presenter?: StatementPresenter;
+}
+
+/** A statement that was not signed, and why: the person said no (`declined`), it ran out of time
+ *  (`expired`), the person closed the screen (`cancelled`), the app or the Identity Agent would not ask
+ *  (`refused`), or something failed (`error`). `message` is a sentence a person can act on. */
+export class StatementNotSigned extends Error {
+  constructor(public readonly reason: "declined" | "expired" | "cancelled" | "refused" | "error", message: string) {
+    super(message);
+    this.name = "StatementNotSigned";
+  }
 }
 
 /** The signed-in half of a utility app's page, from the link it was opened
@@ -971,7 +1009,18 @@ export interface AppSession {
  *  app's, keeps its session and ends it. A page has no copy of any of it. */
 export function appSession(
   link: AppLink,
-  opts: { storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">; fetchFn?: typeof fetch; browserKey?: (slot: string) => Promise<BrowserKey>; logs?: LogMemory; witnessFetch?: typeof fetch } = {},
+  opts: {
+    storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
+    fetchFn?: typeof fetch;
+    browserKey?: (slot: string) => Promise<BrowserKey>;
+    logs?: LogMemory;
+    witnessFetch?: typeof fetch;
+    /** The screen a statement's wait is shown on; `IdentityAgentApp.appSession` sets its own. */
+    statementPresenter?: StatementPresenter;
+    /** How long between looks at a statement's answer, ms (2000). */
+    statementPollMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): AppSession {
   const logs = opts.logs ?? browserLogMemory();
   const storage = opts.storage ?? sessionStorage;
@@ -1033,6 +1082,13 @@ export function appSession(
       if (!synced) await session.whoami();
       return raw(method.toUpperCase(), path, body);
     },
+    async signStatement(text, o = {}) {
+      return askStatement(session, text, o, {
+        presenter: o.presenter ?? opts.statementPresenter,
+        pollMs: opts.statementPollMs ?? 2000,
+        sleep: opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))),
+      });
+    },
     async signOut() {
       try {
         if (storage.getItem(slot)) await session.call("POST", "/session/signout", "{}");
@@ -1046,4 +1102,126 @@ export function appSession(
   return session;
 }
 
+/** How long a statement may wait for the person, as the app holds it to: a little over its window. */
+const STATEMENT_GIVE_UP_MS = 11 * 60 * 1000;
+
+async function askStatement(
+  session: AppSession,
+  text: string,
+  o: SignStatementOptions,
+  env: { presenter?: StatementPresenter; pollMs: number; sleep: (ms: number) => Promise<void> },
+): Promise<SignedStatement> {
+  const say = (view: StatementView, actions = { cancel() {}, again() {} }) => env.presenter?.show(view, actions);
+  let action: "cancel" | "again" | null = null;
+  const actions = { cancel: () => void (action = "cancel"), again: () => void (action = "again") };
+  // The request has ended: the screen says why, and its Close closes it, since nothing is waiting on it now.
+  const fail = (reason: StatementNotSigned["reason"], message: string, view: StatementView): never => {
+    say(view, { cancel: () => env.presenter?.close(), again() {} });
+    throw new StatementNotSigned(reason, message);
+  };
+  const start = async (): Promise<{ id: string; pointer: string }> => {
+    let r: AppCall;
+    try {
+      r = await session.call("POST", "/session/statement", JSON.stringify(o.title ? { statement: text, title: o.title } : { statement: text }));
+    } catch (e) {
+      if (e instanceof SessionEnded) {
+        env.presenter?.close();
+        throw e;
+      }
+      const why = (e as Error).message || "The app could not be reached.";
+      return fail("error", why, { state: "error", reason: why });
+    }
+    const body = r.json<{ id?: string; pointer?: string; error?: string }>();
+    if (r.status !== 200 || !body.id || !body.pointer) {
+      const why = statementProblem(r.status, body.error);
+      return fail("refused", why, { state: "error", reason: why });
+    }
+    return { id: body.id, pointer: body.pointer };
+  };
+
+  for (;;) {
+    let ask = await start();
+    action = null;
+    say({ state: "pointer", pointer: ask.pointer, statement: text }, actions);
+    const until = Date.now() + STATEMENT_GIVE_UP_MS;
+    let shown = "pointer";
+    for (let first = true; ; first = false) {
+      if (!first) await env.sleep(env.pollMs);
+      if (action === "cancel") {
+        env.presenter?.close();
+        throw new StatementNotSigned("cancelled", "You closed the request. Nothing was signed.");
+      }
+      if (action === "again") {
+        action = null;
+        // After a no, Try again asks for a new code: the old one would only be declined again.
+        if (shown === "declined") break;
+        say({ state: "waiting", pointer: ask.pointer, statement: text }, actions);
+        shown = "waiting";
+      }
+      let r: AppCall;
+      try {
+        r = await session.call("GET", "/session/statement/" + encodeURIComponent(ask.id));
+      } catch (e) {
+        if (e instanceof SessionEnded) {
+          env.presenter?.close();
+          throw e;
+        }
+        if (Date.now() > until) return fail("expired", "This request expired before it was signed.", { state: "expired" });
+        continue; // a poll that fails is tried again, until the request would have expired anyway
+      }
+      if (r.status === 404) {
+        // The Identity Agent that asked has forgotten it (a restart): it is gone, as an expired one is.
+        say({ state: "expired" }, actions);
+        shown = "expired";
+      } else if (r.status !== 200) {
+        if (Date.now() > until) return fail("expired", "This request expired before it was signed.", { state: "expired" });
+        continue;
+      } else {
+        const b = r.json<Record<string, unknown>>();
+        switch (b.state) {
+          case "verified": {
+            const sig = b.signature, aid = b.signer_aid, sn = b.kel_sn;
+            if (typeof sig !== "string" || !sig || typeof aid !== "string" || !aid || typeof sn !== "number" || !Number.isInteger(sn) || sn < 0) {
+              const why = "Your device signed, but the answer was not whole, so nothing was sent. Try again.";
+              return fail("error", why, { state: "error", reason: why });
+            }
+            say({ state: "signed" }, actions);
+            env.presenter?.close();
+            return { signature: sig, signer_aid: aid, kel_sn: sn };
+          }
+          case "scanned":
+            if (shown !== "scanned") say({ state: "scanned", pointer: ask.pointer, statement: text }, actions);
+            shown = "scanned";
+            break;
+          case "declined":
+            if (shown !== "declined") say({ state: "declined" }, actions);
+            shown = "declined";
+            break;
+          case "expired":
+            if (shown !== "expired") say({ state: "expired" }, actions);
+            shown = "expired";
+            break;
+          default:
+            if (shown === "pointer" || shown === "scanned") say({ state: "waiting", pointer: ask.pointer, statement: text }, actions);
+            if (shown === "pointer") shown = "waiting";
+        }
+      }
+      if (shown === "expired") {
+        // Only the person asking for a new code starts one; closing the screen ends it.
+        for (;;) {
+          await env.sleep(env.pollMs);
+          if (action === "cancel") {
+            env.presenter?.close();
+            throw new StatementNotSigned("expired", "This request expired before it was signed.");
+          }
+          if (action === "again") break;
+        }
+        break;
+      }
+    }
+  }
+}
+
 export { signInProblem } from "./signInProblem.js";
+import { statementProblem, type StatementView } from "./statementWords.js";
+export { statementWords, type StatementView, type StatementWords } from "./statementWords.js";
