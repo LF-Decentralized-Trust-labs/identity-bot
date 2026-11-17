@@ -281,12 +281,15 @@ void main() {
       (t) async {
     final app = FakeApp(clock: DateTime.now().toUtc())..pendingAsks = 2;
     final used = <String>[];
-    await open(t, app, FakeHardware(), initialLink: linkOf(app), onLinkUsed: used.add);
-    expect(find.widgetWithText(TextField, linkOf(app)), findsOneWidget);
+    // The link carries the second it was made, so it is made once: two calls a
+    // second apart would be two different links.
+    final link = linkOf(app);
+    await open(t, app, FakeHardware(), initialLink: link, onLinkUsed: used.add);
+    expect(find.widgetWithText(TextField, link), findsOneWidget);
     expect(used, isEmpty);
     await t.tap(find.byKey(const Key('sign-in')));
     await t.pumpAndSettle(const Duration(milliseconds: 20));
-    expect(used, [linkOf(app)]);
+    expect(used, [link]);
   });
 
   testWidgets('a last link that is read after the screen is up fills the field, unless the person has typed one',

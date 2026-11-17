@@ -164,6 +164,8 @@ class FakeApp {
           't': 1,
           'site_aid': link.aid,
           'browser_key': challengeKey ?? j['browserKey'],
+          'rid': link.rid,
+          'api': link.api,
           'front_end': kind,
           'expiry':
               '${clock.add(challengeLife).toUtc().toIso8601String().split('.').first}Z',

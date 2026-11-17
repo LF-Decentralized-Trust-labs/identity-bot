@@ -228,6 +228,8 @@ class AppSession {
         sig: j['sig'],
         pointer: j['relay_or_qr_url'],
         ownThumbprint: key.thumbprint,
+        rid: link.rid,
+        api: link.api,
         now: now().add(skew),
         frontEnd: key.kind.wire));
     final id = j['session_token'];
