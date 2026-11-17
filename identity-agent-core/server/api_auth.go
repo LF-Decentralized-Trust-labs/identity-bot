@@ -172,6 +172,12 @@ var publicRoutes = map[string]string{
 	// the identity named at inception either — the log answers before any file
 	// does, so re-sealing changes nothing.
 	"POST /api/signer/invites/{token}/redeem": "an invited owner's agent accepts, committing the keys they will sign with",
+	// An invited owner's device fetches the rotation the ceremony prepared and
+	// returns its signature. The invite code authorises it, as it does the
+	// acceptance, and the engine adds nothing a signature does not verify for.
+	"GET /api/signer/invites/{token}/ceremony-event":      "an invited owner's device fetches the rotation it is to sign",
+	"GET /api/signer/invites/{token}/ceremony-terms":      "an invited owner's device reads who is taking part, to show them before they sign",
+	"POST /api/signer/invites/{token}/ceremony-signature": "an invited owner's device returns its signature over that rotation",
 
 	// A machine enrolling itself with the key it generated. It is not the owner
 	// and never will be — that is the point of it holding its own key — so it

@@ -1479,6 +1479,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 	s.mountScanRoutes(r)
 	// Ask the app that issued an invite this agent redeemed what it published for it.
 	s.mountRedeemedInviteRoutes(r)
+	s.mountCeremonySigningRoutes(r)
 	// Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
 	s.mountAskCreateRoute(r)
 	// login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).

@@ -1,0 +1,16 @@
+{
+ "app": "EExampleAppAID0000000000000000000000000000",
+ "note": "Committed vectors for the key a utility app's backups are sealed to, and the reply that carries a content key to the restoring machine. Key: HKDF-SHA256(ikm=root_seed, salt=identity-agent-backup-seal-salt-v1, info=identity-agent-backup-seal-app-v1 | len(app) as 2 bytes big endian | app | epoch as 4 bytes big endian), 32 bytes, as an X25519 private key; public = X25519 of it. Reply: eph_pub(32)|nonce(12)|wrapped(48); KEK = HKDF-SHA256(X25519(eph,restore), salt=eph_pub|restore_pub, info=identity-agent-backup-open-reply-v1), AES-256-GCM with the 32-byte request digest as the authenticated data. Every value hex except app.",
+ "private_epoch_1": "1b9a7e581f9725b12b8c7ea8638950599259d80ce1c43a1832d6e57e878d214a",
+ "private_epoch_2": "377108ec1559ca2509ef09e641f1c46ea57e922043e7f4d44fe6590c344e6d3b",
+ "public_epoch_1": "8f6e8f4fcbd28496d3b270a24220eeb445274f523854a0a2d54bae4f16804708",
+ "public_epoch_2": "53492e0c5f9c54c45a28f80f4614cd1f8b50a104a4e53d45f9a5ebf4a9428268",
+ "reply": "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b4142434445464748494a4b4cbf63383bc886bb79e51ad4df582fd7d8d05220c20feddf3accecb38034a8f297eeb3bc06b4478b3198ce503f7bbb8686",
+ "reply_content_key": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+ "reply_ephemeral_private": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40",
+ "reply_nonce": "4142434445464748494a4b4c",
+ "reply_request_digest": "32333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f5051",
+ "reply_restore_private": "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526",
+ "reply_restore_public": "07b8c542487686a78301855fcb6d3f6a8a911cd7f1983a9b44dc9dcd22839d23",
+ "root_seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+}

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/atomicfile"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
@@ -33,10 +34,10 @@ import (
 // the key that signed it speaks for the person (trail.KeyRoster). Nothing the
 // app says can add to it.
 
-// browserKeyLife is how long a sign-in lets its key speak: the person's
-// approval is for a working day, then they sign in again. Shortening it is a
-// reversible, local change.
-const browserKeyLife = 12 * time.Hour
+// How long a sign-in lets its key speak is the asset's: its owner sets it for a
+// utility app, and every other asset has the default (asset.Asset.SignInLifetime,
+// within asset.MaxSignInLifetime). The time is fixed when the person approves
+// and kept in the record; changing the setting later does not move it.
 
 type browserKeyRecord struct {
 	Asset      string `json:"asset"`
@@ -300,11 +301,36 @@ func (k keysSpeakingAt) KeySpeaksFor(person, signer, verkey string) bool {
 	if err != nil {
 		return false
 	}
-	rec, ok := k.s.browserKeys().Get(k.asset, tp, time.Now())
-	if !ok || rec.Person != person {
-		return false
+	_, ok := k.s.keySpeaksUntil(k.asset, person, tp, time.Now())
+	return ok
+}
+
+// keySpeaksUntil is whether the key with this thumbprint speaks for person at
+// the asset now, and until when: a live record of a sign-in at the asset for
+// that person, and the asset still standing behind them. A zero time is an
+// installed app's grant, which speaks until it is ended. It is the one reading
+// of whether a key speaks: a statement is judged by it (KeySpeaksFor), and a
+// utility app's back end asks it (BrowserKeySpeaksUntil) so the session it holds for
+// the key ends when the key stops speaking, not later.
+func (s *CoreServer) keySpeaksUntil(assetID, person, thumbprint string, now time.Time) (time.Time, bool) {
+	rec, ok := s.browserKeys().Get(assetID, thumbprint, now)
+	if !ok || rec.Person != person || !s.assetStillStands(rec) {
+		return time.Time{}, false
 	}
-	return k.s.assetStillStands(rec)
+	return rec.Until, true
+}
+
+// browserKeySpeaksUntil is keySpeaksUntil for an add-on, which names the key
+// by its RFC 7638 thumbprint; a malformed one is an error, not a "no".
+func (s *CoreServer) browserKeySpeaksUntil(assetID, person, thumbprint string) (time.Time, bool, error) {
+	if assetID == "" || person == "" {
+		return time.Time{}, false, errors.New("ask whether a key speaks by the asset and the person")
+	}
+	if err := login.CheckBrowserKeyThumbprint(thumbprint); err != nil {
+		return time.Time{}, false, err
+	}
+	until, ok := s.keySpeaksUntil(assetID, person, thumbprint, time.Now())
+	return until, ok, nil
 }
 
 // assetStillStands asks the asset the question it asked at sign-in, now: the
@@ -378,17 +404,23 @@ func (s *CoreServer) endBrowserKeys(r *http.Request, thumbprint, person string) 
 
 // assetIDOfSite is the id of the asset whose pairwise identifier is siteAID.
 func (s *CoreServer) assetIDOfSite(siteAID string) (string, bool) {
+	a, ok := s.assetOfSite(siteAID)
+	return a.ID, ok
+}
+
+// assetOfSite is the asset whose pairwise identifier is siteAID.
+func (s *CoreServer) assetOfSite(siteAID string) (asset.Asset, bool) {
 	if s.assetHandler == nil || siteAID == "" {
-		return "", false
+		return asset.Asset{}, false
 	}
 	assets, err := s.assetHandler.Store.ListAssets()
 	if err != nil {
-		return "", false
+		return asset.Asset{}, false
 	}
 	for _, a := range assets {
 		if a.PairwiseAID == siteAID {
-			return a.ID, true
+			return a, true
 		}
 	}
-	return "", false
+	return asset.Asset{}, false
 }

@@ -9,6 +9,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
+	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -36,6 +37,11 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 	if err != nil || identity == nil {
 		return nil, fmt.Errorf("this agent has no identity to sign as")
 	}
+	// An identity handed to its owners' devices is not signed for here, whatever
+	// its record still says of the key this Identity Agent once held.
+	if identity.HandedOver {
+		return nil, errKeyElsewhere
+	}
 	// Two different failures, told apart because they call for different
 	// things. A seed stored here that cannot be read right now (a keychain or
 	// enclave not available to this process) is a fault to report, and the
@@ -46,6 +52,12 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errKeyUnavailable, err)
 	}
+	return identitySigningSeedFrom(identity, rootSeed)
+}
+
+// identitySigningSeedFrom is the one derivation of the identity's current signing key from a root seed, checked
+// against the public key the identity recorded (errKeyElsewhere when it is another).
+func identitySigningSeedFrom(identity *store.IdentityState, rootSeed []byte) ([]byte, error) {
 	seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, identity.KeyGeneration)
 	if err != nil {
 		return nil, fmt.Errorf("%w: could not derive this identity's signing key: %w", errKeyUnavailable, err)

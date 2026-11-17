@@ -130,9 +130,10 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/recovery/holdings/stop":    "giving up a share makes somebody else's backups unopenable by this machine",
 
 	// --- who may sign for this identity ---
-	"POST /api/signer/invites":                "inviting a signer decides who else may sign for this identity",
-	"POST /api/signer/invites/{token}/redeem": "redeeming a signer invitation adds somebody who may sign",
-	"POST /api/redeemed-invites/published":    "only the agent that redeemed an invite may ask the inviting app for what it published against it, signing with the key it redeemed with",
+	"POST /api/signer/invites":                      "inviting a signer decides who else may sign for this identity",
+	"POST /api/signer/invites/{token}/redeem":       "redeeming a signer invitation adds somebody who may sign",
+	"POST /api/redeemed-invites/ceremony-signature": "signing an ownership ceremony's rotation with the key this device derived for the organisation is the owner's own act, from this device",
+	"POST /api/redeemed-invites/published":          "only the Identity Agent that redeemed an invite may ask the inviting app for what it published against it, signing with the key it redeemed with",
 
 	// --- this machine's own enclave ---
 	//
@@ -253,6 +254,8 @@ var controllerOwnerOnly = map[string]string{
 	// The relay identifier a utility app's sign-in challenges name is the owner's to record.
 	"PUT /api/assets/{id}/relay-id": "this sets the relay identifier a utility app's sign-in challenges are signed for",
 	"PUT /api/assets/{id}/back-end": "this sets the back-end address a utility app's sign-in challenges are signed for",
+	// A longer sign-in widens what the owner allowed, so only the owner lengthens it.
+	"PUT /api/assets/{id}/sign-in-lifetime": "this decides how long a person's sign-in to a utility app lets their browser's key speak for them",
 	// A grant that never lapses is the owner's to end, from the device holding the key.
 	"DELETE /api/assets/{id}/app-key-grants/{key}": "ending a person's installed-app grant takes away what the owner allowed",
 

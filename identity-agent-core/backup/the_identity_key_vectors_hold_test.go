@@ -56,6 +56,11 @@ type identityKeyPhrase struct {
 	// ML-DSA-65 key each child seed gives, as qb64 under the proposed code
 	// 2AAE, and the next-key digest a commitment to it is (ADR-061 section 1).
 	PostQuantum []postQuantumKey `json:"post_quantum"`
+	// RelationshipPostQuantum are the post-quantum next keys of the first
+	// relationship's generations 0 to 2, the ones an owner's device commits to
+	// in an ownership change beside its classical keys (ADR-061 section 6): at
+	// m/44'/0'/0'/1'/(7000001+j)'.
+	RelationshipPostQuantum []postQuantumKey `json:"relationship_post_quantum"`
 	// Messaging are the messaging keysets of generations 0 and 1, by the
 	// anchor a key log commits to each with.
 	Messaging []messagingKeySet `json:"messaging"`
@@ -130,7 +135,9 @@ func computeIdentityKeyVectors(in identityKeyVectors) (identityKeyVectors, error
 			"public_key_qb64 is the key in CESR with code D. post_quantum: the post-quantum next key of generation j is at " +
 			"m/44'/0'/0'/7000001'/j', ML-DSA-65 from that child seed, qb64 under 2AAE, and its commitment is Blake3-256 over " +
 			"that qb64 text, as code E. messaging: the messaging keyset of generation g is at m/44'/0'/0'/7000002'/g', " +
-			"by its anchor. signature_forms: key 0's signature over the founding, in the A, 2A and B forms. " +
+			"by its anchor. relationship_post_quantum: the post-quantum next key beside classical key j of a relationship " +
+			"(the owner's own device in an ownership change) is at m/44'/0'/0'/<relationship index>'/(7000001+j)', shown for " +
+			"relationship 1, built as post_quantum is. signature_forms: key 0's signature over the founding, in the A, 2A and B forms. " +
 			"Checked by identity-agent-core/backup and by the app's key manager.",
 		Published: in.Published,
 	}
@@ -163,6 +170,19 @@ func computeIdentityKeyVectors(in identityKeyVectors) (identityKeyVectors, error
 			}
 			ph.PostQuantum = append(ph.PostQuantum, postQuantumKey{Generation: gen,
 				Path: fmt.Sprintf("m/44'/0'/0'/%d'/%d'", PostQuantumBranch, gen), SeedHex: hex.EncodeToString(s),
+				VerkeyQB64: pq.Verkey, Digest: pq.Digest})
+		}
+		for gen := 0; gen < 3; gen++ {
+			s, err := DerivePairwisePostQuantumSeed(bip39, 1, gen)
+			if err != nil {
+				return out, err
+			}
+			pq, err := keymath.PostQuantumNextKey(s)
+			if err != nil {
+				return out, err
+			}
+			ph.RelationshipPostQuantum = append(ph.RelationshipPostQuantum, postQuantumKey{Generation: gen,
+				Path: fmt.Sprintf("m/44'/0'/0'/1'/%d'", PostQuantumBranch+gen), SeedHex: hex.EncodeToString(s),
 				VerkeyQB64: pq.Verkey, Digest: pq.Digest})
 		}
 		for gen := 0; gen < 2; gen++ {
