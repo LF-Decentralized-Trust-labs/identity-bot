@@ -17,11 +17,11 @@ Every platform has its native code. What has been **compiled**, and what has onl
 | Half | Compiled? | How |
 |---|---|---|
 | Dart (all platforms) | Yes, and tested | `flutter test` here and in `../login-dart`, against a fake channel and the shared vectors |
-| Android Kotlin (`android/src`) | Yes, on Linux; never run | `android/compilecheck/compile.sh` (Gradle `compileDebugKotlin` against the Android SDK and Flutter's embedding, no Flutter app around it). A real call that does not exist (the plugin once called `HardwareKey.sign`, which is `signCall`) fails it |
+| Android Kotlin (`android/src`) | Compiles; not run on a device | `android/compilecheck/compile.sh` (Gradle `compileDebugKotlin` of the plugin's own `android/build.gradle`, against the Android SDK and Flutter's embedding, no Flutter app around it). A real call that does not exist (the plugin once called `HardwareKey.sign`, which is `signCall`) fails it |
 | Windows TPM commands (`windows/tpm2.cpp`) | Yes, and run against a software TPM | `windows/test/run.sh`: the endorsement key is the standard one, the software TPM opens the Identity Agent's credential and refuses a tampered one, and the Identity Agent's verifier accepts the evidence |
 | Windows TBS, DPAPI and EK-certificate calls (`windows/tpm_key.cpp`, with `tpm2.cpp`) | Yes, with mingw-w64 (syntax and types); never run on Windows | `x86_64-w64-mingw32-g++ -std=c++17 -fsyntax-only` |
 | Windows plugin glue (`windows/login_flutter_plugin.cpp`) | **No: written only.** It needs Flutter's Windows C++ wrapper headers, which are not here | |
-| Swift (`darwin/`, iOS and macOS) | **No: written only.** Swift cannot be built on Linux | Needs a Mac and Xcode; App Attest does not run in a simulator |
+| Swift (`darwin/`, iOS and macOS) | Compiles for macOS, an iOS device and the iOS simulator; not run on a device | `darwin/compilecheck/compile.sh` (`swiftc` against Flutter's `FlutterMacOS.xcframework` and `Flutter.xcframework`). App Attest does not run in a simulator |
 
 Nothing has run on a device or a real TPM. Android needs a real device (an emulator's keys are software).
 

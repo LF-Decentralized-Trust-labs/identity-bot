@@ -16,7 +16,7 @@
 // program holds its key, so this proves a key is in a TPM and not that it is this
 // app's: the owner must have accepted that (`tpm_keys`).
 //
-// NOT COMPILED OR RUN ON WINDOWS: see README, "What runs where, and what has been tried".
+// NOT RUN ON WINDOWS: see README, "What runs where, and what has been tried".
 namespace tpm_key {
 
 using Bytes = tpm2::Bytes;

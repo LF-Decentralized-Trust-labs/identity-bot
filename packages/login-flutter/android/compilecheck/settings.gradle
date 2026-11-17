@@ -1,2 +1,5 @@
-pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+// The plugin's own Android build (../build.gradle), included as a Flutter app includes it, so
+// what is compiled is the plugin's real configuration and not a copy of it.
 rootProject.name = 'login_flutter_compilecheck'
+include ':login_flutter'
+project(':login_flutter').projectDir = file('..')

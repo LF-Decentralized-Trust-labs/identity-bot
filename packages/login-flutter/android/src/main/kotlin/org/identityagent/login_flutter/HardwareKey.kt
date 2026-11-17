@@ -8,6 +8,7 @@ import java.io.ByteArrayOutputStream
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
+import java.security.ProviderException
 import java.security.Signature
 import java.security.cert.Certificate
 import java.security.interfaces.ECPublicKey
@@ -67,8 +68,11 @@ object HardwareKey {
                 KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, PROVIDER)
                     .apply { initialize(spec(strongBox)) }.generateKeyPair()
                 return
-            } catch (e: StrongBoxUnavailableException) {
-                // fall through to the TEE
+            } catch (e: ProviderException) {
+                // StrongBoxUnavailableException exists from API 28 and is a ProviderException:
+                // it alone falls through to the TEE. Below API 28 StrongBox is never asked for,
+                // and the class is not named where it does not exist.
+                if (!strongBox || Build.VERSION.SDK_INT < Build.VERSION_CODES.P || e !is StrongBoxUnavailableException) throw e
             }
         }
     }

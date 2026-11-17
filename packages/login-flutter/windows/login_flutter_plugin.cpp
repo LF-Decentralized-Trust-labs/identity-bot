@@ -10,7 +10,7 @@
 #include "tpm_key.h"
 
 // The channel `MethodChannelHardwareKey` (lib/src/hardware_key.dart) speaks, on Windows.
-// NOT COMPILED OR RUN ON WINDOWS: see tpm_key.cpp.
+// NOT COMPILED OR RUN: see README, "What runs where, and what has been tried".
 
 namespace {
 

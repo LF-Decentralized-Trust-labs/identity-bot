@@ -6,8 +6,8 @@
 #include <shlobj.h>
 #include <tbs.h>
 
-// NOT COMPILED OR RUN ON WINDOWS: no Windows machine was available when this was written.
-// What was run is everything under tpm2.cpp, on Linux against a software TPM (test/). What
+// NOT RUN ON WINDOWS: compiled with mingw-w64 for syntax and types only (see README). What
+// was run is everything under tpm2.cpp, against a software TPM (test/). What
 // is Windows's own and unproved is here: the TBS calls, DPAPI, the file location, and the
 // CNG property that fetches an EK certificate the TPM does not carry.
 

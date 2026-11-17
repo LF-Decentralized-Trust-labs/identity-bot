@@ -23,8 +23,8 @@ import FlutterMacOS
 /// What the Identity Agent checks of the evidence (Apple's pinned root, the nonce, the
 /// owner's "<team id>.<bundle id>") is its to decide.
 ///
-/// NOT COMPILED OR RUN: no Mac or device was available when this was written. App
-/// Attest does not run in a simulator.
+/// Compiles for macOS, an iOS device and the iOS simulator (`compilecheck/compile.sh`); not
+/// run on a device. App Attest does not run in a simulator.
 public class LoginFlutterPlugin: NSObject, FlutterPlugin {
     private static let service = "org.identityagent.login_flutter"
 
