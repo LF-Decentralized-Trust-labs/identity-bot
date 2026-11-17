@@ -12,7 +12,8 @@ it was fetched, and lists every certificate with its maker and class.
 **Classes.** `tools/tpmroots` marks each certificate *physical*, *virtual* or *unclassified* (the
 evidence for each is at the top of `SOURCE.txt`). Only physical ones are pinned in `tpmroots` and
 `tpmintermediates`. Microsoft's own TPM issuers (`MSFT-KEYID-…`: the software TPM of Hyper-V and Azure)
-are written to `../tpmvirtual`, which is never trusted and only lets a chain through one be refused by
+are written to `../tpmvirtual`, which is trusted only for an owner who opts in to virtual TPMs (ADR-072
+Amendment 13), and otherwise only lets a chain through one be refused by
 name. A certificate that cannot be classified is written nowhere. The package does not itself name a
 certificate as virtual: that reading rests on the vendor id and on Microsoft's own statements, and a
 virtual TPM that chains through an issuer this tool took for physical would be accepted, so any

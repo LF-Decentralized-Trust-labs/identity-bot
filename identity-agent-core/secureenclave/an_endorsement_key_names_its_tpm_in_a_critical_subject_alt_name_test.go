@@ -74,6 +74,38 @@ func TestARealShapedEndorsementKeyCertificateIsAcceptedUnderAPinnedIssuer(t *tes
 	}
 }
 
+func otherName(t *testing.T, id asn1.ObjectIdentifier) asn1.RawValue {
+	t.Helper()
+	inner, _ := asn1.Marshal(asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true, Bytes: []byte{0x0c, 0x02, 'i', 'd'}})
+	oid, _ := asn1.Marshal(id)
+	v, _ := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: inner})
+	return asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: append(oid, v...)}
+}
+
+// Beside the TPM's directoryName, the device-identity otherNames go-attestation takes are taken.
+func TestATPMsDirectoryNameWithADeviceIdentityOtherNameIsAccepted(t *testing.T) {
+	tpm := directoryName(t, pkix.RDNSequence{{{Type: oidTPMManufacturer, Value: "id:49465800"}, {Type: oidTPMModel, Value: "SLB9670"}, {Type: oidTPMVersion, Value: "id:00070055"}}})
+	for name, other := range map[string]asn1.ObjectIdentifier{"permanentIdentifier": oidPermanentIdentifier, "hardwareModuleName": oidHardwareModuleName} {
+		t.Run(name, func(t *testing.T) {
+			c := newEKChainWithLeafExtensions(t, "IFX-KEYID-1", []pkix.Extension{subjectAltNameOf(t, tpm, otherName(t, other))})
+			withIssuers(t, []*x509.Certificate{c.issuer}, nil)
+			if _, _, err := verifyEKCertificateIssuer(c.leaf, nil, []*x509.Certificate{c.root}, c.now); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	c := newEKChainWithLeafExtensions(t, "IFX-KEYID-1", []pkix.Extension{subjectAltNameOf(t, tpm, otherName(t, asn1.ObjectIdentifier{1, 2, 3, 4}))})
+	withIssuers(t, []*x509.Certificate{c.issuer}, nil)
+	if _, _, err := verifyEKCertificateIssuer(c.leaf, nil, []*x509.Certificate{c.root}, c.now); err == nil {
+		t.Fatal("an otherName of another kind was taken")
+	}
+	c = newEKChainWithLeafExtensions(t, "IFX-KEYID-1", []pkix.Extension{subjectAltNameOf(t, otherName(t, oidPermanentIdentifier))})
+	withIssuers(t, []*x509.Certificate{c.issuer}, nil)
+	if _, _, err := verifyEKCertificateIssuer(c.leaf, nil, []*x509.Certificate{c.root}, c.now); err == nil {
+		t.Fatal("a critical SAN with no directoryName was taken")
+	}
+}
+
 // A critical SAN that holds anything but the TCG directoryName stays unhandled.
 func TestACriticalSubjectAltNameWithOtherContentIsRefused(t *testing.T) {
 	cases := map[string]pkix.Extension{

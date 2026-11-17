@@ -142,3 +142,16 @@ func TestEveryOtherIrregularityIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// A serial written as a constructed value is not an integer, however its bytes read.
+func TestAConstructedSerialIsRefused(t *testing.T) {
+	der, k := aCertificate(t)
+	odd := reshape(t, der, k, func(f []asn1.RawValue) []asn1.RawValue {
+		full, _ := asn1.Marshal(asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagInteger, IsCompound: true, Bytes: []byte{0x02, 0x01, 0x01}})
+		f[1] = asn1.RawValue{FullBytes: full}
+		return f
+	}, nil)
+	if _, err := Parse(odd); err == nil {
+		t.Fatal("accepted")
+	}
+}

@@ -164,6 +164,7 @@ var grantPushDefault = sync.OnceValue(func() *http.Client {
 		Transport: &http.Transport{
 			DialContext:         (&net.Dialer{Timeout: 5 * time.Second, Control: refusePrivate}).DialContext,
 			TLSHandshakeTimeout: 5 * time.Second,
+			MaxIdleConns:        32,
 			MaxIdleConnsPerHost: 2,
 			IdleConnTimeout:     90 * time.Second,
 		},
@@ -193,10 +194,7 @@ func (s *CoreServer) tellBackEndsGrantsEnded(gone []browserKeyRecord) {
 				return
 			}
 			defer func() { <-grantEndedSlots }()
-			if time.Since(ended) > s.grantFreshFor() {
-				log.Printf("[identity-agent-core] not telling the back end of %s its grant ended: the notice waited too long to be taken", r.Asset)
-				return
-			}
+			// A notice that waited here too long is dropped by tellBackEnd before its first attempt.
 			s.tellBackEnd(ctx, r, ended)
 		}(r)
 	}

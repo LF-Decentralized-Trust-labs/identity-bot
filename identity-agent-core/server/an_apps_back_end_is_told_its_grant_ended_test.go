@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -504,5 +505,52 @@ func TestARetryCarriesTheNoticeDatedWhenTheGrantEnded(t *testing.T) {
 	defer w.be.mu.Unlock()
 	if len(w.be.bodies) != 2 || w.be.bodies[0] != w.be.bodies[1] {
 		t.Fatalf("the retry is not the first notice again: %q", w.be.bodies)
+	}
+}
+
+// A notice that waited for a place past what a back end takes is dropped before its first attempt.
+func TestANoticeThatWaitedTooLongForAPlaceIsNotSent(t *testing.T) {
+	w := aPushedWorld(t)
+	w.org.grantFresh = 150 * time.Millisecond
+	addr := startBackEnd(t, w.rl, w.be)
+	w.signIn(t, addr)
+	for i := 0; i < cap(grantEndedSlots); i++ { // every place taken
+		grantEndedSlots <- struct{}{}
+	}
+	freed := 0
+	t.Cleanup(func() {
+		for ; freed < cap(grantEndedSlots); freed++ {
+			<-grantEndedSlots
+		}
+	})
+	if _, err := w.org.browserKeys().End("the-website", w.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	<-grantEndedSlots // one place frees, after the notice is too old
+	freed++
+	time.Sleep(400 * time.Millisecond)
+	if w.be.got.Load() != 0 {
+		t.Fatalf("a notice that waited too long was sent (%d attempts)", w.be.got.Load())
+	}
+}
+
+// No credential is made for an app this Identity Agent does not know.
+func TestNoTPMCredentialIsMadeForAnAppThatIsNotKnown(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	ask, err := iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := iw.org.assetHandler.Store.DeleteAsset("the-website"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, TPMCredentialRequest{})
+	var refused *SignInRefused
+	if !errors.As(err, &refused) || refused.Code != http.StatusNotFound {
+		t.Fatalf("a credential for an app that is gone: %v", err)
 	}
 }
