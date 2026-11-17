@@ -337,6 +337,9 @@ var ErrInviteNotFound = errors.New("no such invite")
 // or already used up, so there is nothing left to withdraw.
 var ErrInviteClosed = errors.New("invite is already revoked or used up")
 
+// ErrInviteExpired is for an invite presented after the time it was made to stop being accepted.
+var ErrInviteExpired = errors.New("invite has expired")
+
 // RevokeInvite withdraws an asset invite. It says ErrInviteNotFound for a token
 // it does not hold and ErrInviteClosed for one already revoked or used up, so a
 // caller is never told "revoked" about a code that was not live to begin with.

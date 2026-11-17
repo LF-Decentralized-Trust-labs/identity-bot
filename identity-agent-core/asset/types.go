@@ -327,6 +327,9 @@ type EmployeeInvite struct {
 	UseCount          int       `json:"use_count"`
 	CreatedAt         time.Time `json:"created_at"`
 	Revoked           bool      `json:"revoked"`
+	// ExpiresAt, when set, is when the invite stops being accepted. A binding
+	// invite always has one; an invite without one does not expire.
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
 }
 
 // PurposeBinding marks an invite to join an identifier to a record.

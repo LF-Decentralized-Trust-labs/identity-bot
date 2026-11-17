@@ -6,11 +6,15 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/binding"
@@ -764,5 +768,222 @@ func TestAMintThatCannotSignLeavesNoInviteAndTheEmployeeListIsEmploymentOnly(t *
 	}
 	if after := len(w.org.assetHandler.Store.ListEmployeeInvites()); after != before {
 		t.Fatalf("a failed mint left %d invites behind", after-before)
+	}
+}
+
+// tryForged runs an Ask through the Preview and the approval, and fails the test if either goes through, if anything
+// reaches the organisation's redeem route, or if an identifier is made for the site.
+func (w *joinWorld) tryForged(p *CoreServer, ask []byte) {
+	w.t.Helper()
+	if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: ActionBindSite}); err == nil {
+		w.t.Fatal("a forged Ask was shown to the person")
+	}
+	if _, err := w.approve(p, ask, true); err == nil {
+		w.t.Fatal("a forged Ask was signed")
+	}
+	if w.hits.Load() != 0 {
+		w.t.Fatal("a statement was sent")
+	}
+	if _, ok := p.loginHandler.Store.Get("ENOTES"); ok {
+		w.t.Fatal("an identifier was made for the site")
+	}
+}
+
+func (w *joinWorld) personWhoHolds(holds bool) *CoreServer {
+	if holds {
+		return w.aPerson("ECHAT")
+	}
+	return w.aPerson()
+}
+
+// Whoever writes an Ask chooses the addresses its checks fetch. Those fetches must be the same whether or not the
+// person holds an identifier at the place the Ask names, or an Ask nobody signed would tell its writer which sites a
+// person deals with. Each case runs once for a person who holds an identifier at ECHAT and once for one who holds
+// none, and compares what left their Identity Agent.
+func TestAForgedAskMakesTheSameRequestsWhetherOrNotThePersonHoldsAnIdentifierThere(t *testing.T) {
+	// Unsigned, with every address on the writer's own server, and nothing stood in: the requests are real.
+	overTheNetwork := func(t *testing.T, holds bool) []string {
+		w := newJoinWorld(t)
+		p := w.personWhoHolds(holds)
+		var mu sync.Mutex
+		var got []string
+		atk := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			got = append(got, r.Method+" "+r.URL.Path)
+			mu.Unlock()
+			http.NotFound(rw, r)
+		}))
+		defer atk.Close()
+		// The person once saved this host as a contact, so only the order of the checks keeps a fetch from going.
+		if err := p.DataStore.SaveContact(store.ContactRecord{AID: "EEVIL", OobiURL: atk.URL + "/oobi/EEVIL"}); err != nil {
+			t.Fatal(err)
+		}
+		p.organisationKeyOf, p.siteIsDelegatedBy = nil, nil
+		ask, _ := json.Marshal(map[string]interface{}{
+			"v": "ASK1", "t": ActionBindSite, "org_name": "Org", "org_aid": "EEVIL", "org_oobi": atk.URL + "/oobi/EEVIL",
+			"site_aid": "ENOTES", "site_oobi": atk.URL + "/oobi/ENOTES", "record_site_aid": "ECHAT", "record_site_oobi": atk.URL + "/oobi/ECHAT",
+			"role": binding.RolePerson, "invite_token": "tok1", "redeem_url": atk.URL + "/api/binding/invites/tok1/redeem", "org_sig": "0Bforged",
+		})
+		w.tryForged(p, ask)
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(got)
+	}
+	holder, stranger := overTheNetwork(t, true), overTheNetwork(t, false)
+	if len(holder) == 0 {
+		t.Fatal("no request reached the writer's server at all, so this case shows nothing")
+	}
+	if !slices.Equal(holder, stranger) {
+		t.Fatalf("the writer's server saw %v for a person who holds an identifier there, and %v for one who does not", holder, stranger)
+	}
+
+	// Signed by an organisation of the writer's own, naming as the record's place a site that organisation does not
+	// run. The organisation's key and the delegation check are stood in, and record what they would fetch.
+	selfSigned := func(t *testing.T, holds bool) []string {
+		w := newJoinWorld(t)
+		p := w.personWhoHolds(holds)
+		writer := make([]byte, ed25519.SeedSize)
+		writer[0] = 9
+		var got []string
+		p.organisationKeyOf = func(oobi, aid string) ([]byte, error) {
+			got = append(got, "key of "+aid+" from "+oobi)
+			return ed25519.NewKeyFromSeed(writer).Public().(ed25519.PublicKey), nil
+		}
+		p.siteIsDelegatedBy = func(site, siteOOBI, org, orgOOBI string) error {
+			got = append(got, "is "+site+" from "+siteOOBI+" run by "+org)
+			if site == "ENOTES" {
+				return nil
+			}
+			return errors.New("not delegated")
+		}
+		ask := signedAsOrganisation(t, map[string]interface{}{
+			"v": "ASK1", "t": ActionBindSite, "org_name": "Org", "org_aid": "EEVIL", "org_oobi": "https://evil.example/oobi/EEVIL",
+			"site_aid": "ENOTES", "site_oobi": "https://evil.example/oobi/ENOTES", "record_site_aid": "ECHAT",
+			"record_site_oobi": "https://evil.example/oobi/ECHAT", "role": binding.RolePerson, "invite_token": "tok1",
+			"redeem_url": "https://evil.example/api/binding/invites/tok1/redeem",
+		}, writer)
+		w.tryForged(p, ask)
+		return got
+	}
+	holder, stranger = selfSigned(t, true), selfSigned(t, false)
+	if len(holder) == 0 || !slices.Equal(holder, stranger) {
+		t.Fatalf("checks made for a person who holds an identifier there: %v; for one who does not: %v", holder, stranger)
+	}
+}
+
+// An identifier made for the site is kept only once the organisation has taken the statement. A refusal, or a
+// statement that never arrived, leaves the person as they were, and an identifier the person already had is kept.
+func TestAJoiningTheOrganisationDidNotTakeLeavesNoNewIdentifier(t *testing.T) {
+	t.Run("refused", func(t *testing.T) {
+		w := newJoinWorld(t)
+		p := w.aPerson("ECHAT")
+		w.runs["ENOTES"], w.runs["ECHAT"] = true, true
+		ask := w.askFor("tok-unknown", binding.RolePerson, "ENOTES", "ECHAT") // an invite the organisation never kept
+		if _, err := w.approve(p, ask, true); err == nil || !strings.Contains(err.Error(), "declined") {
+			t.Fatalf("an invite the organisation does not hold was taken: %v", err)
+		}
+		if w.hits.Load() != 1 {
+			t.Fatalf("%d statements reached the organisation, want 1", w.hits.Load())
+		}
+		if _, ok := p.loginHandler.Store.Get("ENOTES"); ok {
+			t.Fatal("the identifier made for the site was kept after the organisation refused")
+		}
+	})
+	t.Run("never arrived", func(t *testing.T) {
+		w := newJoinWorld(t)
+		p := w.aPerson("ECHAT")
+		gone := httptest.NewServer(http.NotFoundHandler())
+		goneURL := gone.URL
+		gone.Close()
+		genuine := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", w.identifierOf(p, "ECHAT"))
+		ask := resign(t, genuine, mustSeed(t, w), func(m map[string]interface{}) { m["redeem_url"] = goneURL + "/api/binding/invites/tok1/redeem" })
+		if _, err := w.approve(p, ask, true); err == nil {
+			t.Fatal("a statement that never arrived was taken as made")
+		}
+		if _, ok := p.loginHandler.Store.Get("ENOTES"); ok {
+			t.Fatal("the identifier made for the site was kept although the statement never arrived")
+		}
+	})
+	t.Run("one the person already had", func(t *testing.T) {
+		w := newJoinWorld(t)
+		p := w.aPerson("ECHAT", "ENOTES") // signed in at the site before
+		before := w.identifierOf(p, "ENOTES")
+		w.runs["ENOTES"], w.runs["ECHAT"] = true, true
+		if _, err := w.approve(p, w.askFor("tok-unknown", binding.RolePerson, "ENOTES", "ECHAT"), true); err == nil {
+			t.Fatal("an invite the organisation does not hold was taken")
+		}
+		if after, ok := p.loginHandler.Store.Get("ENOTES"); !ok || after.PairwiseAID != before {
+			t.Fatal("the identifier the person already had at the site was removed by a refused joining")
+		}
+	})
+}
+
+// An invite is accepted until its time and not after. The mint gives every invite one, the Ask carries it, the
+// person's Identity Agent does not ask about one that has passed, and the organisation refuses one at redeem.
+func TestABindingInviteExpires(t *testing.T) {
+	w := newJoinWorld(t)
+	p := w.aPerson("ECHAT")
+	a := w.identifierOf(p, "ECHAT")
+	// An organisation that can mint: its engine makes the pairwise key that signs the Ask.
+	org := adoptingOwner(t)
+	st, err := asset.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	org.assetHandler = &asset.Handler{Store: st}
+	org.EndpointService.SetOverrideURL("https://org.example")
+	mint := func(extra string) *httptest.ResponseRecorder {
+		body := `{"site_aid":"ENOTES","record_site_aid":"ECHAT","role":"person","record_identifiers":["` + a + `"]` + extra + `}`
+		rec := httptest.NewRecorder()
+		org.handleCreateBindingInvite(rec, httptest.NewRequest(http.MethodPost, "/api/binding/invites", strings.NewReader(body)))
+		return rec
+	}
+	for _, bad := range []string{`,"expires_in_hours":-1`, `,"expires_in_hours":721`} {
+		if rec := mint(bad); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: minted (%d)", bad, rec.Code)
+		}
+	}
+	rec := mint(`,"expires_in_hours":2`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("minting: %d %s", rec.Code, rec.Body)
+	}
+	var minted struct{ Token string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &minted)
+	mintedAsks.Lock()
+	ask := mintedAsks.m[minted.Token]
+	mintedAsks.Unlock()
+	var m map[string]interface{}
+	_ = json.Unmarshal(ask, &m)
+	at, err := time.Parse(time.RFC3339, fmt.Sprint(m["expiry"]))
+	if err != nil || at.Sub(time.Now()) < 110*time.Minute || at.Sub(time.Now()) > 2*time.Hour {
+		t.Fatalf("the minted Ask says it expires at %v", m["expiry"])
+	}
+	if kept := st.ListEmployeeInvites(); len(kept) != 1 || !kept[0].ExpiresAt.Equal(at) {
+		t.Fatalf("the invite kept does not expire when its Ask says: %+v", kept)
+	}
+
+	// An Ask whose time has passed is not put to the person: the scan gate refuses it before its consent screen.
+	passed := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", a)
+	_ = json.Unmarshal(passed, &m)
+	m["expiry"] = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	passed, _ = json.Marshal(m)
+	dec := httptest.NewRecorder()
+	p.handleScanDecode(dec, httptest.NewRequest(http.MethodPost, "/api/scan", strings.NewReader(`{"url":"`+serveAsk(t, passed)+`"}`)))
+	if dec.Code != http.StatusGone || !strings.Contains(dec.Body.String(), "expired") {
+		t.Fatalf("an expired invite was put to the person: %d %s", dec.Code, dec.Body)
+	}
+
+	// The organisation refuses an invite past its time, whatever the Ask said, and does not spend it.
+	if err := w.org.assetHandler.Store.CreateEmployeeInvite(asset.EmployeeInvite{
+		Token: "tok-old", Purpose: asset.PurposeBinding, BindRole: binding.RolePerson, MaxUses: 1, SiteAID: "ENOTES",
+		RecordIdentifiers: []string{a}, ExpiresAt: time.Now().Add(-time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := w.post("tok-old", w.link(p, "tok-old", binding.RolePerson, "ECHAT", "ENOTES", nil)); code != http.StatusBadRequest || !strings.Contains(body, "expired") {
+		t.Fatalf("an expired invite was taken: %d %s", code, body)
+	}
+	if len(w.org.Bindings()) != 0 {
+		t.Fatal("a joining was kept for an expired invite")
 	}
 }

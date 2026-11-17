@@ -84,6 +84,18 @@ func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	return s.saveLocked()
 }
 
+// Delete removes the relationship at siteAID. Its index is not given out again:
+// the high-water mark is kept, so a later relationship never reuses its key.
+func (s *RelationshipStore) Delete(siteAID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.items[siteAID]; !ok {
+		return nil
+	}
+	delete(s.items, siteAID)
+	return s.saveLocked()
+}
+
 // AllocateNextRelationshipIndex atomically allocates and returns the next never-reused index,
 // bumping the highWater under lock and persisting it. Mirrors the main Store's counter.
 func (s *RelationshipStore) AllocateNextRelationshipIndex() int {

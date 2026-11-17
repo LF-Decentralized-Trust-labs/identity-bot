@@ -348,7 +348,8 @@ private-use range or inside an implementation.
 - **Who mints:** an organization.
 - **Request schema:** `org_name`, `org_aid`, `org_oobi`, `site_aid`, `site_oobi`,
   `site_name`, `record_site_aid`, `record_site_oobi`, `role` (`person` or `owner`),
-  `invite_token`, `signer_oobi`, `redeem_url`, `org_sig`.
+  `invite_token`, `signer_oobi`, `redeem_url`, `org_sig`, `expiry` (when the organization stops taking
+  the statement).
 - **Authentication:** `sig` is the base-layer signature of the pairwise key at
   `signer_oobi`, as for any Ask. `org_sig` is the organization's own identity key
   (current, from its key log at `org_oobi`) over the fixed `ORGASK1` form of ADR-082,

@@ -153,7 +153,8 @@
         "invite_token": { "type": "string", "required": true, "kind": "open" },
         "signer_oobi": { "type": "string", "required": true, "kind": "open" },
         "redeem_url": { "type": "string", "required": true, "kind": "open" },
-        "org_sig": { "type": "string", "required": true, "kind": "open" }
+        "org_sig": { "type": "string", "required": true, "kind": "open" },
+        "expiry": { "type": "string", "required": false, "kind": "open" }
       },
       "preview_contract": { "title": "Join {site} as the same person you are to {org}.", "conveys": ["org", "site"] },
       "discloses": [],

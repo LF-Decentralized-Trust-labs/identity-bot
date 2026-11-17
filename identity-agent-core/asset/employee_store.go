@@ -98,6 +98,9 @@ func (s *Store) reserveInvite(token string, signer bool, purpose string) (Employ
 		return EmployeeInvite{}, ErrInviteNotFound
 	}
 	inv := s.empInvites[id]
+	if !inv.ExpiresAt.IsZero() && !time.Now().Before(inv.ExpiresAt) {
+		return EmployeeInvite{}, ErrInviteExpired
+	}
 	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
 		return EmployeeInvite{}, ErrInviteExhausted
 	}
