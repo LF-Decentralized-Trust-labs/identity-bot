@@ -4,8 +4,9 @@
 (`tpm_key_certify.go`, `verifyEKCertificate`), and `../tpmintermediates/*.pem` (and `../tpmlenient/*.pem`, below) the issuers a
 chain must pass through (the leaf's direct issuer must be one of them, or a pinned root with none
 beneath it), so a front end need not send them. They come from Microsoft's trusted TPM root
-certificate list, the one Windows device attestation uses, and the project decided on 2026-11-14 to
-trust it for **physical TPM chips only**. `SOURCE.txt` records the package URL, its SHA-256 and the date
+certificate list, the one Windows device attestation uses, and are trusted for **physical TPM chips
+only** (ADR-072 Amendment 10). They are Microsoft's published TPM certificates, redistributed unmodified,
+and are not covered by this repository's licence. `SOURCE.txt` records the package URL, its SHA-256 and the date
 it was fetched, and lists every certificate with its maker and class.
 
 **Classes.** `tools/tpmroots` marks each certificate *physical*, *virtual* or *unclassified* (the

@@ -112,8 +112,8 @@ import (
 )
 
 // tpmManufacturerRoots are the TPM manufacturer root certificates an EK
-// certificate must chain to. Empty on purpose: verification fails closed until
-// the vendor roots are supplied.
+// certificate must chain to: the physical roots pinned in tpmroots (ADR-072
+// Amendment 10). Verification fails closed if none are loaded.
 var tpmManufacturerRoots []*x509.Certificate // set from tpmroots by tpm_roots.go
 
 const (

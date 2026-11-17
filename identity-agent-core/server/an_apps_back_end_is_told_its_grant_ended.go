@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -38,7 +39,7 @@ import (
 // to its standing check, which asks whether the key still speaks (within a minute).
 //
 // Only an installed app's grant is pushed: a front end that lapses within a working
-// day keeps no address, and is left to the back end's standing check (Amendment 11,
+// day keeps no address, and is left to the back end's standing check (Amendment 12,
 // "Not built").
 
 const grantEndedPath = "/identity-agent/grant-ended"
@@ -52,6 +53,13 @@ var grantEndedBackoff = []time.Duration{0, 2 * time.Second, 10 * time.Second, 60
 const grantEndedAtOnce = 16
 
 var grantEndedSlots = make(chan struct{}, grantEndedAtOnce)
+
+// grantEndedFresh is how old a notice may be when an attempt starts. A back end refuses
+// one dated more than five minutes from its clock (login-go's GrantEndedWindow), so a
+// notice that waited for a slot, or for its retries, past this is dropped rather than
+// sent stale; the minute is room for the attempt itself and for the two clocks differing.
+// The back end's standing check still ends the session.
+const grantEndedFresh = 4 * time.Minute
 
 // grantEndedNotice is the wire body, held to login-go's GrantEnded.
 type grantEndedNotice struct {
@@ -132,18 +140,36 @@ var notPublic = func() []*net.IPNet {
 	return out
 }()
 
-// grantPushHTTP is the client a notice is sent with: the one a test gives, or one
-// that dials public addresses only, follows no redirect and gives up in ten seconds.
+func (s *CoreServer) grantFreshFor() time.Duration {
+	if s.grantFresh > 0 {
+		return s.grantFresh
+	}
+	return grantEndedFresh
+}
+
+// grantPushHTTP is the client a notice is sent with: the one a test gives, or the
+// core's own (grantPushDefault).
 func (s *CoreServer) grantPushHTTP() *http.Client {
 	if s.grantPushClient != nil {
 		return s.grantPushClient
 	}
+	return grantPushDefault()
+}
+
+// grantPushDefault is the core's one client for notices, made once so its connections are
+// reused: it dials public addresses only, follows no redirect and gives up in ten seconds.
+var grantPushDefault = sync.OnceValue(func() *http.Client {
 	return &http.Client{
-		Timeout:       10 * time.Second,
-		Transport:     &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second, Control: refusePrivate}).DialContext},
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: 5 * time.Second, Control: refusePrivate}).DialContext,
+			TLSHandshakeTimeout: 5 * time.Second,
+			MaxIdleConnsPerHost: 2,
+			IdleConnTimeout:     90 * time.Second,
+		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-}
+})
 
 // tellBackEndsGrantsEnded is browserKeys.ended: it starts one push for each grant
 // that had an address, and returns at once.
@@ -167,6 +193,10 @@ func (s *CoreServer) tellBackEndsGrantsEnded(gone []browserKeyRecord) {
 				return
 			}
 			defer func() { <-grantEndedSlots }()
+			if time.Since(ended) > s.grantFreshFor() {
+				log.Printf("[identity-agent-core] not telling the back end of %s its grant ended: the notice waited too long to be taken", r.Asset)
+				return
+			}
 			s.tellBackEnd(ctx, r, ended)
 		}(r)
 	}
@@ -205,11 +235,17 @@ func (s *CoreServer) tellBackEnd(ctx context.Context, r browserKeyRecord, ended 
 			return
 		case <-time.After(wait):
 		}
-		// A key that has been given a grant again since is not told about again:
-		// the notice's date already spares the new session, and this also spares it
-		// where the person signed in again within the same second.
+		if time.Since(ended) > s.grantFreshFor() {
+			last = errors.New("the notice is too old to be taken now")
+			break
+		}
+		// A key that has been given a grant again since, for the same person, is not
+		// told about again: the notice's date already spares the new session, and this
+		// also spares it where the person signed in again within the same second. A
+		// grant for someone else at the same key does not stop the first person's
+		// sessions being ended.
 		if i > 0 {
-			if _, speaks := s.browserKeys().Get(r.Asset, r.Thumbprint, time.Now()); speaks {
+			if again, speaks := s.browserKeys().Get(r.Asset, r.Thumbprint, time.Now()); speaks && again.Person == r.Person {
 				return
 			}
 		}

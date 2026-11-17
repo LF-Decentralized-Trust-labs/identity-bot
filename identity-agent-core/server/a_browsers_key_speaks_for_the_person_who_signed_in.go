@@ -19,6 +19,7 @@ import (
 	"identity-agent-core/atomicfile"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/trail"
 )
 
@@ -396,11 +397,37 @@ func (s *CoreServer) assetStillStands(rec browserKeyRecord) bool {
 		if a.FrontEndRefusal(kind) != "" {
 			return false
 		}
+		if !tpmProofStillAllowed(rec.Proof, a.InstalledApp) {
+			return false
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	ok, _ := s.authorizeAssetAccess(ctx, a.PairwiseAID, rec.Person, rec.Presented)
 	return ok
+}
+
+// tpmProofStillAllowed is whether the owner still accepts the kind of chip a TPM key was
+// proved in, asked on every use as the front-end switch is: an owner who withdraws
+// tpm_keys stops every grant held by a TPM key, and one who withdraws virtual_tpm_keys
+// stops every grant held by a virtual or cloud TPM's key, however long ago it was approved.
+// A key proved on another platform is not this rule's.
+func tpmProofStillAllowed(p *installedAppFact, id asset.InstalledAppIdentity) bool {
+	if p == nil || p.Platform != "tpm" {
+		return true
+	}
+	if !id.TPMKeys {
+		return false
+	}
+	switch p.EKClass {
+	case secureenclave.TPMClassPhysical:
+		return true
+	case secureenclave.TPMClassVirtual:
+		return id.AcceptsVirtualTPM()
+	default:
+		// A TPM proof that names no class was not kept by this core; it is not trusted for one.
+		return false
+	}
 }
 
 // personStandsAtAsset is whether the asset still stands behind the person: by

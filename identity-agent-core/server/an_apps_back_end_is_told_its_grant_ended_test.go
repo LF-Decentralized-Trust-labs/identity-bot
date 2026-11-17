@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -343,22 +344,81 @@ func TestANoticeTheBackEndRefusesIsNotRepeated(t *testing.T) {
 }
 
 // The client the core uses unless a test gives one: it will not dial a machine
-// of this host's, and it does not follow a redirect to one.
+// of this host's, and it does not follow a redirect to one. The client under test is
+// the core's own, made to trust the test server's certificate, so the only thing that
+// can stop the call is the guard on the dial: without it the call would succeed.
 func TestTheCoreOwnClientDoesNotReachThisMachineOrFollowARedirect(t *testing.T) {
 	var hit atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit.Add(1) }))
 	defer srv.Close()
 	s := &CoreServer{}
-	c := s.grantPushHTTP()
-	if _, err := c.Post(srv.URL+"/identity-agent/grant-ended", "application/json", strings.NewReader("{}")); err == nil {
-		t.Fatal("the core dialled a loopback address")
+	core := s.grantPushHTTP()
+	if core != s.grantPushHTTP() {
+		t.Fatal("the core makes a new client for each notice, so no connection is reused")
+	}
+	trusting := func(tr *http.Transport) *http.Client {
+		tr.TLSClientConfig = srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+		return &http.Client{Transport: tr, Timeout: core.Timeout, CheckRedirect: core.CheckRedirect}
+	}
+	c := trusting(core.Transport.(*http.Transport).Clone())
+	_, err := c.Post(srv.URL+"/identity-agent/grant-ended", "application/json", strings.NewReader("{}"))
+	if err == nil || !strings.Contains(err.Error(), "not a public address") {
+		t.Fatalf("the core's client was not stopped at the dial: %v", err)
 	}
 	if hit.Load() != 0 {
 		t.Fatal("a request reached a loopback server")
 	}
-	if err := c.CheckRedirect(nil, nil); err != http.ErrUseLastResponse {
+	// The same client with an unguarded dial reaches the server, so the refusal above is the guard's.
+	open := core.Transport.(*http.Transport).Clone()
+	open.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
+	resp, err := trusting(open).Post(srv.URL+"/identity-agent/grant-ended", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("the test cannot tell the guard from a failing handshake: %v", err)
+	}
+	resp.Body.Close()
+	if hit.Load() != 1 {
+		t.Fatal("the unguarded client did not reach the server")
+	}
+	if err := core.CheckRedirect(nil, nil); err != http.ErrUseLastResponse {
 		t.Fatalf("a redirect would be followed: %v", err)
 	}
+}
+
+// A notice that has waited past what a back end takes is dropped, not sent stale.
+func TestANoticeTooOldToBeTakenIsNotSent(t *testing.T) {
+	w := aPushedWorld(t)
+	w.org.grantBackoff = []time.Duration{0, 300 * time.Millisecond}
+	w.org.grantFresh = 150 * time.Millisecond
+	addr := startBackEnd(t, w.rl, w.be)
+	w.signIn(t, addr)
+	w.be.unavailable.Store(1) // the first attempt fails, so the retry comes after the notice is too old
+	if _, err := w.org.browserKeys().End("the-website", w.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the first attempt", func() bool { return w.be.got.Load() >= 1 })
+	time.Sleep(700 * time.Millisecond)
+	if w.be.got.Load() != 1 {
+		t.Fatalf("a notice too old to be taken was sent (%d attempts)", w.be.got.Load())
+	}
+}
+
+// The retry is skipped only when the key speaks again for the same person: a grant
+// at the same key for someone else does not spare the first person's sessions.
+func TestARetryStillEndsTheFirstPersonsSessionWhenTheKeyNowSpeaksForSomeoneElse(t *testing.T) {
+	w := aPushedWorld(t)
+	w.org.grantBackoff = []time.Duration{0, 300 * time.Millisecond}
+	addr := startBackEnd(t, w.rl, w.be)
+	person := w.signIn(t, addr)
+	w.be.unavailable.Store(1)
+	if _, err := w.org.browserKeys().End("the-website", w.key, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the first attempt", func() bool { return w.be.got.Load() >= 1 })
+	if err := w.org.browserKeys().RecordAppKeyAt(addr, "the-website", "Esomeone-else", w.key, time.Now(), nil, installedAppFact{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the retried notice", func() bool { return w.be.got.Load() >= 2 })
+	waitUntil(t, "the first person's session to end", func() bool { p, ok := w.be.sessionFor(w.key); return !ok || p != person })
 }
 
 func TestANoticeIsSignedWithTheAppsKeyAndNoOneElsesIsTaken(t *testing.T) {

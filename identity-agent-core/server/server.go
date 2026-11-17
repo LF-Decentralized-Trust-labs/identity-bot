@@ -107,6 +107,8 @@ type CoreServer struct {
 	grantPushClient *http.Client
 	// grantBackoff, when set, is the wait before each notice attempt instead of grantEndedBackoff.
 	grantBackoff []time.Duration
+	// grantFresh, when set, is how old a notice may be when an attempt starts instead of grantEndedFresh.
+	grantFresh time.Duration
 	// relayGen counts relay starts. A start that a newer one has overtaken
 	// (the settings changed while it was enrolling) installs nothing.
 	relayGen int
