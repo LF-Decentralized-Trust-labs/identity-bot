@@ -68,6 +68,6 @@ Each says what is now false, what is true instead, where that was decided, and w
 
 ## Consequences
 
-- A receipt one of our witnesses issues is accepted by keripy's own parser and verified against the controller's key log. `identity-agent-core/interop/verify_witness_receipts_with_keripy.py` is the check, and its test vectors are made by keripy itself (`make_witness_receipt_vectors.py`, `drivers/testdata/keripy_witness_receipts.json`).
+- A receipt one of our witnesses issues is accepted by keripy's own parser and verified against the controller's key log. `identity-agent-core/interop/verify_witness_receipts_with_keripy.py` is the check, and its test vectors are made by keripy itself (`make_witness_receipt_vectors.py`, `witnessproto/testdata/keripy_witness_receipts.json`).
 - `witnessingReport` can now reject a receipt whose index is not the witness's place in the designated list.
 - The class is carried on the wire as `WitnessEntry.Class` (`identity-agent-core/witness/types.go`).
