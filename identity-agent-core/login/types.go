@@ -163,8 +163,8 @@ type LoginPreviewResponse struct {
 	// challenge names it, so the consent screen can say what is being approved.
 	FrontEnd string `json:"front_end,omitempty"`
 	// LastsUntilEnded is true when approving this sign-in lets the front end's
-	// key speak for the person until they or the app's owner end it, not for a
-	// working day: an installed app's app-key grant (ADR-072 section 4). The
+	// key speak for the person until they or the app's owner end it, not for the
+	// asset's sign-in lifetime: an installed app's app-key grant (ADR-072 section 4). The
 	// consent screen shows it before the person approves.
 	LastsUntilEnded bool   `json:"lasts_until_ended,omitempty"`
 	RPSessionURL    string `json:"rp_session_url"`

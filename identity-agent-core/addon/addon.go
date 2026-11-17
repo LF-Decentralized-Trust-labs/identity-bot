@@ -107,7 +107,7 @@ type Host interface {
 	AuthorityOf(r *http.Request) (Authority, func(), error)
 	AwaitingFor(holder string, pending bool) string
 	BindSigner(aid string, signer string) (server.ControllerGrant, error)
-	// EndBrowserKeys ends, before its twelve hours are up, what a sign-in let a
+	// EndBrowserKeys ends, before its lifetime is up, what a sign-in let a
 	// browser's key say: the key with this thumbprint, or, when thumbprint is
 	// empty, every key the person (by their identifier at the asset) holds. r is
 	// the request the app's back end signed, and the asset is that app's own,
