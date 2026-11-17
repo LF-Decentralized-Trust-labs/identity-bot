@@ -129,6 +129,10 @@ type Asset struct {
 	// FrontEndsOff are the offered front ends the owner has switched off. Always
 	// a subset of DeviceFrontEnds.
 	FrontEndsOff []string `json:"front_ends_off,omitempty"`
+	// SignInLifetimeHours is how long a person's sign-in to this utility app lets
+	// their browser's key speak for them, as its owner set it; 0 is the default.
+	// Read it through SignInLifetime, which applies the default and the ceiling.
+	SignInLifetimeHours int `json:"sign_in_lifetime_hours,omitempty"`
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
 	// raw private key is never persisted. >0 means the asset can sign login challenges.

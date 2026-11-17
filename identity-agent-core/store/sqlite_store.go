@@ -264,9 +264,9 @@ func (s *SQLiteStore) GetIdentity() (*IdentityState, error) {
 	var state IdentityState
 	err := s.db.QueryRow(
 		`SELECT aid, public_key, next_key_digest, created, event_count,
-		        derivation_index, key_generation FROM identity ORDER BY rowid LIMIT 1`,
+		        derivation_index, key_generation, handed_over FROM identity ORDER BY rowid LIMIT 1`,
 	).Scan(&state.AID, &state.PublicKey, &state.NextKeyDigest, &state.Created, &state.EventCount,
-		&state.DerivationIndex, &state.KeyGeneration)
+		&state.DerivationIndex, &state.KeyGeneration, &state.HandedOver)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -314,8 +314,8 @@ func saveIdentity(ex sqlExecer, state IdentityState) error {
 		-- An agent has exactly one identity, so rowid 1 is that identity and the
 		-- conflict clause now has something to conflict with.
 		INSERT INTO identity (rowid, aid, public_key, next_key_digest, created, event_count,
-		                      derivation_index, key_generation)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+		                      derivation_index, key_generation, handed_over)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(rowid) DO UPDATE SET
 			aid = excluded.aid,
 			public_key = excluded.public_key,
@@ -323,9 +323,10 @@ func saveIdentity(ex sqlExecer, state IdentityState) error {
 			created = excluded.created,
 			event_count = excluded.event_count,
 			derivation_index = excluded.derivation_index,
-			key_generation = excluded.key_generation`,
+			key_generation = excluded.key_generation,
+			handed_over = excluded.handed_over`,
 		state.AID, state.PublicKey, state.NextKeyDigest, state.Created, state.EventCount,
-		state.DerivationIndex, state.KeyGeneration,
+		state.DerivationIndex, state.KeyGeneration, state.HandedOver,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save identity: %w", err)

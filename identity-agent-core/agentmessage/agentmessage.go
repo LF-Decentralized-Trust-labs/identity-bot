@@ -54,6 +54,10 @@ const (
 	// the answer — the ask stays open, so the reply or failure that closes it
 	// can still follow, and any number of notes may come before it.
 	KindProgress = "progress"
+	// KindAddendum is more to say about an ask already answered by a reply:
+	// from the one who answered to the one who asked, a person or an AI agent.
+	// It owes no answer, takes no turn and leaves the ask answered (ADR-081).
+	KindAddendum = "addendum"
 	// KindClose is the one who opened a conversation saying the work is done,
 	// or the organisation's owner stopping it. It takes no turn and carries no
 	// words. Nothing closes a conversation for being quiet.
@@ -315,7 +319,7 @@ func (s Statement) Check() error {
 		}
 	}
 	switch s.Kind {
-	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress, KindClose, KindReopen, KindLimit:
+	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress, KindAddendum, KindClose, KindReopen, KindLimit:
 	default:
 		return fmt.Errorf("%q is not a kind of message", s.Kind)
 	}
