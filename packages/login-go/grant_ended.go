@@ -14,7 +14,7 @@ import (
 )
 
 // An installed app's grant ended, told to the app's back end (ADR-072 section 6,
-// Amendment 11).
+// Amendment 12).
 //
 // The owner's Identity Agent refuses an ended grant at each use, but a back end
 // that holds a session for the key keeps it until its next call to the core. So

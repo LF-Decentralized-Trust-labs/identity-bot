@@ -1,6 +1,6 @@
 package secureenclave
 
-// The core's half of the TPM credential exchange (ADR-072 Amendments 3 and 9, and the
+// The core's half of the TPM credential exchange (ADR-072 Amendments 3 and 10, and the
 // header of tpm_key_certify.go): TPM2_MakeCredential, done in software by the
 // party that wants to know an attestation key (AK) shares a TPM with an
 // endorsement key (EK) whose certificate chains to a manufacturer.

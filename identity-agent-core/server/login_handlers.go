@@ -330,7 +330,8 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// key speaks for them at this asset, which is what later lets a statement
 	// signed by the key be taken as theirs (trail.CheckAuthor).
 	if bundle.BrowserKey != "" {
-		assetID, found := s.assetIDOfSite(bundle.SiteAID)
+		site, found := s.assetOfSite(bundle.SiteAID)
+		assetID := site.ID
 		if !found {
 			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the asset this sign-in was for is gone"})
 			http.Error(w, "not authorized", http.StatusForbidden)
@@ -351,7 +352,10 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 			}
 			err = s.browserKeys().RecordAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
 		} else {
-			err = s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(browserKeyLife), now, presented)
+			// How long is the asset's to say: its owner's setting, within the
+			// core's ceiling (asset.Asset.SignInLifetime). It is read here, at
+			// the person's approval, and the time it gives is kept with the key.
+			err = s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(site.SignInLifetime()), now, presented)
 		}
 		if errors.Is(err, errGrantHeld) {
 			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "this key already speaks for another person"})

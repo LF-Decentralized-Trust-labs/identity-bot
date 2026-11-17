@@ -105,6 +105,7 @@
         "receipt",
         "failure",
         "progress",
+        "addendum",
         "message",
         "hand-off",
         "split",
@@ -113,7 +114,7 @@
         "limit",
         "outcome"
       ],
-      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
+      "description": "An AI agent's kinds are ask, reply, receipt, failure, progress, addendum (more to say about an ask already answered by a reply, no answer owed, ADR-081), and close, reopen and limit, which address nobody and act on no message (ADR-077). A person's statement over a fingerprint (ADR-067) is a message, ask, hand-off, split, close, reopen or limit. outcome is the Identity Agent's own note of how a person's entry ended (ADR-068)."
     },
     "party": {
       "description": "An AI agent's identifier, or person: followed by a person's identifier.",

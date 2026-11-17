@@ -17,7 +17,7 @@ func TestAProgressNoteIsOnlyForAnOpenAsk(t *testing.T) {
 	}
 	newVerifier := func() (*verifier, *Report) {
 		r := &Report{}
-		v := &verifier{r: r, entries: map[string]agentmessage.Record{"m-ask": ask}, answered: map[string]bool{}}
+		v := &verifier{r: r, entries: map[string]agentmessage.Record{"m-ask": ask}, answered: map[string]bool{}, repliedTo: map[string]bool{}}
 		return v, r
 	}
 

@@ -52,7 +52,54 @@ Uint8List? _matter(Object? qb64, String code, int len) {
   for (var i = 0; i < ps; i++) {
     if (raw[i] != 0) return null;
   }
-  return Uint8List.sublistView(raw, ps);
+  final out = Uint8List.sublistView(raw, ps);
+  // A witness key (B) or a verification key (D) must name one signer, as the
+  // core and login-verify read it.
+  if ((code == 'B' || code == 'D') && len == 32 && !_namesOneSigner(out)) {
+    return null;
+  }
+  return out;
+}
+
+final BigInt _p = (BigInt.one << 255) - BigInt.from(19);
+final BigInt _d =
+    (BigInt.from(-121665) * BigInt.from(121666).modInverse(_p)) % _p;
+final BigInt _sqrtMinusOne =
+    BigInt.two.modPow((_p - BigInt.one) ~/ BigInt.from(4), _p);
+
+/// The eight points of small order, as canonically written: a signature of
+/// R = one of them and s = 0 verifies over every message under such a key.
+const _smallOrder = {
+  '0100000000000000000000000000000000000000000000000000000000000000',
+  'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+  '0000000000000000000000000000000000000000000000000000000000000000',
+  '0000000000000000000000000000000000000000000000000000000000000080',
+  '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05',
+  '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85',
+  'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a',
+  'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa',
+};
+
+/// Whether [raw] is an Ed25519 public key that names a single signer: a point on
+/// the curve, in its one canonical encoding, and not of small order (the rule of
+/// the core's CheckEd25519PublicKey and login-verify's ed25519KeyPoint).
+bool _namesOneSigner(Uint8List raw) {
+  if (raw.length != 32) return false;
+  final hex = [for (final b in raw) b.toRadixString(16).padLeft(2, '0')].join();
+  if (_smallOrder.contains(hex)) return false;
+  var y = BigInt.zero;
+  for (var i = 31; i >= 0; i--) {
+    y = (y << 8) | BigInt.from(i == 31 ? raw[i] & 0x7f : raw[i]);
+  }
+  final negative = raw[31] & 0x80 != 0;
+  if (y >= _p) return false; // y written as y + p
+  final y2 = y * y % _p;
+  final x2 = (y2 - BigInt.one) * (_d * y2 + BigInt.one).modInverse(_p) % _p;
+  var x = x2.modPow((_p + BigInt.from(3)) ~/ BigInt.from(8), _p);
+  if ((x * x - x2) % _p != BigInt.zero) x = x * _sqrtMinusOne % _p;
+  if ((x * x - x2) % _p != BigInt.zero) return false; // no point has this y
+  if (x == BigInt.zero && negative) return false; // minus zero
+  return true;
 }
 
 /// CESR fixed-size material under [code] (see [_matter]), for the codes the
@@ -391,7 +438,8 @@ Map<String, dynamic> checkChallenge({
   // names another relay identifier, and so another back end, is not the one the
   // app's Identity Agent signed this for, and one that names none is refused the same.
   if (c['rid'] != rid) {
-    fail('the challenge is signed for another relay identifier than the link names');
+    fail(
+        'the challenge is signed for another relay identifier than the link names');
   }
   // The back end the link names is signed beside it (Amendment 8); one that names
   // none is refused the same.
