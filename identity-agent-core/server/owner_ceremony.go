@@ -37,9 +37,12 @@ import (
 // ceremonyState is where a ceremony has got to.
 const (
 	ceremonyCollecting = "collecting"
-	ceremonyApplied    = "applied"
-	ceremonyFailed     = "failed"
-	ceremonyAbandoned  = "abandoned"
+	// ceremonySigning is every invited owner accepted and the rotation is
+	// prepared and waiting for the signatures only their devices can make.
+	ceremonySigning   = "signing"
+	ceremonyApplied   = "applied"
+	ceremonyFailed    = "failed"
+	ceremonyAbandoned = "abandoned"
 )
 
 // OwnerCeremony is one attempt to change who controls an identity.
@@ -57,6 +60,26 @@ type OwnerCeremony struct {
 	// the pre-rotated key and its successor.
 	OwnPublicKey     string `json:"org_public_key,omitempty"`
 	OwnNextPublicKey string `json:"org_next_public_key,omitempty"`
+	// OwnNextDigests is what the identity's own share of the first rotation
+	// committed to: its classical next digest, then its post-quantum one.
+	// Fixed when the rotation is prepared, so the terms say what the event
+	// holds. Empty in a ceremony recorded before it was kept.
+	OwnNextDigests []string `json:"own_next_digests,omitempty"`
+	// HandOver is a ceremony that ends with this identity's own key out of
+	// control: the first rotation commits only to the invited owners' next keys,
+	// and a second, signed by them alone, reveals those keys, after which this
+	// Identity Agent holds no key of the identity and derives none.
+	HandOver bool `json:"hand_over,omitempty"`
+	// StageSince is when the rotation being signed now was prepared, so the person
+	// who started the ceremony can be told how long it has been waiting for
+	// signatures. Empty before there is one.
+	StageSince *time.Time `json:"stage_since,omitempty"`
+	// Stage, PendingRawB64 and PendingSAID are the rotation being signed now:
+	// "rot1" or "rot2", the event's bytes as the invited owners' devices are
+	// shown them, and its digest. Empty until everybody has accepted.
+	Stage         string `json:"stage,omitempty"`
+	PendingRawB64 string `json:"pending_raw_b64,omitempty"`
+	PendingSAID   string `json:"pending_said,omitempty"`
 	// Invited is one entry per party being brought in, in the order they were
 	// named, so a half-finished ceremony can say who is still missing rather
 	// than only how many.
@@ -103,6 +126,27 @@ type CeremonyInvitee struct {
 	PublicKey     string    `json:"public_key,omitempty"`
 	NextPublicKey string    `json:"next_public_key,omitempty"`
 	AcceptedAt    time.Time `json:"accepted_at,omitempty"`
+	// NextPostQuantumDigest is the post-quantum commitment that goes beside the
+	// classical one in the owner's next keys, when their device makes one.
+	NextPostQuantumDigest string `json:"next_post_quantum_digest,omitempty"`
+	// AfterNextPublicKey is the key the owner will commit to in the second
+	// rotation of a hand-over, so that rotation is fully known before anybody
+	// signs it; AfterNextPostQuantumDigest is its post-quantum partner. Both
+	// are asked for only in a hand-over.
+	AfterNextPublicKey         string `json:"after_next_public_key,omitempty"`
+	AfterNextPostQuantumDigest string `json:"after_next_post_quantum_digest,omitempty"`
+	// LastSeenAt is when this owner's invite code was last used on the routes a
+	// device reads the ceremony from. It is proof the code was used, not that the
+	// person opened the Identity Agent app and saw anything: those routes are public and reached
+	// by the code alone, and the code travels in the invite link, so whoever has
+	// the link can make it move. The screen says "a look was recorded" and no
+	// more. It is kept only while the ceremony is under way (saveCeremony drops it
+	// when the ceremony is made, stopped or has failed), so it is never a lasting
+	// log of when a person used their phone.
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// SignedStage is the rotation ("rot1" or "rot2") this owner's device last
+	// signed, so who is still to sign can be shown.
+	SignedStage string `json:"signed_stage,omitempty"`
 }
 
 // Accepted reports whether this person has taken part yet.
@@ -110,11 +154,17 @@ func (c CeremonyInvitee) Accepted() bool {
 	return c.PairwiseAID != "" && c.PublicKey != "" && c.NextPublicKey != ""
 }
 
+// accepted is Accepted, and in a hand-over also the key the owner commits to
+// in the second rotation, which that rotation cannot be built without.
+func (c *OwnerCeremony) accepted(i CeremonyInvitee) bool {
+	return i.Accepted() && (!c.HandOver || i.AfterNextPublicKey != "")
+}
+
 // Outstanding lists who has not accepted yet.
 func (c *OwnerCeremony) Outstanding() []string {
 	var waiting []string
 	for _, invitee := range c.Invited {
-		if !invitee.Accepted() {
+		if !c.accepted(invitee) {
 			name := invitee.Name
 			if name == "" {
 				name = "an unnamed invitee"
@@ -197,6 +247,13 @@ func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
 			stored.Invited[i].Token = ""
 		}
 	}
+	// A ceremony that is over keeps no record of when anybody looked at it.
+	switch stored.Status {
+	case ceremonyApplied, ceremonyFailed, ceremonyAbandoned:
+		for i := range stored.Invited {
+			stored.Invited[i].LastSeenAt = nil
+		}
+	}
 	raw, err := json.MarshalIndent(&stored, "", "  ")
 	if err != nil {
 		return err
@@ -210,12 +267,25 @@ func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
 	return nil
 }
 
+// CeremonyExtras are what an owner's device sends beside its keys: a
+// post-quantum commitment, and in a hand-over the key it will commit to in
+// the second rotation. Public halves only.
+type CeremonyExtras struct {
+	NextPostQuantumDigest      string `json:"next_post_quantum_digest,omitempty"`
+	AfterNextPublicKey         string `json:"after_next_public_key,omitempty"`
+	AfterNextPostQuantumDigest string `json:"after_next_post_quantum_digest,omitempty"`
+}
+
 // recordAcceptance stores one invitee's key against their token.
 //
 // Returns the ceremony when this acceptance completed it, so the caller knows
 // to rotate. Returns nil when the token belongs to no ceremony, which is the
 // ordinary case for an invite that is not part of one and is not an error.
-func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicKey string) (*OwnerCeremony, bool, error) {
+func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicKey string, extra ...CeremonyExtras) (*OwnerCeremony, bool, error) {
+	var more CeremonyExtras
+	if len(extra) > 0 {
+		more = extra[0]
+	}
 	ceremonyMu.Lock()
 	defer ceremonyMu.Unlock()
 
@@ -240,12 +310,22 @@ func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicK
 			continue
 		}
 		found = true
-		if c.Invited[i].Accepted() {
+		if c.accepted(c.Invited[i]) {
 			// Already done. Not an error — a second scan of the same code is a
 			// person checking it worked, and it must not overwrite the key they
 			// already committed to.
 			return nil, false, nil
 		}
+		if c.HandOver && more.AfterNextPublicKey == "" {
+			return nil, false, fmt.Errorf("this ceremony hands the identity over, so the key you will " +
+				"commit to after this rotation is needed too, and was not sent")
+		}
+		if why := checkTheDigestsSent(c.HandOver, nextPublicKey, more); why != "" {
+			return nil, false, fmt.Errorf("%s", why)
+		}
+		c.Invited[i].NextPostQuantumDigest = more.NextPostQuantumDigest
+		c.Invited[i].AfterNextPublicKey = more.AfterNextPublicKey
+		c.Invited[i].AfterNextPostQuantumDigest = more.AfterNextPostQuantumDigest
 		c.Invited[i].PairwiseAID = pairwiseAID
 		c.Invited[i].PublicKey = publicKey
 		c.Invited[i].NextPublicKey = nextPublicKey
@@ -281,4 +361,38 @@ func (s *CoreServer) finishCeremony(status, detail, rotationSAID string) error {
 		c.AppliedAt = time.Now().UTC()
 	}
 	return s.saveCeremony(c)
+}
+
+// ceremonyNow is the time the ceremony reads, a variable so a test can move it.
+var ceremonyNow = time.Now
+
+// aLookIsRecordedAfter is how long a recorded look stands before the next is
+// written, so a phone that asks every few seconds does not rewrite the record
+// every few seconds.
+const aLookIsRecordedAfter = time.Minute
+
+// noteALook records that the invite code token was used to read the ceremony,
+// against the person it belongs to, if it belongs to one and the ceremony is
+// under way. It never fails the read it is part of. Callers hold ceremonyMu.
+func (s *CoreServer) noteALook(token string) {
+	if token == "" {
+		return
+	}
+	c, err := s.loadCeremony()
+	if err != nil || c == nil || (c.Status != ceremonyCollecting && c.Status != ceremonySigning) {
+		return
+	}
+	for i := range c.Invited {
+		inv := &c.Invited[i]
+		if inv.TokenDigest == "" || !enrolsecret.Equal(token, inv.TokenDigest) {
+			continue
+		}
+		now := ceremonyNow().UTC()
+		if inv.LastSeenAt != nil && now.Sub(*inv.LastSeenAt) < aLookIsRecordedAfter {
+			return
+		}
+		inv.LastSeenAt = &now
+		_ = s.saveCeremony(c)
+		return
+	}
 }

@@ -124,10 +124,13 @@ function toadOf(ev: Ev): number | null {
   return typeof ev.bt === "string" && /^(0|[1-9a-f][0-9a-f]{0,3})$/.test(ev.bt) ? parseInt(ev.bt, 16) : null;
 }
 
+/** The signatures checked, at one event, among one answer's receipts that name one witness (the same bound as the core's). */
+const MAX_RECEIPT_CHECKS_PER_WITNESS = 4;
+
 /** How many leading events of `texts` have their threshold of receipts (an unwitnessed event
  *  has threshold 0 and is always met). `receipts` are by event SAID. Fails closed: an event whose
  *  witnesses or threshold cannot be read ends the count. */
-async function receiptedThrough(texts: string[], receipts: Map<string, { witness: string; sig: string }[]>): Promise<{ through: number; named: number; toad: number }> {
+async function receiptedThrough(texts: string[], receipts: Map<string, { witness: string; sig: string; src: number }[]>): Promise<{ through: number; named: number; toad: number }> {
   let designated: string[] = [];
   let toad = 0;
   for (let i = 0; i < texts.length; i++) {
@@ -143,14 +146,24 @@ async function receiptedThrough(texts: string[], receipts: Map<string, { witness
     designated = after;
     toad = bt;
     const keys = new Set<string>();
+    // The signatures checked are bounded for each answer and witness, never across answers: the receipts are pooled from
+    // answers that do not trust each other, and one that could spend another's allowance could keep a genuine receipt
+    // from counting. A check is charged only for a receipt with the shape of a genuine one.
+    const tried = new Map<string, number>();
     for (const r of receipts.get(ev.d as string) ?? []) {
       const at = designated.indexOf(r.witness);
       const key = decodeMatterRaw(r.witness, "B", 32);
       if (at < 0 || !key || !isIndexedReceipt(r.sig)) continue;
       const idx = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(r.sig[1]);
       if (idx !== at) continue;
+      if (keys.has(r.witness)) continue;
+      // A signature that does not decode has not the shape of a genuine one: it costs nothing and uses up nothing.
       const raw = decodeMatterRaw(r.sig, r.sig.slice(0, 2), 64);
-      if (!raw || !(await verifyEd25519(raw, utf8.encode(texts[i]), key))) continue;
+      if (!raw) continue;
+      const spender = r.src + ":" + r.witness;
+      if ((tried.get(spender) ?? 0) >= MAX_RECEIPT_CHECKS_PER_WITNESS) continue;
+      tried.set(spender, (tried.get(spender) ?? 0) + 1);
+      if (!(await verifyEd25519(raw, utf8.encode(texts[i]), key))) continue;
       keys.add(r.witness);
     }
     if (keys.size < toad) return { through: i, named: designated.length, toad };
@@ -168,10 +181,10 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
   const refuse = (why: string): never => {
     throw new Error("the witnesses' key log is refused: " + why);
   };
-  const receipts = new Map<string, { witness: string; sig: string }[]>();
+  const receipts = new Map<string, { witness: string; sig: string; src: number }[]>();
   const candidates: { texts: string[]; checked: CheckedLog; through: number }[] = [];
   const read: { texts: string[]; sigs: string[]; checked: CheckedLog }[] = [];
-  for (const a of answers) {
+  for (const [src, a] of answers.entries()) {
     const ans = a as WitnessAnswer;
     if (!ans || typeof ans !== "object" || ans.aid !== rid || !Array.isArray(ans.kel) || !ans.kel.length || ans.kel.length > MAX_LOG_EVENTS) continue;
     const texts: string[] = [];
@@ -212,7 +225,7 @@ export async function readWitnessedLog(rid: string, answers: unknown[]): Promise
       for (const r of list as { witness?: unknown; cesr_signature?: unknown }[]) {
         if (typeof r?.witness !== "string" || typeof r?.cesr_signature !== "string") continue;
         const said = checked.events[i].said;
-        receipts.set(said, [...(receipts.get(said) ?? []), { witness: r.witness, sig: r.cesr_signature }]);
+        receipts.set(said, [...(receipts.get(said) ?? []), { witness: r.witness, sig: r.cesr_signature, src: src + 1 }]);
       }
     });
   }

@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/backendaddr"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/jsonreply"
@@ -468,6 +470,132 @@ func (h *Handler) HandleSetOfferedFrontEnds(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.writeJSON(w, frontEndsOf(a), http.StatusOK)
+}
+
+// HandleSetRelayID records a utility app's relay identifier, which its sign-in
+// challenges then carry, signed (ADR-072 Amendment 7). PUT /api/assets/{id}/relay-id
+// {"relay_id": "E…"}. Owner only. The record itself is SetRelayID, which an add-on
+// that learns the identifier calls directly.
+func (h *Handler) HandleSetRelayID(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RelayID string `json:"relay_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeJSON(w, map[string]string{"error": "bad request: relay_id is required, an identifier of 44 characters"}, http.StatusBadRequest)
+		return
+	}
+	a, err := h.SetRelayID(chi.URLParam(r, "id"), body.RelayID)
+	switch {
+	case errors.Is(err, ErrRelayIDShape):
+		h.writeJSON(w, map[string]string{"error": "bad request: relay_id is required, an identifier of 44 characters"}, http.StatusBadRequest)
+	case errors.Is(err, ErrNotFound):
+		h.writeJSON(w, map[string]string{"error": "not found"}, http.StatusNotFound)
+	case errors.Is(err, ErrNotAnApp):
+		h.writeJSON(w, map[string]string{"error": "only a utility app has a relay identifier"}, http.StatusBadRequest)
+	case err != nil:
+		h.writeJSON(w, map[string]string{"error": "the relay identifier could not be saved"}, http.StatusInternalServerError)
+	default:
+		h.writeJSON(w, map[string]string{"relay_id": a.RelayID}, http.StatusOK)
+	}
+}
+
+var (
+	// ErrRelayIDShape is a relay identifier that is not 44 characters of the identifier alphabet.
+	ErrRelayIDShape = errors.New("a relay identifier is 44 characters")
+	// ErrNotFound is an asset that is not held.
+	ErrNotFound = errors.New("not found")
+	// ErrNotAnApp is an asset that is not a utility app.
+	ErrNotAnApp = errors.New("only a utility app has a relay identifier")
+)
+
+// SetRelayID records the relay identifier of the utility app assetID. It may be set
+// again, as a utility app that is replaced is given a new identifier; challenges
+// already issued keep the old one. The route and an add-on both come here, so the
+// shape check and the write are in one place.
+func (h *Handler) SetRelayID(assetID, relayID string) (*Asset, error) {
+	if backendaddr.CheckRelayID(relayID) != nil {
+		return nil, ErrRelayIDShape
+	}
+	frontEndsMu.Lock()
+	defer frontEndsMu.Unlock()
+	a, found, err := h.Store.GetAsset(assetID)
+	switch {
+	case err != nil:
+		return nil, err
+	case !found:
+		return nil, ErrNotFound
+	case a.AssetType != "app":
+		return nil, ErrNotAnApp
+	}
+	a.RelayID = relayID
+	a.UpdatedAt = time.Now().UTC()
+	if err := h.Store.UpsertAsset(a); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// HandleSetBackEnd records a utility app's back-end address, which its sign-in
+// challenges then carry, signed beside the relay identifier (ADR-072 Amendment 8).
+// PUT /api/assets/{id}/back-end {"back_end": "https://…"}. Owner only. The record
+// itself is SetBackEnd.
+func (h *Handler) HandleSetBackEnd(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BackEnd string `json:"back_end"`
+	}
+	bad := map[string]string{"error": "bad request: back_end is required, an https address in lower case with no trailing slash"}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeJSON(w, bad, http.StatusBadRequest)
+		return
+	}
+	a, err := h.SetBackEnd(chi.URLParam(r, "id"), body.BackEnd)
+	switch {
+	case errors.Is(err, ErrBackEndShape):
+		h.writeJSON(w, bad, http.StatusBadRequest)
+	case errors.Is(err, ErrNotFound):
+		h.writeJSON(w, map[string]string{"error": "not found"}, http.StatusNotFound)
+	case errors.Is(err, ErrNotAnApp):
+		h.writeJSON(w, map[string]string{"error": "only a utility app has a back end"}, http.StatusBadRequest)
+	case err != nil:
+		h.writeJSON(w, map[string]string{"error": "the back-end address could not be saved"}, http.StatusInternalServerError)
+	default:
+		h.writeJSON(w, map[string]string{"back_end": a.BackEnd}, http.StatusOK)
+	}
+}
+
+// ErrBackEndShape is a back-end address a front end would not accept: not https
+// (or http on this machine), not lower case, or with a trailing slash.
+var ErrBackEndShape = backendaddr.ErrShape
+
+// inDev says whether this is a development build, which may name a back end on this
+// machine. A variable so a test can say it is.
+var inDev = buildmode.IsDev
+
+// SetBackEnd records the back-end address of the utility app assetID, in the form a
+// front end reads a link's (the page's `backEndAddress`), so the two compare equal.
+// It may be set again; challenges already issued keep the old one. The route and an
+// add-on both come here.
+func (h *Handler) SetBackEnd(assetID, address string) (*Asset, error) {
+	if err := backendaddr.Check(address, inDev()); err != nil {
+		return nil, ErrBackEndShape
+	}
+	frontEndsMu.Lock()
+	defer frontEndsMu.Unlock()
+	a, found, err := h.Store.GetAsset(assetID)
+	switch {
+	case err != nil:
+		return nil, err
+	case !found:
+		return nil, ErrNotFound
+	case a.AssetType != "app":
+		return nil, ErrNotAnApp
+	}
+	a.BackEnd = address
+	a.UpdatedAt = time.Now().UTC()
+	if err := h.Store.UpsertAsset(a); err != nil {
+		return nil, err
+	}
+	return &a, nil
 }
 
 func (h *Handler) appForFrontEnds(id string) (a Asset, ok bool, status int, msg string) {

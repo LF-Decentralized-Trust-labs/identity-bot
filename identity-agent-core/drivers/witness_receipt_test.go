@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"identity-agent-core/iacrypto"
 	"testing"
 
 	keri "github.com/grapeid/keri-go"
@@ -226,5 +227,70 @@ func TestOneWitnessCannotMeetAThresholdTwice(t *testing.T) {
 	}
 	if got.Witnessed || got.WitnessDetail[0].ReceiptsVerified != 1 {
 		t.Fatalf("one witness counted twice towards a threshold: %+v", got.WitnessDetail)
+	}
+}
+
+// Each receipt with the shape of a genuine one is a signature check, and a served
+// record can carry about a megabyte of them, each naming a designated witness.
+// The allowance is per source and witness: a source that buries a genuine
+// receipt behind more than the allowance loses it, and nothing another source
+// holds is affected.
+func TestTheReceiptChecksOfOneSourceAreBoundedAndOnlyItsOwn(t *testing.T) {
+	// A well formed signature that fails, at the witness's own place (index 0).
+	forged := func(n int, source int, aid string) []WitnessReceipt {
+		var out []WitnessReceipt
+		for i := 0; i < n; i++ {
+			raw := make([]byte, 64)
+			raw[0], raw[1], raw[2] = byte(i), byte(i>>8), 7
+			sig, err := iacrypto.MatterIndexedSigQB64("A", 0, raw, 88)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, WitnessReceipt{WitnessAID: aid, CesrSignature: sig, Source: source})
+		}
+		return out
+	}
+	verified := func(t *testing.T, in ValidateKELInput) int {
+		got, err := ValidateKELFromBytes(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.WitnessDetail[0].ReceiptsVerified
+	}
+	// One source: its own genuine receipt, behind its own junk.
+	for _, tc := range []struct{ junk, counted int }{{maxReceiptChecksPerWitness - 1, 1}, {maxReceiptChecksPerWitness, 0}, {20000, 0}} {
+		in, w1, _, sign1, _ := witnessedLog(t)
+		for k := range in.Receipts {
+			in.Receipts[k] = append(forged(tc.junk, 1, w1), WitnessReceipt{WitnessAID: w1, CesrSignature: sign1(k), Source: 1})
+		}
+		if n := verified(t, in); n != tc.counted {
+			t.Errorf("%d forged receipts of one source before its genuine one: %d counted, want %d", tc.junk, n, tc.counted)
+		}
+	}
+	// Another source's junk, however much, spends none of this source's allowance.
+	in, w1, _, sign1, _ := witnessedLog(t)
+	for k := range in.Receipts {
+		in.Receipts[k] = append(forged(20000, 1, w1), WitnessReceipt{WitnessAID: w1, CesrSignature: sign1(k), Source: 2})
+	}
+	if n := verified(t, in); n != 1 {
+		t.Errorf("a hostile source's junk kept another source's genuine receipt from counting: %d", n)
+	}
+	// What has not the shape of a receipt costs nothing, and uses up nothing: not
+	// text, not a signature indexed at another witness's place.
+	in, w1, _, sign1, _ = witnessedLog(t)
+	for k := range in.Receipts {
+		var junk []WitnessReceipt
+		for i := 0; i < 50; i++ {
+			junk = append(junk, WitnessReceipt{WitnessAID: w1, CesrSignature: "junk", Source: 1})
+		}
+		other := forged(50, 1, w1)
+		for i := range other {
+			raw := make([]byte, 64)
+			other[i].CesrSignature, _ = iacrypto.MatterIndexedSigQB64("A", 1, raw, 88) // w2's place, not w1's
+		}
+		in.Receipts[k] = append(append(junk, other...), WitnessReceipt{WitnessAID: w1, CesrSignature: sign1(k), Source: 1})
+	}
+	if n := verified(t, in); n != 1 {
+		t.Errorf("receipts that are not worth a check used up the allowance: %d counted", n)
 	}
 }

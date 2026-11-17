@@ -103,11 +103,13 @@ Schema design is deferred to a dedicated planning session. Key design decisions 
 
 ---
 
-### Domain 4 — Sandbox Infrastructure (`sandbox.db`)
+### Domain 4 — Activity log (`activity.db`, formerly `sandbox.db`)
+
+*Amended 2026-11-15: the database is the Identity Agent's signed activity log and was renamed from `sandbox.db` on first open (ADR-012 Amendment 6). It holds the signed activity log, and the capability gateway add-on's own tables (its installed host plug-ins and their instances, its proxy log and its events). The Identity Agent starts no container or program of its own for the older sandboxed-app kind, so nothing of that kind is kept there. The rest of this section describes what the domain held before.*
 
 | Property | Value |
 |----------|-------|
-| File | `$AGENT_DATA_DIR/sandbox.db` |
+| File | `$AGENT_DATA_DIR/activity.db` (`sandbox.db` before 2026-11-15) |
 | Access | Identity Agent core (sandbox subsystem) only |
 | Sensitivity | System |
 | Size | Small-medium |

@@ -285,7 +285,7 @@ def statement_refused(s):
     vals = [s.get(x, "") for x in req + ("to", "conversation", "in_reply_to", "tier")] + list(s.get("brain", {}).values())
     if any("\n" in x or "\r" in x for x in vals):
         return True
-    if s["kind"] not in ("ask", "reply", "receipt", "failure", "progress", "close", "reopen", "limit") or not (s.get("in_reply_to") or opens or control):
+    if s["kind"] not in ("ask", "reply", "receipt", "failure", "progress", "addendum", "close", "reopen", "limit") or not (s.get("in_reply_to") or opens or control):
         return True
     if s.get("tier") and (s["tier"] not in ("quick", "standard", "deep") or s["kind"] != "ask"):
         return True

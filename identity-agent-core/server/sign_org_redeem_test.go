@@ -77,6 +77,11 @@ func TestSigningForAnOrganisationSendsWhatItRefusesWithout(t *testing.T) {
 		t.Error("no rotation key was sent, so this owner could never be replaced — which is " +
 			"the one thing founding an organisation as its own root exists to keep possible")
 	}
+	// The key after that, which a ceremony that hands an identity over commits
+	// to in its second rotation: without it such a ceremony cannot be built.
+	if body["after_next_public_key"] == "" || body["after_next_public_key"] == body["next_public_key"] {
+		t.Errorf("the key after the next was %q: a hand-over ceremony cannot build its second rotation", body["after_next_public_key"])
+	}
 	// And the recovery key, which decides whether the organisation can ever be
 	// restored after losing the machine it runs on.
 	if body["backup_seal_public_key_b64"] == "" {

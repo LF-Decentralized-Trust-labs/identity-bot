@@ -70,6 +70,12 @@ const (
 	// inviting app's own window is shorter; this only bounds what is held.
 	redeemedInviteMemory = 15 * time.Minute
 
+	// redeemedCeremonyMemory is how long an invite to an ownership ceremony is
+	// remembered: the other owners take as long as people take, and the invite is kept on disk
+	// as well (a_redeemed_ceremony_invite_signs_its_rotation.go) so a restart
+	// does not strand a hand-over half way.
+	redeemedCeremonyMemory = 7 * 24 * time.Hour
+
 	// publishedBodyLimit bounds what is read back from the inviting app.
 	publishedBodyLimit = 16 << 10
 )
@@ -81,7 +87,19 @@ type redeemedInvite struct {
 	publishedPath string
 	siteAID       string
 	siteOOBI      string
-	at            time.Time
+	// ceremony is an invite that brought this Identity Agent into an ownership ceremony,
+	// which goes on after the acceptance: the other owners have still to accept
+	// and then every device signs, so it is remembered for longer.
+	ceremony bool
+	at       time.Time
+}
+
+// memory is how long this invite is remembered.
+func (in redeemedInvite) memory() time.Duration {
+	if in.ceremony {
+		return redeemedCeremonyMemory
+	}
+	return redeemedInviteMemory
 }
 
 type redeemedInviteBook struct {
@@ -105,7 +123,7 @@ func (b *redeemedInviteBook) remember(token string, in redeemedInvite) {
 	}
 	now := b.clock()
 	for t, v := range b.m {
-		if now.Sub(v.at) > redeemedInviteMemory {
+		if now.Sub(v.at) > v.memory() {
 			delete(b.m, t)
 		}
 	}
@@ -117,7 +135,7 @@ func (b *redeemedInviteBook) recall(token string) (redeemedInvite, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	v, ok := b.m[token]
-	if !ok || b.clock().Sub(v.at) > redeemedInviteMemory {
+	if !ok || b.clock().Sub(v.at) > v.memory() {
 		delete(b.m, token)
 		return redeemedInvite{}, false
 	}

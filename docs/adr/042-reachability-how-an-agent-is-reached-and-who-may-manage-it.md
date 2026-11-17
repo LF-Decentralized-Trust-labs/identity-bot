@@ -254,9 +254,9 @@ Three properties make this sound:
     bound rather than assuming the default.
   - **It never leaves the core.** Read from the environment once and removed there,
     and withheld from every process the core starts (`childenv`); never forwarded to a
-    model provider or through the sandbox proxy, and redacted in its logs; never in a
-    backup. A sandboxed app's volumes are confined to its own directory, so none can
-    mount the data directory.
+    model provider or through the credential-injecting proxy, and redacted in its logs; never in a
+    backup. (The older sandboxed-app kind confined its volumes to its own directory, so
+    none could mount the data directory; the kind is retired, ADR-012 Amendment 6.)
   - **Windows.** A file's mode means little there; the folder decides who may read it.
     A data directory inside the user's profile inherits an access list only that user
     can read. The core warns loudly when it is anywhere else.

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"identity-agent-core/limits"
 	"sync"
 
@@ -91,6 +93,9 @@ func (h hostWrapper) BeginInstalledAppKey(r *http.Request, callerAsset, assetID 
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
 }
+func (h hostWrapper) BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint string) (time.Time, bool, error) {
+	return h.s.browserKeySpeaksUntil(assetID, pairwiseAID, thumbprint)
+}
 func (h hostWrapper) BrowserKeySignInResult(siteAID, session, collector string) (BrowserKeySignInResult, error) {
 	return h.s.browserKeySignInResult(siteAID, session, collector)
 }
@@ -127,6 +132,21 @@ func (h hostWrapper) IssueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 }
 func (h hostWrapper) IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool {
 	return h.s.issuedUnderFirstVersionTooLate(rec)
+}
+func (h hostWrapper) BackupSealKeyOf(appAID string, epoch uint32) ([]byte, error) {
+	return h.s.backupSealKeyOf(appAID, epoch)
+}
+func (h hostWrapper) BackupSlotOpens(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte) (int, bool, error) {
+	return h.s.backupSlotOpens(appAID, maxEpoch, fileID, slots)
+}
+func (h hostWrapper) ResealBackupSlot(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, toAppAID string, toEpoch uint32) ([]byte, error) {
+	return h.s.resealBackupSlot(appAID, maxEpoch, fileID, slots, toAppAID, toEpoch)
+}
+func (h hostWrapper) SealBackupOpenReply(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, restoreKey, digest []byte) ([]byte, int, error) {
+	return h.s.sealBackupOpenReply(appAID, maxEpoch, fileID, slots, restoreKey, digest)
+}
+func (h hostWrapper) IsOwnBackupSealKey(pub []byte, epochs map[string]uint32) bool {
+	return h.s.isOwnBackupSealKey(pub, epochs)
 }
 func (h hostWrapper) KeyCanSign() error    { return h.s.keyCanSign() }
 func (h hostWrapper) KeyIsElsewhere() bool { return h.s.keyIsElsewhere() }
@@ -251,3 +271,19 @@ func (h hostWrapper) ResolveBearerToken(r *http.Request, token string, cc permis
 	return h.s.resolveBearerToken(r, token, cc)
 }
 func (hostWrapper) BearerFrom(r *http.Request) string { return bearerFrom(r) }
+
+// ReviveAssetIdentity revives the stored asset's identity, read from the store so
+// an add-on cannot revive one under a name or state the store does not hold.
+func (h hostWrapper) ReviveAssetIdentity(assetID string) error {
+	if h.s.assetHandler == nil {
+		return errors.New("assets are unavailable")
+	}
+	a, ok, err := h.s.assetHandler.Store.GetAsset(assetID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no asset %s", assetID)
+	}
+	return h.s.reviveAssetIdentity(a)
+}

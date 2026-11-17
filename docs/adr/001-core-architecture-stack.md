@@ -28,6 +28,7 @@ the same engine a computer runs. (Revised 2026-08-18; see ADR-037.)
 
 ### 3. AI Governance (The "Seatbelt") — Future
 * **Integration:** The "Open Claw" agent and "Shadow Auditor" will run as isolated processes or sandboxed logic within the Go Core. This is planned for a future development phase (see roadmap Phase 6).
+  *(Amended 2026-11-15: the Identity Agent starts no container or program of its own for these. They run as utility apps beside it, on machines of their own, ADR-072.)*
 * **Constraint:** All AI Egress must pass through a strict "Deterministic Whitelist" filter enforced by the Go backend before reaching the network.
 
 ## Consequences
