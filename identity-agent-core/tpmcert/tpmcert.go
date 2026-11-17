@@ -91,8 +91,13 @@ func Parse(der []byte) (*Certificate, error) {
 	if t.Version != 2 {
 		return nil, fmt.Errorf("tpmcert: version %d is not a version 3 certificate", t.Version+1)
 	}
-	if t.Serial.Tag != asn1.TagInteger || t.Serial.Class != asn1.ClassUniversal || len(t.Serial.Bytes) == 0 {
+	if t.Serial.Tag != asn1.TagInteger || t.Serial.Class != asn1.ClassUniversal || t.Serial.IsCompound || len(t.Serial.Bytes) == 0 {
 		return nil, errors.New("tpmcert: the serial number is not an integer")
+	}
+	// Redundant leading zeros are the one irregularity taken; a negative serial, which
+	// crypto/x509 also refuses, is not.
+	if t.Serial.Bytes[0]&0x80 != 0 {
+		return nil, errors.New("tpmcert: the serial number is negative")
 	}
 	if !t.SigAlg.Algorithm.Equal(o.SigAlg.Algorithm) {
 		return nil, errors.New("tpmcert: the two signature algorithms differ")

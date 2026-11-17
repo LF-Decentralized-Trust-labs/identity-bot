@@ -711,8 +711,12 @@ func verifyTPMSignature(ak *tpmPublic, msg, sig []byte) error {
 	switch {
 	case ak.typ == tpmAlgRSA && (sigAlg == tpmAlgRSASSA || sigAlg == tpmAlgRSAPSS):
 		s := r.sized()
-		if r.err || len(r.b) != 0 || len(ak.mod) < 128 {
+		if r.err || len(r.b) != 0 {
 			return errTPM("malformed RSA signature")
+		}
+		// An RSA attestation key is 2048 bits or more, as a TPM 2.0 makes one.
+		if new(big.Int).SetBytes(ak.mod).BitLen() < 2048 {
+			return errTPM("the RSA attestation key is shorter than 2048 bits")
 		}
 		e := int(ak.exp)
 		if e == 0 {

@@ -77,15 +77,21 @@ func (s *CoreServer) makeInstalledAppKeyCredential(r *http.Request, callerAsset,
 	}
 	// A TPM key the owner has not allowed is refused before the TPM is asked to do anything,
 	// and a virtual one only where the owner opted in to it, the same as the proof will be.
-	allowVirtual := false
-	if s.assetHandler != nil {
-		if a, found, err := s.assetHandler.Store.GetAsset(assetID); err == nil && found {
-			if !a.InstalledApp.TPMKeys {
-				return nil, &SignInRefused{http.StatusForbidden, errTPMKeysNotAllowed.Error()}
-			}
-			allowVirtual = a.InstalledApp.AcceptsVirtualTPM()
-		}
+	// An app that cannot be read is refused, not taken as allowing nothing in particular.
+	if s.assetHandler == nil || s.assetHandler.Store == nil {
+		return nil, &SignInRefused{http.StatusServiceUnavailable, "this Identity Agent cannot read the app's settings now; try again"}
 	}
+	app, found, err := s.assetHandler.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, &SignInRefused{http.StatusServiceUnavailable, "this Identity Agent cannot read the app's settings now; try again"}
+	}
+	if !found {
+		return nil, &SignInRefused{http.StatusNotFound, "this app is not known to this Identity Agent"}
+	}
+	if !app.InstalledApp.TPMKeys {
+		return nil, &SignInRefused{http.StatusForbidden, errTPMKeysNotAllowed.Error()}
+	}
+	allowVirtual := app.InstalledApp.AcceptsVirtualTPM()
 	s.installedAppAskMu.Lock()
 	a, ok := s.installedAppAsks[askID]
 	if !ok || a.asset != assetID || time.Now().After(a.until) {

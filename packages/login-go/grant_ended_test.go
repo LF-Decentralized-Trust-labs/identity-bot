@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 )
 
 type grantEndedVectors struct {
+	SeedHex   string         `json:"seed_hex"`
 	PublicHex string         `json:"public_hex"`
 	Now       string         `json:"now"`
 	StaleNow  string         `json:"stale_now"`
@@ -96,6 +98,27 @@ func TestANoticeThatChangedAfterSigningOrIsForAnotherAppOrIsStaleIsRefused(t *te
 	}
 	if _, err := VerifyGrantEnded(body(extra), asset, pub, now); err == nil {
 		t.Error("a notice with a field it does not define was taken")
+	}
+}
+
+// A notice correctly signed by the same key, but for another of the key's apps, is refused:
+// the signature alone does not say which app it ends a grant at.
+func TestACorrectlySignedNoticeForAnotherAssetIsRefused(t *testing.T) {
+	v, pub, now := readGrantEnded(t)
+	seed, _ := hex.DecodeString(v.SeedHex)
+	priv := ed25519.NewKeyFromSeed(seed)
+	n := map[string]any{}
+	for k, x := range v.Notice {
+		n[k] = x
+	}
+	n["asset"] = "Eanother-asset-of-the-same-key"
+	sig := ed25519.Sign(priv, GrantEndedStatement(n["asset"].(string), n["key"].(string), n["person"].(string), n["issued"].(string)))
+	n["signature"] = base64.RawURLEncoding.EncodeToString(sig)
+	if _, err := VerifyGrantEnded(body(n), n["asset"].(string), pub, now); err != nil {
+		t.Fatalf("the notice is not correctly signed, so this test would show nothing: %v", err)
+	}
+	if _, err := VerifyGrantEnded(body(n), v.Notice["asset"].(string), pub, now); err == nil {
+		t.Fatal("a notice for another asset was taken")
 	}
 }
 
