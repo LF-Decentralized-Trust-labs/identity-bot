@@ -183,13 +183,14 @@ func TestAPersonRemovedFromTheRosterIsNoLongerAdmitted(t *testing.T) {
 	}
 }
 
-// browserKeyHost is the three methods of addon.Host an add-on calls (that
+// browserKeyHost is the methods of addon.Host an add-on calls (that
 // package imports this one, so the interface is restated here: the test fails
 // to compile if hostWrapper stops satisfying it, as it would for addon.Host).
 type browserKeyHost interface {
 	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error)
 	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
 	BrowserKeySignInResult(siteAID, session, collector string) (BrowserKeySignInResult, error)
+	BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint string) (time.Time, bool, error)
 }
 
 // The three methods an add-on calls, reached through the host wrapper
@@ -295,5 +296,53 @@ func TestAVerifiedSignInForABrowserKeyIsKeptAsWhoseTheKeyIs(t *testing.T) {
 	}
 	if _, ok := w.org.browserKeys().Whose("the-website", aBrowserKey, time.Now().Add(browserKeyLife+time.Second)); ok {
 		t.Fatal("the key still speaks after the sign-in's time")
+	}
+}
+
+// A utility app's back end asks, through the host, whether the key its session is
+// bound to still speaks, and until when: the record's own time, the same answer
+// a statement the key signs is judged by. A session that outlives the key is
+// one that says it is signed in while everything it sends is refused.
+func TestAnAddOnAsksUntilWhenABrowserKeySpeaks(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	var host browserKeyHost = hostWrapper{s: w.org}
+	h := aPersonsIdentityAgent(t)
+	req := aBrowserKeyChallenge(t, w, aBrowserKey)
+	before := time.Now()
+	if _, err := h.Approve(req); err != nil {
+		t.Fatal(err)
+	}
+	w.org.challengeMu.Lock()
+	person, _ := w.org.challengeStatus[req.SessionToken]["pairwise_aid"].(string)
+	w.org.challengeMu.Unlock()
+
+	until, speaks, err := host.BrowserKeySpeaksUntil("the-website", person, aBrowserKey)
+	if err != nil || !speaks {
+		t.Fatalf("the key the person approved does not speak: %v %v", speaks, err)
+	}
+	if until.Before(before.Add(browserKeyLife)) || until.After(time.Now().Add(browserKeyLife)) {
+		t.Fatalf("the key speaks until %v, not the sign-in's %v on", until, browserKeyLife)
+	}
+	for name, q := range map[string][3]string{
+		"another person": {"the-website", "Esomebody-else", aBrowserKey},
+		"another key":    {"the-website", person, anotherBrowserKey},
+		"another asset":  {"another-asset", person, aBrowserKey},
+	} {
+		if _, speaks, err := host.BrowserKeySpeaksUntil(q[0], q[1], q[2]); err != nil || speaks {
+			t.Fatalf("%s: speaks %v (%v)", name, speaks, err)
+		}
+	}
+	if _, _, err := host.BrowserKeySpeaksUntil("the-website", person, "not-a-thumbprint"); err == nil {
+		t.Fatal("a malformed thumbprint was answered as a no")
+	}
+
+	// Lapsed: the record's time has passed, so the key speaks no more, and the
+	// answer is the one a statement it signs would get.
+	now := time.Now()
+	if err := w.org.browserKeys().Record("the-website", person, aBrowserKey, now.Add(-time.Second), now.Add(-browserKeyLife), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, speaks, _ := host.BrowserKeySpeaksUntil("the-website", person, aBrowserKey); speaks {
+		t.Fatal("a lapsed key still speaks to the utility app's back end")
 	}
 }

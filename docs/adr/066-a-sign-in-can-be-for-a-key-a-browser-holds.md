@@ -168,6 +168,14 @@ signatures), and a thumbprint that must be refused. Go
     re-check a required credential, which needs what the person presented. An
     error means the asset could not be read, which is not an answer either way.
     Use it to sign out someone removed from the roster since they signed in.
+  - `BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint)` says whether
+    the key with that thumbprint still speaks for that person at the asset,
+    and until when: the same reading a statement the key signs is judged by
+    (`keySpeaksUntil`, which `keysSpeakingAt.KeySpeaksFor` asks). A utility app's
+    back end that holds a session bound to the key asks it, so the session ends
+    when the key stops speaking and can say when that will be, rather than
+    outliving the key and having every statement it carries refused. A zero
+    time with true is an installed app's grant, which speaks until it is ended.
 
 ### A signed-in person speaks to an AI agent from the app's page — SUPERSEDED
 

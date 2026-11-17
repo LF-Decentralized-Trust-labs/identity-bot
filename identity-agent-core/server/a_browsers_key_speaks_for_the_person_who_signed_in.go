@@ -300,11 +300,36 @@ func (k keysSpeakingAt) KeySpeaksFor(person, signer, verkey string) bool {
 	if err != nil {
 		return false
 	}
-	rec, ok := k.s.browserKeys().Get(k.asset, tp, time.Now())
-	if !ok || rec.Person != person {
-		return false
+	_, ok := k.s.keySpeaksUntil(k.asset, person, tp, time.Now())
+	return ok
+}
+
+// keySpeaksUntil is whether the key with this thumbprint speaks for person at
+// the asset now, and until when: a live record of a sign-in at the asset for
+// that person, and the asset still standing behind them. A zero time is an
+// installed app's grant, which speaks until it is ended. It is the one reading
+// of whether a key speaks: a statement is judged by it (KeySpeaksFor), and a
+// utility app's back end asks it (BrowserKeySpeaksUntil) so the session it holds for
+// the key ends when the key stops speaking, not later.
+func (s *CoreServer) keySpeaksUntil(assetID, person, thumbprint string, now time.Time) (time.Time, bool) {
+	rec, ok := s.browserKeys().Get(assetID, thumbprint, now)
+	if !ok || rec.Person != person || !s.assetStillStands(rec) {
+		return time.Time{}, false
 	}
-	return k.s.assetStillStands(rec)
+	return rec.Until, true
+}
+
+// browserKeySpeaksUntil is keySpeaksUntil for an add-on, which names the key
+// by its RFC 7638 thumbprint; a malformed one is an error, not a "no".
+func (s *CoreServer) browserKeySpeaksUntil(assetID, person, thumbprint string) (time.Time, bool, error) {
+	if assetID == "" || person == "" {
+		return time.Time{}, false, errors.New("ask whether a key speaks by the asset and the person")
+	}
+	if err := login.CheckBrowserKeyThumbprint(thumbprint); err != nil {
+		return time.Time{}, false, err
+	}
+	until, ok := s.keySpeaksUntil(assetID, person, thumbprint, time.Now())
+	return until, ok, nil
 }
 
 // assetStillStands asks the asset the question it asked at sign-in, now: the

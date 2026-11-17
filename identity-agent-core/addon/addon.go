@@ -153,6 +153,14 @@ type Host interface {
 	// since can be signed out. It does not re-check a required credential
 	// (RequiredCredSchema), which needs what the person presented.
 	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
+	// BrowserKeySpeaksUntil is whether the key with this RFC 7638 thumbprint
+	// still speaks for the person (by their identifier at the asset) at the
+	// asset, and until when: the same answer a statement the key signs is
+	// judged by (trail.CheckAuthor), so a utility app's back end can end the session
+	// it holds for the key when the key stops speaking, and say when that is.
+	// A zero time with true is an installed app's grant, which speaks until it
+	// is ended. An error is a malformed question, not an answer.
+	BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint string) (until time.Time, speaks bool, err error)
 	// BrowserKeySignInResult is how that sign-in stands, given the asset the asker
 	// is (siteAID, the asset's own identifier, as the challenge was signed as), and the session and
 	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key
