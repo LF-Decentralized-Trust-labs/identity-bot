@@ -99,6 +99,15 @@ func theControlAPersonSigns(r *http.Request) (conversation, kind string, ok bool
 // when every check below holds. A request that carries these headers and is not
 // an app's is refused where it is read (thePersonAsking).
 func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, body []byte) (named coretypes.Signer, statement, salt []byte, err error) {
+	return s.thePersonSpeaksFor(r, app, nil, body)
+}
+
+// thePersonSpeaksFor is thePersonAnAppSpeaksFor, and also the holder of a
+// self-owned Identity Agent saying a conversation is done (holder non-nil,
+// app unused): the same statement, held to the same checks, but only on the
+// route a person closes, reopens or limits a conversation on, signed by the
+// Identity Agent's own key, and standing as its owner (ADR-077 amendment).
+func (s *CoreServer) thePersonSpeaksFor(r *http.Request, app AppCaller, holder *selfOwnedHolder, body []byte) (named coretypes.Signer, statement, salt []byte, err error) {
 	who := strings.TrimSpace(r.Header.Get(headerSpeakingFor))
 	raw := strings.TrimSpace(r.Header.Get(headerPersonStatement))
 	rawSalt := strings.TrimSpace(r.Header.Get(headerPersonSalt))
@@ -135,6 +144,10 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 		msg   agentmessage.PersonMessage
 	)
 	cid, controlKind, isControl := theControlAPersonSigns(r)
+	if holder != nil && !isControl {
+		return refuse(errors.New("the holder of a self-owned Identity Agent signs here only to close a conversation, " +
+			"take a close back or raise its turn limit"))
+	}
 	if isControl {
 		if json.Unmarshal(body, &msg) != nil {
 			return refuse(errors.New("the request must be JSON"))
@@ -195,8 +208,12 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 	// Then the statement is the person's: well formed, the key's signature, this
 	// Identity Agent, a key the person's own sign-in at the app's asset named,
 	// signed just now. Judged by the trail's one check.
+	var keys trail.KeyRoster = keysSpeakingAt{s: s, asset: app.Asset}
+	if holder != nil {
+		keys = holder
+	}
 	if verr := trail.CheckAuthor(trail.Write{Statement: st, Verkey: proof.Verkey, Signature: proof.Signature},
-		s.thisIdentityAgentsIdentifier(), keysSpeakingAt{s: s, asset: app.Asset}); verr != nil {
+		s.thisIdentityAgentsIdentifier(), keys); verr != nil {
 		return refuse(fmt.Errorf("the person's statement does not hold: %w", verr))
 	}
 	if ferr := trail.CheckFresh(st, time.Now()); ferr != nil {
@@ -209,6 +226,9 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 		return refuse(uerr)
 	} else if used {
 		return refuse(errors.New("this statement was already used"))
+	}
+	if holder != nil {
+		return coretypes.Signer{AID: who, Standing: "owner", Name: "The owner"}, js, salt, nil
 	}
 	return coretypes.Signer{AID: who, Standing: "member", Asset: app.Asset}, js, salt, nil
 }
