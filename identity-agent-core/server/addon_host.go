@@ -93,6 +93,9 @@ func (h hostWrapper) BeginInstalledAppKey(r *http.Request, callerAsset, assetID 
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
 }
+func (h hostWrapper) BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint string) (time.Time, bool, error) {
+	return h.s.browserKeySpeaksUntil(assetID, pairwiseAID, thumbprint)
+}
 func (h hostWrapper) BrowserKeySignInResult(siteAID, session, collector string) (BrowserKeySignInResult, error) {
 	return h.s.browserKeySignInResult(siteAID, session, collector)
 }

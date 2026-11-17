@@ -254,6 +254,8 @@ var controllerOwnerOnly = map[string]string{
 	// The relay identifier a utility app's sign-in challenges name is the owner's to record.
 	"PUT /api/assets/{id}/relay-id": "this sets the relay identifier a utility app's sign-in challenges are signed for",
 	"PUT /api/assets/{id}/back-end": "this sets the back-end address a utility app's sign-in challenges are signed for",
+	// A longer sign-in widens what the owner allowed, so only the owner lengthens it.
+	"PUT /api/assets/{id}/sign-in-lifetime": "this decides how long a person's sign-in to a utility app lets their browser's key speak for them",
 	// A grant that never lapses is the owner's to end, from the device holding the key.
 	"DELETE /api/assets/{id}/app-key-grants/{key}": "ending a person's installed-app grant takes away what the owner allowed",
 
