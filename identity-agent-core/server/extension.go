@@ -62,10 +62,11 @@ func membershipResolverFor(source string) MembershipResolver {
 	return membershipResolvers[source]
 }
 
-// HasMembershipResolver reports whether a resolver is registered for source, so
-// an add-on that makes assets can name a membership source only where this
-// Identity Agent can answer for it: an unrecognized source fails closed, and a
-// policy naming one this Identity Agent does not have admits nobody.
+// HasMembershipResolver reports whether a resolver is registered for source. An
+// add-on linked into this Identity Agent that makes assets asks it before naming
+// a membership source in an asset's policy, so it names only a source this
+// Identity Agent can answer for: a source with no resolver fails closed, and a
+// policy naming one admits nobody.
 func HasMembershipResolver(source string) bool {
 	return membershipResolverFor(source) != nil
 }

@@ -6,8 +6,8 @@ type allAdmit struct{}
 
 func (allAdmit) Admit(string, string) (bool, string) { return true, "" }
 
-// An add-on that makes assets asks whether a membership source can be answered
-// for here before it names one.
+// An add-on linked into the Identity Agent that makes assets asks whether a
+// membership source can be answered for here before it names one.
 func TestAMembershipSourceCanBeAskedFor(t *testing.T) {
 	if HasMembershipResolver("a-roster-nobody-registered") {
 		t.Fatal("a source with no resolver is said to have one")

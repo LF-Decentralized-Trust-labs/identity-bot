@@ -3,7 +3,7 @@ import { detectLocalAgent, openDesktopLoginDeepLink, triggerLocalLogin } from ".
 import { useSessionPoll } from "./useSessionPoll.js";
 import { startPageSession, type PageSessionRead } from "./pageSession.js";
 import { LoginQrCode } from "./LoginQrCode.js";
-import { refusalInWords, signInProblem } from "./signInProblem.js";
+import { pollProblem, refusalProblem, signInProblem } from "./signInProblem.js";
 
 export interface SignInButtonProps {
   sessionEndpoint: string;
@@ -91,7 +91,7 @@ export function SignInButton({
       onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken, collectorSecret, signIn: poll.result });
     }
     if (poll.state === "declined" || poll.state === "expired" || poll.state === "error") {
-      onError?.(new Error(signInProblem(poll.state, poll.state === "declined" ? poll.reason : poll.error)));
+      onError?.(new Error(pollProblem({ state: poll.state, reason: poll.reason, error: poll.error })));
     }
   }, [poll.state, poll.appSessionToken, poll.result, poll.error, poll.reason, sessionToken, collectorSecret, onSuccess, onError]);
 
@@ -190,7 +190,7 @@ export function SignInButton({
 
       {poll.lastRefusal && poll.state !== "verified" && (
         <p role="alert" style={{ fontSize: dims.font, margin: "8px 0 0" }}>
-          That answer was refused: {refusalInWords(poll.lastRefusal)}. The sign-in is still open; try again.
+          {refusalProblem(poll.lastRefusal)}
         </p>
       )}
 

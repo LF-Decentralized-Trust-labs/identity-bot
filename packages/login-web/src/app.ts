@@ -1222,6 +1222,6 @@ async function askStatement(
   }
 }
 
-export { refusalInWords, signInProblem } from "./signInProblem.js";
+export { pollProblem, refusalInWords, refusalNextStep, refusalProblem, signInProblem, type RefusalNextStep } from "./signInProblem.js";
 import { statementProblem, type StatementView } from "./statementWords.js";
 export { statementWords, type StatementView, type StatementWords } from "./statementWords.js";
