@@ -223,8 +223,8 @@ Sections come from `Collector.Collect` in `backup/collector.go`. Requesting `tie
 
 | Section | Contents |
 |---|---|
-| `sandbox_index` | A JSON object `{"entries": [<file names in the sandbox directory>]}`. Names only — no container images and no app data. |
-| `file:<path>` | One file from the data directory, at `<path>` relative to it with forward slashes, restored to the same path. Every file is carried except a short list excluded by name, each with its reason, in `skipReason` in `backup/everything_this_device_holds.go`. A SQLite database, recognised by its header, is copied through SQLite rather than read as bytes, so the transactions still in its write-ahead log are not lost. The core names none of these files: a database an add-on keeps in the data directory, such as an AI memory store, is carried because it is there. |
+| `sandbox_index` | Written by builds before 2026-11-15 only: a JSON object `{"entries": [<file names in the sandbox directory>]}`. It is no longer written, and a restore of an archive that has it reads and ignores it. |
+| `file:<path>` | One file from the data directory, at `<path>` relative to it with forward slashes, restored to the same path. One name is restored elsewhere: `file:sandbox.db`, the activity log under the name older builds kept it by, is restored as `activity.db`, unless the archive also carries `file:activity.db`, in which case it is a stale copy and is dropped, and the restore says so. Every file is carried except a short list excluded by name, each with its reason, in `skipReason` in `backup/everything_this_device_holds.go`. A SQLite database, recognised by its header, is copied through SQLite rather than read as bytes, so the transactions still in its write-ahead log are not lost. The core names none of these files: a database an add-on keeps in the data directory, such as an AI memory store, is carried because it is there. |
 | `not_carried` | What the sweep deliberately left out, as JSON: each path, the reason, and its size. |
 
 Tier 3 is in the default tiers (`DefaultConfig` in `backup/config.go`). It writes no
@@ -344,8 +344,8 @@ Things the format defines or records but that no code path completes.
 - **Tier 2 and tier 3 sections are collected but not restored.** `applyPayload`
   (`recovery/service.go:294-339`) writes back identity, KEL events, contacts,
   `login_relationships`, `root_seed` and `sqlite_identity_db`. `credentials`, `settings`,
-  `pending_requests` and `sandbox_index` are decrypted and
-  integrity-checked but never applied.
+  `pending_requests` and (in archives older builds wrote) `sandbox_index` are
+  decrypted and integrity-checked but never applied.
 - **`DeltaStateHMAC` is dead code.** Defined at `backup/crypto.go:250`, called from nowhere.
   Its own comment describes it as a placeholder.
 - **`tiers` is not enforced.** Written from the request; no reader compares it against the

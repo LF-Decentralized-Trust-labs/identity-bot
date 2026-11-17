@@ -156,6 +156,31 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		return nil, fmt.Errorf("derive the rotation key this owner commits to: %w", nerr)
 	}
 	nextPub := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
+	// The key after that, which an ownership ceremony that hands an identity
+	// over commits to in its second rotation. Sent always and used only by such
+	// a ceremony, so an owner never has to be asked again; a public half, as
+	// the other two are.
+	afterNextPub := ""
+	if root, rerr := secureenclave.LoadRootSeed(s.DataDir); rerr == nil {
+		if sd, derr := backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 2); derr == nil {
+			afterNextPub = iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(sd).Public().(ed25519.PublicKey))
+		}
+	}
+	// The post-quantum digest that goes beside each classical one (ADR-061
+	// section 6), so an ownership change commits this owner to a key a quantum
+	// computer cannot take from its digest. NOT optional: an owner whose
+	// commitment is classical only would be the weak share of every weighted
+	// next-keys threshold, and the phone refuses to sign a rotation that leaves
+	// its own out (ownerCommitmentAt, aRotationCommitsTo). Sent always and used
+	// only by an ownership ceremony, like the key after next.
+	commitNext, commitAfterNext, cerr := s.commitmentsOfThisDevice(rel)
+	if cerr != nil {
+		return nil, fmt.Errorf("derive the post-quantum commitments this owner makes: %w", cerr)
+	}
+	afterNextPQ := ""
+	if afterNextPub != "" {
+		afterNextPQ = commitAfterNext.PostQuantum
+	}
 
 	// What this organisation will seal its backups and its disk to.
 	//
@@ -200,14 +225,19 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	}
 
 	body, _ := json.Marshal(disclosureBody(fields, profile, map[string]string{
-		"pairwise_aid":               rel.PairwiseAID,
-		"machine_owner_aid":          machineOwnerAID,
-		"oobi":                       rel.RelayOOBI,
-		"vouch_sig":                  vouchSig,
-		"vouch_payload":              string(vouchPayload),
-		"public_key":                 iacrypto.VerkeyQB64(pub),
-		"next_public_key":            iacrypto.VerkeyQB64(nextPub),
-		"backup_seal_public_key_b64": sealKey,
+		"pairwise_aid":          rel.PairwiseAID,
+		"machine_owner_aid":     machineOwnerAID,
+		"oobi":                  rel.RelayOOBI,
+		"vouch_sig":             vouchSig,
+		"vouch_payload":         string(vouchPayload),
+		"public_key":            iacrypto.VerkeyQB64(pub),
+		"next_public_key":       iacrypto.VerkeyQB64(nextPub),
+		"after_next_public_key": afterNextPub,
+		// Digests of keys that stay on this device: public, and useless to
+		// anyone who does not hold the phrase.
+		"next_post_quantum_digest":       commitNext.PostQuantum,
+		"after_next_post_quantum_digest": afterNextPQ,
+		"backup_seal_public_key_b64":     sealKey,
 	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/signer/invites/" + p.InviteToken + "/redeem"
 	resp, err := siteClient(15*time.Second, redeemURL).Post(redeemURL, "application/json", strings.NewReader(string(body)))
@@ -231,10 +261,29 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	if err != nil {
 		return nil, fmt.Errorf("the organization's answer: %w", err)
 	}
-	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{
+	// An organisation that answers "accepted" has put this owner into an
+	// ownership ceremony, which is not over until every owner's device has
+	// signed: the person is taken on to that, not to claiming a machine.
+	var said struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(answer, &said)
+	inCeremony := said.Status == "accepted"
+	redeemed := redeemedInvite{
 		base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI,
-		publishedPath: publishedPathFrom(answer),
-	})
+		publishedPath: publishedPathFrom(answer), ceremony: inCeremony,
+	}
+	s.redeemedInvites.remember(p.InviteToken, redeemed)
+	if inCeremony {
+		// The change goes on for as long as people take to sign it, and the second
+		// signature of a hand-over comes after this Identity Agent may have restarted:
+		// without the invite this phone could never sign it, and the first
+		// rotation is already in the log.
+		if err := s.keepCeremonyInvite(p.InviteToken, redeemed); err != nil {
+			log.Printf("[sign_org] could not keep the ownership change on disk, so a restart of this Identity Agent "+
+				"before it is finished would leave this phone unable to sign it: %v", err)
+		}
+	}
 
 	org := p.OrgName
 	if org == "" {
@@ -248,6 +297,7 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		"invited_by":        strings.TrimRight(ctx.Base, "/"),
 		"machine_owner_aid": machineOwnerAID,
 		"employer":          org,
+		"ceremony":          inCeremony,
 		"role":              "Super Admin",
 		"pairwise_aid":      rel.PairwiseAID,
 		"status":            "active", // the signer is active immediately

@@ -295,3 +295,83 @@ func TestTheOfferedListIsTheTokensNotTheMachines(t *testing.T) {
 		t.Fatalf("a token that declared nothing made a declared app: %+v", got)
 	}
 }
+
+// Fails without the record: the relay identifier a utility app's challenges are
+// signed for is kept, can be replaced, and is refused when it is not an identifier
+// or the asset is not a utility app.
+func TestTheRelayIdentifierOfAnAppIsRecordedAndReplaced(t *testing.T) {
+	h, r := anAppHandler(t, Asset{ID: "a", AssetType: "app"})
+	r.(*chi.Mux).Put("/assets/{id}/relay-id", h.HandleSetRelayID)
+	const first, second = "EPK79TkurF8S2rezG3Z8dUiUYkEuYy_9_kZOSBi5HSqI", "EBabiu_JCa0OHEYE5r-0zQ34qUPDiAlRbNbS-dNK-8Dl"
+	for _, rid := range []string{first, second} {
+		if rec := do(r, "PUT", "/assets/a/relay-id", `{"relay_id":"`+rid+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("%s answered %d: %s", rid, rec.Code, rec.Body)
+		}
+		if a, _, _ := h.Store.GetAsset("a"); a.RelayID != rid {
+			t.Fatalf("the app's relay identifier is %q, not %q", a.RelayID, rid)
+		}
+	}
+	for _, bad := range []string{`{}`, `{"relay_id":""}`, `{"relay_id":"not an identifier"}`, `{"relay_id":"` + first + `x"}`} {
+		if rec := do(r, "PUT", "/assets/a/relay-id", bad); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s answered %d", bad, rec.Code)
+		}
+	}
+	if a, _, _ := h.Store.GetAsset("a"); a.RelayID != second {
+		t.Fatalf("a refused request changed it to %q", a.RelayID)
+	}
+	if rec := do(r, "PUT", "/assets/nope/relay-id", `{"relay_id":"`+first+`"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("an asset that is not there answered %d", rec.Code)
+	}
+	h2, r2 := anAppHandler(t, Asset{ID: "site", AssetType: "domain"})
+	r2.(*chi.Mux).Put("/assets/{id}/relay-id", h2.HandleSetRelayID)
+	if rec := do(r2, "PUT", "/assets/site/relay-id", `{"relay_id":"`+first+`"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a website answered %d", rec.Code)
+	}
+}
+
+// Fails without the record: the back-end address a utility app's challenges are
+// signed for is kept, can be replaced, and is refused in any form a front end would
+// not read the link's address as.
+func TestTheBackEndOfAnAppIsRecordedInTheFormAFrontEndReads(t *testing.T) {
+	h, r := anAppHandler(t, Asset{ID: "a", AssetType: "app"})
+	r.(*chi.Mux).Put("/assets/{id}/back-end", h.HandleSetBackEnd)
+	// A development build may name a back end on this machine; the others may not.
+	was := inDev
+	t.Cleanup(func() { inDev = was })
+	inDev = func() bool { return true }
+	for _, ok := range []string{"https://tasks.example.com", "https://tasks.example.com:8443/api", "http://127.0.0.1:8080", "http://localhost"} {
+		if rec := do(r, "PUT", "/assets/a/back-end", `{"back_end":"`+ok+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("%s answered %d: %s", ok, rec.Code, rec.Body)
+		}
+		if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != ok {
+			t.Fatalf("the app's back end is %q, not %q", a.BackEnd, ok)
+		}
+	}
+	for _, bad := range []string{`{}`, `{"back_end":""}`, `{"back_end":"https://Tasks.example.com"}`, `{"back_end":"https://tasks.example.com/"}`,
+		`{"back_end":"http://tasks.example.com"}`, `{"back_end":"https://tasks.example.com?x=1"}`, `{"back_end":"https://a b"}`, `{"back_end":"ftp://x"}`} {
+		if rec := do(r, "PUT", "/assets/a/back-end", bad); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s answered %d", bad, rec.Code)
+		}
+	}
+	if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != "http://localhost" {
+		t.Fatalf("a refused request changed it to %q", a.BackEnd)
+	}
+	// Outside a development build, this machine and a private network are refused.
+	inDev = func() bool { return false }
+	for _, bad := range []string{"http://localhost", "http://127.0.0.1:8080", "https://10.0.0.5", "https://169.254.169.254", "https://db.internal", "https://intranet"} {
+		if rec := do(r, "PUT", "/assets/a/back-end", `{"back_end":"`+bad+`"}`); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s answered %d outside a development build", bad, rec.Code)
+		}
+	}
+	if a, _, _ := h.Store.GetAsset("a"); a.BackEnd != "http://localhost" {
+		t.Fatalf("a refused request changed it to %q", a.BackEnd)
+	}
+	if rec := do(r, "PUT", "/assets/nope/back-end", `{"back_end":"https://x.example"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("an asset that is not there answered %d", rec.Code)
+	}
+	h2, r2 := anAppHandler(t, Asset{ID: "site", AssetType: "domain"})
+	r2.(*chi.Mux).Put("/assets/{id}/back-end", h2.HandleSetBackEnd)
+	if rec := do(r2, "PUT", "/assets/site/back-end", `{"back_end":"https://x.example"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a website answered %d", rec.Code)
+	}
+}

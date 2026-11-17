@@ -35,7 +35,7 @@ assert.throws(() => readPinnedAppLink(hash({ api: "https://tasks.example/elsewhe
 assert.throws(() => readPinnedAppLink(hash({ api: "http://127.0.0.1:5050" }), pin), /a different back end/);
 
 // the back end is compared byte for byte, never case-folded: one spelling is taken, and a pin must be written in it
-assert.throws(() => readPinnedAppLink(hash({ api: "https://Tasks.example" }), pin), /a different back end/, "a host in another case");
+assert.throws(() => readPinnedAppLink(hash({ api: "https://Tasks.example" }), pin), /no back end|a different back end/, "a host in another case");
 assert.throws(() => readPinnedAppLink(hash({ api: "HTTPS://tasks.example" }), pin), /no back end|a different back end/, "a scheme in another case");
 assert.equal(readPinnedAppLink(hash({ api: "https://tasks.example/A" }), { ...pin, api: "https://tasks.example/A" }).api, "https://tasks.example/A");
 assert.throws(() => readPinnedAppLink(hash({ api: "https://tasks.example/a" }), { ...pin, api: "https://tasks.example/A" }), /a different back end/, "a path in another case");

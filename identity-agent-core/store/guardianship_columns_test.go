@@ -32,16 +32,16 @@ func TestTheDelegationColumnsAreDroppedAndTheDependentIsKept(t *testing.T) {
 		VALUES ('g','minor_child','EGuardian','EDep','Sam','EDelegated','["EOther"]',2,'ECred')`); err != nil {
 		t.Fatal(err)
 	}
-	var m59 string
+	var m60 string
 	for _, m := range identityMigrations {
-		if m.Version == 59 {
-			m59 = m.SQL
+		if m.Version == 60 {
+			m60 = m.SQL
 		}
 	}
-	if m59 == "" {
-		t.Fatal("no migration 59")
+	if m60 == "" {
+		t.Fatal("no migration 60")
 	}
-	if err := execMigration(db, m59); err != nil {
+	if err := execMigration(db, m60); err != nil {
 		t.Fatal(err)
 	}
 	var dep, name, cred, parts string

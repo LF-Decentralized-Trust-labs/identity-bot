@@ -1250,6 +1250,16 @@ CREATE TABLE IF NOT EXISTS kel_seen_log (
 `},
 	{
 		Version:     59,
+		Description: "Mark an identity whose keys an ownership change handed to its owners",
+		SQL: `
+-- After a hand-over the record keeps an owner's public key beside the
+-- derivation index and key generation of the key this Identity Agent held before. Those
+-- are inert, but nothing said so. handed_over says it, so nothing here derives
+-- or signs a key of the identity on the strength of them.
+ALTER TABLE identity ADD COLUMN handed_over INTEGER NOT NULL DEFAULT 0;
+`},
+	{
+		Version:     60,
 		Description: "Guardianship is a multi-signature on the dependent's own identifier: keep the dependent's identifier and the keys in its key set, and no guardian's identifier",
 		SQL: `
 -- ADR-019 amendment. The delegation columns (guardian_aid, delegated_aid_prefix,

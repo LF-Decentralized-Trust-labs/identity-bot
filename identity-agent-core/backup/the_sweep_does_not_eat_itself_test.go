@@ -154,7 +154,9 @@ func TestWhereAMachineBacksUpToIsNotCarriedToAnother(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"backup/credentials_master.key", "backup/credentials_drive.enc",
-		"backup_config.json", "backup_history.json", "backup_delta_state.json"} {
+		"backup_config.json", "backup_history.json", "backup_delta_state.json",
+		// The codes of an ownership change this device is in the middle of.
+		"redeemed_ceremony_invites.json"} {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}

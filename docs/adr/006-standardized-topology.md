@@ -264,14 +264,16 @@ meant "runs an inception of its own rather than a delegated one" and reads as
   person approves on their own Identity Agent. Those routes, and the public
   answers any party may read, are what a browser may call.
 
-  Three places do not conform yet, and are named here so that nobody reads
-  them as allowed:
+  One place does not conform yet, and is named here so that nobody reads it
+  as allowed:
   - a person's session at an app on the talk routes (ADR-066), which is being
-    reworked so that the app asks from its own server;
-  - the app display at `/apps/{app_id}/` (ADR-012), which a browser loads
-    through the core;
-  - a sandboxed app's page calling a model at `/sandbox/llm/v1` (ADR-012,
-    ADR-013), which answers any origin.
+    reworked so that the utility app asks from its own server.
+
+  The display proxy at `/apps/{app_id}/` and the model route that answered any
+  origin, which this list once named, belonged to the older sandboxed-app kind
+  and are gone (ADR-012 Amendment 6). The model-call filter is `/api/llm/v1`,
+  refused to any caller without a grant for `model.call`, and it answers no
+  origin.
 
   A person's own apps are reached from a browser: the browser talks to
   the app, and the app, enrolled with its own credential, asks the core from
