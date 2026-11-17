@@ -61,11 +61,12 @@ func (s *Store) ListEmployeeInvites() []EmployeeInvite {
 // that lets concurrent redeems exceed MaxUses, and a caller that ignores its
 // error spends nothing when the save fails. Use ReserveEmployeeInvite, and
 // ReleaseEmployeeInvite if the redemption then fails. Kept exported only until
-// the organisation backend's signerRedeemHandler moves over.
+// the organisation backend's signerRedeemHandler moves over. It counts only
+// employment and signer invites, never an invite of another purpose.
 func (s *Store) IncrementEmployeeInviteUse(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id, ok := s.findEmployeeInviteLocked(token); ok {
+	if id, ok := s.findEmployeeInviteLocked(token); ok && s.empInvites[id].Purpose == "" {
 		inv := s.empInvites[id]
 		inv.UseCount++
 		s.empInvites[id] = inv

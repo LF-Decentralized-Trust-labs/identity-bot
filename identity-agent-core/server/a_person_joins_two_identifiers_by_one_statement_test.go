@@ -987,3 +987,23 @@ func TestABindingInviteExpires(t *testing.T) {
 		t.Fatal("a joining was kept for an expired invite")
 	}
 }
+
+// The owner's identifier can rotate, and a key log the redeemer sends may stop before the rotation. So the owner joins
+// only with the key the organisation holds as the owner's current one: a key the owner's log once had is not enough.
+func TestTheOwnerJoinsOnlyWithTheKeyTheOrganisationHoldsAsCurrent(t *testing.T) {
+	w := newJoinWorld(t)
+	owner := w.aPerson("EORGSITE")
+	ownerAID := w.identifierOf(owner, "EORGSITE")
+	rotated := make([]byte, ed25519.SeedSize)
+	rotated[0] = 3 // the key the owner rotated to, which the organisation holds
+	if err := w.org.SealOwnerAuthority(OwnerAuthority{AID: ownerAID, PublicKey: iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(rotated).Public().(ed25519.PublicKey))}); err != nil {
+		t.Fatal(err)
+	}
+	ask := w.anInvite("own", binding.RoleOwner, "ENOTES", "EORGSITE", ownerAID)
+	if _, err := w.approve(owner, ask, true); err == nil || !strings.Contains(err.Error(), "current key") {
+		t.Fatalf("the owner joined with a key the organisation does not hold as current: %v", err)
+	}
+	if len(w.org.Bindings()) != 0 {
+		t.Fatal("a joining was kept")
+	}
+}

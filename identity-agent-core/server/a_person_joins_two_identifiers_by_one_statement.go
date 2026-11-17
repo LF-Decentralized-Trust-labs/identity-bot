@@ -532,6 +532,15 @@ func (s *CoreServer) handleRedeemBindingInvite(w http.ResponseWriter, r *http.Re
 			refuse(http.StatusForbidden, "that is not this organisation's owner")
 			return
 		}
+		// The owner's identifier can rotate, and a key log the redeemer sends may stop
+		// before a rotation. So the owner's key must be the one this organisation holds
+		// as the owner's current key, not merely a key the log once had.
+		ownerKey, herr := ownerKeyBytes(oa.PublicKey)
+		sent, _, serr := iacrypto.DecodeEd25519Key(body.Link.RecordKey, false)
+		if herr != nil || serr != nil || !bytes.Equal(ownerKey, sent) {
+			refuse(http.StatusForbidden, "that is not the owner's current key")
+			return
+		}
 	}
 	err = s.assetHandler.Store.AddBinding(asset.Binding{
 		Record: st.Record, New: st.New, Role: st.Role, Site: st.Site, InviteDigest: st.Invite,
@@ -542,6 +551,12 @@ func (s *CoreServer) handleRedeemBindingInvite(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, map[string]interface{}{"status": "bound", "role": st.Role, "record": st.Record, "identifier": st.New})
+}
+
+// ownerKeyBytes is the raw owner key, written in any spelling an owner key is sealed in.
+func ownerKeyBytes(key string) ([]byte, error) {
+	raw, _, err := iacrypto.DecodeEd25519Key(key, true)
+	return raw, err
 }
 
 // handleListBindings lists the joinings this organisation holds. Owner only.

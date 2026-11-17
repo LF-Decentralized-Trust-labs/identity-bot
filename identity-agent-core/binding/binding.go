@@ -78,8 +78,10 @@ type Expect struct {
 	Site   string
 	Invite string // the digest of the invite that was redeemed
 	// KeyIsCurrent says whether key is a current signing key of the identifier.
-	// It is the verifier's own record of the identifier's key log, never the
-	// link's word for it.
+	// The link names the key; this check, not the link, decides whether it is
+	// current. A key log sent with the link shows only that the key was once the
+	// identifier's (it may stop before a rotation), so a verifier that must be
+	// sure checks against a log or key of its own (ADR-082, decision 2).
 	KeyIsCurrent func(identifier, key string) error
 }
 
