@@ -41,6 +41,12 @@ type ChallengeBundle struct {
 	// identifier or back end can see the challenge is not for it, and refuse. Omitted
 	// when none is recorded, so a challenge for anything else keeps its form.
 	RelayID string `json:"rid,omitempty"`
+	// BackEnd is the address of the utility app's back end, as the owner's Identity
+	// Agent recorded it (ADR-072 Amendment 8). Signed in the challenge, so a front end
+	// handed a link that names another back end can see the challenge is not for it,
+	// and so the person's Identity Agent knows where to send the end of a session.
+	// Omitted when none is recorded.
+	BackEnd string `json:"api,omitempty"`
 	// DevicePlatform and DeviceName say which device an installed app runs on,
 	// when the sign-in is for an installed app's key. DevicePlatform is what
 	// the core that checked the key's hardware proof established, "android",
@@ -166,8 +172,8 @@ type LoginPreviewResponse struct {
 	// challenge names it, so the consent screen can say what is being approved.
 	FrontEnd string `json:"front_end,omitempty"`
 	// LastsUntilEnded is true when approving this sign-in lets the front end's
-	// key speak for the person until they or the app's owner end it, not for a
-	// working day: an installed app's app-key grant (ADR-072 section 4). The
+	// key speak for the person until they or the app's owner end it, not for the
+	// asset's sign-in lifetime: an installed app's app-key grant (ADR-072 section 4). The
 	// consent screen shows it before the person approves.
 	LastsUntilEnded bool `json:"lasts_until_ended,omitempty"`
 	// DevicePlatform is the kind of device an installed app's key was proved

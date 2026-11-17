@@ -43,6 +43,9 @@ func (s *CoreServer) ownRotationKeys() (*rotationKeys, error) {
 	if err != nil || identity == nil {
 		return nil, fmt.Errorf("this agent has no identity to rotate")
 	}
+	if identity.HandedOver {
+		return nil, fmt.Errorf("this identity was handed to its owners' devices: %w", errKeyElsewhere)
+	}
 
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {

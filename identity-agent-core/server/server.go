@@ -1475,6 +1475,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 	s.mountScanRoutes(r)
 	// Ask the app that issued an invite this agent redeemed what it published for it.
 	s.mountRedeemedInviteRoutes(r)
+	s.mountCeremonySigningRoutes(r)
 	// Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
 	s.mountAskCreateRoute(r)
 	// login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).
@@ -3446,6 +3447,20 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 	}
 
 	jsonreply.Write(w, http.StatusOK, result)
+}
+
+// ownAddress is where this agent knows itself to be reached: through the relay
+// it came by, or the endpoint it has been given. Never what the request says it
+// was addressed to, which anybody can write; "" when this agent knows no
+// address of its own.
+func (es *CoreServer) ownAddress(r *http.Request) string {
+	if url, ok := es.relayedAddress(r); ok {
+		return url
+	}
+	if es.EndpointService != nil {
+		return es.EndpointService.CurrentURL()
+	}
+	return ""
 }
 
 func (es *CoreServer) getPublicURL(r *http.Request) string {

@@ -1,0 +1,197 @@
+{
+  "about": "Tampers with the head statement of genuine-bundle-with-head.json. Each vector is an RFC 6902 JSON Patch to apply to that file; the patched file must not verify, for the reason given, and must not be accepted as a head-bearing bundle that does. The control patch changes nothing and must verify, so a checker shows its patching works before it is believed to refuse anything. Each tamper is one the Identity Agent's signature does not cover, or a second spelling of what it does, so nobody could see the change from the signatures alone: a bundle's head is signed text and two signatures, and nothing else of its envelope may be present. A schema cannot say which identity signed, so the one tamper the schema accepts is a head signed by another identity than the bundle's root (schema_refuses false there); a verifier refuses it, as it does every one.",
+  "genuine": "genuine-bundle-with-head.json",
+  "patch_format": "RFC 6902 (JSON Patch): add, replace and remove, over the parsed file; values are literal.",
+  "control": {
+    "name": "control-no-change",
+    "patch": [],
+    "verifies": true
+  },
+  "vectors": [
+    {
+      "name": "head-another-algorithm",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/protected/alg",
+          "value": "authcrypt"
+        }
+      ],
+      "because": "the head's protected alg is not none",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-another-encryption",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/protected/enc",
+          "value": "A256GCM"
+        }
+      ],
+      "because": "the head's protected enc is not none",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-another-sender",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/protected/skid",
+          "value": "EAnotherIdentityAgentAltogether0000000000000"
+        }
+      ],
+      "because": "the head's skid is not the Identity Agent that signed it",
+      "schema_refuses": false
+    },
+    {
+      "name": "head-no-sender",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/protected/skid",
+          "value": ""
+        }
+      ],
+      "because": "the head's skid is empty",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-missing-sender",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/head/protected/skid"
+        }
+      ],
+      "because": "the head has no skid at all",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-extra-sender-header",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/head/protected/apu",
+          "value": "x"
+        }
+      ],
+      "because": "the head's protected header carries apu, which nothing signs",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-extra-recipient-reference",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/head/protected/apv",
+          "value": "x"
+        }
+      ],
+      "because": "the head's protected header carries apv, which nothing signs",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-another-mode",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/mode",
+          "value": "authcrypt"
+        }
+      ],
+      "because": "the head's mode is not signed",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-a-ciphertext",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/ciphertext",
+          "value": "AAAA"
+        }
+      ],
+      "because": "the head carries a ciphertext, which nothing signs",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-an-iv",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/iv",
+          "value": "AAAA"
+        }
+      ],
+      "because": "the head carries an iv, which nothing signs",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-recipients",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/recipients",
+          "value": [
+            {}
+          ]
+        }
+      ],
+      "because": "the head carries a recipient, which nothing signs",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-a-sender-key-log",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/head/sender_kel",
+          "value": [
+            {
+              "t": "icp"
+            }
+          ]
+        }
+      ],
+      "because": "the head carries a sender key log, which nothing signs",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-another-spelling-of-the-statement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/plaintext",
+          "value": "eyJpZCI6InRyYWlsLWhlYWQ6Y194OGJpdFRCczhoWk44X2hZTV9TZVJOSlI6MTAiLCJ0eXBlIjoidHJhaWwtaGVhZCIsImZyb20iOiJkaWQ6a2VyaTpFTGc3bnpjS0phSFVQa25xMEZQNG9aRVJvRmp1V08yaVI3WnY1S2lvZl84SSIsInRvIjpbImRpZDprZXJpOkVMZzduemNLSmFIVVBrbnEwRlA0b1pFUm9GanVXTzJpUjdadjVLaW9mXzhJIl0sImNyZWF0ZWRfdGltZSI6IjIwMjYtMTEtMTVUMTU6MjI6NTAuNDE5MDY3MTE4WiIsImV4cGlyZXNfdGltZSI6IiIsImJvZHkiOnsiY29udmVyc2F0aW9uIjoiY194OGJpdFRCczhoWk44X2hZTV9TZVJOSlIiLCJjb3VudCI6MTAsImhlYWQiOiJFQmtYMHJ1dlNBTjhNZDFGcnR2VTk5eE9EaHhyOEV6MTBLd2JGVk9WWUJqViIsImlhX3RpbWUiOiIyMDI2LTExLTE1VDE1OjIyOjUwLjQxOTA2NzExOFoifX1"
+        }
+      ],
+      "because": "the head's plaintext is not the one unpadded base64url spelling of the bytes signed",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-another-spelling-of-the-ed25519-signature",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/ed_sig",
+          "value": "z6mK9sU0h2p8H-z0Yk8zBLKrEQutvo1gooY9Uv_CxHFI5Q_6Ib_j-elMr1eoQZS2lCZBBZOqR9CqojmxdopCCh"
+        }
+      ],
+      "because": "the head's ed_sig is not the one unpadded base64url spelling of the signature",
+      "schema_refuses": true
+    },
+    {
+      "name": "head-another-spelling-of-the-mldsa-signature",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/head/mldsa_sig",
+          "value": "qOvyXXPRHcXJlN8WgDOSAYA6Wd0tGGbVnQpIVviXhOMV_yaGFOaU_o7qI8IXKEc74e64OJflk4mqklcRWwENieMIAhqFfFXiMFle0913uk5OGL_bThh2wMffEupcS7jel66q6h9nYmoC4XCvoB1RHBntqYpLEit8-H60miRkgVfpufy2NRv1ITARj55Vq7EXMskMAjXCRRIsfQIevn1EOimfsOkA5Odf-5Rmh_HTzzytaOZnhS3nUrMvyod2D1a3278KbC2-OzYL4kuTQINVcm2gchwpuijMNwMBJsV3905AvgLTWihokz_NXkQK5xeN5sGBPjFiwxAoyngZyTD9bh4RY1bxSmww7WKGU9761JlTvz7qntE_KnK1wZrAcvEpnbyF9mcVe5Y5_oksVdbU8hTmbztRq4sv7ehb58lAgu8uzQ_LRaVCuz14OIIv6QrdB1C5DBoLGCRxtnlxrZRtpgEztws8e-p_6a7jQw9cpC9qcVZrBxt98OjHC-OcLopfEIgosw4VVv2hhshIojc_VHfu_rrO_QNbJmGK6nea2ZR3kG2zkmP3_A0bE8HabQgOdm0n28sToSHsM3CTzHr3B4vo0Fr58GN1u-RNLWALRkd0RNw0kPZvVEjEguBYsPXoULnUqrnZjGLfC3dj9Hqx31pPd9KKKaZ2ZJw_VgTXN32j5JKswrpysAeibXmv7_T9WVzD3Yt-yzsxC6do8YHl6ol1uEaCK7pi5GGGBly4EtAVFHaUwHhJ8xCScY900jdbD2T7v6h5YGokCl7KcMluXsGfwES68VLooSesVn5Fart82Cq6ktVE6lI6bwgnXzTU56S8_dTuWAXDzYYdGgqV-b7BRecdi9XXt9Irk1lXYDTbbKSleY73EGFN_Fa5pzITun8vRRAPfdlyRlzYhbAKt3SU5E5IEnfBNO5pSXgslbXj-e6YRWu3HGMqWuPVlJCmyntbOjsu8s3L_1MRB8LscZ2en44dVE3gfxWyOqvCO59QN7CLFE5Jto3blOtTOgeEFskaf0Nb-X6SNxobj9JiW0vlPSuIH6AvoJvbA2hp3Km1bfG1-ANbIA6PSWeW_UYjLxe6ER-qjT4seXDOJQhTJCk9p2pXahpP2y_Azz0Ci2guHIu5nZgXD-EPzlOg_ZOm9UiL_gIjN9jRwulXKlICfmoCUW7GnylN7rB7b_Mxgsew3UDkf6lhIjCzPYsmo61dI5qNH8o9QzJ9K1ge1tfznM8HWvIhgXP_vHH8gXjSN_DQqMtXjWznSeV_dbSOYGfpAlLMK_qVoazoTDcDB3tSz8fiSswU4uqRtzd9k5cUcWXkcqEdIJ8wuzwNwnCpE6PILZTXE75LvGtMXGoxQRPQQWclYaBwi0atiorg2duizCcKW6YbugjSU9PzZaCYmBji0gjabIdFgPFfY-P-HZuXDRHnM4iADwQM-Jsz3NE_5NNsfsY1DHg7CvM1H4pUwVDgg1z0-Z2ZmGSAMoXD31JhPIVc7xfxqwUSUHSp_FNLmPI_b79Uqcal13xVlMQHmxS_7M8m-_nDsdmG_4LmWrFrdLuZDS7g7yy9DhX9vOW-UUKyknTYV8mxOjD0XrwIFo2FuhFzYRH6F1tmBR4JSppPlRKZ5eXDaU7-8SMnK9ksXvFP4I-01BUFYiAPw5nGRd77FHlfllKVmro3QF8q4-QWsYegQPSKqX8M6-lZmh5p3KJltPPgBoWOMUFHtb9anW4m7xNV3fKRXWsm_Lu3kNBWWldczzEkgh0GUZbedZHeuIQLGkoMnHBrj4XtFegx1IyAPD59kC5WfzaUySlopmzuuCOsFmhTeRxB0yFUD7iZCACfcVxR_8fnyEGwWSrTEC6W4grUacL0BJgoj8yek0W33CZSYfT9VR0v264axpMMfK8tqL0k6SH61tZKveEzOx5SXSYwu4O1Ph8Ee6dJQNIn9zmONRRCozOgHimsUV0q_8yaSTEHeGYWNFnEIex2WUk_w8UnWipDUN99oBh8YYYGCSf87oitxs7L0hhbasXobVtB-Q_PekHcM0wfgUX4lzgYTBW4JVoqr15OPayVHSXpHHxsjbjy8kfTGyGFMX9phF83Mz16jr-Mgk_YV5fHmLGvmXE_k5p1vNlfn4LS1yYrXHNhRlHsKd39Fcd3gstUlns8Sm7jezwOmeRRfjVNPnTyirOdT0baM74QrRC9mg0yktU1j0Af1ZdFhgLJeXMSodGDPNVFoxiQ9Kx5W5jHdlwgwSoBSMrjUQCfmHOjLI-gtJIp6htXpYygWz7jo1anO5Y3-oKmdrH8mDQkPGLKtz2xhMhyWXEXrwcEKfXgQV9pTdcTqLrjwElHvBwwfhiI4GzfCLYFT438_VTNu6vZs-0xxcvpFSU8SZGqMBx-I0w5kKNehShAUzg3WSkJ93RETiJ8CmPxUIXb6lFzINYhCpbeIJQucfKfXQbtn48BCOOYnqkkS1Se9XrTR55NWMBpL-WsIykf6sj1mo5MQFemUpCr4IWBs7_a3Ok2KK5yFMFhxNjbv3AGOXV5PS1YQo45Z5Tl7-B7Vv0OvmPwUkBibuekFhffrPT2Dqx2rYobD9u3BLYBobsNZptleRccZvcOvjrp2NykcDaG3PJVeZNJUD2HPVhPS1WT-Ha5rvvP0hcotK6CtCyJznUcv2PgiHF1kUKwql1tIUB6u6ASWHvG3Zyz_osiyaLHZfM5zX0fIYvjrTWqewBRcwqMvQzs456f4VApPprqgX3eWW91-138mcoOlDuAPwI7m3Hgy28L-Qqc5C71_G-JtU--KnpptlooNwT6igvYV8SnIX0FdmIPkxuqXpEuLpzQxOqNUcRpclrV3o7kWxKkds38hIPzlMkOpO30SjPK8taaVSgOUm-RwcNXyXa77DtzUK4t7hJhZh8TLasWNSZhMI2EgLFSaV04X00anTecgS0kw_NZJv3RhfHw06k59MM03v2JAbft9X82jEPFyhj4w1jiydgUirEnxz5MmLjYDZ89S-gxeAgSiivhe2tdMcuIGwwyv49meP1sVrQGAEku01Vm9SchA04-2wHoSPdWoyEmVAVNzStm4CQkD8qoyu6oOyxFofOxRj0zwiCaFMahNA8zfCLIJjXHWeq7zUa5IFJr7Bvzj1aywRBVUOLedms_KxnR7H_sqKT2tDYTuenNMW08ahx-6MF4H4aEbhERZhNvc4AIb_JBS1VmMW5QbTW8lpQuyiBBFtpDKHGVH2NtySIGuSECqqoWg-Amaid-oCR_45tKxvYqLGhfDoOjlMVUF6ufybtuO1H0ECR0d66B6FRHR1ivIg4-U-ZwJ_skrxf_5wa-eLq4fTY52hNEEwI2OCGzcbdoNLf-wg3Naq9G2H2rI0M-8inDgqfaj8t39FAm5vogcvY60d7a6AgD6m8Tll5MNwBB5tlA3AfnuqxCjkMeQYaMNEBGEde5dn6wF7k3jmNeNC_JN5VS_HH-b-GDkFrGJuca3dXKdyTrw_WMPjjH00zf0qjjZ_59pDjFlchpLqrHm7f-1utyduIhGzZYbwwATgENE1yv3Rx4ZRlvW1KkM4Ceym6zaJZntmEp3LinyshyWBGLPtjFxo-PgR31l94qly8zt5v7FYwr7rIKI0Y0v7jDIgeme5JXlCxO8eJEwmzyyykBVNDWR1XXg9NEso1TQ6klt4WX2fb7Rbe-731EKKaDsAD2AmK5PLyBimInLXJYcNzNpgRjoCYvPy0RQfbnfJRJS-o0ZDDBhIuRM2Jq16ABYBVyLUvSgg-tTJxcVMPROQP0juLdZ_MqxrrbsIdxroAWXc-MGREJWq4OJld1JzFXHEM7Ufkl_ygNr-MihHeS61rxZ_o-BS7aSNuPiuiPYl2YbKQqFsIjRTMfSfii_YIXG5j30OapX5JaMsfW6scPaC00ZMVNiXNMcAngduHyaS1tKs7IJBQol5qrdHLfOTzwwjCZGMUSntNij9NN52ljBzZXiHuf_F569J8RukyME2Pj-D6V16-jl3CkyM7aHgT9c3Tkv3Ix-QsjeSrQqrGcEtzwZGv7M24y_SLyPyyNbBY53blK8ecBj1LiLM0wcJTfmMzAFJsp_3YEDKcjjy97EYYA5KEb4KOJ7YZNe_DETTUdeYVwynD3qjDdjJQZd-xVPTf06Q9jANDhUQMlL84fGeeWVituu15i-1g8ZshNsXZOvQce05OPMqxiKwNeC-z2M__NfotsmKiwW3Nytvbzu1Hm54_GBlKr3hwipm3oDud2u8RmiWThrEEX46huz0tZiKbO9iY8KnYnJCQxyYOy83EtuhapwMwWnmpR9SgDwxkDQu8n9A6AbvSumvOfccJYICrqi4ZteJ2xsra82O0CP0BCZ297hNHlAyIvP0uktBAefJCX8AEWOEhsht0BQ0dupbnA1PYAAAAAAAAACRMaICcw="
+        }
+      ],
+      "because": "the head's mldsa_sig is not the one unpadded base64url spelling of the signature",
+      "schema_refuses": true
+    }
+  ]
+}

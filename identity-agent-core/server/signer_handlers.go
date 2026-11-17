@@ -29,6 +29,9 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 		// that took the code in its path was reachable only by the owner,
 		// who has no use for it.
 		r.Post("/invites/{token}/redeem", s.handleRedeemSignerInvite)
+		r.Get("/invites/{token}/ceremony-event", s.handleCeremonyEvent)
+		r.Get("/invites/{token}/ceremony-terms", s.handleCeremonyTerms)
+		r.Post("/invites/{token}/ceremony-signature", s.handleCeremonySignature)
 	})
 }
 
@@ -188,8 +191,11 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		OOBI          string `json:"oobi"`
 		PublicKey     string `json:"public_key"`
 		NextPublicKey string `json:"next_public_key"`
-		VouchSig      string `json:"vouch_sig"`
-		VouchPayload  string `json:"vouch_payload"`
+		// What an invited owner's device adds in an ownership ceremony: see
+		// CeremonyExtras. Ignored by every other redemption.
+		CeremonyExtras
+		VouchSig     string `json:"vouch_sig"`
+		VouchPayload string `json:"vouch_payload"`
 		// BackupSealPublicKeyB64 is the X25519 key this organisation will seal
 		// its archives to, so it can write backups it cannot itself read.
 		//
@@ -260,6 +266,7 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		PairwiseAID:            body.PairwiseAID,
 		PublicKey:              body.PublicKey,
 		NextPublicKey:          body.NextPublicKey,
+		CeremonyExtras:         body.CeremonyExtras,
 		BackupSealPublicKeyB64: body.BackupSealPublicKeyB64,
 		OOBI:                   body.OOBI,
 	})
@@ -293,10 +300,11 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 // SignerAcceptance is what somebody presented when they agreed to own an
 // organisation.
 type SignerAcceptance struct {
-	InviteToken            string
-	PairwiseAID            string
-	PublicKey              string
-	NextPublicKey          string
+	InviteToken   string
+	PairwiseAID   string
+	PublicKey     string
+	NextPublicKey string
+	CeremonyExtras
 	BackupSealPublicKeyB64 string
 	// OOBI is where the owner's key event log can be fetched. It is what lets
 	// the name they signed be shown beside them afterwards
@@ -346,7 +354,7 @@ func (s *CoreServer) acceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 	// several people; the founding path below is for the FIRST owner, where
 	// there is nothing yet to rotate from.
 	ceremony, complete, cerr := s.recordAcceptance(
-		a.InviteToken, a.PairwiseAID, a.PublicKey, a.NextPublicKey)
+		a.InviteToken, a.PairwiseAID, a.PublicKey, a.NextPublicKey, a.CeremonyExtras)
 	if cerr != nil {
 		return SignerAccepted{}, fmt.Errorf("could not record your acceptance: %w", cerr)
 	}

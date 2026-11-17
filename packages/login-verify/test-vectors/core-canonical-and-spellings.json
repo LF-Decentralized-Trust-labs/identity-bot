@@ -315,7 +315,19 @@
       "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"
     },
     {
-      "name": "a device named for an installed app (ADR-072 Amendment 8)",
+      "name": "a utility app's back-end address named beside its relay identifier (ADR-072 Amendment 8)",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"api\":\"https://tasks.example.com\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"api\":\"https://tasks.example.com\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"
+    },
+    {
+      "name": "a back-end address with a character the core writes escaped: '\u0026' is \\u0026 in the signed body (ADR-072 Amendment 8)",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"api\":\"https://tasks.example.com/a\u0026b\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"browser\",\"rid\":\"ERelayOfTheApp\",\"api\":\"https://tasks.example.com/a\\u0026b\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"
+    },
+    {
+      "name": "a device named for an installed app (ADR-072 Amendment 14)",
       "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"installed_app\",\"device_platform\":\"apple\",\"device_name\":\"Ann’s iPhone \u003c2\u003e \u0026 \\\"x\\\"\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}",
       "go_reads": true,
       "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"front_end\":\"installed_app\",\"device_platform\":\"apple\",\"device_name\":\"Ann’s iPhone \\u003c2\\u003e \\u0026 \\\"x\\\"\",\"callback_url\":\"https://app.example.com/cb\",\"session_token\":\"tok\"}"

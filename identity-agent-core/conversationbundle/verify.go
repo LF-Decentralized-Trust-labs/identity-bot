@@ -38,6 +38,23 @@ func decode(s string) ([]byte, error) {
 	return base64.StdEncoding.Strict().DecodeString(s)
 }
 
+// exactSignedEnvelope is nil when env is a signed envelope that carries only
+// the signed text and its two signatures, each in its one encoding, from signer.
+// Every other field an envelope can have is signed by nothing, so one that is
+// present, or a different value in one, would change the file and nothing it
+// proves.
+func exactSignedEnvelope(env *didcomm.Envelope, signer string) error {
+	exact := didcomm.Envelope{Mode: "signed", Protected: didcomm.ProtectedHeader{Alg: "none", Enc: "none", Skid: signer},
+		Plain: env.Plain, EdSig: env.EdSig, DsaSig: env.DsaSig}
+	if !reflect.DeepEqual(*env, exact) {
+		return errors.New("the envelope carries more than the signed text and its signatures")
+	}
+	if !canonicalURL(env.Plain) || !canonicalURL(env.EdSig) || !canonicalURL(env.DsaSig) {
+		return errors.New("the signed text or a signature is not encoded as it was signed")
+	}
+	return nil
+}
+
 // canonicalURL reports whether s is the one unpadded base64url encoding of
 // the bytes it decodes to.
 func canonicalURL(s string) bool {
@@ -195,6 +212,9 @@ type verifier struct {
 	// answered is every ask a reply or failure has closed, by its message id:
 	// a progress note on an ask is valid only while the ask is still open.
 	answered map[string]bool
+	// repliedTo is every ask answered by a reply rather than a failure: only
+	// such an ask has an answer to add to (ADR-081).
+	repliedTo map[string]bool
 	// opener is the first entry when an AI agent opened the conversation; the
 	// zero Record when a person did.
 	opener agentmessage.Record
@@ -255,7 +275,7 @@ func verify(b *Bundle, headKeys map[string]*didcomm.DID) Report {
 	}
 	r.Conversation, r.Root = b.Conversation, b.Root
 	v := &verifier{b: b, r: &r, kels: map[string]*keyLog{}, regs: map[string]bool{}, creds: map[string]*credential{},
-		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}, answered: map[string]bool{}}
+		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}, answered: map[string]bool{}, repliedTo: map[string]bool{}}
 	r.Trusts = []string{
 		"The organisation's root key log, as the bundle gives it: its inception and every key it puts in force. Every other identity, credential and anchor is checked back to it.",
 		"The times the Identity Agent stamped on each message and on each credential's issuance and revocation, which decide whether a credential was in force when a message was sent. A body's own signed time must agree with the stamp to within " + agentbody.RequestWindow.String() + ", and a person's signed request to within " + authorisation.Skew.String() + ".",
@@ -783,13 +803,8 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 	}
 	// Only the entry and its two signatures are signed. Anything else an
 	// envelope can carry is refused, so nothing in the bundle goes unchecked.
-	exact := didcomm.Envelope{Mode: "signed", Protected: didcomm.ProtectedHeader{Alg: "none", Enc: "none", Skid: signer},
-		Plain: e.Envelope.Plain, EdSig: e.Envelope.EdSig, DsaSig: e.Envelope.DsaSig}
-	if !reflect.DeepEqual(*e.Envelope, exact) {
-		v.fault(where, "the envelope carries more than the countersigned entry and its signatures")
-	}
-	if !canonicalURL(e.Envelope.Plain) || !canonicalURL(e.Envelope.EdSig) || !canonicalURL(e.Envelope.DsaSig) {
-		v.fault(where, "the countersigned entry is not encoded as it was signed")
+	if err := exactSignedEnvelope(e.Envelope, signer); err != nil {
+		v.fault(where, "%v", err)
 	}
 	rec, err := agentmessage.Open(did, e.Envelope)
 	if err != nil {
@@ -975,12 +990,24 @@ func (v *verifier) checkThread(where string, rec agentmessage.Record) {
 			v.fault(where, "an answer goes only to the sender of an ask addressed to the one answering, and this does not")
 		}
 		v.answered[prompt.MessageID] = true
+		if rec.Kind == agentmessage.KindReply {
+			v.repliedTo[prompt.MessageID] = true
+		}
 	case agentmessage.KindProgress:
 		switch {
 		case prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From:
 			v.fault(where, "a progress note goes only to the sender of an ask addressed to the one writing it, and this does not")
 		case v.answered[prompt.MessageID]:
 			v.fault(where, "a progress note comes after the ask it is about was answered, and a note is only for an ask still being worked")
+		}
+	case agentmessage.KindAddendum:
+		switch {
+		case prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From:
+			v.fault(where, "an addendum goes only from the one an ask was put to, to the one who sent it, and this does not")
+		case !v.repliedTo[prompt.MessageID]:
+			v.fault(where, "an addendum is for an ask that was answered by a reply, and %s was not", prompt.MessageID)
+		case v.closed:
+			v.fault(where, "an addendum was recorded in a conversation that had been closed and not reopened")
 		}
 	case agentmessage.KindAsk:
 		if prompt.To != rec.From {

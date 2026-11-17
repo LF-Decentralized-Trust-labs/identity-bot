@@ -258,7 +258,8 @@ private-use range or inside an implementation.
 - **Request schema (ChallengeBundle):** `site_aid`, `site_oobi`, `audience`, `nonce`,
   `dt`, `expiry`, `requested_disclosures[]`, `requested_credentials[]`,
   `requested_score?`, `callback_url`, `session_token`, `relationship_anchor_aid?`,
-  `relationship_anchor_oobi?`, `browser_key?`.
+  `relationship_anchor_oobi?`, `browser_key?`, `front_end?`, `rid?`, `api?`,
+  `device_platform?`, `device_name?`.
 - **Preview:** "Sign in to {site}" + what's being requested (data/credentials/score).
 - **Outcome:** the agent presents a pairwise AID (per-RP by default; anchored to a
   chosen identity when `relationship_anchor_aid` is set), signs the challenge, and
@@ -270,6 +271,14 @@ private-use range or inside an implementation.
   key the sign-in's browser holds and cannot export. When present it is signed in the
   challenge, after the relationship anchor fields and before `callback_url`, and the
   assertion repeats it (ADR-066).
+  `front_end` is `browser` or `installed_app` (ADR-072); `rid` is the relay identifier of the
+  utility app the sign-in is for and `api` the address of its back end (ADR-072 Amendment 8),
+  each signed in the challenge when present, in that order, after `browser_key` and before
+  `callback_url`, and each checked by the person's Identity Agent before it keeps it (package
+  `backendaddr`; the shared cases are `packages/login-verify/test-vectors/back-end-addresses.json`).
+  `device_platform` and `device_name` name the device an installed app's key was proved on
+  and what the installed app calls it (ADR-072 Amendment 14), signed after `api` when present,
+  and only for an installed app's sign-in (`login.CheckDevice`).
 
 ### `t = 2` · `add_contact`
 - **Summary:** a mutual, front-facing "we know each other" contact ceremony between two agents.

@@ -171,6 +171,9 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		// Asking the inviting app what it published for an invite this agent
 		// redeemed: the same redeeming agent, signed with the redeem key (ADR-020).
 		"POST /api/redeemed-invites/published",
+		// Signing an ownership ceremony's rotation with the key this device derived
+		// for the organisation: the owner's own act, from the device that holds it.
+		"POST /api/redeemed-invites/ceremony-signature",
 		"POST /api/recovery/retrieve",
 		"POST /api/backup/export",
 		"POST /api/backup/pull/{destID}",
@@ -215,6 +218,10 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"PUT /api/assets/{id}/front-ends",
 		"PUT /api/assets/{id}/front-ends/offered",
 		"PUT /api/assets/{id}/relay-id",
+		"PUT /api/assets/{id}/back-end",
+		// How long a sign-in to a utility app lasts: a longer one widens what
+		// the owner allowed.
+		"PUT /api/assets/{id}/sign-in-lifetime",
 		"DELETE /api/assets/{id}/app-key-grants/{key}",
 		// The lock of a logged-out identity (ADR-074): a peer never opens or
 		// closes this device's identity.

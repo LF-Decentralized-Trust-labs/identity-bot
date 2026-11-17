@@ -171,6 +171,12 @@ var publicRoutes = map[string]string{
 	// the identity named at inception either — the log answers before any file
 	// does, so re-sealing changes nothing.
 	"POST /api/signer/invites/{token}/redeem": "an invited owner's agent accepts, committing the keys they will sign with",
+	// An invited owner's device fetches the rotation the ceremony prepared and
+	// returns its signature. The invite code authorises it, as it does the
+	// acceptance, and the engine adds nothing a signature does not verify for.
+	"GET /api/signer/invites/{token}/ceremony-event":      "an invited owner's device fetches the rotation it is to sign",
+	"GET /api/signer/invites/{token}/ceremony-terms":      "an invited owner's device reads who is taking part, to show them before they sign",
+	"POST /api/signer/invites/{token}/ceremony-signature": "an invited owner's device returns its signature over that rotation",
 
 	// A machine enrolling itself with the key it generated. It is not the owner
 	// and never will be — that is the point of it holding its own key — so it
@@ -249,6 +255,8 @@ var publicRoutes = map[string]string{
 	"POST /api/witness/event":                      "witnessing protocol — a controller sends a signed event, verified before it is stored",
 	"POST /api/witness/cover":                      "an owner's signed declaration that a plain identifier is its own, so this witness holds its key log; every refusal is one answer",
 	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
+	"GET /api/witness/ksn/{signer_aid}":            "how far this witness holds an identity's key log, as a KERI key state notice dated and signed with its key — to anybody else, as for a log not held",
+	"GET /api/witness/loc/{witness_aid}":           "where this witness says it is reached, as a KERI /loc/scheme reply signed with the key it witnesses under — only for that key",
 	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce — to anybody else, as for a log not held",
 	"GET /api/witness/tel/{issuer_aid}":            "the registry logs of an identity this witness witnesses, from a place in its key log, to the identity, its delegator or a verifier presenting its inception — anybody else is told it is not held; never by credential",
 	"GET /api/witness/tel/{issuer_aid}/head":       "where an identity's registry log is held to and the digest of its latest event, on the same terms as the log — never by credential",

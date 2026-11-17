@@ -1967,13 +1967,19 @@ class CoreService {
   ///
   /// Nothing changes until every one of them has scanned. threshold omitted
   /// means all of them must sign afterwards.
-  Future<OwnerCeremony> startOwnerCeremony(List<String> invite, {int? threshold}) async {
+  ///
+  /// [handOver] ends the ceremony with this Identity Agent's own key out of control: the
+  /// owners' devices sign two rotations, and afterwards this Identity Agent holds and
+  /// derives no key of the identity.
+  Future<OwnerCeremony> startOwnerCeremony(List<String> invite,
+      {int? threshold, bool handOver = false}) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/owners/ceremony'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'invite': invite,
         if (threshold != null) 'threshold': threshold,
+        if (handOver) 'hand_over': true,
       }),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
@@ -2379,6 +2385,30 @@ class CoreService {
         reason.isNotEmpty
             ? reason
             : 'The inviting app could not be asked: ${response.statusCode}');
+  }
+
+  /// Asks this device's own Identity Agent to make the signature its key owes over a
+  /// rotation of an ownership ceremony it accepted. [generation] is 0 for the
+  /// first rotation and 1 for the second of a hand-over. The Identity Agent signs only a
+  /// rotation of the organisation that invited it that reveals that key.
+  Future<List<int>> signACeremonyRotation(String inviteToken,
+      {required int generation, required List<int> raw}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/redeemed-invites/ceremony-signature'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'invite_token': inviteToken,
+        'generation': generation,
+        'raw_b64': base64Encode(raw),
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(response.body.trim().isNotEmpty
+          ? response.body.trim()
+          : 'This device\u2019s Identity Agent would not sign: ${response.statusCode}');
+    }
+    return base64Decode(
+        (jsonDecode(response.body) as Map<String, dynamic>)['signature_b64'] as String);
   }
 
   Future<Map<String, dynamic>> adoptAgent({
@@ -3455,6 +3485,17 @@ class OwnerCeremony {
   /// The rotation that made it real, so this and the key log can be reconciled.
   final String rotationSaid;
 
+  /// This ceremony drops the identity's own key: see [CoreService.startOwnerCeremony].
+  final bool handOver;
+
+  /// While [isSigning], which rotation is waiting for the owners' devices: "rot1"
+  /// or "rot2".
+  final String stage;
+
+  /// When the rotation being signed was prepared, so a screen can say how long it
+  /// has been waiting. Null before there is one.
+  final DateTime? stageSince;
+
   const OwnerCeremony({
     required this.id,
     this.threshold = 0,
@@ -3462,9 +3503,19 @@ class OwnerCeremony {
     this.status = '',
     this.detail = '',
     this.rotationSaid = '',
+    this.handOver = false,
+    this.stage = '',
+    this.stageSince,
   });
 
   bool get isCollecting => status == 'collecting';
+
+  /// Everyone has accepted and the rotation is waiting for their devices to sign it.
+  bool get isSigning => status == 'signing';
+
+  /// Whose device has still to sign the rotation waiting.
+  List<CeremonyInvitee> get yetToSign =>
+      invited.where((i) => i.signedStage != stage).toList();
   bool get isApplied => status == 'applied';
   bool get hasFailed => status == 'failed';
 
@@ -3481,8 +3532,16 @@ class OwnerCeremony {
         status: json['status'] ?? '',
         detail: json['detail'] ?? '',
         rotationSaid: json['rotation_said'] ?? '',
+        handOver: json['hand_over'] == true,
+        stage: json['stage'] ?? '',
+        stageSince: _timeOrNull(json['stage_since']),
       );
 }
+
+/// A time the Identity Agent wrote, or null where it wrote none (or something
+/// that is not one): an unset time is left out of its answers, not written as
+/// the year 1.
+DateTime? _timeOrNull(Object? v) => v is String && v.isNotEmpty ? DateTime.tryParse(v) : null;
 
 /// One person being brought in as an owner.
 class CeremonyInvitee {
@@ -3498,12 +3557,24 @@ class CeremonyInvitee {
   final String publicKey;
   final String acceptedAt;
 
+  /// The rotation ("rot1" or "rot2") this person's device last signed.
+  final String signedStage;
+
+  /// When their invite's code was last used to read the ceremony, or null if it
+  /// has not been. It shows the code was used, which is not the same as the
+  /// person having opened the Identity Agent app and seen anything: the routes are reached by
+  /// the code alone, which travels in the invite link. Say "a look was recorded",
+  /// never "they saw it".
+  final DateTime? lastSeenAt;
+
   const CeremonyInvitee({
     this.name = '',
     this.inviteUrl = '',
     this.pairwiseAid = '',
     this.publicKey = '',
     this.acceptedAt = '',
+    this.signedStage = '',
+    this.lastSeenAt,
   });
 
   bool get accepted => pairwiseAid.isNotEmpty && publicKey.isNotEmpty;
@@ -3514,6 +3585,8 @@ class CeremonyInvitee {
         pairwiseAid: json['pairwise_aid'] ?? '',
         publicKey: json['public_key'] ?? '',
         acceptedAt: json['accepted_at'] ?? '',
+        signedStage: json['signed_stage'] ?? '',
+        lastSeenAt: _timeOrNull(json['last_seen_at']),
       );
 }
 

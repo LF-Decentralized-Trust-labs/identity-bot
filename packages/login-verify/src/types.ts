@@ -66,9 +66,13 @@ export interface LoginChallenge {
    *  Identity Agent recorded it (ADR-072 Amendment 7). Signed, so a front end
    *  handed a link naming another relay identifier can see the challenge is not for it. */
   rid?: string;
+  /** The address of the utility app's back end, as its owner's Identity Agent recorded
+   *  it (ADR-072 Amendment 8). Signed, so a front end handed a link naming another
+   *  back end can see the challenge is not for it. */
+  api?: string;
   /** For an installed app whose key the core proved in hardware: the platform
    *  the proof showed (`android`, `apple` or `tpm`) and the label the installed
-   *  app gave its device, which nothing proves (ADR-072 Amendment 8). Signed;
+   *  app gave its device, which nothing proves (ADR-072 Amendment 14). Signed;
    *  shown on the person's consent, not repeated in the assertion. */
   device_platform?: string;
   device_name?: string;

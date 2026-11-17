@@ -20,7 +20,6 @@ A downloadable open app that anyone can install is a goal for later.
 | `packages/login-web/`, `packages/login-verify/` | Sign in with an Identity Agent: the website widget, and verification for the service behind it |
 | `packages/link-verify-web/` | Link verification for web pages |
 | `identity-agent-core/contracts/` | The formats another implementation has to speak to work with this one |
-| `sandbox-apps/` | An example app that runs sandboxed inside an Identity Agent |
 | `tools/sealed-image/` | Building the sealed server image, and checking its measurement yourself |
 | `docs/adr/` | The architecture decisions, numbered and dated |
 

@@ -60,6 +60,10 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 	if c.RelayID != "" {
 		parts = append(parts, jsonField("rid", c.RelayID))
 	}
+	// Omitted when empty, like rid.
+	if c.BackEnd != "" {
+		parts = append(parts, jsonField("api", c.BackEnd))
+	}
 	// Omitted when empty, like the front end, so only a sign-in that names a
 	// device carries one, and a relay cannot add, change or drop it.
 	if c.DevicePlatform != "" {

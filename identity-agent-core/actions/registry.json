@@ -26,7 +26,12 @@
         "session_token": { "type": "string", "required": false, "kind": "open" },
         "relationship_anchor_aid": { "type": "string", "required": false, "kind": "open" },
         "relationship_anchor_oobi": { "type": "string", "required": false, "kind": "open" },
-        "browser_key": { "type": "string", "required": false, "kind": "open" }
+        "browser_key": { "type": "string", "required": false, "kind": "open" },
+        "front_end": { "type": "string", "required": false, "kind": "open" },
+        "rid": { "type": "string", "required": false, "kind": "open" },
+        "api": { "type": "string", "required": false, "kind": "open" },
+        "device_platform": { "type": "string", "required": false, "kind": "open" },
+        "device_name": { "type": "string", "required": false, "kind": "open" }
       },
       "preview_contract": { "title": "Sign in to {site}", "conveys": ["site", "requested data/credentials/score"] },
       "discloses": [],

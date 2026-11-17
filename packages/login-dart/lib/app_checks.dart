@@ -52,7 +52,54 @@ Uint8List? _matter(Object? qb64, String code, int len) {
   for (var i = 0; i < ps; i++) {
     if (raw[i] != 0) return null;
   }
-  return Uint8List.sublistView(raw, ps);
+  final out = Uint8List.sublistView(raw, ps);
+  // A witness key (B) or a verification key (D) must name one signer, as the
+  // core and login-verify read it.
+  if ((code == 'B' || code == 'D') && len == 32 && !_namesOneSigner(out)) {
+    return null;
+  }
+  return out;
+}
+
+final BigInt _p = (BigInt.one << 255) - BigInt.from(19);
+final BigInt _d =
+    (BigInt.from(-121665) * BigInt.from(121666).modInverse(_p)) % _p;
+final BigInt _sqrtMinusOne =
+    BigInt.two.modPow((_p - BigInt.one) ~/ BigInt.from(4), _p);
+
+/// The eight points of small order, as canonically written: a signature of
+/// R = one of them and s = 0 verifies over every message under such a key.
+const _smallOrder = {
+  '0100000000000000000000000000000000000000000000000000000000000000',
+  'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+  '0000000000000000000000000000000000000000000000000000000000000000',
+  '0000000000000000000000000000000000000000000000000000000000000080',
+  '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05',
+  '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85',
+  'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a',
+  'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa',
+};
+
+/// Whether [raw] is an Ed25519 public key that names a single signer: a point on
+/// the curve, in its one canonical encoding, and not of small order (the rule of
+/// the core's CheckEd25519PublicKey and login-verify's ed25519KeyPoint).
+bool _namesOneSigner(Uint8List raw) {
+  if (raw.length != 32) return false;
+  final hex = [for (final b in raw) b.toRadixString(16).padLeft(2, '0')].join();
+  if (_smallOrder.contains(hex)) return false;
+  var y = BigInt.zero;
+  for (var i = 31; i >= 0; i--) {
+    y = (y << 8) | BigInt.from(i == 31 ? raw[i] & 0x7f : raw[i]);
+  }
+  final negative = raw[31] & 0x80 != 0;
+  if (y >= _p) return false; // y written as y + p
+  final y2 = y * y % _p;
+  final x2 = (y2 - BigInt.one) * (_d * y2 + BigInt.one).modInverse(_p) % _p;
+  var x = x2.modPow((_p + BigInt.from(3)) ~/ BigInt.from(8), _p);
+  if ((x * x - x2) % _p != BigInt.zero) x = x * _sqrtMinusOne % _p;
+  if ((x * x - x2) % _p != BigInt.zero) return false; // no point has this y
+  if (x == BigInt.zero && negative) return false; // minus zero
+  return true;
 }
 
 /// CESR fixed-size material under [code] (see [_matter]), for the codes the
@@ -181,8 +228,8 @@ class AppLink {
       throw const TrustRefused(
           'the link names no latest key log event the utility app\'s relay identifier must have reached');
     }
-    if (!RegExp(r'^https://').hasMatch(api) &&
-        !RegExp(r'^http://(127\.0\.0\.1|localhost)[:/]').hasMatch(api)) {
+    final backEnd = readLinkBackEnd(api);
+    if (backEnd == null) {
       throw const TrustRefused('the link names no back end to sign in at');
     }
     final iatText = p['iat'] ?? '';
@@ -201,9 +248,82 @@ class AppLink {
       throw const TrustRefused(
           'this link is dated later than this device\'s clock says it is now: set the date and time on this device, or ask the utility app\'s owner for a new link');
     }
-    return AppLink(p['aid']!, p['kel']!, rid,
-        api.replaceAll(RegExp(r'/+$'), ''), seal, min, wit);
+    return AppLink(p['aid']!, p['kel']!, rid, backEnd, seal, min, wit);
   }
+}
+
+// ---- a back end's address ----------------------------------------------------
+
+const _reservedSuffixes = [
+  '.local',
+  '.localhost',
+  '.internal',
+  '.lan',
+  '.home.arpa',
+  '.corp',
+  '.intranet',
+  '.localdomain'
+];
+
+/// A lower-case DNS name of at least two labels, whose last label is not all
+/// digits (so not an IPv4 address) and which no suffix reserved for a private
+/// network ends.
+bool _aPublicName(String host) {
+  if (host.isEmpty || host.length > 253 || !host.contains('.')) return false;
+  final labels = host.split('.');
+  final label = RegExp(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$');
+  if (!labels.every(label.hasMatch)) return false;
+  // No real top-level name starts with a digit; a last label that does (all
+  // digits, or 0x and hex digits) is read as an IPv4 address by browsers.
+  if (!RegExp(r'^[a-z]').hasMatch(labels.last)) return false;
+  return !_reservedSuffixes
+      .any((s) => host.endsWith(s) || host == s.substring(1));
+}
+
+bool _aPort(String p) =>
+    RegExp(r'^[1-9][0-9]{0,4}$').hasMatch(p) && int.parse(p) <= 65535;
+
+/// Whether [api] is an address a utility app's back end may be named by, as
+/// the Identity Agent core accepts it (identity-bot
+/// `identity-agent-core/backendaddr`; the cases they agree on are in
+/// `packages/login-verify/test-vectors/back-end-addresses.json`): https and a
+/// public name in lower case (no IP address, no name with no dot, none under a
+/// private suffix), a port that is one, and an optional path with no dot or
+/// empty segment, no query, fragment, user name or trailing slash. A front end
+/// has no build mode, so it also accepts http on this machine, for development.
+bool backEndAddress(String api) {
+  if (api.isEmpty || api.length > 2048) return false;
+  final m = RegExp(r'^(https|http)://([^/]*)(/.*)?$', dotAll: true).firstMatch(api);
+  if (m == null) return false;
+  final scheme = m.group(1)!;
+  final hostport = m.group(2)!;
+  final path = m.group(3) ?? '';
+  final i = hostport.indexOf(':');
+  final host = i < 0 ? hostport : hostport.substring(0, i);
+  if (i >= 0 && !_aPort(hostport.substring(i + 1))) return false;
+  if (scheme == 'http'
+      ? host != '127.0.0.1' && host != 'localhost'
+      : !_aPublicName(host)) {
+    return false;
+  }
+  if (path.isEmpty) return true;
+  if (path.endsWith('/') ||
+      !RegExp(r"^(/([A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})*)+$")
+          .hasMatch(path)) {
+    return false;
+  }
+  return path.substring(1).split('/').every((seg) {
+    final s = seg.replaceAll(RegExp('%2e', caseSensitive: false), '.');
+    return seg != '' && s != '.' && s != '..';
+  });
+}
+
+/// What a link's `api` is read as: trailing slashes dropped, then the address
+/// rule applied. Null for a link that names none, or none a back end may be
+/// named by.
+String? readLinkBackEnd(String api) {
+  final stripped = api.replaceAll(RegExp(r'/+$'), '');
+  return backEndAddress(stripped) ? stripped : null;
 }
 
 // ---- the app's key log -----------------------------------------------------
@@ -274,7 +394,7 @@ Uint8List checkKeyLog(String aid, String encoded) {
 
 /// The challenge the signed text says, or a [TrustRefused]: signed by the app's
 /// key, for the app, naming this device's own key and the relay identifier [rid]
-/// the link names, not lapsed. [body] is the
+/// and back end [api] the link names, not lapsed. [body] is the
 /// exact text the signature covers; it is read only after the signature has
 /// been checked.
 Map<String, dynamic> checkChallenge({
@@ -285,6 +405,7 @@ Map<String, dynamic> checkChallenge({
   required Object? pointer,
   required String ownThumbprint,
   required String rid,
+  required String api,
   required DateTime now,
   String frontEnd = 'browser',
 }) {
@@ -317,7 +438,13 @@ Map<String, dynamic> checkChallenge({
   // names another relay identifier, and so another back end, is not the one the
   // app's Identity Agent signed this for, and one that names none is refused the same.
   if (c['rid'] != rid) {
-    fail('the challenge is signed for another relay identifier than the link names');
+    fail(
+        'the challenge is signed for another relay identifier than the link names');
+  }
+  // The back end the link names is signed beside it (Amendment 8); one that names
+  // none is refused the same.
+  if (c['api'] != api) {
+    fail('the challenge is signed for another back end than the link names');
   }
   // The kind is in the signed body when the Identity Agent names one (ADR-072
   // Amendment 2): a challenge naming another kind than ours is not ours.

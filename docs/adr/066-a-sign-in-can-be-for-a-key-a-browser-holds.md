@@ -4,7 +4,7 @@
 **Date:** 2026-11-05
 **Deciders:** Rob Andersen
 **Amends:** ADR-021 (Sign In with Identity Agent — Login Protocol)
-**Amended by:** ADR-072, 2026-11-09 (the talk-route note), and its Amendment 1, 2026-11-10 (the app's back end signs as the app, not as a controller)
+**Amended by:** ADR-072, 2026-11-09 (the talk-route note), and its Amendment 1, 2026-11-10 (the app's back end signs as the app, not as a controller), and its Amendment 9, 2026-11-17 (how long a sign-in lasts is set per utility app)
 
 ---
 
@@ -168,6 +168,14 @@ signatures), and a thumbprint that must be refused. Go
     re-check a required credential, which needs what the person presented. An
     error means the asset could not be read, which is not an answer either way.
     Use it to sign out someone removed from the roster since they signed in.
+  - `BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint)` says whether
+    the key with that thumbprint still speaks for that person at the asset,
+    and until when: the same reading a statement the key signs is judged by
+    (`keySpeaksUntil`, which `keysSpeakingAt.KeySpeaksFor` asks). A utility app's
+    back end that holds a session bound to the key asks it, so the session ends
+    when the key stops speaking and can say when that will be, rather than
+    outliving the key and having every statement it carries refused. A zero
+    time with true is an installed app's grant, which speaks until it is ended.
 
 ### A signed-in person speaks to an AI agent from the app's page — SUPERSEDED
 
@@ -189,7 +197,8 @@ session layer that makes the browser prove it holds the key.
 **What the core keeps from the sign-in.** When the callback verifies an
 assertion that repeats the challenge's `browser_key`, the core records, itself,
 "key K speaks for person P at asset A until T" (P is the pairwise identifier
-the assertion proved, T is 12 hours on). The app does not write it and cannot.
+the assertion proved, T is the asset's sign-in lifetime on, below). The app
+does not write it and cannot.
 It is the only way the core learns whose a browser key is.
 
 **How a person talks to an AI agent from the app's page.** The browser talks to
@@ -229,9 +238,18 @@ it.
 
 ### How long a key speaks, and what ends it early
 
-A sign-in lets its key speak for at most twelve hours (`browserKeyLife`), and
-three things can end that sooner. Each is checked when the key is used, not
-only when the person signed in.
+A sign-in lets its key speak for the asset's sign-in lifetime
+(`asset.Asset.SignInLifetime`), fixed when the person approves and kept in the
+record. A utility app's owner sets it (ADR-072 Amendment 9); every other asset,
+and a utility app whose owner has not said, has the default of twelve hours.
+The core never records more than thirty days (`asset.MaxSignInLifetime`),
+whatever the asset's record holds. These things end it sooner. Each is
+checked when the key is used, not only when the person signed in.
+
+- **The owner removes the person or switches the front end off.** Removing a
+  member of the asset ends every key of theirs there, and switching off a
+  utility app's browser front end ends every browser key at it (ADR-072
+  section 3).
 
 - **The app signs the person out.** The app's back end calls
   `Host.EndBrowserKeys` with the request it signs as the app (ADR-072
@@ -247,7 +265,7 @@ only when the person signed in.
   as the person presented it at sign-in, verified again. The record keeps what
   was presented for that (`browserKeyRecord.Presented`, only the entries of the
   required schema). A person whose required credential has lapsed or been
-  revoked stops speaking on the next use, not at the end of the twelve hours.
+  revoked stops speaking on the next use, not at the end of the sign-in's lifetime.
   The employee list is not the asset's answer and is not consulted.
 - **A statement works once, across a restart.** What has been used is kept in
   `person_statements_used.json` in the data directory for as long as a statement

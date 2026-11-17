@@ -135,7 +135,7 @@ sequenceDiagram
 - **One way in for every app.** A developer writing a utility app builds against this protocol and needs nothing from an Identity Agent's routes except the sign-in Ask and the app's own connection.
 - **The core's surface does not grow per app.** No core serves an app's page or answers an app's browser origin. The talk-route path ADR-066 described moves behind the app's back end: the core stops answering the app's origin there and admits the person's signed request only inside the app's own call.
 - **An Identity Agent is the control point, never the data path.** It approves sign-ins, enforces which front ends an app may use, answers the app's requests and asks for consent. The app's own traffic does not pass through it.
-- **ADR-006's other two non-conforming places are not settled here.** The app display at `/apps/{app_id}/` and `/sandbox/llm/v1` belong to the older sandboxed-app kind. This ADR covers only apps beside an Identity Agent, so they stay listed in ADR-006 until they are reworked.
+- **ADR-006's other two non-conforming places are not settled here.** The app display at `/apps/{app_id}/` and `/sandbox/llm/v1` belong to the older sandboxed-app kind. This ADR covers only apps beside an Identity Agent, so they stay listed in ADR-006 until they are reworked. *(Amended 2026-11-15: both are gone with the older kind, and ADR-006 no longer lists them; see ADR-012 Amendment 6.)*
 - **Stated weaknesses.** The relay is a provider the person did not choose to trust. It reads nothing, but it sees that somebody reached the app and when, and it can refuse to carry traffic. On phones whose operating system wakes a closed app only through the platform's push service, an app that must ring or notify has to send a sealed wake-up through that service. The wake-up carries nothing readable, but on that platform it is a dependency the person cannot avoid.
 
 ## What this does not settle
@@ -158,6 +158,7 @@ sequenceDiagram
 - sealed front-end traffic: the format, test vectors, the page's side in TypeScript and in Dart (`packages/login-dart`, which every installed front end uses), and the Go side (Amendment 4)
 - a relay identifier's witnesses, the owner's declaration that makes a witness hold its log, and the page's and Dart's reading of the log from them, with test vectors (Amendment 5)
 - the relay identifier in a utility app's sign-in challenge, the owner's record of it, and the page's and Dart's check of it against the link, with test vectors (Amendment 7)
+- the back-end address in the same challenge, the owner's record of it, the page's and Dart's check of it against the link, and the person's own record of the browser sign-ins they approved, which keeps both (Amendment 8)
 
 **Not built:**
 - a front end checking the app's key log and App Body credential
@@ -319,6 +320,8 @@ Amendment 6 pins a hosted page to its app, so a crafted link cannot move that pa
 
 **The challenge names the relay identifier.** The owner's Identity Agent records a utility app's relay identifier (`PUT /api/assets/{id}/relay-id`, owner only, or `asset.Handler.SetRelayID` from whatever learns it) and puts it in the signed challenge as `rid`, after `front_end` and before `callback_url`. It may be recorded again, as an app given a new relay identifier needs. It is left out when none is recorded, so a challenge for anything else keeps its form. The Go and TypeScript canonical forms and `core-canonical-and-spellings.json` carry it.
 
+**One rule for the address, kept in three places.** What may be written as a back-end address is decided once, in `identity-agent-core/backendaddr`, and the page (`packages/login-web`, `backEndAddress`) and the Dart link reader (`packages/login-dart`, `backEndAddress`) apply the same rule. It is a rule of shape, which is all a person's Identity Agent can check on reading a challenge: an https address of a public name in lower case, with no IP address, no name without a dot, none under a private suffix (`.local`, `.internal`, `.lan`, `.home.arpa` and the like), a real port, no user name, query, fragment or trailing slash, and a path with no dot or empty segment. Http on this machine is accepted only in a development build; a page and a Dart reader have no build mode and accept it. The cases all three decide alike are `packages/login-verify/test-vectors/back-end-addresses.json`. A person's Identity Agent runs the rule, and the relay identifier's shape, on a signed challenge before it shows consent and again where it keeps them (`login.CheckUtilityAppAddress`). A public name that resolves to a private address passes the shape; sending the end of a session to it goes through the guarded client for an address a site chose, which refuses the connection.
+
 **A front end requires it to equal the link's.** `checkAppChallenge` (`packages/login-web/src/app.ts`) and `checkChallenge` (`packages/login-dart/lib/app_checks.dart`) take the relay identifier the link names and refuse a challenge whose `rid` is another, or is missing. A missing one is refused because a challenge that names none says nothing about which relay identifier the app stands behind: taking it would leave every app whose identifier is not recorded open to the link above. `app-checks.json` holds the cases, run in TypeScript and Dart alike. On a pinned page the check repeats what the pin already holds; it is kept there so the page and an installed front end run one check.
 
 **Rollout.** Two older parties break, in this order, and the order of rollout follows from them:
@@ -328,7 +331,41 @@ Amendment 6 pins a hosted page to its app, so a crafted link cannot move that pa
 
 **What this does not close.** The link's `api` is still not signed. While the front end holds the relay identifier's current key log, that is enough: every answer is checked against that log (Amendments 1 and 4) and every call is sealed to the key it vouches for, so a back end at another address can carry the traffic or drop it but cannot read it or answer it. It is not enough when the front end takes an older log from the link: a holder of a key the identifier has rotated away from, such as a removed machine, can write a link with an older `min` and no `wit`, and a front end that has never seen a newer log takes its sealing key and its answers. That is the open case Amendment 5 lists as "a link that names no witness", now the way in for a back end at another address; the challenge naming the relay identifier does not close it. A relay identifier that is replaced is safe only from when the new one is recorded: whatever records it must do so in the same step as the replacement, or a link naming the old one still matches the challenge until it does.
 
-## Amendment 8 (2026-11-15): the consent names the device an installed app runs on
+## Amendment 8 (2026-11-15): the challenge also names the app's back-end address, and the person keeps where each session is
+
+Amendment 7 left the link's `api` unsigned. It is signed now, beside `rid`, for two reasons that are one change: a front end can hold the link's back end to what the owner recorded, and the person's Identity Agent learns where the app is. The second is what lets a person see the browser sessions they approved at one utility app and end one: the end goes to the app's back end, and until now only the browser knew its address and relay identifier.
+
+**The challenge names the back end.** The owner records it (`PUT /api/assets/{id}/back-end` `{"back_end": "https://…"}`, owner only, or `asset.Handler.SetBackEnd`), in the form a front end reads a link's: an https address (http only on this machine) in lower case, with no trailing slash. It is signed as `api`, after `rid` and before `callback_url`, and left out when none is recorded. The Go and TypeScript canonical forms and `core-canonical-and-spellings.json` carry it.
+
+**A front end requires it to equal the link's.** `checkAppChallenge` (`packages/login-web/src/app.ts`) and `checkChallenge` (`packages/login-dart/lib/app_checks.dart`) refuse a challenge whose `api` is another or is missing, for the reason Amendment 7 gives for `rid`. This replaces Amendment 7's "the link's `api` is still not signed": a link that carries the real relay identifier but another back end address is now refused at the challenge. What stays open is the case Amendment 7 names for an older key log, and a back end that is not the one named in the link is still read only through the answers' signatures.
+
+**The person's record keeps both.** `recordBrowserSignIn` stores the challenge's `rid` and `api` with the line it already kept (app, browser key, when approved), so a later end can be sent to that back end under that relay identifier. A sign-in at an app that had recorded neither keeps a line with neither, and an end cannot be sent for it.
+
+**Rollout** is Amendment 7's, with one more field: an Identity Agent that does not know `api` refuses a challenge carrying it as unreadable, so the owner records the back end only once the Identity Agents of the people who sign in understand it; and a front end built on this change refuses a challenge with none, so it is shipped only once the owner has recorded it. Record the relay identifier and the back end in the same step, and replace them together.
+
+The Go is `identity-agent-core/asset` (`SetBackEnd`), `identity-agent-core/login` (`ChallengeBundle.BackEnd`, `canonicalChallengeBody`, `recordBrowserSignIn`). The cases are in `packages/login-web/test-vectors/app-checks.json`, run in TypeScript and Dart alike.
+
+## Amendment 9 (2026-11-17): how long a sign-in lasts is set per utility app
+
+ADR-066 let every sign-in's browser key speak for twelve hours, the same for every asset and with no reason given for that number. How long is right depends on the utility app. For one whose consequential actions each need the person's own signature on their Identity Agent anyway, such as an AI agent's chat, a sign-in that has to be approved again every working day costs the person a step every day, while the actions that matter are each approved on their own. What a sign-in still reaches without a signature, such as reading what was said, is what its owner weighs in setting it.
+
+**The owner sets it, per utility app.** The asset carries `sign_in_lifetime_hours`, beside the front-end setting in section 3. It is set when the utility app is made, by the owner's Identity Agent from whichever of its controllers may make one (the add-on that makes it passes it to `asset.Handler.SetSignInLifetime`, as it passes the front ends), or later with `PUT /api/assets/{id}/sign-in-lifetime` `{"sign_in_lifetime_hours": 720}`, which is owner only: a longer sign-in widens what the owner allowed. Zero, or a record that has never said, is the default of twelve hours. Only a utility app has the setting; every other asset has the default.
+
+**The utility app cannot lengthen its own.** Nothing a utility app's back end or front end sends is read for it: the time comes from the asset record, which only the owner's routes and an add-on in the owner's Identity Agent write. The back end can still shorten a session by ending its keys (ADR-066).
+
+**The core holds the ceiling.** No setting above thirty days (`asset.MaxSignInLifetime`) is kept, and on reading, a record holding more than that (written by hand, or by a build with another ceiling) gives thirty days (`asset.Asset.SignInLifetime`). The time is read at the person's approval and kept in the key's record, so changing the setting later moves only later sign-ins.
+
+**A utility app's session should follow the key.** A back end that asks when the key stops speaking (`Host.BrowserKeySpeaksUntil`) should end a session in use then, so it is not cut short of the lifetime the owner set nor kept past it. It may still end one left unused sooner: much of what a session reaches carries no statement the person signed.
+
+**What this does not settle.**
+
+- The person's Identity Agent is not told how long the sign-in it approves will last: the challenge does not carry it, so the consent screen cannot show it. Signing it into the challenge would need the rollout order Amendment 7 describes, and is left for a later change.
+- A longer sign-in makes ending one sign-in early matter more. Today the person ends one by sending the end to the utility app's back end (Amendment 8), which then ends the key; the owner can end a person's keys only by removing the person, or everyone's by switching the front end off. A way for the owner, or the person's own Identity Agent, to end one key at the core without the back end's help is not built.
+- Lowering the setting does not shorten sign-ins already made: each keeps the time it was given.
+
+The Go is `identity-agent-core/asset` (`SignInLifetime`, `SetSignInLifetime`, `HandleSetSignInLifetime`) and `identity-agent-core/server` (`handleLoginCallback`). The tests are `how_long_a_sign_in_lasts_is_the_owners_to_set_test.go` and `TestASignInLastsAsLongAsTheUtilityAppsOwnerSetWithinTheCeiling`.
+
+## Amendment 14 (2026-11-15): the consent names the device an installed app runs on
 
 *Amended 2026-11-15. Nothing above is changed.*
 
