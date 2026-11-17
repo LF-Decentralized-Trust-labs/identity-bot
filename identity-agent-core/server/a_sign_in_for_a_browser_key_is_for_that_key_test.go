@@ -350,15 +350,19 @@ func TestAnAddOnAsksUntilWhenABrowserKeySpeaks(t *testing.T) {
 // Fails without the lifetime being the asset's: a sign-in at a utility app
 // whose owner set thirty days lets the key speak for thirty days, one whose
 // record holds more than the ceiling for no longer than the ceiling, and one
-// that says nothing for the default.
+// that says nothing, or is not a utility app, for the default.
 func TestASignInLastsAsLongAsTheUtilityAppsOwnerSetWithinTheCeiling(t *testing.T) {
 	for name, c := range map[string]struct {
+		kind  string
 		hours int
 		want  time.Duration
 	}{
-		"thirty days":      {720, 30 * 24 * time.Hour},
-		"past the ceiling": {100000, asset.MaxSignInLifetime},
-		"not said":         {0, asset.DefaultSignInLifetime},
+		"thirty days":      {"app", 720, 30 * 24 * time.Hour},
+		"past the ceiling": {"app", 100000, asset.MaxSignInLifetime},
+		"not said":         {"app", 0, asset.DefaultSignInLifetime},
+		// Only a utility app has the setting: a website's record that holds
+		// one is given the default.
+		"a website": {"website", 720, asset.DefaultSignInLifetime},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
@@ -366,7 +370,7 @@ func TestASignInLastsAsLongAsTheUtilityAppsOwnerSetWithinTheCeiling(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			a.AssetType, a.SignInLifetimeHours = "app", c.hours
+			a.AssetType, a.SignInLifetimeHours = c.kind, c.hours
 			if err := w.org.assetHandler.Store.UpsertAsset(a); err != nil {
 				t.Fatal(err)
 			}

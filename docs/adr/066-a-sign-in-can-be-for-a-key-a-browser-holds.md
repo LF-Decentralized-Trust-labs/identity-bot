@@ -243,8 +243,13 @@ A sign-in lets its key speak for the asset's sign-in lifetime
 record. A utility app's owner sets it (ADR-072 Amendment 9); every other asset,
 and a utility app whose owner has not said, has the default of twelve hours.
 The core never records more than thirty days (`asset.MaxSignInLifetime`),
-whatever the asset's record holds. Three things can end it sooner. Each is
+whatever the asset's record holds. These things end it sooner. Each is
 checked when the key is used, not only when the person signed in.
+
+- **The owner removes the person or switches the front end off.** Removing a
+  member of the asset ends every key of theirs there, and switching off a
+  utility app's browser front end ends every browser key at it (ADR-072
+  section 3).
 
 - **The app signs the person out.** The app's back end calls
   `Host.EndBrowserKeys` with the request it signs as the app (ADR-072
