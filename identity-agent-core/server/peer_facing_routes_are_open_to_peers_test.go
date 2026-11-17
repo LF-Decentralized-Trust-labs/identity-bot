@@ -51,7 +51,12 @@ func watcherAgent(t *testing.T, aid string, seq int, digest string) *CoreServer 
 	t.Cleanup(func() { ds.Close() })
 	var db *sql.DB = ds.DB()
 	ws := watcher.NewService(watcher.NewSQLiteStore(db))
-	if err := ws.RecordFirstSeen(aid, seq, digest, watcher.SourceOOBI, "http://test/oobi"); err != nil {
+	now := time.Now().UTC()
+	// Proven: only a sighting of a log its controller signed is served as testimony.
+	if err := ws.Store.RecordFirstSeen(watcher.FirstSeenRecord{
+		AID: aid, SequenceNum: seq, KelDigest: digest, FirstSeenAt: now, LastConfirmedAt: now,
+		SeenCount: 1, SourceType: watcher.SourceOOBI, SourceURL: "http://test/oobi", Proven: true,
+	}); err != nil {
 		t.Fatalf("watcher store: %v", err)
 	}
 	s := newAuthTestServer(t)

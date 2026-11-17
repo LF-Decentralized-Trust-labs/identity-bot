@@ -1258,6 +1258,43 @@ CREATE TABLE IF NOT EXISTS kel_seen_log (
 -- or signs a key of the identity on the strength of them.
 ALTER TABLE identity ADD COLUMN handed_over INTEGER NOT NULL DEFAULT 0;
 `},
+	{
+		Version:     60,
+		Description: "Guardianship is a multi-signature on the dependent's own identifier: keep the dependent's identifier and the keys in its key set, and no guardian's identifier",
+		SQL: `
+-- ADR-019 amendment. The delegation columns (guardian_aid, delegated_aid_prefix,
+-- co_guardians_json) held identifiers of guardians; none is kept now. Guardianship
+-- had not shipped, so what they held is dropped, not converted: an identifier
+-- cannot be turned into the key a guardian would place in the key set.
+DROP INDEX IF EXISTS idx_guardianships_guardian;
+DROP INDEX IF EXISTS idx_guardianships_dependent;
+DROP INDEX IF EXISTS idx_guardianships_status;
+CREATE TABLE guardianships_multisig (
+    id                          TEXT PRIMARY KEY,
+    type                        TEXT NOT NULL DEFAULT '',
+    dependent_aid               TEXT NOT NULL DEFAULT '',
+    dependent_name              TEXT NOT NULL DEFAULT '',
+    status                      TEXT NOT NULL DEFAULT 'active',
+    hosting_type                TEXT NOT NULL DEFAULT '',
+    hosting_url                 TEXT NOT NULL DEFAULT '',
+    created_at                  TEXT NOT NULL DEFAULT '',
+    updated_at                  TEXT NOT NULL DEFAULT '',
+    emancipation_json           TEXT NOT NULL DEFAULT '{}',
+    multisig_participants_json  TEXT NOT NULL DEFAULT '[]',
+    multisig_threshold          INTEGER NOT NULL DEFAULT 0,
+    metadata_json               TEXT NOT NULL DEFAULT '{}',
+    credential_said             TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO guardianships_multisig (id, type, dependent_aid, dependent_name, status, hosting_type, hosting_url,
+    created_at, updated_at, emancipation_json, multisig_threshold, metadata_json, credential_said)
+SELECT id, type, dependent_aid, dependent_name, status, hosting_type, hosting_url,
+    created_at, updated_at, emancipation_json, multisig_threshold, metadata_json, COALESCE(credential_said, '')
+FROM guardianships;
+DROP TABLE guardianships;
+ALTER TABLE guardianships_multisig RENAME TO guardianships;
+CREATE INDEX IF NOT EXISTS idx_guardianships_dependent ON guardianships(dependent_aid);
+CREATE INDEX IF NOT EXISTS idx_guardianships_status ON guardianships(status);
+`},
 }
 
 // execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD

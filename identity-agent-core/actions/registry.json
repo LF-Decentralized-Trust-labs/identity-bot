@@ -104,6 +104,33 @@
       "outcome": "The individual signs a vouch over the organization's AID (stored by the counterpart as proof) and is enrolled as the active owner (the super-admin role). No delegated inception — the organization controls its own keys; the signer only attests.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    },
+    {
+      "code": 6,
+      "key": "sign_statement",
+      "name": "Sign a statement",
+      "summary": "A utility app asks a person to sign a statement with their own Identity Agent's root key, after reading exactly what it says, so the utility app can prove the person said it. Code 5 stays reserved as issue (ADR-021).",
+      "who_mints": "relying_party",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "site_aid": { "type": "string", "required": true, "kind": "open" },
+        "site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "audience": { "type": "string", "required": true, "kind": "open" },
+        "nonce": { "type": "string", "required": true, "kind": "open" },
+        "dt": { "type": "string", "required": true, "kind": "open" },
+        "expiry": { "type": "string", "required": true, "kind": "open" },
+        "statement": { "type": "string", "required": true, "kind": "open" },
+        "title": { "type": "string", "required": false, "kind": "open" },
+        "session_token": { "type": "string", "required": true, "kind": "open" },
+        "sig": { "type": "string", "required": true, "kind": "open" },
+        "signer_oobi": { "type": "string", "required": true, "kind": "open" }
+      },
+      "preview_contract": { "title": "Sign a statement for {site}", "conveys": ["site", "the exact statement"] },
+      "discloses": [],
+      "outcome": "The person's Identity Agent signs, with the root key in force, the envelope in docs/statement-signature.md (a fixed header, the asker's identifier, the statement exactly as shown) and posts the signature, the signer's identifier and the sequence number of the key event the key was set at to the asker's callback. Nothing is signed without the person's approval on that device.",
+      "tiers": null,
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }
   ]
 }

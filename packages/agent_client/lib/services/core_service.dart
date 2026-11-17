@@ -288,6 +288,11 @@ class ContactResponse {
   final JCardResponse? jcard;
   final String photo;
 
+  /// What the contact published about itself, unverified: "individual" (a
+  /// person) or "organization". Empty when the contact never said, which is
+  /// neither kind.
+  final String entityType;
+
   ContactResponse({
     required this.aid,
     required this.alias,
@@ -300,7 +305,12 @@ class ContactResponse {
     this.isWitness = false,
     this.jcard,
     this.photo = '',
+    this.entityType = '',
   });
+
+  /// True only for a contact that said it is an organisation; a contact that
+  /// said nothing is not assumed to be either.
+  bool get isOrganisation => entityType == 'organization';
 
   bool get isAccepted => status == 'accepted';
   bool get isPendingInbound => status == 'pending_inbound';
@@ -326,6 +336,7 @@ class ContactResponse {
       isWitness: json['is_witness'] ?? false,
       jcard: json['jcard'] != null ? JCardResponse.fromJson(json['jcard']) : null,
       photo: json['photo'] ?? '',
+      entityType: json['entity_type'] ?? '',
     );
   }
 }
@@ -598,6 +609,12 @@ class ScanDecodeResult {
   final String defaultTier;
   final String warning; // amber caution line, if any
 
+  /// What the person is asked to sign, for an Ask that asks for a signature
+  /// (action 6, ADR-080); null for every other. It is shown as what they are
+  /// signing and never filed among [details], the data they share: approving it
+  /// shares nothing.
+  final ScanPreviewStatement? statement;
+
   /// Digest of the exact Ask bytes this preview describes. Pass it back to
   /// [CoreService.scanExecute] so the core can prove it is acting on the
   /// request the user actually approved.
@@ -615,6 +632,7 @@ class ScanDecodeResult {
     this.tierOptions = const [],
     this.defaultTier = '',
     this.warning = '',
+    this.statement,
     this.askDigest = '',
   });
 
@@ -637,9 +655,43 @@ class ScanDecodeResult {
           const [],
       defaultTier: json['default_tier']?.toString() ?? '',
       warning: json['warning']?.toString() ?? '',
+      statement: json['statement'] is Map<String, dynamic>
+          ? ScanPreviewStatement.fromJson(json['statement'] as Map<String, dynamic>)
+          : null,
       askDigest: json['ask_digest']?.toString() ?? '',
     );
   }
+}
+
+/// A statement shown to be signed (the Go `PreviewStatement`): a registered
+/// form's reading ([rows], possibly none) beside the exact text ([verbatim]),
+/// which is what is signed.
+class ScanPreviewStatement {
+  final String heading; // "Your approval of a decision"
+  final String form; // the registered form's name, or '' for plain text
+  final List<ScanPreviewDetail> rows;
+  final String verbatim;
+  final String signerNote; // "Only your signature makes … count this as yours."
+
+  const ScanPreviewStatement({
+    required this.heading,
+    this.form = '',
+    this.rows = const [],
+    required this.verbatim,
+    this.signerNote = '',
+  });
+
+  factory ScanPreviewStatement.fromJson(Map<String, dynamic> json) =>
+      ScanPreviewStatement(
+        heading: json['heading']?.toString() ?? '',
+        form: json['form']?.toString() ?? '',
+        rows: (json['rows'] as List<dynamic>?)
+                ?.map((e) => ScanPreviewDetail.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        verbatim: json['verbatim']?.toString() ?? '',
+        signerNote: json['signer_note']?.toString() ?? '',
+      );
 }
 
 /// The contacts an agent's watcher cross-checks key logs with.
@@ -1544,7 +1596,7 @@ class CoreService {
     String? dependentAid,
     String? hostingUrl,
     Map<String, dynamic>? emancipationTrigger,
-    List<String>? coGuardians,
+    List<MultisigParticipantResponse>? multisigParticipants,
     int? multisigThreshold,
     Map<String, String>? metadata,
   }) async {
@@ -1556,7 +1608,9 @@ class CoreService {
     if (dependentAid != null) body['dependent_aid'] = dependentAid;
     if (hostingUrl != null) body['hosting_url'] = hostingUrl;
     if (emancipationTrigger != null) body['emancipation_trigger'] = emancipationTrigger;
-    if (coGuardians != null) body['co_guardians'] = coGuardians;
+    if (multisigParticipants != null) {
+      body['multisig_participants'] = multisigParticipants.map((p) => p.toJson()).toList();
+    }
     if (multisigThreshold != null) body['multisig_threshold'] = multisigThreshold;
     if (metadata != null) body['metadata'] = metadata;
 
@@ -2668,17 +2722,17 @@ class CoreService {
 class GuardianshipResponse {
   final String id;
   final String type;
-  final String guardianAid;
   final String dependentAid;
   final String dependentName;
-  final String delegatedAidPrefix;
   final String status;
   final String hostingType;
   final String hostingUrl;
   final String createdAt;
   final String updatedAt;
   final EmancipationTriggerResponse? emancipationTrigger;
-  final List<String> coGuardians;
+  /// The keys in the dependent's multi-signature key set. Keys only: no
+  /// identifier of a guardian is kept.
+  final List<MultisigParticipantResponse> multisigParticipants;
   final int multisigThreshold;
   final Map<String, String> metadata;
   final String credentialSaid;
@@ -2686,17 +2740,15 @@ class GuardianshipResponse {
   GuardianshipResponse({
     required this.id,
     required this.type,
-    required this.guardianAid,
     required this.dependentAid,
     required this.dependentName,
-    required this.delegatedAidPrefix,
     required this.status,
     required this.hostingType,
     required this.hostingUrl,
     required this.createdAt,
     required this.updatedAt,
     this.emancipationTrigger,
-    required this.coGuardians,
+    required this.multisigParticipants,
     required this.multisigThreshold,
     required this.metadata,
     this.credentialSaid = '',
@@ -2706,10 +2758,8 @@ class GuardianshipResponse {
     return GuardianshipResponse(
       id: json['id'] as String? ?? '',
       type: json['type'] as String? ?? '',
-      guardianAid: json['guardian_aid'] as String? ?? '',
       dependentAid: json['dependent_aid'] as String? ?? '',
       dependentName: json['dependent_name'] as String? ?? '',
-      delegatedAidPrefix: json['delegated_aid_prefix'] as String? ?? '',
       status: json['status'] as String? ?? '',
       hostingType: json['hosting_type'] as String? ?? '',
       hostingUrl: json['hosting_url'] as String? ?? '',
@@ -2718,8 +2768,9 @@ class GuardianshipResponse {
       emancipationTrigger: json['emancipation_trigger'] != null
           ? EmancipationTriggerResponse.fromJson(json['emancipation_trigger'])
           : null,
-      coGuardians: (json['co_guardians'] as List<dynamic>?)
-          ?.map((e) => e.toString()).toList() ?? [],
+      multisigParticipants: (json['multisig_participants'] as List<dynamic>?)
+          ?.map((e) => MultisigParticipantResponse.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
       multisigThreshold: (json['multisig_threshold'] as num?)?.toInt() ?? 0,
       metadata: (json['metadata'] as Map<String, dynamic>?)
           ?.map((k, v) => MapEntry(k, v.toString())) ?? {},
@@ -2738,6 +2789,24 @@ class GuardianshipResponse {
   }
 
   bool get isActive => status == 'active';
+}
+
+/// One public key in a dependent's key set, and what it is for
+/// (guardian, co_guardian, court, emergency or dependent).
+class MultisigParticipantResponse {
+  final String publicKey;
+  final String role;
+
+  MultisigParticipantResponse({required this.publicKey, required this.role});
+
+  factory MultisigParticipantResponse.fromJson(Map<String, dynamic> json) {
+    return MultisigParticipantResponse(
+      publicKey: json['public_key'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'public_key': publicKey, 'role': role};
 }
 
 class EmancipationTriggerResponse {

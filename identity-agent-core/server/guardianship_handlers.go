@@ -6,6 +6,7 @@ import (
 	"identity-agent-core/schemas"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -45,19 +46,26 @@ func (s *CoreServer) handleListGuardianships(w http.ResponseWriter, r *http.Requ
 // handleCreateGuardianship creates a new guardianship relationship.
 func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Type                string                     `json:"type"`
-		DependentName       string                     `json:"dependent_name"`
-		DependentAID        string                     `json:"dependent_aid"`
-		DelegatedAIDPrefix  string                     `json:"delegated_aid_prefix"`
-		HostingType         string                     `json:"hosting_type"`
-		HostingURL          string                     `json:"hosting_url"`
-		EmancipationTrigger *store.EmancipationTrigger `json:"emancipation_trigger"`
-		CoGuardians         []string                   `json:"co_guardians"`
-		MultisigThreshold   int                        `json:"multisig_threshold"`
-		Metadata            map[string]string          `json:"metadata"`
+		Type                 string                      `json:"type"`
+		DependentName        string                      `json:"dependent_name"`
+		DependentAID         string                      `json:"dependent_aid"`
+		HostingType          string                      `json:"hosting_type"`
+		HostingURL           string                      `json:"hosting_url"`
+		EmancipationTrigger  *store.EmancipationTrigger  `json:"emancipation_trigger"`
+		MultisigParticipants []store.MultisigParticipant `json:"multisig_participants"`
+		MultisigThreshold    int                         `json:"multisig_threshold"`
+		Metadata             map[string]string           `json:"metadata"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// A guardian is a key in the dependent's key set, never an identifier, so a
+	// body that names one (the delegation-era fields) is refused, not ignored.
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := checkMultisig(req.MultisigParticipants, req.MultisigThreshold); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid multi-signature", err.Error())
 		return
 	}
 
@@ -97,24 +105,22 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	record := store.GuardianshipRecord{
-		ID:                  uuid.New().String(),
-		Type:                req.Type,
-		GuardianAID:         identity.AID,
-		DependentAID:        req.DependentAID,
-		DependentName:       req.DependentName,
-		DelegatedAIDPrefix:  req.DelegatedAIDPrefix,
-		Status:              "active",
-		HostingType:         req.HostingType,
-		HostingURL:          req.HostingURL,
-		CreatedAt:           now,
-		UpdatedAt:           now,
-		EmancipationTrigger: req.EmancipationTrigger,
-		CoGuardians:         req.CoGuardians,
-		MultisigThreshold:   req.MultisigThreshold,
-		Metadata:            req.Metadata,
+		ID:                   uuid.New().String(),
+		Type:                 req.Type,
+		DependentAID:         req.DependentAID,
+		DependentName:        req.DependentName,
+		Status:               "active",
+		HostingType:          req.HostingType,
+		HostingURL:           req.HostingURL,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+		EmancipationTrigger:  req.EmancipationTrigger,
+		MultisigParticipants: req.MultisigParticipants,
+		MultisigThreshold:    req.MultisigThreshold,
+		Metadata:             req.Metadata,
 	}
-	if record.CoGuardians == nil {
-		record.CoGuardians = []string{}
+	if record.MultisigParticipants == nil {
+		record.MultisigParticipants = []store.MultisigParticipant{}
 	}
 	if record.Metadata == nil {
 		record.Metadata = map[string]string{}
@@ -182,14 +188,29 @@ func (s *CoreServer) handleUpdateGuardianship(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// An update changes only what describes the guardianship. A guardian is a
+	// key in the dependent's key set, never an identifier, and the key set changes
+	// only by a rotation of the dependent's identifier, so neither is set here;
+	// any other field is refused rather than ignored, as on create.
+	for k := range req {
+		switch k {
+		case "dependent_name", "dependent_aid", "status", "hosting_type", "hosting_url", "metadata":
+		case "guardian_aid", "delegated_aid_prefix", "co_guardians":
+			writeError(w, http.StatusBadRequest, "Invalid request body", k+" is not a field: a guardian is a key in the dependent's key set, not an identifier")
+			return
+		case "multisig_participants", "multisig_threshold":
+			writeError(w, http.StatusBadRequest, "Invalid request body", k+" is not changed by an update: the key set changes only by a rotation of the dependent's identifier")
+			return
+		default:
+			writeError(w, http.StatusBadRequest, "Invalid request body", "unknown field "+k)
+			return
+		}
+	}
 	if v, ok := req["dependent_name"].(string); ok && v != "" {
 		existing.DependentName = v
 	}
 	if v, ok := req["dependent_aid"].(string); ok {
 		existing.DependentAID = v
-	}
-	if v, ok := req["delegated_aid_prefix"].(string); ok {
-		existing.DelegatedAIDPrefix = v
 	}
 	if v, ok := req["status"].(string); ok {
 		existing.Status = v
@@ -270,4 +291,33 @@ func (s *CoreServer) handleEmancipateGuardianship(w http.ResponseWriter, r *http
 	log.Printf("[guardianship] Emancipated guardianship %s — dependent %s is now independent", id, existing.DependentName)
 
 	jsonreply.Write(w, http.StatusOK, existing)
+}
+
+// guardianshipRoles are what a key in a dependent's key set may be for.
+var guardianshipRoles = map[string]bool{"guardian": true, "co_guardian": true, "court": true, "emergency": true, "dependent": true}
+
+// checkMultisig refuses a key set that is not one: a key that is blank or
+// repeated, a role that is not a role, or a threshold no set of that size can meet.
+// With no participants named yet the threshold must be 0 (none set).
+func checkMultisig(parts []store.MultisigParticipant, threshold int) error {
+	seen := map[string]bool{}
+	for _, p := range parts {
+		if p.PublicKey == "" || len(p.PublicKey) > 128 || strings.ContainsAny(p.PublicKey, " \t\r\n") {
+			return fmt.Errorf("a participant's public_key is blank or not a key")
+		}
+		if !guardianshipRoles[p.Role] {
+			return fmt.Errorf("role %q is not one of guardian, co_guardian, court, emergency, dependent", p.Role)
+		}
+		if seen[p.PublicKey] {
+			return fmt.Errorf("the key %q is in the key set twice", p.PublicKey)
+		}
+		seen[p.PublicKey] = true
+	}
+	if len(parts) == 0 && threshold != 0 {
+		return fmt.Errorf("threshold %d cannot be met by no keys", threshold)
+	}
+	if len(parts) > 0 && (threshold < 1 || threshold > len(parts)) {
+		return fmt.Errorf("threshold %d cannot be met by %d keys, or needs no signature", threshold, len(parts))
+	}
+	return nil
 }

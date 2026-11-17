@@ -1,8 +1,109 @@
 # ADR-019: Guardianship
 
-**Status:** Accepted
-**Date:** 2026-03-22
+**Status:** Accepted · amended 2026-11-14 (the amendment below replaces how a guardian holds authority)
+**Date:** 2026-03-22 · amended 2026-11-14
 **Deciders:** Rob Andersen
+
+---
+
+# Amendment — 2026-11-14: guardianship is a multi-signature on the dependent's own identifier
+
+> **This amendment replaces the delegation in the rest of this document.** Where
+> the text below says guardianship is a delegation between two Guardianship
+> P-AIDs, the amendment governs. The passages it replaces carry a note pointing
+> here; everything not named in "What changes" is unchanged and still Accepted.
+
+## Why the delegation is replaced
+
+The decision below used delegation (`dip`/`drt`) between two purpose-bound
+identifiers so that no Root AID was published. That removed the Root AID from
+the picture but left the rest of the problem in place:
+
+- **A delegated inception names its delegator in an event anyone can read.** The
+  guardian's Guardianship P-AID is written into every event of the dependent's
+  key history. A verifier who sees any credential of the dependent can walk to
+  the guardian's identifier and see that this person is the dependent's guardian.
+- **The dependent is not sovereign.** A delegated identifier can be rotated only
+  with its delegator's approval, and emancipation had to end the identifier and
+  found a new one, which strands every credential issued to the old one.
+- **It needed a second identifier per relationship** (two Guardianship P-AIDs, a
+  new subclass of pairwise identifier, a hard dependency on the relay's pairwise
+  work) to get a result a multi-signature gives directly.
+
+## The decision
+
+**Every human dependent has an identifier of their own, founded by an ordinary
+standalone inception (`icp`), and guardianship is a multi-signature over that
+identifier.** A guardian's signing key joins the dependent's key set as an
+additional signer; the signing threshold and the set of keys together are the
+authority relationship. Nothing is delegated.
+
+1. **The dependent's identifier is never delegated.** A newborn's is founded by
+   the guardian on the dependent's own isolated Identity Agent instance; an
+   adult who comes under guardianship keeps the identifier they already have.
+   Neither is replaced.
+2. **A guardian joins by rotation.** A newborn's identifier names the
+   guardian's key in its inception, in both the current key set and the next-key
+   commitment. For an identifier that already exists, KERI requires the keys a
+   rotation makes current to be the ones the event before it committed to in its
+   next-key digest, so a new guardian's key takes two rotations: the first
+   commits a next key set that includes it, and the second makes that set
+   current at the threshold the template names.
+3. **Only keys appear, never the guardian's identifier.** The dependent's key
+   history shows that its key set changed on a date. It does not name the
+   guardian's identifier, so no verifier can walk from the dependent to the
+   guardian. The guardian's key placed there is made for this relationship, not
+   the key of the guardian's own identifier, because the same public key in two
+   key histories would link them.
+4. **Co-guardians and courts are further signers.** A second parent, an
+   attorney, a court's signing key and a reserved emergency signer are each
+   another key in the set, with a threshold that fits (two of three leaves no
+   tie; two of two needs a tie-break rule agreed when the guardianship is made).
+5. **Changing guardian is the same pair of rotations.** The first commits a
+   next key set with the incoming guardian's key in place of the outgoing one;
+   the second makes it current. The outgoing guardian's key signs until then, so
+   there is no moment the dependent is uncontrolled.
+6. **Emancipation is a rotation, not a new identifier.** A rotation reduces the
+   key set to keys the dependent alone holds (committed in the next-key digest
+   beforehand, as in item 2). The identifier, its key history,
+   its credentials and its contacts are unchanged. If a guardian is needed again,
+   a rotation brings one back.
+7. **The key history is the proof.** The guardian's authority is that their key
+   signed the rotations that made the multi-signature; no third party is
+   needed for it to exist. What the key history does not say is who the guardian
+   is in the world: where that must be shown to a school, hospital or court, an
+   optional Guardian credential names them and refers to the dependent's identifier.
+8. **What a guardian may do is enforced by threshold, not by the protocol.**
+   The categories (identity, financial, medical, legal, communication) and levels
+   (full, co-sign, view, blocked) are a policy the dependent's Identity Agent
+   enforces by asking for more or fewer of the key set's signers before it acts
+   on each kind of request. KERI itself signs every event at the one threshold
+   the key set states; the key history knows nothing of categories.
+9. **Delegation is still right for what is not a person.** An asset acting for
+   its owner, such as an AI agent or a bot, is delegated (ADR-045); only human
+   guardianship leaves delegation.
+
+This is standard KERI: multi-signature inception and rotation with next-key
+digests, no new event type. The KERI engine (ADR-037) therefore needs
+multi-signature inception and rotation, which it does not perform yet; it does
+not need delegated inception or rotation for guardianship.
+
+## What changes in this document
+
+| Passage | Now |
+|---|---|
+| Context, "Privacy constraint" | Replaced: no delegation, so no delegator is exposed |
+| Guiding principle 2 | Replaced by item 1-3 above |
+| "Guardianship = KERI Delegation Between Guardianship P-AIDs" | Replaced by the decision above; the guardian's actions become: rotations to add or change a guardian (items 2, 5), change the threshold by rotation, and end guardianship by an emancipating rotation (item 6) |
+| "Emancipation = Authority Transfer" | Replaced by item 6; there is no new inception and no topology change |
+| Data model | `guardian_guardianship_raid`, `dependent_guardianship_raid` and `co_guardian_raids_json` become `dependent_aid` (the dependent's own identifier), `multisig_participants_json` (the public keys in the set, each with its role) and `multisig_threshold` (kept); no identifier of any guardian is stored |
+| Consequence 8 (relay is a prerequisite) | Withdrawn: guardianship no longer uses pairwise identifiers |
+| Consequence 9 (delegated inception in the driver) | Replaced: the KERI engine (ADR-037) must perform multi-signature inception and rotation |
+| Consequence 10 (store migration) | The legacy delegation fields are replaced by the three above; guardianship has not shipped, so it is still a hard migration |
+
+Unchanged: one identifier per Identity Agent instance, hosting of the
+dependent's instance, the four templates (their emancipation triggers become
+rotations), contact labels, navigation, the API surface and phasing.
 
 ---
 
@@ -18,6 +119,8 @@ The Identity Agent manages an individual's user-controlled digital identity. How
 
 KERI already provides the cryptographic primitives needed for all of these scenarios — delegated AIDs, multi-sig, and pre-rotation commitments. This ADR establishes how these primitives are exposed to users through the Guardianship feature, including the device/hosting architecture for dependent identities.
 
+> *Replaced by the 2026-11-14 amendment above.*
+
 **Privacy constraint.** Vanilla root-to-root KERI delegation would expose both parties' Root AIDs (R-AIDs) to any verifier who sees the dependent's credentials, because the dependent's DIP event contains a `delegator` reference that anyone with the child KEL can walk. That violates the Root AID shielding rule established by the Identity Agent's **Agent URL Relay** architecture, which defines Pairwise AIDs as the mechanism for keeping the Root AID private. To satisfy both guardianship's need for KEL-anchored authority and the shielding rule, this ADR specifies that **guardianship delegation is between two purpose-bound Guardianship P-AIDs — never between Root AIDs.** KERI does not distinguish "root" from "non-root" delegators, so this uses the existing `dip`/`drt` primitives unchanged; only the AIDs selected to participate change.
 
 → *Related: ADR-006 (Topology), ADR-014 (Key Custody), ADR-018 (Desktop Navigation); Agent URL Relay architecture (defines Pairwise AIDs and the Guardianship P-AID subclass)*
@@ -27,6 +130,8 @@ KERI already provides the cryptographic primitives needed for all of these scena
 ## Decision
 
 ### Guiding Principles
+
+> *Principle 2 is replaced by the 2026-11-14 amendment above.*
 
 1. **One AID per Identity Agent instance, always.** A dependent's AID is never co-located on the guardian's device within the same Identity Agent instance. Every identity gets its own isolated instance with its own data directory and key storage.
 
@@ -43,6 +148,9 @@ KERI already provides the cryptographic primitives needed for all of these scena
 ---
 
 ### Guardianship = KERI Delegation Between Guardianship P-AIDs
+
+> **Replaced by the 2026-11-14 amendment above** — guardianship is a multi-signature on the dependent's own identifier, not a delegation.
+
 
 Each guardianship relationship maps to a KERI delegation between two Guardianship P-AIDs:
 
@@ -93,6 +201,9 @@ Custom guardianship types are deferred to a later release.
 
 ### Emancipation = Authority Transfer
 
+> **Replaced by the 2026-11-14 amendment above** — guardianship is a multi-signature on the dependent's own identifier, not a delegation.
+
+
 When a dependent is emancipated (age trigger, manual action, or court order):
 
 1. Guardian performs a final delegated rotation transferring signing authority to keys held solely by the dependent
@@ -118,6 +229,8 @@ Contacts involved in guardianship relationships display a directional role label
 | **My Data > Family** (future, when My Data is implemented) | Read-only family tree, succession status summary (documents owned by the data taxonomy) |
 
 ### Data Model
+
+> **Replaced by the 2026-11-14 amendment above** — guardianship is a multi-signature on the dependent's own identifier, not a delegation.
 
 **GuardianshipRecord** stored in SQLite (`guardianships` table):
 
@@ -168,9 +281,9 @@ Contacts involved in guardianship relationships display a directional role label
 5. **Contact cards gain role labels** — directional guardianship badges alongside existing contact type badges.
 6. **Identity Agent Infrastructure Service Provider** established as a new provider type in Settings > Service Providers (a default provider may be pre-configured; additional providers configurable).
 7. **One AID per instance rule** is now explicit policy — no same-device multi-AID.
-8. **Agent URL Relay is a hard prerequisite.** Guardianship cannot ship until the Agent URL Relay architecture (Pairwise AIDs, Root AID isolation) is built — Guardianship P-AIDs are a subclass of Pairwise AIDs defined there.
-9. **Python KERI driver must gain delegated-inception support.** The current `drivers/keri-core/server.py` has `/inception` and `/rotation` endpoints that produce standard (non-delegated) events. A `delegator` parameter (or a dedicated `/delegation/inception` endpoint) must be added so the dependent's instance can produce a DIP event anchored to the guardian's Guardianship P-AID. Same for `/delegation/rotation` (DRT) to support guardian-authorized rotation, revocation, and emancipation. No protocol-level spike is required — KERI does not distinguish root from non-root delegators, so keripy's existing delegation primitives work unchanged.
-10. **Existing `GuardianshipRecord` in `identity-agent-core/store/store.go` needs a schema migration.** Current fields `GuardianAID`, `DependentAID`, `DelegatedAIDPrefix` are replaced by `GuardianGuardianshipRAID`, `DependentGuardianshipRAID`. Since guardianship has not yet shipped in production, this can be a hard migration (no dual-write / back-compat shim needed).
+*(Replaced by the amendment — see "What changes".)* 8. **Agent URL Relay is a hard prerequisite.** Guardianship cannot ship until the Agent URL Relay architecture (Pairwise AIDs, Root AID isolation) is built — Guardianship P-AIDs are a subclass of Pairwise AIDs defined there.
+*(Replaced by the amendment — see "What changes".)* 9. **Python KERI driver must gain delegated-inception support.** The current `drivers/keri-core/server.py` has `/inception` and `/rotation` endpoints that produce standard (non-delegated) events. A `delegator` parameter (or a dedicated `/delegation/inception` endpoint) must be added so the dependent's instance can produce a DIP event anchored to the guardian's Guardianship P-AID. Same for `/delegation/rotation` (DRT) to support guardian-authorized rotation, revocation, and emancipation. No protocol-level spike is required — KERI does not distinguish root from non-root delegators, so keripy's existing delegation primitives work unchanged.
+*(Replaced by the amendment — see "What changes".)* 10. **Existing `GuardianshipRecord` in `identity-agent-core/store/store.go` needs a schema migration.** Current fields `GuardianAID`, `DependentAID`, `DelegatedAIDPrefix` are replaced by `GuardianGuardianshipRAID`, `DependentGuardianshipRAID`. Since guardianship has not yet shipped in production, this can be a hard migration (no dual-write / back-compat shim needed).
 
 ---
 

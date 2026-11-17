@@ -23,6 +23,15 @@ const (
 	TypeAgentTask    = "agent-task"
 	TypeAgentResult  = "agent-result"
 
+	// A message from an AI agent another Identity Agent holds, signed by that
+	// Identity Agent (ADR-085). It is not an AI agent's own message between AI
+	// agents one Identity Agent holds (agent-message), which another Identity Agent
+	// cannot check the keys of.
+	TypeAgentPeerMessage = "agent-peer-message"
+	// The AI agents this Identity Agent holds that a contact may
+	// reach, named, so it can write them as "name@alias" (ADR-085).
+	TypeAgentPeerDirectory = "agent-peer-directory"
+
 	// An ordinary API request and its answer, carried inside an envelope so
 	// that nothing between the two agents can read either one. The router does
 	// not dispatch these — the transport handles them before dispatch — but
@@ -49,6 +58,8 @@ var knownTypes = map[string]bool{
 	TypeAgentMessage:       true,
 	TypeAgentTask:          true,
 	TypeAgentResult:        true,
+	TypeAgentPeerMessage:   true,
+	TypeAgentPeerDirectory: true,
 	TypeSealedRequest:      true,
 	TypeSealedResponse:     true,
 	TypeBodyEnrolment:      true,
