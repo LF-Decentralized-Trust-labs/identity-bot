@@ -74,6 +74,32 @@ void main() {
     }
   });
 
+  test('a field with a line break is refused before anything is signed', () {
+    final priv = ed.newKeyFromSeed(seed);
+    final signer =
+        PersonStatement.signerOf(Uint8List.fromList(ed.public(priv).bytes));
+    for (final (brk, inNonce) in [
+      ('\n', false),
+      ('\r', false),
+      ('\n', true),
+    ]) {
+      final st = PersonStatement(
+        agent: 'EAGENT',
+        conversation: inNonce ? 'c_one' : 'c_one${brk}close',
+        messageId: 'm1',
+        kind: PersonStatement.kindClose,
+        from: 'EAGENT',
+        signer: signer,
+        nonce: inNonce ? 'n1${brk}n2' : 'n1',
+        time: '2026-11-17T00:00:00Z',
+        fingerprint: 'Efp',
+      );
+      expect(() => st.signedWith(seed), throwsArgumentError,
+          reason: 'line break ${brk.codeUnitAt(0)} in the '
+              '${inNonce ? 'nonce' : 'conversation'}');
+    }
+  });
+
   group('a holder closes a conversation', () {
     test('the request names the route, carries the statement and no words',
         () async {
