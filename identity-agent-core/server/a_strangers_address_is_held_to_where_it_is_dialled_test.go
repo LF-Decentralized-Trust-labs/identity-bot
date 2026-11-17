@@ -71,7 +71,7 @@ func TestAnAddressAStrangerChoosesNeverReachesAnInternalService(t *testing.T) {
 			s.organisationKeyOf = func(_, _ string) ([]byte, error) {
 				return ed25519.NewKeyFromSeed(orgSeed).Public().(ed25519.PublicKey), nil
 			}
-			_, _ = bindSiteAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: bind, T: 5}, ScanDecision{Approved: true})
+			_, _ = bindSiteAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: bind, T: ActionBindSite}, ScanDecision{Approved: true})
 		},
 		"the Ask fetch": func() { _, _ = s.buildAskContext(name + "/i/tok") },
 		"the signer invite's redeem": func() {

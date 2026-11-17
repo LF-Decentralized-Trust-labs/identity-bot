@@ -781,6 +781,44 @@ func TestAnAppGrantMustBeWhatWasAskedFor(t *testing.T) {
 	}
 }
 
+// An App Grant that changes what an existing app may do rests on a request to
+// PUT /api/hosted-apps/{asset}/capabilities, and is about that asset: a request
+// about one app is not the grant of another, and the capabilities and limits
+// asked for are the ones granted.
+func TestAnAppGrantThatChangesAnAppIsBoundToThatApp(t *testing.T) {
+	w := newWorld(t)
+	grant := func(req map[string]interface{}, capabilities []string, about string) []byte {
+		attrs := map[string]interface{}{"asset_type": "app", "name": "Task console", "capabilities": capabilities, "request": req}
+		if about != "" {
+			attrs["about"] = about
+		}
+		acdc, _ := w.build(schemas.AppGrant.Schema.SAID, agentAID, time.Now().UTC(), attrs, w.edge())
+		return acdc
+	}
+	asked := `{"capabilities":["system.info.read","ai_agent.watch_feed"]}`
+	req := w.signs("PUT", "/api/hosted-apps/app-1/capabilities", asked, ago(time.Minute))
+	both := []string{"system.info.read", "ai_agent.watch_feed"}
+	if err := w.check(grant(req, both, "app-1")); err != nil {
+		t.Fatalf("a request to change an app's grant, for that app, was refused: %v", err)
+	}
+	if err := w.check(grant(req, both, "app-2")); err == nil {
+		t.Fatal("a request about one app was accepted as the grant of another")
+	}
+	if err := w.check(grant(req, both, "")); err == nil {
+		t.Fatal("a grant that names no app was accepted as the change of one")
+	}
+	if err := w.check(grant(req, append([]string{"infra.zone.list"}, both...), "app-1")); err == nil {
+		t.Fatal("more capabilities than were asked for were accepted")
+	}
+	// The route is the app's own: not an AI agent's, and not another method.
+	for _, c := range [][2]string{{"POST", "/api/hosted-apps/app-1/capabilities"}, {"PUT", "/api/hosted-apps/app-1/revoke"}, {"PUT", "/api/mcp/agents/app-1/capabilities"}} {
+		other := w.signs(c[0], c[1], asked, ago(time.Minute))
+		if err := w.check(grant(other, both, "app-1")); err == nil {
+			t.Errorf("%s %s was accepted as a request to change an app's grant", c[0], c[1])
+		}
+	}
+}
+
 // A grant issued under the 1.1.0 version of the AI agent grant is still checked
 // against what was asked for, so a conversation bundle that holds one verifies.
 func TestAnOlderAIAgentGrantIsStillCheckedAgainstTheRequest(t *testing.T) {

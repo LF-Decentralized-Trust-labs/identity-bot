@@ -384,11 +384,23 @@ def check_message(v):
         h = digest(lines(env["plaintext"], env["ed_sig"], env["mldsa_sig"]).encode())
         same(where + " hash", h, e["hash"])
         prev = h
+    for c in v["countersigned_to"]:
+        jwm = dict(jwm_of(c["envelope"]))
+        rto = c["record_to"]
+        # person: names the person, peer:<Identity Agent>/<AI agent> names the
+        # Identity Agent (the AI agent is in the body), nobody names the signer.
+        if rto.startswith("person:"):
+            want = rto[len("person:"):]
+        elif rto.startswith("peer:"):
+            want = rto[len("peer:"):].split("/")[0]
+        else:
+            want = rto or me
+        same(c["name"] + " addressed to", jwm["to"], ["did:keri:" + want])
     for r in v["refused_entries"]:
         jwm = dict(jwm_of(r["envelope"]))
         if jwm["id"] == dict_deep(jwm["body"])["message_id"]:
             fail(r["name"] + " is not refused by the prose's rules")
-    return len(v["statements"]) + len(v.get("opening_grants", [])) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + check_person(v["person"])
+    return len(v["statements"]) + len(v.get("opening_grants", [])) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + len(v["countersigned_to"]) + check_person(v["person"])
 
 
 def check_controller_proof(where, proof, request, rec):

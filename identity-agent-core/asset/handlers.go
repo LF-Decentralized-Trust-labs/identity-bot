@@ -504,8 +504,10 @@ var (
 	ErrRelayIDShape = errors.New("a relay identifier is 44 characters")
 	// ErrNotFound is an asset that is not held.
 	ErrNotFound = errors.New("not found")
-	// ErrNotAnApp is an asset that is not a utility app.
-	ErrNotAnApp = errors.New("only a utility app has a relay identifier")
+	// ErrNotAnApp is an asset that is not a utility app, asked for something only a
+	// utility app has: a relay identifier, a back end, a grant to change or a sign-in
+	// lifetime. Each route says which in its own answer.
+	ErrNotAnApp = errors.New("that asset is not a utility app")
 )
 
 // SetRelayID records the relay identifier of the utility app assetID. It may be set

@@ -123,7 +123,7 @@ func (w *joinWorld) askFor(token, role, site, recordSite string) []byte {
 	})
 	var m map[string]interface{}
 	_ = json.Unmarshal(b, &m)
-	m["t"] = 5
+	m["t"] = ActionBindSite
 	seed, err := w.org.identitySigningSeed()
 	if err != nil {
 		w.t.Fatal(err)
@@ -147,7 +147,7 @@ func signedAsOrganisation(t *testing.T, m map[string]interface{}, seed []byte) [
 }
 
 func (w *joinWorld) approve(p *CoreServer, ask []byte, yes bool) (map[string]interface{}, error) {
-	return bindSiteAsk{}.Execute(p, AskContext{Base: w.orgURL, Token: "x", AskBytes: ask, T: 5}, ScanDecision{Approved: yes})
+	return bindSiteAsk{}.Execute(p, AskContext{Base: w.orgURL, Token: "x", AskBytes: ask, T: ActionBindSite}, ScanDecision{Approved: yes})
 }
 
 func TestAPersonWhoApprovesHasTwoIdentifiersJoinedAndBothSidesKeepIt(t *testing.T) {
@@ -203,7 +203,7 @@ func TestAPersonIsNotAskedToJoinFromAnIdentifierTheyDoNotHold(t *testing.T) {
 	w := newJoinWorld(t)
 	p := w.aPerson() // holds nothing at ECHAT
 	ask := w.anInvite("tok1", binding.RolePerson, "ENOTES", "ECHAT", "EVICTIM")
-	if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: 5}); err == nil {
+	if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: ActionBindSite}); err == nil {
 		t.Fatal("shown to someone who holds no identifier there")
 	}
 	if _, err := w.approve(p, ask, true); err == nil {
@@ -432,7 +432,7 @@ func TestAPersonIsNeverAskedToJoinFromASiteTheOrganisationDoesNotRun(t *testing.
 	bank := w.identifierOf(p, "EBANK")
 	ask := w.anInvite("tok1", binding.RolePerson, "ENOTES", "EBANK", bank)
 	delete(w.runs, "EBANK") // the organisation does not run the bank
-	if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: 5}); err == nil || !strings.Contains(err.Error(), "not one this organization runs") {
+	if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: ActionBindSite}); err == nil || !strings.Contains(err.Error(), "not one this organization runs") {
 		t.Fatalf("shown a request that names somebody else's site as the organisation's: %v", err)
 	}
 	if _, err := w.approve(p, ask, true); err == nil {
@@ -510,7 +510,7 @@ func TestAnAskNamingAnOrganisationThatDidNotSignItIsRefusedAndNothingIsSent(t *t
 		}(),
 		"a redeem address for another invite": resign(t, genuine, mustSeed(t, w), func(m map[string]interface{}) { m["redeem_url"] = w.orgURL + "/api/binding/invites/other/redeem" }),
 	} {
-		if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: 5}); err == nil {
+		if _, err := (bindSiteAsk{}).Preview(p, AskContext{AskBytes: ask, T: ActionBindSite}); err == nil {
 			t.Errorf("%s: shown to the person", name)
 		}
 		if _, err := w.approve(p, ask, true); err == nil {

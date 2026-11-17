@@ -102,6 +102,20 @@ func TestThePublishedMessageVectorsHold(t *testing.T) {
 			t.Fatalf("%s was opened; it must be refused", r.Name)
 		}
 	}
+	wantTo := map[string]string{"EAGENT_B": "EAGENT_B", Person("EPERSON"): "EPERSON", Peer("EBETA", "EREVIEWER"): "EBETA", "": set.Countersigner.AID}
+	if len(set.CountersignedTo) != len(wantTo) {
+		t.Fatal("the vectors do not show every kind of recipient")
+	}
+	for _, c := range set.CountersignedTo {
+		rec, err := Open(&set.Countersigner, c.Envelope)
+		if err != nil || rec.To != c.RecordTo {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		jwm, _ := didcomm.UnpackSigned(&set.Countersigner, c.Envelope)
+		if len(jwm.To) != 1 || jwm.To[0] != "did:keri:"+wantTo[c.RecordTo] {
+			t.Errorf("%s: addressed to %v, want did:keri:%s", c.Name, jwm.To, wantTo[c.RecordTo])
+		}
+	}
 	p := set.Person
 	if p.Record.ControllerProof == nil || len(p.Record.ControllerProof.RequestBytes) == 0 {
 		t.Fatal("the person's entry carries no request bytes")
@@ -136,6 +150,7 @@ func TestTheMessageSchemaDescribesTheseTypes(t *testing.T) {
 		"person_ref":       PersonRef{},
 		"person_statement": PersonStatement{},
 		"person_proof":     PersonProof{},
+		"peer_proof":       PeerProof{},
 		"outcome":          Outcome{},
 		"notice":           Notice{},
 		"person_message":   PersonMessage{},
@@ -245,6 +260,25 @@ func fillMessageVectors(set *MessageVectorSet) error {
 		Name     string            `json:"name"`
 		Envelope *didcomm.Envelope `json:"envelope"`
 	}{{Name: "a message id that is not the record's", Envelope: mismatched}}
+	set.CountersignedTo = nil
+	for _, c := range []struct{ name, to string }{
+		{"an AI agent this Identity Agent holds", "EAGENT_B"},
+		{"a person", Person("EPERSON")},
+		{"an AI agent another Identity Agent holds", Peer("EBETA", "EREVIEWER")},
+		{"nobody", ""},
+	} {
+		rec := Record{MessageID: "m_to_" + fmt.Sprint(len(set.CountersignedTo)), Conversation: "c_vector", Seq: 1,
+			IATime: first.IATime, Kind: KindAsk, From: first.From, To: c.to, OpenedBy: first.From}
+		env, err := Countersign(ks, rec)
+		if err != nil {
+			return err
+		}
+		set.CountersignedTo = append(set.CountersignedTo, struct {
+			Name     string            `json:"name"`
+			RecordTo string            `json:"record_to"`
+			Envelope *didcomm.Envelope `json:"envelope"`
+		}{c.name, c.to, env})
+	}
 	return nil
 }
 

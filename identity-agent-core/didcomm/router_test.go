@@ -12,7 +12,7 @@ func TestEveryTypeTheCodeSendsIsRegistered(t *testing.T) {
 		TypeCredentialOffer, TypeCredentialRequest, TypeCredentialIssuance,
 		TypeKeriEvent, TypeContactRequest, TypeDirectMessage, TypeAck,
 		TypeNotification, TypeAgentMessage, TypeAgentTask, TypeAgentResult,
-		TypeSealedRequest, TypeSealedResponse,
+		TypeSealedRequest, TypeSealedResponse, TypeAgentPeerMessage, TypeAgentPeerDirectory,
 	} {
 		if !KnownType(typ) {
 			t.Errorf("%q is used by the code but unregistered, so anything sent "+

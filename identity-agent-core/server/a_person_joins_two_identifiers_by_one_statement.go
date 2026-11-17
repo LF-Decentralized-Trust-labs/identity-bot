@@ -26,10 +26,14 @@ import (
 
 // A person joins two of their identifiers to one record by one statement signed
 // with both keys (ADR-082). This file has both sides: the organisation's, which
-// mints the invite and checks the statement, and the person's, the Ask (t=5)
+// mints the invite and checks the statement, and the person's, the Ask (t=7)
 // that asks them and signs.
 
-// ---- the person's side: t=5, bind_site ----
+// ActionBindSite is the action code of "Join a site with one identity"
+// (actions/registry.json).
+const ActionBindSite = 7
+
+// ---- the person's side: t=7, bind_site ----
 
 type bindSiteAsk struct{}
 
@@ -91,7 +95,7 @@ func (bindSiteAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error
 	org := firstOf(p.OrgName, p.OrgAID)
 	site := firstOf(p.SiteName, p.SiteAID)
 	return GenericPreview{
-		T: 5, Action: "bind_site", Title: "Join " + site,
+		T: ActionBindSite, Action: "bind_site", Title: "Join " + site,
 		Subtitle: org + " asks you to join " + site + " as the same person you are to them", Counterparty: p.OrgAID,
 		Details: []PreviewDetail{{Label: "Organization", Value: org}, {Label: "Site", Value: site}, {Label: "Joining as", Value: roleWords(p.Role)}},
 		Warning: org + " will know that you here and you where you already deal with them are the same person. This cannot be undone except by leaving.",
@@ -283,7 +287,7 @@ func (s *CoreServer) mountBindingRoutes(r chi.Router) {
 		// Owner only: nobody else may ask a person to join a site.
 		r.Post("/invites", s.handleCreateBindingInvite)
 		r.Get("/links", s.handleListBindings)
-		// Public: the person's own Identity Agent redeems here (t=5). The invite is
+		// Public: the person's own Identity Agent redeems here (t=7). The invite is
 		// single use, and what it takes is a statement only the person's two keys can make.
 		r.Post("/invites/{token}/redeem", s.handleRedeemBindingInvite)
 	})
@@ -299,7 +303,7 @@ type bindingInviteRequest struct {
 	Role              string   `json:"role"`
 }
 
-// handleCreateBindingInvite mints a single-use invite and its Ask (t=5).
+// handleCreateBindingInvite mints a single-use invite and its Ask (t=7).
 //
 // For a person it names the identifiers the record already holds, and one of them must
 // sign. For the owner it names the owner the organisation's identity settled on, and
@@ -365,7 +369,7 @@ func (s *CoreServer) handleCreateBindingInvite(w http.ResponseWriter, r *http.Re
 		return
 	}
 	ask, _ := json.Marshal(map[string]interface{}{
-		"v": "ASK1", "t": 5, "org_name": orgName, "org_aid": id.AID,
+		"v": "ASK1", "t": ActionBindSite, "org_name": orgName, "org_aid": id.AID,
 		"org_oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, id.AID),
 		"site_aid": req.SiteAID, "site_oobi": req.SiteOOBI, "site_name": req.SiteName,
 		"record_site_aid": req.RecordSiteAID, "record_site_oobi": req.RecordSiteOOBI, "role": req.Role, "invite_token": inv.Token,
