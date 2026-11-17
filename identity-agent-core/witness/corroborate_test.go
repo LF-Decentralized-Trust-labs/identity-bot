@@ -522,7 +522,7 @@ func TestALogDesignatingNoWitnessAsksNobody(t *testing.T) {
 // A log built and receipted by keripy itself, with receipts keripy's Hab.witness
 // made, is corroborated with nothing of ours in the way it was made.
 func TestALogBuiltAndReceiptedByKeripyCorroborates(t *testing.T) {
-	b, err := os.ReadFile("../drivers/testdata/keripy_witness_receipts.json")
+	b, err := os.ReadFile("../witnessproto/testdata/keripy_witness_receipts.json")
 	if err != nil {
 		t.Fatal(err)
 	}

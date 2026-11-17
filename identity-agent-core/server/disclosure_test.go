@@ -162,7 +162,7 @@ func TestUnknownDisclosureFieldIsRejected(t *testing.T) {
 
 func TestDisclosureSummaryReadsAsASentence(t *testing.T) {
 	got := disclosureSummary([]string{disclosePhoto, discloseName})
-	if !strings.Contains(got, "name and photo") {
+	if !strings.Contains(got, "name and avatar") {
 		t.Errorf("summary should list fields in display order: %q", got)
 	}
 	if none := disclosureSummary(nil); !strings.Contains(none, "Nothing") {
@@ -177,5 +177,21 @@ func TestEveryRegisteredActionHasAValidDeclaration(t *testing.T) {
 		if _, err := declaredDisclosure(code); err != nil {
 			t.Errorf("action %d: %v", code, err)
 		}
+	}
+}
+
+// The consent row for the image field reads "Your avatar", not "Your photo": an
+// identity's avatar may be a photo, a cartoon or any image. The wire key stays
+// "photo", since it is already in the jCard and the action registry.
+func TestTheImageRowIsLabelledAvatarAndKeepsItsWireKey(t *testing.T) {
+	rows := disclosureRows([]string{disclosePhoto}, fullProfile())
+	if len(rows) != 1 || rows[0].Label != "Your avatar" {
+		t.Fatalf("the image row should read \"Your avatar\": %+v", rows)
+	}
+	if disclosePhoto != "photo" {
+		t.Fatalf("the wire key changed to %q", disclosePhoto)
+	}
+	if got := disclosureBody([]string{disclosePhoto}, fullProfile(), nil); got["photo"] == "" || len(got) != 1 {
+		t.Fatalf("the body must still carry the image under \"photo\": %v", got)
 	}
 }

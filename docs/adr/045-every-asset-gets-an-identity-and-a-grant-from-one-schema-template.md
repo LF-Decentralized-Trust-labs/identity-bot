@@ -307,10 +307,11 @@ identities by it. Three seams are closed with it:
 
 - `checkAskedFor` (`identity-agent-core/authorisation/request.go`) checks an App Grant against the
   request that asked for it, exactly as it does an AI Agent Grant (name, capabilities and limits), at the route that creates an app,
-  `POST /api/hosted-apps` (mounted by the apphosting add-on), and only there: no route changes an app's capabilities yet,
-  and when one is added it is bound in `checkAskedFor` with it. A request to grant an AI agent is
-  not accepted as an app's, nor the reverse. The request does not name the app it creates, so
-  nothing ties the grant to an asset beyond its name.
+  `POST /api/hosted-apps` (mounted by the apphosting add-on), and, from 2026-11-15, at the owner's
+  `PUT /api/hosted-apps/{asset}/capabilities`, which changes what an existing app's grant gives and
+  is bound to the app named in its path (the grant's `about`). No other route grants an app anything.
+  A request to grant an AI agent is not accepted as an app's, nor the reverse. The request to create
+  an app does not name the app it creates, so nothing ties that grant to an asset beyond its name.
 - `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) shows an
   App Grant, as kind `app`, with its name, capabilities, limits and end, so a device holding the
   owner's key can be asked to sign one.
@@ -325,13 +326,12 @@ These seams are still open, and each is refused rather than half-working:
 
 - An App Grant signed on another device is kept by this Identity Agent only once an add-on
   registers the app grant kind; until then it is not taken up. No add-on registers it yet.
-- Re-issuing an app's grant while the owner's key is on another device withdraws the old App
-  Grant before the new one is signed, which leaves the app with none until it is; no route
-  re-issues an app's grant yet, and the one that does must keep the old grant until the new one
-  is taken up.
+- **Closed (2026-11-15).** Re-issuing an app's grant while the owner's key is on another device no
+  longer leaves the app with none: `PUT /api/hosted-apps/{asset}/capabilities` keeps the old grant
+  until the new one is taken up, and the core then withdraws it (see the Amendment at the end).
 - No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
   route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
-  route that will, and no route yet changes an app's capabilities.
+  route that will. The owner changes an existing app's capabilities at `PUT /api/hosted-apps/{asset}/capabilities` (Amendment, 2026-11-15).
 - The Identity Agent's own list of grant schemas it honours as capability grants
   (`CapabilityGrantSchemaSAIDs`, read by add-ons) is unchanged, so no gateway admits an app on its App
   Grant yet (an app's back end is admitted at the core itself, on its App Body key and the App Grant it holds,
@@ -483,3 +483,13 @@ server could answer a request for one schema with a widened one that accepts a f
 A credential's attribute block here is declared with `additionalProperties: false`, as the
 grants' is. The issue form offers only declared attributes, and a test holds each form to its
 schema.
+
+**Amendment (2026-11-15): the owner changes what an existing app's grant gives.** `PUT
+/api/hosted-apps/{asset}/capabilities` (the apphosting add-on) issues the App Grant again with the
+capabilities the owner asks for, as `PUT /api/mcp/agents/{id}/capabilities` does for an AI agent, and the
+grant it replaces is withdrawn once the new one stands. Where the owner's key is on another device, that
+device is shown the new grant and signs it: the app keeps the grant it has until then, and when the
+device's signature comes back the core withdraws the grant it replaces (asking the device to sign that
+withdrawal too), for an App Grant or an AI Agent Grant alike. The add-on holds the change asked of the
+device and holds the grant that comes back to it, so a grant that is not that change is not kept.
+Nothing else above is changed.

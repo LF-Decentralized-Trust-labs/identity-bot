@@ -58,11 +58,25 @@ type GenericPreview struct {
 	TierOptions        []string        `json:"tier_options,omitempty"` // e.g. add-contact: general/trusted/professional
 	DefaultTier        string          `json:"default_tier,omitempty"`
 	Warning            string          `json:"warning,omitempty"`
+	// Statement is what a person is asked to sign, for an Ask that asks for a signature: shown on its
+	// own, as what they are signing, and never among the data they share.
+	Statement *PreviewStatement `json:"statement,omitempty"`
 
 	// AskDigest is the Blake3 digest of the exact Ask bytes this preview
 	// describes. The client echoes it back on execute so the agent can prove
 	// it is acting on the same document the user saw — see bindConsent.
 	AskDigest string `json:"ask_digest"`
+}
+
+// PreviewStatement is a statement shown to be signed: a registered form's reading (Rows) beside the
+// exact text, which is always there and is what is signed.
+type PreviewStatement struct {
+	Heading  string          `json:"heading"`
+	Form     string          `json:"form,omitempty"`
+	Rows     []PreviewDetail `json:"rows,omitempty"`
+	Verbatim string          `json:"verbatim"`
+	// SignerNote says whose signature this is, and what only it makes the asker count.
+	SignerNote string `json:"signer_note"`
 }
 
 type PreviewDetail struct {

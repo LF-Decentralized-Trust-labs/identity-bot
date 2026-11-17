@@ -1475,13 +1475,13 @@ func (s *SQLiteStore) SaveGuardianship(record GuardianshipRecord) error {
 		emancipationJSON = string(b)
 	}
 
-	coGuardiansJSON := "[]"
-	if record.CoGuardians != nil {
-		b, err := json.Marshal(record.CoGuardians)
+	participantsJSON := "[]"
+	if record.MultisigParticipants != nil {
+		b, err := json.Marshal(record.MultisigParticipants)
 		if err != nil {
-			return fmt.Errorf("failed to marshal co-guardians: %w", err)
+			return fmt.Errorf("failed to marshal multisig participants: %w", err)
 		}
-		coGuardiansJSON = string(b)
+		participantsJSON = string(b)
 	}
 
 	metadataJSON := "{}"
@@ -1494,29 +1494,27 @@ func (s *SQLiteStore) SaveGuardianship(record GuardianshipRecord) error {
 	}
 
 	_, err := s.db.Exec(`
-		INSERT INTO guardianships (id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
-			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json, co_guardians_json,
+		INSERT INTO guardianships (id, type, dependent_aid, dependent_name,
+			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json, multisig_participants_json,
 			multisig_threshold, metadata_json, credential_said)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			type                 = excluded.type,
-			guardian_aid         = excluded.guardian_aid,
 			dependent_aid        = excluded.dependent_aid,
 			dependent_name       = excluded.dependent_name,
-			delegated_aid_prefix = excluded.delegated_aid_prefix,
 			status               = excluded.status,
 			hosting_type         = excluded.hosting_type,
 			hosting_url          = excluded.hosting_url,
 			updated_at           = excluded.updated_at,
 			emancipation_json    = excluded.emancipation_json,
-			co_guardians_json    = excluded.co_guardians_json,
+			multisig_participants_json = excluded.multisig_participants_json,
 			multisig_threshold   = excluded.multisig_threshold,
 			metadata_json        = excluded.metadata_json,
 			credential_said      = excluded.credential_said`,
-		record.ID, record.Type, record.GuardianAID, record.DependentAID,
-		record.DependentName, record.DelegatedAIDPrefix, record.Status,
+		record.ID, record.Type, record.DependentAID,
+		record.DependentName, record.Status,
 		record.HostingType, record.HostingURL, record.CreatedAt, record.UpdatedAt,
-		emancipationJSON, coGuardiansJSON, record.MultisigThreshold, metadataJSON, record.CredentialSAID,
+		emancipationJSON, participantsJSON, record.MultisigThreshold, metadataJSON, record.CredentialSAID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save guardianship: %w", err)
@@ -1526,9 +1524,9 @@ func (s *SQLiteStore) SaveGuardianship(record GuardianshipRecord) error {
 
 func (s *SQLiteStore) GetGuardianships() ([]GuardianshipRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+		`SELECT id, type, dependent_aid, dependent_name,
 			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
-			co_guardians_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
+			multisig_participants_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
 		 FROM guardianships ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query guardianships: %w", err)
@@ -1539,9 +1537,9 @@ func (s *SQLiteStore) GetGuardianships() ([]GuardianshipRecord, error) {
 
 func (s *SQLiteStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+		`SELECT id, type, dependent_aid, dependent_name,
 			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
-			co_guardians_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
+			multisig_participants_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
 		 FROM guardianships WHERE id = ?`, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query guardianship: %w", err)
@@ -1560,9 +1558,9 @@ func (s *SQLiteStore) GetGuardianship(id string) (*GuardianshipRecord, error) {
 
 func (s *SQLiteStore) GetGuardianshipByDependentAID(dependentAID string) (*GuardianshipRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, type, guardian_aid, dependent_aid, dependent_name, delegated_aid_prefix,
+		`SELECT id, type, dependent_aid, dependent_name,
 			status, hosting_type, hosting_url, created_at, updated_at, emancipation_json,
-			co_guardians_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
+			multisig_participants_json, multisig_threshold, metadata_json, COALESCE(credential_said,'')
 		 FROM guardianships WHERE dependent_aid = ? AND status = 'active' LIMIT 1`, dependentAID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query guardianship by dependent: %w", err)
@@ -1590,11 +1588,11 @@ func (s *SQLiteStore) scanGuardianships(rows *sql.Rows) ([]GuardianshipRecord, e
 	var records []GuardianshipRecord
 	for rows.Next() {
 		var r GuardianshipRecord
-		var emancipationJSON, coGuardiansJSON, metadataJSON string
-		if err := rows.Scan(&r.ID, &r.Type, &r.GuardianAID, &r.DependentAID,
-			&r.DependentName, &r.DelegatedAIDPrefix, &r.Status, &r.HostingType,
+		var emancipationJSON, participantsJSON, metadataJSON string
+		if err := rows.Scan(&r.ID, &r.Type, &r.DependentAID,
+			&r.DependentName, &r.Status, &r.HostingType,
 			&r.HostingURL, &r.CreatedAt, &r.UpdatedAt, &emancipationJSON,
-			&coGuardiansJSON, &r.MultisigThreshold, &metadataJSON, &r.CredentialSAID); err != nil {
+			&participantsJSON, &r.MultisigThreshold, &metadataJSON, &r.CredentialSAID); err != nil {
 			return nil, fmt.Errorf("failed to scan guardianship: %w", err)
 		}
 		if emancipationJSON != "" && emancipationJSON != "{}" {
@@ -1603,11 +1601,11 @@ func (s *SQLiteStore) scanGuardianships(rows *sql.Rows) ([]GuardianshipRecord, e
 				r.EmancipationTrigger = &trigger
 			}
 		}
-		if coGuardiansJSON != "" && coGuardiansJSON != "[]" {
-			_ = json.Unmarshal([]byte(coGuardiansJSON), &r.CoGuardians)
+		if participantsJSON != "" && participantsJSON != "[]" {
+			_ = json.Unmarshal([]byte(participantsJSON), &r.MultisigParticipants)
 		}
-		if r.CoGuardians == nil {
-			r.CoGuardians = []string{}
+		if r.MultisigParticipants == nil {
+			r.MultisigParticipants = []MultisigParticipant{}
 		}
 		if metadataJSON != "" && metadataJSON != "{}" {
 			_ = json.Unmarshal([]byte(metadataJSON), &r.Metadata)

@@ -25,7 +25,11 @@ import (
 //
 // The counter is returned and not judged here: the caller decides what a
 // repeat means. The core's statements are one-use and expire in minutes, which
-// is what stops a replayed assertion today.
+// is what stops a replayed assertion today. A caller whose proof has no nonce
+// or single-use ask of its own must persist the last counter per key and refuse
+// one that does not rise; server's
+// TestEveryPlaceAnAppleAssertionIsCheckedIsOneThatIsFreshOnItsOwn fails when
+// such a caller appears.
 //
 // NOT PROVEN AGAINST A REAL DEVICE. The vector in apple_app_assertion_test.go
 // is made by the same steps with a software key; no iPhone produced it.

@@ -107,6 +107,18 @@ type MessageVectorSet struct {
 		Name     string            `json:"name"`
 		Envelope *didcomm.Envelope `json:"envelope"`
 	} `json:"refused_entries"`
+
+	// CountersignedTo shows who a countersigned envelope is addressed to for each
+	// kind of recipient a record has: an AI agent (itself), a person (the person's
+	// identifier, the person: prefix removed), an AI agent another Identity Agent
+	// holds (that Identity Agent, the peer: prefix and the AI agent removed: the
+	// AI agent is named in the record) and nobody (the countersigner).
+	CountersignedTo []struct {
+		Name string `json:"name"`
+		// RecordTo is the record's to.
+		RecordTo string            `json:"record_to"`
+		Envelope *didcomm.Envelope `json:"envelope"`
+	} `json:"countersigned_to"`
 }
 
 // MessageVectors returns the published message vectors.
