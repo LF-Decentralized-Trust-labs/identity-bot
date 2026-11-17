@@ -176,6 +176,37 @@ type Host interface {
 	IssueAssetCredential(kind *schemas.AssetGrant, holder string, issuer string, claims map[string]interface{}, expiry string, by Authority) (string, error)
 	IssueCapabilityGrant(agent *asset.Asset, by Authority) (string, error)
 	IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool
+	// BackupSealKeyOf is the public key a utility app's backups are sealed to,
+	// at an epoch (the app's identifier, never a display name; epochs start at
+	// 1 and stop at MaxBackupEpoch): this Identity Agent's own, one per
+	// app and epoch, derived in the core. Public only. With no root seed of the
+	// identity's own it fails with ErrNoBackupSeed and makes none.
+	BackupSealKeyOf(appAID string, epoch uint32) ([]byte, error)
+	// BackupSlotOpens says which of a file's v2 slots one of the app's keys (its
+	// epoch maxEpoch, or an earlier one) opens, and whether any does. Nothing
+	// comes out of the opening. A file has at most 255 slots.
+	BackupSlotOpens(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte) (index int, found bool, err error)
+	// ResealBackupSlot opens a file's slot under the app's keys and makes a new
+	// slot of the content key for the key of toAppAID at toEpoch, bound to the
+	// same file. The core derives that destination key itself: the caller names
+	// an app and an epoch, never a key, so the content key only ever goes to a
+	// key this Identity Agent holds. The content key stays in the core.
+	ResealBackupSlot(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, toAppAID string, toEpoch uint32) ([]byte, error)
+	// SealBackupOpenReply opens a file's slot under the app's keys and seals the
+	// content key to restoreKey, for the request whose 32-byte digest this is
+	// (the reply opens for that request only). It says which slot opened. It
+	// refuses a restore key that is one this Identity Agent holds (a person's
+	// key, or the app's at any epoch up to maxEpoch). The core protects the
+	// seed and the content key; it does not decide who receives a content key
+	// it is asked to seal to the restore key, which is the add-on's consent.
+	SealBackupOpenReply(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, restoreKey, digest []byte) (reply []byte, index int, err error)
+	// IsOwnBackupSealKey is whether pub is a key this Identity Agent opens
+	// backups with: the person's, or the key of an app named in epochs (the
+	// app's identifier to the epoch it is at) at that epoch or an earlier one.
+	// With no root seed, a key of the wrong length or an epoch past
+	// MaxBackupEpoch it answers true, so a check that wants "not ours"
+	// fails.
+	IsOwnBackupSealKey(pub []byte, epochs map[string]uint32) bool
 	KeyCanSign() error
 	KeyIsElsewhere() bool
 	// MessagingKeysOf are the public DIDComm keys of aid, this Identity
