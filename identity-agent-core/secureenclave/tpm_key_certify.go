@@ -356,6 +356,12 @@ func verifyEKCertificateClass(der []byte, chain [][]byte, roots []*x509.Certific
 	if err != nil {
 		return nil, nil, notAttested("the endorsement key certificate: %v", err)
 	}
+	// A real endorsement key certificate names its TPM in a critical subject alternative
+	// name crypto/x509 does not read; that one form, and no other critical extension, is
+	// taken as handled (tpm_ek_subject_alt_name.go).
+	if err := acceptTCGSubjectAltName(leaf); err != nil {
+		return nil, nil, notAttested("the endorsement key certificate: %v", err)
+	}
 	if len(chain) > 8 {
 		return nil, nil, notAttested("the endorsement key certificate chain is too long")
 	}

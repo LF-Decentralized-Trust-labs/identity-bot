@@ -22,7 +22,16 @@ type ekChain struct {
 	now          time.Time
 }
 
+// Each endorsement key certificate is shaped as a real one is: an empty subject, and the TPM
+// named in a critical subject alternative name (tcgSubjectAltName).
 func newEKChain(t *testing.T, issuerCN string) ekChain {
+	t.Helper()
+	return newEKChainWithLeafExtensions(t, issuerCN, []pkix.Extension{tcgSubjectAltName(t)})
+}
+
+// newEKChainWithLeafExtensions is newEKChain with the endorsement key certificates'
+// extensions named; the subject is empty either way.
+func newEKChainWithLeafExtensions(t *testing.T, issuerCN string, leafExts []pkix.Extension) ekChain {
 	t.Helper()
 	now := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
 	mk := func(cn string, parent *x509.Certificate, parentKey *ecdsa.PrivateKey, ca bool, serial int64) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
@@ -33,6 +42,8 @@ func newEKChain(t *testing.T, issuerCN string) ekChain {
 			tmpl.KeyUsage = x509.KeyUsageCertSign
 		} else {
 			tmpl.UnknownExtKeyUsage = []asn1.ObjectIdentifier{tpmEKCertificateEKU}
+			tmpl.Subject = pkix.Name{}
+			tmpl.ExtraExtensions = leafExts
 		}
 		signer, signerKey := tmpl, k
 		if parent != nil {

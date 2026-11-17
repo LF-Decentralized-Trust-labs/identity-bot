@@ -18,7 +18,7 @@ require (
 	github.com/google/go-tdx-guest v0.3.2-0.20250814004405-ffb0869e6f4d // indirect
 	github.com/google/logger v1.1.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/grapeid/keri-go v0.5.1-0.20261113011744-edad9b2daf64 // indirect
+	github.com/grapeid/keri-go v0.5.1-0.20261114214057-6f13a662d95e // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

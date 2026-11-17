@@ -186,6 +186,7 @@ func (c lenientChain) leaf(t *testing.T, signer *ecdsa.PrivateKey, notAfter time
 	tmpl := &x509.Certificate{SerialNumber: big.NewInt(9), Subject: pkix.Name{}, NotBefore: c.now.Add(-time.Hour), NotAfter: notAfter}
 	if ek {
 		tmpl.UnknownExtKeyUsage = []asn1.ObjectIdentifier{tpmEKCertificateEKU}
+		tmpl.ExtraExtensions = []pkix.Extension{tcgSubjectAltName(t)}
 	}
 	parent := *c.issuerCert
 	parent.PublicKey = &signer.PublicKey // a signer that is not the issuer's key still names the issuer

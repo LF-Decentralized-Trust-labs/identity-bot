@@ -159,6 +159,7 @@ func TestTheCredentialIsMadeForAVirtualTPMOnlyWhenTheOwnerOptedIn(t *testing.T) 
 			tmpl.KeyUsage = x509.KeyUsageCertSign
 		} else {
 			tmpl.UnknownExtKeyUsage = []asn1.ObjectIdentifier{tpmEKCertificateEKU}
+			tmpl.Subject, tmpl.ExtraExtensions = pkix.Name{}, []pkix.Extension{tcgSubjectAltName(t)}
 		}
 		signer, signerKey := tmpl, k
 		if parent != nil {
@@ -212,6 +213,7 @@ func TestThePublicEntryPointsTakeAVirtualTPMOnlyWithTheOwnersOptIn(t *testing.T)
 			tmpl.KeyUsage = x509.KeyUsageCertSign
 		} else {
 			tmpl.UnknownExtKeyUsage = []asn1.ObjectIdentifier{tpmEKCertificateEKU}
+			tmpl.Subject, tmpl.ExtraExtensions = pkix.Name{}, []pkix.Extension{tcgSubjectAltName(t)}
 		}
 		signer, signerKey := tmpl, k
 		if parent != nil {
