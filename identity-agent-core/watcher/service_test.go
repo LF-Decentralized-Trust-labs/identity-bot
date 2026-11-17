@@ -76,7 +76,7 @@ func TestAPublicWatcherServiceAnswersItsDigest(t *testing.T) {
 	_ = ws.Store.RecordFirstSeen(FirstSeenRecord{
 		AID: "EAlice", SequenceNum: 2, KelDigest: "Edigest123",
 		FirstSeenAt: now, LastConfirmedAt: now, SeenCount: 1,
-		SourceType: SourceOOBI,
+		SourceType: SourceOOBI, Proven: true,
 	})
 
 	if err := ws.Store.SetConfig(configPublicWatcher, "true"); err != nil {
