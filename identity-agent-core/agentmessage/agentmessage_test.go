@@ -262,3 +262,21 @@ func TestAProgressNoteIsAMessageButNotAnAsk(t *testing.T) {
 		t.Fatal("a progress note carrying a tier was accepted")
 	}
 }
+
+// An addendum is a kind of message a body may sign; it acts on the ask it adds
+// to, carries no tier, and a body cannot send one that names no message.
+func TestAnAddendumIsAMessageButNotAnAsk(t *testing.T) {
+	st := vectorStatement(t)
+	st.Kind = KindAddendum
+	if _, err := Sign(vectorSigner(), st); err != nil {
+		t.Fatalf("an addendum was refused: %v", err)
+	}
+	st.Tier = TierQuick
+	if st.Check() == nil {
+		t.Fatal("an addendum carrying a tier was accepted")
+	}
+	st.Tier, st.InReplyTo = "", ""
+	if st.Check() == nil {
+		t.Fatal("an addendum that names no ask was accepted")
+	}
+}

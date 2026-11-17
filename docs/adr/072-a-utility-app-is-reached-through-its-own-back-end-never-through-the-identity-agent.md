@@ -344,3 +344,23 @@ Amendment 7 left the link's `api` unsigned. It is signed now, beside `rid`, for 
 **Rollout** is Amendment 7's, with one more field: an Identity Agent that does not know `api` refuses a challenge carrying it as unreadable, so the owner records the back end only once the Identity Agents of the people who sign in understand it; and a front end built on this change refuses a challenge with none, so it is shipped only once the owner has recorded it. Record the relay identifier and the back end in the same step, and replace them together.
 
 The Go is `identity-agent-core/asset` (`SetBackEnd`), `identity-agent-core/login` (`ChallengeBundle.BackEnd`, `canonicalChallengeBody`, `recordBrowserSignIn`). The cases are in `packages/login-web/test-vectors/app-checks.json`, run in TypeScript and Dart alike.
+
+## Amendment 9 (2026-11-17): how long a sign-in lasts is set per utility app
+
+ADR-066 let every sign-in's browser key speak for twelve hours, the same for every asset and with no reason given for that number. How long is right depends on the utility app. For one whose consequential actions each need the person's own signature on their Identity Agent anyway, such as an AI agent's chat, a sign-in that has to be approved again every working day costs the person a step every day, while the actions that matter are each approved on their own. What a sign-in still reaches without a signature, such as reading what was said, is what its owner weighs in setting it.
+
+**The owner sets it, per utility app.** The asset carries `sign_in_lifetime_hours`, beside the front-end setting in section 3. It is set when the utility app is made, by the owner's Identity Agent from whichever of its controllers may make one (the add-on that makes it passes it to `asset.Handler.SetSignInLifetime`, as it passes the front ends), or later with `PUT /api/assets/{id}/sign-in-lifetime` `{"sign_in_lifetime_hours": 720}`, which is owner only: a longer sign-in widens what the owner allowed. Zero, or a record that has never said, is the default of twelve hours. Only a utility app has the setting; every other asset has the default.
+
+**The utility app cannot lengthen its own.** Nothing a utility app's back end or front end sends is read for it: the time comes from the asset record, which only the owner's routes and an add-on in the owner's Identity Agent write. The back end can still shorten a session by ending its keys (ADR-066).
+
+**The core holds the ceiling.** No setting above thirty days (`asset.MaxSignInLifetime`) is kept, and on reading, a record holding more than that (written by hand, or by a build with another ceiling) gives thirty days (`asset.Asset.SignInLifetime`). The time is read at the person's approval and kept in the key's record, so changing the setting later moves only later sign-ins.
+
+**A utility app's session should follow the key.** A back end that asks when the key stops speaking (`Host.BrowserKeySpeaksUntil`) should end a session in use then, so it is not cut short of the lifetime the owner set nor kept past it. It may still end one left unused sooner: much of what a session reaches carries no statement the person signed.
+
+**What this does not settle.**
+
+- The person's Identity Agent is not told how long the sign-in it approves will last: the challenge does not carry it, so the consent screen cannot show it. Signing it into the challenge would need the rollout order Amendment 7 describes, and is left for a later change.
+- A longer sign-in makes ending one sign-in early matter more. Today the person ends one by sending the end to the utility app's back end (Amendment 8), which then ends the key; the owner can end a person's keys only by removing the person, or everyone's by switching the front end off. A way for the owner, or the person's own Identity Agent, to end one key at the core without the back end's help is not built.
+- Lowering the setting does not shorten sign-ins already made: each keeps the time it was given.
+
+The Go is `identity-agent-core/asset` (`SignInLifetime`, `SetSignInLifetime`, `HandleSetSignInLifetime`) and `identity-agent-core/server` (`handleLoginCallback`). The tests are `how_long_a_sign_in_lasts_is_the_owners_to_set_test.go` and `TestASignInLastsAsLongAsTheUtilityAppsOwnerSetWithinTheCeiling`.
