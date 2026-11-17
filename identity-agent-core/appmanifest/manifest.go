@@ -120,6 +120,11 @@ type WhenDown struct {
 type Backup struct {
 	What       []string `json:"what"`                  // any of "store", "settings"; empty means nothing is backed up
 	EveryHours *int     `json:"every_hours,omitempty"` // present exactly when what is not empty
+	// KeepDays is how many whole days a backup is kept before it is removed. It is the one
+	// number a person is told, so what is told and what is done cannot differ (ADR-084).
+	// Left out when nothing is backed up; an app that backs up and leaves it out declares
+	// no limit, and is shown as having stated none.
+	KeepDays *int `json:"keep_days,omitempty"`
 }
 
 // The values of AppManifest.EncryptedMachine.
