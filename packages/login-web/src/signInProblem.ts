@@ -18,8 +18,8 @@ const REFUSALS: Record<string, Said> = {
     next: "again",
   },
   "asset store unavailable": {
-    words: "the owner's Identity Agent could not read this utility app's settings",
-    next: "again",
+    words: "the owner's Identity Agent has no settings for this utility app it can read",
+    next: "owner",
   },
   "the website's settings could not be read": {
     words: "the owner's Identity Agent could not read this utility app's settings",
@@ -36,17 +36,17 @@ const REFUSALS: Record<string, Said> = {
   },
   "the required credential was not presented": {
     words: "this utility app asks for a credential your Identity Agent did not present",
-    next: "owner",
-    todo: "Approve it again from an Identity Agent that holds that credential, or ask the utility app's owner which credential it needs.",
+    next: "again",
+    todo: "The sign-in is still open: approve it again from an Identity Agent that holds that credential, or ask the utility app's owner which credential it needs.",
   },
   "the credential could not be checked": {
     words: "the credential your Identity Agent presented could not be checked",
     next: "again",
   },
   "the credential is not accepted here": {
-    words: "the credential your Identity Agent presented is not one this utility app accepts",
-    next: "owner",
-    todo: "Ask the utility app's owner which credential it accepts; trying again with the same one will not help.",
+    words: "the credential your Identity Agent presented was not accepted",
+    next: "again",
+    todo: "The sign-in is still open, so you can approve it again. If it keeps happening, ask the utility app's owner which credential it accepts.",
   },
   "minimum score gate is not available yet": {
     words: "this utility app asks for a minimum score, which cannot be checked yet",
@@ -102,10 +102,10 @@ export function refusalInWords(reason: string): string {
   return said(reason)?.words ?? reason.trim();
 }
 
-/** Whether approving the sign-in again can help ("again"), or only the utility app's owner can ("owner"). A reason
- *  not known here is taken as one a retry may get past. */
-export function refusalNextStep(reason: string): RefusalNextStep {
-  return said(reason)?.next ?? "again";
+/** Whether approving the sign-in again can help ("again"), or only the utility app's owner can ("owner"); undefined
+ *  for a reason not known here, which may be either. */
+export function refusalNextStep(reason: string): RefusalNextStep | undefined {
+  return said(reason)?.next;
 }
 
 /** The line a page shows while a sign-in is still open after an answer was refused (its `lastRefusal`): why, in
@@ -113,9 +113,11 @@ export function refusalNextStep(reason: string): RefusalNextStep {
 export function refusalProblem(reason: string): string {
   const s = said(reason);
   const todo = s?.todo ??
-    (s?.next === "owner"
-      ? "Trying again will not help until the utility app's owner changes this; tell them."
-      : "The sign-in is still open, so you can approve it again. If it keeps happening, tell the utility app's owner.");
+    (s === undefined
+      ? "The sign-in is still open. If this is not what you expected, tell the utility app's owner."
+      : s.next === "owner"
+        ? "Trying again will not help until the utility app's owner changes this; tell them."
+        : "The sign-in is still open, so you can approve it again. If it keeps happening, tell the utility app's owner.");
   return "That answer was refused: " + refusalInWords(reason) + ". " + todo;
 }
 
