@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"identity-agent-core/agentpeer"
 )
 
 // ErrNoCapabilities refuses a grant that gives nothing.
@@ -33,6 +35,11 @@ func checkGrantAsked(noun string, capabilities []string, validUntil *time.Time, 
 // give, which could never apply. Accepting any of these would record a limit
 // the asset is not actually held to.
 func CheckResourceConstraints(rc map[string]interface{}, capabilities []string) error {
+	// Messaging AI agents another Identity Agent holds has a shape of its own,
+	// which the use of the grant applies again (agentpeer.CheckPeerGrant).
+	if err := agentpeer.CheckPeerGrantShape(rc); err != nil {
+		return err
+	}
 	granted := map[string]bool{}
 	for _, c := range capabilities {
 		granted[c] = true
