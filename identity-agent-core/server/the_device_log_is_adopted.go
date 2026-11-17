@@ -285,10 +285,15 @@ func (s *CoreServer) adoptGrant(row waitingRow, signature string) error {
 			err = s.checkAuthorisationOf(p.Prepared.AcdcRaw, p.Spec.Issuer, "", "", p.Spec.by())
 		}
 		if err == nil {
+			// A capability grant the owner changed replaces the one standing,
+			// read before the new one is recorded so it is not among them.
+			superseded := s.capabilityGrantsStanding(kind, p.Spec.Holder)
 			said, ferr := s.finishIssuance(kind, result, p.Spec.Holder, p.Spec.Issuer, p.Spec.Expiry,
 				p.Prepared.Registry, p.Spec.RequestDigest, p.Spec.by())
 			if ferr == nil {
 				s.grantArrived(kind, p.Spec, said)
+				// Withdrawn only now that the new one stands, never before.
+				s.withdrawSuperseded(superseded, said)
 				return nil
 			}
 			err = ferr

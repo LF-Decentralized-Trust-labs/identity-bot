@@ -283,25 +283,41 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 	}
 	// An app's grant is an App Grant, an AI agent's an AI Agent Grant; each
 	// withdraws the one it replaces, of its own kind.
-	kind, held := schemas.AIAgentGrant, capabilityGrantSchemaSAIDs
-	if agent.AssetType == "app" {
-		kind, held = schemas.AppGrant, []string{schemas.AppGrant.Schema.SAID}
-	}
+	kind, held := capabilityGrantKindOf(agent)
 	superseded := s.credentialsOfAnyHeldBy(agentAID, held, s.OwnerRootAID(), true)
 	grantSAID, err := s.issueAssetCredential(kind, agentAID, issuerRootAID, claims, expiry, by)
 	if err != nil {
 		return "", err
 	}
-	// The grant this one replaces is withdrawn, not left standing. A re-issue
-	// that narrows a ceiling would otherwise leave the wider grant valid beside
-	// it, and anything checking "does this agent hold a valid grant" would find
-	// the old one as readily as the new.
-	//
-	// If the revocation cannot be written to the registry, the replaced grant is
-	// still marked unusable here — this identity issued it, and its own record is
-	// what its gateway reads — and the failure is reported, never skipped.
+	s.withdrawSuperseded(superseded, grantSAID)
+	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))
+	return grantSAID, nil
+}
+
+// capabilityGrantKindOf is the kind of grant an asset's capabilities are given
+// in, and the schemas of every version of it that may stand for the asset.
+func capabilityGrantKindOf(agent *asset.Asset) (*schemas.AssetGrant, []string) {
+	if agent.AssetType == "app" {
+		return schemas.AppGrant, []string{schemas.AppGrant.Schema.SAID}
+	}
+	return schemas.AIAgentGrant, capabilityGrantSchemaSAIDs
+}
+
+// withdrawSuperseded withdraws the grants a new grant, grantSAID, replaces. A
+// re-issue that narrows a ceiling would otherwise leave the wider grant valid
+// beside it, and anything checking "does this holder hold a valid grant" would
+// find the old one as readily as the new.
+//
+// If the revocation cannot be written to the registry, the replaced grant is
+// still marked unusable here (this identity issued it, and its own record is
+// what its gateway reads) and the failure is reported, never skipped. Where the
+// key is on another device the withdrawal is asked of it (withdrawCredential).
+func (s *CoreServer) withdrawSuperseded(superseded []store.CredentialRecord, grantSAID string) {
 	for i := range superseded {
 		old := superseded[i]
+		if old.SAID == grantSAID {
+			continue
+		}
 		if _, _, err := s.withdrawCredential(&old); err != nil {
 			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
 				"it is marked superseded and no longer admits anything here", old.SAID, grantSAID, err)
@@ -310,6 +326,20 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 			}
 		}
 	}
-	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))
-	return grantSAID, nil
+}
+
+// capabilityGrantsStanding are the usable grants of kind's own family that
+// holder holds, from this identity: what a new one of the kind replaces.
+// Nothing for a kind that is not a capability grant.
+func (s *CoreServer) capabilityGrantsStanding(kind *schemas.AssetGrant, holder string) []store.CredentialRecord {
+	var held []string
+	switch kind {
+	case schemas.AppGrant:
+		held = []string{schemas.AppGrant.Schema.SAID}
+	case schemas.AIAgentGrant, schemas.AIAgentGrantV11:
+		held = capabilityGrantSchemaSAIDs
+	default:
+		return nil
+	}
+	return s.credentialsOfAnyHeldBy(holder, held, s.OwnerRootAID(), true)
 }
