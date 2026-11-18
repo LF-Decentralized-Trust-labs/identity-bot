@@ -48,7 +48,7 @@ because nothing else holds it.
 The whole record (`plain`): id, conversation, `seq`, `prev_hash`, `ia_time`,
 kind, `from`, `to`, `in_reply_to`, depth, `body_hash`, the sender's proof (the
 statement, or `person_proof` with its signature), `grant_said`, `body_grade`,
-`body_credential`, the person reference, `opened_by`, `refusal` and `outcome`.
+`body_credential`, the person reference, `opened_by`, `refusal`, `outcome` and `notice`.
 `entry_hash` also covers the two signatures. The words are not covered, only
 their fingerprint (`body_hash`). The signer is the Identity Agent for a person's
 entry and for its own, and the AI agent for the AI agent's
@@ -161,7 +161,7 @@ to, the asset's `pairwise_aid`), never the asset id in the route. The Identity
 Agent resolves the route's asset id to that identifier and refuses a statement
 to any other.
 
-Three more things are entries of the same chain (for a conversation an app
+Four more things are entries of the same chain (for a conversation an app
 keeps, a person's entry is kept by the app before it is committed, so it is
 never *pending* and no *not kept* outcome is written for it: ADR-068; the
 checker still reads those forms):
@@ -171,6 +171,7 @@ checker still reads those forms):
 | **pending** | the person's entry as above, written before anything is forwarded to the app |
 | **refusal** | the person's entry with `refusal` set (a plain reason). It records who tried, when and why, and nothing was forwarded |
 | **outcome** | a record of kind `outcome` from the Identity Agent, with `in_reply_to` the entry's id and `outcome` (`entry`, `state` `committed` or `not-kept`, `reason` required for `not-kept`). It carries no sender's proof; the countersignature is the proof |
+| **notice** | a record of kind `notice` from the Identity Agent, to a person in the conversation, with `notice` (`code`, one of the codes `agent-message.schema.json` lists, each with fixed words) and the hash of no words (ADR-083). It carries no sender's proof, no `in_reply_to` and nothing vouched for about a sender; the countersignature is the proof |
 
 An entry is never changed: it is pending until an outcome entry follows it,
 and a refusal never has one. **Committed**, **not kept**, **pending** and
@@ -190,7 +191,11 @@ skew of the Identity Agent's stamp; an entry that answers another answers one
 that was kept at that point; an entry the Identity Agent allowed does not reuse
 an id or a nonce its author used before (a refusal may, and uses them up); an
 outcome is the Identity Agent's, is about an earlier entry that was pending, and
-ends it once; the entry's id is `e` and its `seq`; and a person's version 0
+ends it once; a notice is the Identity Agent's, to a person who opened the
+conversation or wrote an entry in it that was not refused, names a code with
+words, carries no words, no sender's proof and no field its contract does not
+name, comes while the conversation is open, and is given once per code and
+person; the entry's id is `e` and its `seq`; and a person's version 0
 words (a paired app's signed request) do not follow a version 1 entry (ADR-067).
 A refusal, a not-kept entry and a kept entry are checked alike and none needs
 words. An export that carries a kept entry's words (`body`) and salt (`salt`) has

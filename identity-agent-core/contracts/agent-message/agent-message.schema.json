@@ -243,7 +243,7 @@
       }
     },
     "record": {
-      "description": "One entry in a conversation, as the Identity Agent countersigns it. It carries exactly one sender's proof: statement with host_signature and host_verkey, controller_proof, person_proof, or peer_proof (an entry from an AI agent another Identity Agent holds); an outcome carries none. A person's entry may instead be a refusal (refusal set), which holds no words. The entry's id is e and its seq, and a person's entry and its outcome are separate entries. What the record says must be what the sender signed. prev_hash is the hash of the entry before it in the conversation (see entry_hash), empty for the first.",
+      "description": "One entry in a conversation, as the Identity Agent countersigns it. It carries exactly one sender's proof: statement with host_signature and host_verkey, controller_proof, person_proof, or peer_proof (an entry from an AI agent another Identity Agent holds); an outcome or a notice carries none. A person's entry may instead be a refusal (refusal set), which holds no words. The entry's id is e and its seq, and a person's entry and its outcome are separate entries. What the record says must be what the sender signed. prev_hash is the hash of the entry before it in the conversation (see entry_hash), empty for the first.",
       "type": "object",
       "required": [
         "message_id",
@@ -619,7 +619,7 @@
       }
     },
     "notice": {
-      "description": "What the Identity Agent told a person in a conversation (ADR-083). It is an entry of its own, of kind notice, from the Identity Agent, to a person, with no in_reply_to, no sender's proof and the hash of no words; the countersignature is the proof. It names a code and never carries text: every reader shows the words the code has. A conversation holds one notice of a code for a person, and none after it is closed.",
+      "description": "What the Identity Agent told a person in a conversation (ADR-083). It is an entry of its own, of kind notice, from the Identity Agent, to a person who opened the conversation or wrote an entry in it that was not refused, with no in_reply_to, no sender's proof, nothing vouched for about a sender, and the hash of no words; the countersignature is the proof. It names a code and never carries text: every reader shows the words the code has. A conversation holds one notice of a code for a person, and none after it is closed.",
       "type": "object",
       "required": [
         "code"

@@ -804,7 +804,7 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 	}
 	claimed, err := agentmessage.Read(e.Envelope)
 	if err != nil {
-		v.fault(where, "it is unreadable")
+		v.fault(where, "it is unreadable: %v", err)
 		return agentmessage.Record{}, false
 	}
 	signer := agentmessage.Countersigner(claimed.From, v.b.Root)

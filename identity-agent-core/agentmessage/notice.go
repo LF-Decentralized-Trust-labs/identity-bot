@@ -37,8 +37,14 @@ func NoticeWords(code string) (string, bool) {
 // checkNotice checks a notice record: the Identity Agent's, for a person, with
 // a code that has words, no proof of a sender's, nothing it replies to and no words of its own.
 func (r Record) checkNotice() error {
-	if r.Statement != nil || r.ControllerProof != nil || r.PersonProof != nil || r.Refusal != "" || r.CiphertextHash != "" {
+	if r.Statement != nil || r.ControllerProof != nil || r.PersonProof != nil || r.PeerProof != nil || r.CiphertextHash != "" {
 		return errors.New("a notice carries no sender's proof")
+	}
+	if r.Refusal != "" {
+		return errors.New("a notice refuses nothing")
+	}
+	if r.HostSignature != "" || r.HostVerkey != "" || r.GrantSAID != "" || r.BodyGrade != "" || r.BodyCredential != "" || r.Person != nil {
+		return errors.New("a notice carries its code and nothing the Identity Agent vouches for about a sender")
 	}
 	if r.Kind != KindNotice {
 		return errors.New("a notice is of the kind notice")
@@ -46,7 +52,7 @@ func (r Record) checkNotice() error {
 	if _, ok := noticeWords[r.Notice.Code]; !ok {
 		return fmt.Errorf("%q is not a notice the Identity Agent gives", r.Notice.Code)
 	}
-	if _, person := IsPerson(r.To); !person {
+	if aid, person := IsPerson(r.To); !person || aid == "" {
 		return errors.New("a notice is for a person")
 	}
 	if r.InReplyTo != "" {
