@@ -526,7 +526,7 @@ func New(cfg Config) (*CoreServer, error) {
 		if id == nil {
 			return ""
 		}
-		return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", cfg.Port, id.AID)
+		return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", s.Port, id.AID)
 	}
 	// What kind of entity this agent belongs to, which decides which peers may
 	// witness for it. Read live rather than captured, because the profile is
@@ -769,10 +769,17 @@ func (s *CoreServer) Start() error {
 		return fmt.Errorf("OpenExtraRoutes names routes no overlay mounts, or gives no reason: %v", bad)
 	}
 
-	// Try the configured port first, then fallback to 5051–5059
+	// Try the configured port first, then fallback to 5051–5059. Port 0
+	// asks the system for a free port, so there is nothing to fall back to:
+	// the port it gave is read back, and is what .port and the log report.
 	requestedPort := s.Port
 	var bindErr error
-	for attempt := 0; attempt < 10; attempt++ {
+	if requestedPort == 0 {
+		if s.listener, bindErr = net.Listen("tcp4", rootListenAddr(0)); bindErr == nil {
+			s.Port = s.listener.Addr().(*net.TCPAddr).Port
+		}
+	}
+	for attempt := 0; s.listener == nil && requestedPort != 0 && attempt < 10; attempt++ {
 		tryPort := requestedPort + attempt
 		addr := rootListenAddr(tryPort)
 		s.listener, bindErr = net.Listen("tcp4", addr)
@@ -786,6 +793,9 @@ func (s *CoreServer) Start() error {
 		log.Printf("[identity-agent-core] Port %d unavailable: %v", tryPort, bindErr)
 	}
 	if s.listener == nil {
+		if requestedPort == 0 {
+			return fmt.Errorf("failed to bind on a port the system assigns: %w", bindErr)
+		}
 		return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
 	}
 
