@@ -176,9 +176,24 @@ func TestTheDeviceRowCleansTheNameItShows(t *testing.T) {
 func TestAVirtualTPMIsNamedAsOneOnTheConsent(t *testing.T) {
 	virtual := installedAppFact{Platform: "tpm", EKClass: "virtual"}
 	physical := installedAppFact{Platform: "tpm", EKClass: "physical"}
-	if signedDevicePlatform(virtual) != login.DeviceVirtualTPM || signedDevicePlatform(physical) != login.DeviceTPM ||
-		signedDevicePlatform(installedAppFact{Platform: "android"}) != "android" {
-		t.Fatal("the signed platform does not follow the chip's class")
+	for _, c := range []struct {
+		f    installedAppFact
+		want string
+		ok   bool
+	}{
+		{virtual, login.DeviceVirtualTPM, true},
+		{physical, login.DeviceTPM, true},
+		{installedAppFact{Platform: "android"}, "android", true},
+		{installedAppFact{Platform: "tpm"}, "", false},
+	} {
+		if got, ok := signedDevicePlatform(c.f); got != c.want || ok != c.ok {
+			t.Fatalf("%+v: signed as %q %v, want %q %v", c.f, got, ok, c.want, c.ok)
+		}
+	}
+	// A TPM proof with no class is refused, not shown as "a computer".
+	w0 := anAppOffering(t, []string{"browser", "installed_app"}, nil)
+	if _, _, code, _ := w0.org.createSignedAssetChallengeOn("the-website", "https://portal.example", "", nil, strings.Repeat("A", 43), "installed_app", w0.srv.URL, true, &installedAppFact{Platform: "tpm"}); code == 0 {
+		t.Fatal("a TPM proof with no class got a sign-in")
 	}
 	w := anAppOffering(t, []string{"browser", "installed_app"}, nil)
 	token, _, code, msg := w.org.createSignedAssetChallengeOn("the-website", "https://portal.example", "", nil, strings.Repeat("A", 43), "installed_app", w.srv.URL, true, &virtual)

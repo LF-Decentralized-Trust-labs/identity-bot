@@ -47,11 +47,13 @@ const MaxDeviceNameRunes = 48
 // the scripts that use more than one (Vietnamese, Devanagari).
 const maxMarksPerLetter = 2
 
-// blankLetters are characters Unicode counts as letters or symbols that draw
-// nothing, so a name of them would look empty or hide a gap.
+// blankLetters are characters Unicode counts as letters, symbols or marks
+// that draw nothing, so a name of them would look empty or hide a gap.
 var blankLetters = map[rune]bool{
 	0x115F: true, 0x1160: true, 0x3164: true, 0xFFA0: true, // Hangul fillers
-	0x2800: true, // braille pattern blank
+	0x2800: true,               // braille pattern blank
+	0x034F: true,               // combining grapheme joiner
+	0x17B4: true, 0x17B5: true, // Khmer inherent vowels, which draw nothing
 }
 
 // CleanDeviceName makes what an installed app calls its device fit to show.

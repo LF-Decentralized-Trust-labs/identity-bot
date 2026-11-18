@@ -87,6 +87,7 @@ func TestCleanDeviceName(t *testing.T) {
 		" \t ":                              "",
 		strings.Repeat("é", 100):            strings.Repeat("é", MaxDeviceNameRunes),
 		strings.Repeat("a ", 100):           strings.TrimSpace(strings.Repeat("a ", MaxDeviceNameRunes/2)),
+		"a\u034F\u17B4b":                    "ab",
 		"\u3164\u115F\u2800":                "",
 		"\uF8FF Ann's iPhone":               "Ann's iPhone",
 		"A" + strings.Repeat("\u0336", 47):  "A\u0336\u0336",

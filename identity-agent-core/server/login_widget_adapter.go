@@ -151,7 +151,13 @@ func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom s
 	// Only a proved installed app's key names a device: the platform is the
 	// proof's, not the request's.
 	if device != nil && installedAppKey && frontEnd == asset.FrontEndInstalledApp {
-		bundle.DevicePlatform = signedDevicePlatform(*device)
+		platform, ok := signedDevicePlatform(*device)
+		if !ok {
+			// A TPM proof that records no chip class speaks for no one, so it is
+			// not shown to the person either.
+			return "", "", http.StatusForbidden, "this device's security chip is of no known kind, so it cannot sign in"
+		}
+		bundle.DevicePlatform = platform
 		bundle.DeviceName = device.DeviceName
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
@@ -375,10 +381,18 @@ func sameOrigin(a, b string) bool {
 // signedDevicePlatform is the platform a proved key's challenge names. A TPM
 // whose endorsement key a virtual or cloud TPM's issuer certified (its owner
 // opted in to those) is named as one, so the person's consent can say that
-// whoever runs its host can read the key, rather than "a computer".
-func signedDevicePlatform(f installedAppFact) string {
-	if f.Platform == login.DeviceTPM && f.EKClass == secureenclave.TPMClassVirtual {
-		return login.DeviceVirtualTPM
+// whoever runs its host can read the key, rather than "a computer". A TPM's
+// key is named only for a class the proof recorded: false for one with none,
+// which fails closed rather than reading as a physical chip.
+func signedDevicePlatform(f installedAppFact) (string, bool) {
+	if f.Platform != login.DeviceTPM {
+		return f.Platform, true
 	}
-	return f.Platform
+	switch f.EKClass {
+	case secureenclave.TPMClassVirtual:
+		return login.DeviceVirtualTPM, true
+	case secureenclave.TPMClassPhysical:
+		return login.DeviceTPM, true
+	}
+	return "", false
 }
