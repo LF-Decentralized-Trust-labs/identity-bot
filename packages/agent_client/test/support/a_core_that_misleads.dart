@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:agent_client/crypto/keys.dart';
@@ -14,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
 
 import 'a_witness.dart';
+import 'the_core.dart';
 
 /// The secret a test's core is started with, as an app hands it the core it
 /// starts.
@@ -244,11 +244,7 @@ class ACore {
 /// core names witnesses on the internet, which a test does not reach. A core
 /// confirms who answers at an address before it proposes it.
 Future<ACore> anotherCore(String bin, KeyMath km,
-    {Directory? dataDir,
-    int? port0,
-    List<AWitness> witnesses = const []}) async {
-  final port = port0 ?? 20000 + Random().nextInt(20000);
-  final base = 'http://127.0.0.1:$port';
+    {Directory? dataDir, List<AWitness> witnesses = const []}) async {
   final data =
       dataDir ?? await Directory.systemTemp.createTemp('witnessed-core-data');
   {
@@ -273,24 +269,8 @@ Future<ACore> anotherCore(String bin, KeyMath km,
       ]
     }));
   }
-  final p = await Process.start(bin, [], environment: {
-    ...Platform.environment,
-    'PORT': '$port',
-    'HOST': '127.0.0.1',
-    'AGENT_DATA_DIR': data.path,
-    'IDENTITY_AGENT_LOCAL_OWNER_SECRET': ownerSecret,
-  });
-  final logs = StringBuffer();
-  p.stdout.transform(utf8.decoder).listen(logs.write);
-  p.stderr.transform(utf8.decoder).listen(logs.write);
-  for (var i = 0; i < 100; i++) {
-    try {
-      if ((await http.get(Uri.parse('$base/api/health'))).statusCode == 200) {
-        break;
-      }
-    } catch (_) {}
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-  }
+  final core =
+      await startTheCore(bin, dataDir: data.path, ownerSecret: ownerSecret);
   final client = ACoreThatMisleads(http.Client());
   if (witnesses.length > 1) {
     // A core names ONE witness endpoint from its registry for a new identity
@@ -300,7 +280,7 @@ Future<ACore> anotherCore(String bin, KeyMath km,
     client.alterTheAnswerTo['/api/events/witnesses-for-a-founding'] =
         (_) => proposalOf(witnesses);
   }
-  return ACore(p, base, client, km, logs, data);
+  return ACore(core.process, core.base, client, km, core.logs, data);
 }
 
 /// What a core proposes for a founding when it names [witnesses]: each one's
