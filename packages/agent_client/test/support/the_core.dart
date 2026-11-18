@@ -66,6 +66,40 @@ class TheCoreRunning {
 
   /// Everything it wrote to its standard output and error.
   final StringBuffer logs;
+
+  /// Stops the core and returns once it has exited, per [stopTheCore].
+  Future<void> stop() => stopTheCore(process);
+}
+
+/// Asks the core in [process] to stop, and returns only once it has exited. A core cleans up its data directory as it shuts down
+/// (removing `.port` and `.pid`, and its database's journal files), so a test
+/// that deletes that directory while the core is still exiting has two
+/// processes deleting the same files, and fails at random on whichever loses.
+/// A core still running after [within] is killed outright; one that is still
+/// not gone fails the test, rather than leave it to delete under a live core.
+Future<void> stopTheCore(Process process,
+    {Duration within = const Duration(seconds: 10)}) async {
+  const gone = Duration(seconds: 5);
+  Future<bool> exited(Duration d) =>
+      process.exitCode.then((_) => true).timeout(d, onTimeout: () => false);
+  process.kill();
+  if (await exited(within)) return;
+  process.kill(ProcessSignal.sigkill);
+  if (await exited(gone)) return;
+  fail('the core (process ${process.pid}) did not exit within '
+      '${(within + gone).inSeconds} s of being stopped');
+}
+
+/// Deletes [dir], a test's temporary directory, with everything in it. Call it
+/// only once nothing else can be writing there, such as after [stopTheCore]:
+/// then a directory already gone is simply done. One that still exists after
+/// a failed delete means something is still writing in it, and fails.
+Future<void> deleteTheDirectory(Directory dir) async {
+  try {
+    await dir.delete(recursive: true);
+  } on PathNotFoundException {
+    if (await dir.exists()) rethrow;
+  }
 }
 
 /// The line a core logs once it holds its port, naming the port.
@@ -112,9 +146,10 @@ Future<TheCoreRunning> startTheCore(String bin,
   unawaited(p.exitCode.then((c) => exitCode = c));
 
   Future<Never> notStarted(String why) async {
+    // A short grace, so a core that never started is stopped, and its log
+    // read, inside the test's own 30 s limit.
     if (exitCode == null) {
-      p.kill(ProcessSignal.sigkill);
-      await p.exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
+      await stopTheCore(p, within: const Duration(seconds: 2));
     }
     // Everything it wrote, which ends once its output is closed.
     await reading.timeout(const Duration(seconds: 5),

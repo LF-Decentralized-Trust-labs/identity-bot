@@ -16,10 +16,11 @@ void main() {
   test('a core is started on the port the system gives it, and answers there',
       () async {
     final data = await Directory.systemTemp.createTemp('a-core-that-starts');
-    addTearDown(() => data.delete(recursive: true));
+    addTearDown(() => deleteTheDirectory(data));
     final core =
         await startTheCore(bin, dataDir: data.path, ownerSecret: ownerSecret);
-    addTearDown(core.process.kill);
+    // Teardowns run last first: the core has exited before its directory goes.
+    addTearDown(core.stop);
     final res = await http.get(Uri.parse('${core.base}/api/health'));
     expect(res.statusCode, 200);
     expect(await File('${data.path}/.port').readAsString(),
@@ -31,7 +32,7 @@ void main() {
       'logged', () async {
     // Its data directory would be inside a file, which no core can make.
     final dir = await Directory.systemTemp.createTemp('a-core-that-fails');
-    addTearDown(() => dir.delete(recursive: true));
+    addTearDown(() => deleteTheDirectory(dir));
     final file = File('${dir.path}/not-a-directory');
     await file.writeAsString('');
     await expectLater(
@@ -49,7 +50,7 @@ void main() {
     // The core asked to compute instead of serve, waiting for a request that
     // never comes: it never takes a port and never answers.
     final data = await Directory.systemTemp.createTemp('a-core-that-hangs');
-    addTearDown(() => data.delete(recursive: true));
+    addTearDown(() => deleteTheDirectory(data));
     await expectLater(
         startTheCore(bin,
             dataDir: data.path,
