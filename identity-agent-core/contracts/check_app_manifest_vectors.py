@@ -4,11 +4,11 @@
 Everything here is rebuilt from the prose in app-manifest/app-manifest.schema.json
 (the descriptions of the manifest, release_digest, encrypted_machine, placement,
 secrets, resources, network and the store, front_and_back_end, when_down and
-backup definitions) and from ADR-012 Amendment 5, not from the Go code. Each
-vector is read, the rules are applied to its manifest, and the outcome (accepted
-or refused) and the row a refusal is about must be the ones the file states. If
-this script and the vector file ever disagree, the prose no longer says what
-the code does.
+backup definitions) and from ADR-012 Amendment 5 and ADR-084, not from the Go
+code. Each vector is read, the rules are applied to its manifest, and the
+outcome (accepted or refused) and the row a refusal is about must be the ones
+the file states. If this script and the vector file ever disagree, the prose no
+longer says what the code does.
 
 Run: python3 check_app_manifest_vectors.py app-manifest-vectors.json
 Needs nothing beyond the Python standard library.
@@ -130,7 +130,7 @@ KEYS = {
     "front_and_back_end": "static_front_end_url back_end_port device_front_ends installed_app_identity".split(),
     "installed_app_identity": "android_package android_signers apple_app_id tpm_keys virtual_tpm_keys".split(),
     "when_down": "person_sees queue_requests queue_max_seconds".split(),
-    "backup": "what every_hours".split(),
+    "backup": "what every_hours keep_days".split(),
 }
 # Which object (or list of objects) a key holds.
 CHILD = {
@@ -304,8 +304,12 @@ def check(m):
         h = b.get("every_hours")
         if not (is_int(h) and 1 <= h <= 8760):
             return refuse("backup.every_hours", "1 to 8760 when something is backed up")
+        if "keep_days" in b and not (is_int(b["keep_days"]) and 1 <= b["keep_days"] <= 3650):
+            return refuse("backup.keep_days", "1 to 3650 whole days when given")
     elif "every_hours" in b:
         return refuse("backup.every_hours", "left out when nothing is backed up")
+    elif "keep_days" in b:
+        return refuse("backup.keep_days", "left out when nothing is backed up")
     hosts = (m.get("network") or {}).get("allowed_domains")
     if not isinstance(hosts, list):
         return refuse("network.allowed_domains", "declared, empty if none")
