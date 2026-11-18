@@ -102,6 +102,14 @@ type IdentityState struct {
 	// read together with the seed rather than trusted alone.
 	DerivationIndex int `json:"derivation_index,omitempty"`
 	KeyGeneration   int `json:"key_generation,omitempty"`
+
+	// HandedOver is set when an ownership change gave this identity's keys to
+	// its owners' own devices. From then on nothing here derives or signs a key
+	// of it: the PublicKey is an owner's, and DerivationIndex and KeyGeneration
+	// describe the key this Identity Agent held before, which is no longer in force.
+	// Nothing clears it: a flow that ever gave an identity back to this Identity
+	// Agent would have to decide that on purpose, with a rotation the owners sign.
+	HandedOver bool `json:"handed_over,omitempty"`
 }
 
 // ContactRecord stores a resolved contact in the Identity Agent.
@@ -679,21 +687,28 @@ type KerlEntry struct {
 
 type GuardianshipRecord struct {
 	ID                  string               `json:"id"`
-	Type                string               `json:"type"` // minor_child|elderly|disability|temporary
-	GuardianAID         string               `json:"guardian_aid"`
-	DependentAID        string               `json:"dependent_aid"`
+	Type                string               `json:"type"`          // minor_child|elderly|disability|temporary
+	DependentAID        string               `json:"dependent_aid"` // the dependent's own identifier, founded by a standalone inception (ADR-019 amendment)
 	DependentName       string               `json:"dependent_name"`
-	DelegatedAIDPrefix  string               `json:"delegated_aid_prefix"`
 	Status              string               `json:"status"`       // active|expired|revoked|emancipated
 	HostingType         string               `json:"hosting_type"` // cloud|device
 	HostingURL          string               `json:"hosting_url"`
 	CreatedAt           string               `json:"created_at"`
 	UpdatedAt           string               `json:"updated_at"`
 	EmancipationTrigger *EmancipationTrigger `json:"emancipation_trigger,omitempty"`
-	CoGuardians         []string             `json:"co_guardians"`
-	MultisigThreshold   int                  `json:"multisig_threshold"`
-	Metadata            map[string]string    `json:"metadata"`
-	CredentialSAID      string               `json:"credential_said"` // SAID of the guardianship ACDC proving this relationship
+	// The keys in the dependent's multi-signature key set, each with what it is
+	// for. Public keys only: no identifier of any guardian is kept, because none
+	// is written into the dependent's key history either.
+	MultisigParticipants []MultisigParticipant `json:"multisig_participants"`
+	MultisigThreshold    int                   `json:"multisig_threshold"`
+	Metadata             map[string]string     `json:"metadata"`
+	CredentialSAID       string                `json:"credential_said"` // SAID of the guardianship ACDC proving this relationship
+}
+
+// A MultisigParticipant is one public key in a dependent's key set.
+type MultisigParticipant struct {
+	PublicKey string `json:"public_key"`
+	Role      string `json:"role"` // guardian|co_guardian|court|emergency|dependent
 }
 
 type EmancipationTrigger struct {

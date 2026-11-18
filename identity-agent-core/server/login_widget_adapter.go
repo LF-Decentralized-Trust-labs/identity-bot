@@ -19,6 +19,52 @@ import (
 	"identity-agent-core/internal/jsonreply"
 )
 
+// assetThatMaySign finds the asset a page or a server asks this Identity Agent to sign as, and
+// refuses what cannot: an asset that is not there, one waiting for its delegator's approval, one with no
+// signing key, and a page that is not the asset's own. It returns the audience a request from a page is
+// for: the page's own origin. Shared by the sign-in and the statement Ask, so the two cannot differ
+// on which page may ask.
+func (s *CoreServer) assetThatMaySign(assetID, audience, askedFrom string) (found *asset.Asset, aud string, errCode int, errMsg string) {
+	if s.assetHandler == nil || s.KeriDriver == nil {
+		return nil, "", http.StatusServiceUnavailable, "asset or keri driver not available"
+	}
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return nil, "", http.StatusInternalServerError, "asset store unreadable: " + err.Error()
+	}
+	for _, a := range assets {
+		if a.ID == assetID {
+			aa := a
+			found = &aa
+			break
+		}
+	}
+	if found == nil {
+		return nil, "", http.StatusNotFound, "asset not found"
+	}
+	if found.ApprovalPending {
+		return nil, "", http.StatusConflict, "this asset is waiting for the device that holds the identity's key to approve it, so it cannot sign anything yet"
+	}
+	if found.SigningIndex == 0 {
+		return nil, "", http.StatusConflict, "asset has no signing key (re-create the asset to provision one)"
+	}
+
+	if askedFrom != "" {
+		if askedFrom == "null" {
+			return nil, "", http.StatusBadRequest, "this page has no origin to sign in to"
+		}
+		if audience != "" && audience != askedFrom {
+			return nil, "", http.StatusBadRequest, "a page signs in to its own origin only"
+		}
+		audience = askedFrom
+		if found.Origin != "" && !sameOrigin(found.Origin, askedFrom) {
+			return nil, "", http.StatusForbidden, "this website asset is not for this page"
+		}
+	}
+
+	return found, audience, 0, ""
+}
+
 // createSignedAssetChallenge builds, signs, and stores a login challenge bundle for an
 // asset, returning the session token + the QR/bundle URL. errCode==0 means success;
 // otherwise (errCode, errMsg) is an HTTP error to surface. Shared by the native
@@ -37,42 +83,9 @@ import (
 // pass false and an installed_app sign-in there is refused: without the proof
 // it is a bearer QR sign-in nothing tells from a browser's.
 func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool) (sessionToken, qrURL string, errCode int, errMsg string) {
-	if s.assetHandler == nil || s.KeriDriver == nil {
-		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
-	}
-	var found *asset.Asset
-	assets, err := s.assetHandler.Store.ListAssets()
-	if err != nil {
-		return "", "", http.StatusInternalServerError, "asset store unreadable: " + err.Error()
-	}
-	for _, a := range assets {
-		if a.ID == assetID {
-			aa := a
-			found = &aa
-			break
-		}
-	}
-	if found == nil {
-		return "", "", http.StatusNotFound, "asset not found"
-	}
-	if found.ApprovalPending {
-		return "", "", http.StatusConflict, "this asset is waiting for the device that holds the identity's key to approve it, so it cannot sign anything yet"
-	}
-	if found.SigningIndex == 0 {
-		return "", "", http.StatusConflict, "asset has no signing key (re-create the asset to provision one)"
-	}
-
-	if askedFrom != "" {
-		if askedFrom == "null" {
-			return "", "", http.StatusBadRequest, "this page has no origin to sign in to"
-		}
-		if audience != "" && audience != askedFrom {
-			return "", "", http.StatusBadRequest, "a page signs in to its own origin only"
-		}
-		audience = askedFrom
-		if found.Origin != "" && !sameOrigin(found.Origin, askedFrom) {
-			return "", "", http.StatusForbidden, "this website asset is not for this page"
-		}
+	found, audience, errCode, errMsg := s.assetThatMaySign(assetID, audience, askedFrom)
+	if errCode != 0 {
+		return "", "", errCode, errMsg
 	}
 
 	// A utility app is reached only by a front end it offers and its owner has
@@ -195,6 +208,7 @@ func (s *CoreServer) mountLoginWidgetRoutes(r chi.Router) {
 	r.Options("/api/login/session/{asset_id}/{token}", corsPreflight)
 	r.Post("/api/login/session/{asset_id}", s.handleCreateLoginSession)
 	r.Get("/api/login/session/{asset_id}/{token}", s.handleLoginSessionStatus)
+	s.mountStatementRoutes(r)
 }
 
 // POST /api/login/session/{asset_id} — create a login session (SignInButton-compatible).
@@ -240,7 +254,6 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Request) {
 	corsHeaders(w)
 	token := chi.URLParam(r, "token")
-
 	offered := r.Header.Get("X-Collector-Secret")
 	if offered == "" {
 		offered = r.URL.Query().Get("collector")

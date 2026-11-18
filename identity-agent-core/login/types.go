@@ -132,6 +132,17 @@ type SiteRelationship struct {
 	// which is the only thing that ties the pairwise key to the identifier.
 	// Empty for relationships made before it was kept; those are rebuilt.
 	InceptionB64 string `json:"inception_b64,omitempty"`
+	// Bound is set when this person joined this relationship's identifier to a
+	// record they already had, by a statement signed with both keys (ADR-082).
+	Bound *BoundRecord `json:"bound,omitempty"`
+}
+
+// BoundRecord is what a person's Identity Agent keeps of a joining it signed.
+type BoundRecord struct {
+	OrgAID           string `json:"org_aid"`
+	Role             string `json:"role"`
+	RecordIdentifier string `json:"record_identifier"`
+	At               string `json:"at"`
 }
 
 type StartLoginRequest struct {
@@ -163,8 +174,8 @@ type LoginPreviewResponse struct {
 	// challenge names it, so the consent screen can say what is being approved.
 	FrontEnd string `json:"front_end,omitempty"`
 	// LastsUntilEnded is true when approving this sign-in lets the front end's
-	// key speak for the person until they or the app's owner end it, not for a
-	// working day: an installed app's app-key grant (ADR-072 section 4). The
+	// key speak for the person until they or the app's owner end it, not for the
+	// asset's sign-in lifetime: an installed app's app-key grant (ADR-072 section 4). The
 	// consent screen shows it before the person approves.
 	LastsUntilEnded bool   `json:"lasts_until_ended,omitempty"`
 	RPSessionURL    string `json:"rp_session_url"`

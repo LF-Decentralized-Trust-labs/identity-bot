@@ -67,6 +67,22 @@ func DeriveVaultKEK(bip39Seed []byte) ([]byte, error) {
 	return out, nil
 }
 
+// DeriveCeremonyInvitesTagKey derives the key that tags the file of invitations
+// into ownership changes this device has accepted, from the root seed. Its own
+// domain, so a key that says "this file is as this device wrote it" is not a
+// key used for anything else.
+func DeriveCeremonyInvitesTagKey(bip39Seed []byte) ([]byte, error) {
+	if len(bip39Seed) < 32 {
+		return nil, fmt.Errorf("bip39 seed must be at least 32 bytes")
+	}
+	r := hkdf.New(sha256.New, bip39Seed, []byte("identity-agent-ceremony-invites-salt-v1"), []byte("identity-agent/ceremony-invites-integrity/v1"))
+	out := make([]byte, 32)
+	if _, err := r.Read(out); err != nil {
+		return nil, fmt.Errorf("hkdf ceremony invites tag key: %w", err)
+	}
+	return out, nil
+}
+
 // The fixed branches of m/44'/0'/0'/branch'/n' an identity's other keys come
 // from, so the phrase alone finds them (ADR-061 section 1): the post-quantum
 // next key of generation j at PostQuantumBranch/j, the messaging keyset of
@@ -75,6 +91,22 @@ const (
 	PostQuantumBranch = 7000001
 	MessagingBranch   = 7000002
 )
+
+// DerivePairwisePostQuantumSeed derives the seed of the post-quantum next key
+// that sits beside classical key [generation] of one relationship: path
+// m/44'/0'/0'/relationshipIndex'/(PostQuantumBranch+generation)'.
+//
+// It is inside the relationship's own branch, at an index no classical
+// generation reaches, so it is never the same 32 bytes as the classical key of
+// that relationship or the post-quantum key of the identity's own
+// PostQuantumBranch (one secret behind two keys would let obtaining either
+// give both, ADR-061 section 1). Fixed, so the phrase alone reproduces it.
+func DerivePairwisePostQuantumSeed(bip39Seed []byte, relationshipIndex, generation int) ([]byte, error) {
+	if generation < 0 || generation > 1<<20 {
+		return nil, fmt.Errorf("key generation %d is out of range", generation)
+	}
+	return DerivePairwiseSeed(bip39Seed, relationshipIndex, PostQuantumBranch+generation)
+}
 
 // DerivePairwiseSeed derives an Ed25519 seed for a contact index using BIP32/SLIP-0010 HD from the root keystore seed.
 // Path: m / 44' / 0' / 0' / contactIndex' / keyIndex'

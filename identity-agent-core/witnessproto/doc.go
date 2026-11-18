@@ -23,8 +23,14 @@
 //     it, which an agent's fetch of a log and a watcher's serving of it are both
 //     tested against;
 //
+//   - [ReceiptMessage], [SignEventReceipt], [VerifyEventReceipt],
+//     [WitnessPosition], [WitnessKey] and [IsEventSignedReceipt]: the witness
+//     receipt in keripy's form (ADR-070), so an Identity Agent and a hosted
+//     witness build and check it with one implementation, tested against
+//     keripy's own receipts ([KeripyWitnessReceiptVectors]);
+//
 //   - [WitnessesAfter]: the witness list in force after an event, following
-//     br and ba;
+//     br and ba, which a receipt's index is a place in;
 //
 //   - [KeyStateRecordOf], [SignedKeyStateNotice] and [VerifyKeyStateNotice]:
 //     the key state notice, KERI's /ksn/{witness} reply in which a witness

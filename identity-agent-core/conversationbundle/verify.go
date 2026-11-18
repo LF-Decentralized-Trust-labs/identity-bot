@@ -15,9 +15,11 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agentmessage"
+	"identity-agent-core/agentpeer"
 	"identity-agent-core/authorisation"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
+	"identity-agent-core/fingerprint"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
@@ -212,6 +214,9 @@ type verifier struct {
 	// answered is every ask a reply or failure has closed, by its message id:
 	// a progress note on an ask is valid only while the ask is still open.
 	answered map[string]bool
+	// repliedTo is every ask answered by a reply rather than a failure: only
+	// such an ask has an answer to add to (ADR-081).
+	repliedTo map[string]bool
 	// opener is the first entry when an AI agent opened the conversation; the
 	// zero Record when a person did.
 	opener agentmessage.Record
@@ -272,7 +277,7 @@ func verify(b *Bundle, headKeys map[string]*didcomm.DID) Report {
 	}
 	r.Conversation, r.Root = b.Conversation, b.Root
 	v := &verifier{b: b, r: &r, kels: map[string]*keyLog{}, regs: map[string]bool{}, creds: map[string]*credential{},
-		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}, answered: map[string]bool{}}
+		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}, answered: map[string]bool{}, repliedTo: map[string]bool{}}
 	r.Trusts = []string{
 		"The organisation's root key log, as the bundle gives it: its inception and every key it puts in force. Every other identity, credential and anchor is checked back to it.",
 		"The times the Identity Agent stamped on each message and on each credential's issuance and revocation, which decide whether a credential was in force when a message was sent. A body's own signed time must agree with the stamp to within " + agentbody.RequestWindow.String() + ", and a person's signed request to within " + authorisation.Skew.String() + ".",
@@ -772,6 +777,14 @@ func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
 	if rec.ControllerProof != nil || rec.PersonProof != nil {
 		return
 	}
+	if rec.PeerProof != nil {
+		// An AI agent another Identity Agent holds opens a conversation of this
+		// Identity Agent's making with its ask to one this one holds (ADR-085).
+		if _, _, peer := agentmessage.IsPeer(rec.From); !peer || rec.Depth != 1 || rec.Seq != 1 || rec.Kind != agentmessage.KindAsk {
+			v.fault(where, "a conversation opened from another Identity Agent begins with its AI agent's ask, as the first entry, at depth 1")
+		}
+		return
+	}
 	if _, person := agentmessage.IsPerson(rec.To); person || rec.Statement == nil || !rec.Statement.Opens() || rec.Depth != 1 {
 		v.fault(where, "a conversation an AI agent opens begins with its ask to another AI agent that acts on no earlier message, and this is not one")
 		return
@@ -824,10 +837,12 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 	body, err := decode(e.Body)
 	if rec.PersonProof != nil {
 		v.notePersonEntry(where, rec, e, body, err)
+	} else if rec.PeerProof != nil && rec.Outcome == nil {
+		v.checkPeerWords(where, rec, e, body, err)
 	} else if err != nil || len(body) > agentmessage.MaxBody || agentmessage.HashBody(body) != rec.BodyHash || e.Salt != "" {
 		v.fault(where, "the words carried are not the words it was signed over")
 	}
-	if err := rec.CheckSenderProof(); err != nil {
+	if err := v.checkSender(rec); err != nil {
 		v.fault(where, "the sender's own signature does not hold: %v", err)
 		return rec, true
 	}
@@ -836,6 +851,8 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		// Nothing a sender signed: the countersignature is the whole proof.
 	} else if rec.PersonProof != nil {
 		once = append(once, "signature "+rec.PersonProof.Signature)
+	} else if rec.PeerProof != nil {
+		once = append(once, "signature "+rec.PeerProof.Exn)
 	} else if rec.Statement != nil {
 		once = append(once, "signature "+rec.HostSignature, "nonce "+rec.Statement.Host+" "+rec.Statement.HostNonce)
 	} else if rec.ControllerProof.StatementOnly() {
@@ -862,6 +879,8 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.checkOutcome(where, rec, m)
 	case rec.PersonProof != nil:
 		v.checkPersonStatement(where, rec, at, m)
+	case rec.PeerProof != nil:
+		m.Sender = "peer"
 	case rec.Statement != nil:
 		v.checkBodySpoke(where, rec, body, at, m)
 	default:
@@ -871,13 +890,35 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 	if t := rec.To; t != "" && rec.PersonProof == nil && !(rec.Kind == agentmessage.KindReceipt && t == v.b.Root) {
 		// A receipt for one of the Identity Agent's own entries (an outcome) is
 		// addressed to the Identity Agent, which is the root and no delegate of it.
-		if _, person := agentmessage.IsPerson(t); !person {
+		_, _, peer := agentmessage.IsPeer(t)
+		if _, person := agentmessage.IsPerson(t); !person && !peer {
 			if why := v.delegatedFromRoot(t); why != "" {
 				v.fault(where, "it is addressed to %s: %s", t, why)
 			}
 		}
 	}
 	return rec, true
+}
+
+// checkSender checks the sender's own proof on a record. An AI agent another
+// Identity Agent holds is checked with that Identity Agent's messaging keys,
+// which the bundle must carry tied to its key log like any countersigner's; the
+// bundle can show that Identity Agent's keys, never that the AI agent it holds
+// sent the words (the Identity Agent answers for them, ADR-085).
+func (v *verifier) checkSender(rec agentmessage.Record) error {
+	if rec.PeerProof == nil || rec.Outcome != nil {
+		return rec.CheckSenderProof()
+	}
+	holder, _, ok := agentmessage.IsPeer(rec.From)
+	if !ok {
+		return fmt.Errorf("%s is not an AI agent another Identity Agent holds", rec.From)
+	}
+	did, ok := v.dids[holder]
+	if !ok {
+		return fmt.Errorf("the bundle carries no messaging keys tied to the key log of %s, which signed for the AI agent it holds", holder)
+	}
+	v.cannotRuleOut("An entry from an AI agent another Identity Agent holds is signed by that Identity Agent, not by the AI agent: it proves the Identity Agent says the AI agent sent these words, and nothing about which machine or brain produced them (ADR-085).")
+	return rec.CheckPeerProof(did, v.b.Root)
 }
 
 // checkBodySpoke checks an entry an AI agent's body sent: its machine key is
@@ -934,6 +975,39 @@ func (v *verifier) checkBodySpoke(where string, rec agentmessage.Record, body []
 func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmessage.Record, body []byte) {
 	var caps []string
 	_ = json.Unmarshal(grant.attrs["capabilities"], &caps)
+	if contact, agent, peer := agentmessage.IsPeer(rec.To); peer {
+		// An ask to an AI agent another Identity Agent holds rests on its own
+		// capability, which names that contact (ADR-085), and so must the grant
+		// of an AI agent that opened the chain it is in. A conversation another
+		// Identity Agent's AI agent opened is never passed on to a third: an ask to
+		// one inside it is a fault (the sender's own policy, which a trail can
+		// still show was broken).
+		if _, _, fromPeer := agentmessage.IsPeer(rec.OpenedBy); fromPeer {
+			v.fault(where, "an ask to %s was recorded in a conversation that %s opened: a message from another Identity Agent is not passed on to a third", rec.To, rec.OpenedBy)
+		}
+		var limits map[string]interface{}
+		if raw, ok := grant.attrs["resource_constraints"]; ok {
+			_ = json.Unmarshal(raw, &limits)
+		}
+		held := false
+		for _, c := range caps {
+			held = held || c == agentpeer.CapabilityMessagePeer
+		}
+		switch {
+		case !held:
+			v.fault(where, "the AI agent's grant does not let it message AI agents another Identity Agent holds")
+		case rec.Statement != nil && rec.Statement.Opens():
+			if err := agentmessage.CheckPeerOpeningGrant(limits, contact, agent); err != nil {
+				v.fault(where, "the AI agent opened a conversation its grant does not let it: %v", err)
+			}
+		default:
+			if err := agentpeer.CheckPeerGrant(limits, contact, agent); err != nil {
+				v.fault(where, "the AI agent's grant does not let it ask %s: %v", rec.To, err)
+			}
+			v.checkOpenerReach(where, rec, func(l map[string]interface{}) error { return agentpeer.CheckPeerGrant(l, contact, agent) })
+		}
+		return
+	}
 	allowed := false
 	for _, c := range caps {
 		allowed = allowed || c == agentmessage.CapabilityMessageAgent
@@ -955,7 +1029,15 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 			v.fault(where, "the AI agent opened a conversation its grant does not let it: %v", err)
 		}
 	}
-	v.checkOpenerReach(where, rec, args)
+	v.checkOpenerReach(where, rec, localAskAllowed(args))
+}
+
+// localAskAllowed is what a grant's limits must allow for an ask to an AI agent
+// this same Identity Agent holds: agent.message.send's constraints over the ask's words.
+func localAskAllowed(args []byte) func(limits map[string]interface{}) error {
+	return func(l map[string]interface{}) error {
+		return permission.CheckResourceConstraints(l, agentmessage.CapabilityMessageAgent, args)
+	}
 }
 
 // checkThread checks that a body spoke only about a message it was given, and
@@ -987,12 +1069,24 @@ func (v *verifier) checkThread(where string, rec agentmessage.Record) {
 			v.fault(where, "an answer goes only to the sender of an ask addressed to the one answering, and this does not")
 		}
 		v.answered[prompt.MessageID] = true
+		if rec.Kind == agentmessage.KindReply {
+			v.repliedTo[prompt.MessageID] = true
+		}
 	case agentmessage.KindProgress:
 		switch {
 		case prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From:
 			v.fault(where, "a progress note goes only to the sender of an ask addressed to the one writing it, and this does not")
 		case v.answered[prompt.MessageID]:
 			v.fault(where, "a progress note comes after the ask it is about was answered, and a note is only for an ask still being worked")
+		}
+	case agentmessage.KindAddendum:
+		switch {
+		case prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From:
+			v.fault(where, "an addendum goes only from the one an ask was put to, to the one who sent it, and this does not")
+		case !v.repliedTo[prompt.MessageID]:
+			v.fault(where, "an addendum is for an ask that was answered by a reply, and %s was not", prompt.MessageID)
+		case v.closed:
+			v.fault(where, "an addendum was recorded in a conversation that had been closed and not reopened")
 		}
 	case agentmessage.KindAsk:
 		if prompt.To != rec.From {
@@ -1441,7 +1535,7 @@ func joinInts(ns []int) string {
 // opened, the opener's own grant as it stood then: a chain reaches no further
 // than the one who started it, as for a person (ADR-047). The opening ask itself
 // is checked against the same grant by checkAskAllowed.
-func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args []byte) {
+func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, allows func(limits map[string]interface{}) error) {
 	if v.opener.MessageID == "" || rec.GrantSAID == v.opener.GrantSAID {
 		return
 	}
@@ -1463,7 +1557,7 @@ func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args 
 	if raw, ok := grant.attrs["resource_constraints"]; ok {
 		_ = json.Unmarshal(raw, &limits)
 	}
-	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
+	if err := allows(limits); err != nil {
 		v.fault(where, "the conversation's opener, %s, could not have asked %s: %v", v.opener.From, rec.To, err)
 	}
 }
@@ -1560,6 +1654,28 @@ func (v *verifier) checkAskEnded(where string, rec agentmessage.Record) {
 		v.endedAsk[ask.MessageID] = true
 		if lost {
 			v.cannotRuleOut("An ask ended because its AI agent's body was lost: that the body was lost is the Identity Agent's word, which nothing in the bundle shows.")
+		}
+	}
+}
+
+// checkPeerWords checks the words of an entry from an AI agent another Identity
+// Agent holds: they may be left out, and when they are carried they come with
+// the salt of their fingerprint, which is the one the other Identity Agent signed
+// (ADR-067: the salt is kept with the words, never in the record).
+func (v *verifier) checkPeerWords(where string, rec agentmessage.Record, e Entry, body []byte, bodyErr error) {
+	switch {
+	case bodyErr != nil || len(body) > agentmessage.MaxBody:
+		v.fault(where, "the words carried are unreadable or too long")
+	case e.Salt == "" && len(body) > 0:
+		v.fault(where, "words are carried without the salt of their fingerprint")
+	case e.Salt != "":
+		salt, err := decode(e.Salt)
+		if err != nil {
+			v.fault(where, "the salt carried is unreadable")
+			return
+		}
+		if f, err := fingerprint.Of(salt, body); err != nil || f != rec.BodyHash {
+			v.fault(where, "the words carried are not the words the other Identity Agent signed")
 		}
 	}
 }

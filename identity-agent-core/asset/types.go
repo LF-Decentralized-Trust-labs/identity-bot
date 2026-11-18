@@ -129,6 +129,10 @@ type Asset struct {
 	// FrontEndsOff are the offered front ends the owner has switched off. Always
 	// a subset of DeviceFrontEnds.
 	FrontEndsOff []string `json:"front_ends_off,omitempty"`
+	// SignInLifetimeHours is how long a person's sign-in to this utility app lets
+	// their browser's key speak for them, as its owner set it; 0 is the default.
+	// Read it through SignInLifetime, which applies the default and the ceiling.
+	SignInLifetimeHours int `json:"sign_in_lifetime_hours,omitempty"`
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
 	// raw private key is never persisted. >0 means the asset can sign login challenges.
@@ -310,10 +314,40 @@ type EmployeeInvite struct {
 	// IsSigner marks the organisation-founding invite (t=4): redeeming it makes the
 	// individual an ACTIVE super-admin immediately (they're a founding signer,
 	// there's no one above them to approve), and requires a vouch signature.
-	IsSigner  bool      `json:"is_signer,omitempty"`
-	UseCount  int       `json:"use_count"`
-	CreatedAt time.Time `json:"created_at"`
-	Revoked   bool      `json:"revoked"`
+	IsSigner bool `json:"is_signer,omitempty"`
+	// Purpose is "" for an invitation to be an employee or a signer, and
+	// PurposeBinding for one to join an identifier to a record (ADR-082). An
+	// invite of one purpose is not accepted as the other.
+	Purpose string `json:"purpose,omitempty"`
+	// BindRole is the role a binding invite joins an identifier in: person or owner.
+	BindRole string `json:"bind_role,omitempty"`
+	// RecordIdentifiers are the identifiers the record already holds, one of
+	// which the redeemer must sign with.
+	RecordIdentifiers []string  `json:"record_identifiers,omitempty"`
+	UseCount          int       `json:"use_count"`
+	CreatedAt         time.Time `json:"created_at"`
+	Revoked           bool      `json:"revoked"`
+	// ExpiresAt, when set, is when the invite stops being accepted. A binding
+	// invite always has one; an invite without one does not expire.
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+}
+
+// PurposeBinding marks an invite to join an identifier to a record.
+const PurposeBinding = "binding"
+
+// Binding is one identifier joined to a record by a person's statement signed
+// with both keys (ADR-082). Statement is the signed bytes and the two
+// signatures are kept so the joining can be shown to be theirs.
+type Binding struct {
+	Record       string    `json:"record"`
+	New          string    `json:"new"`
+	Role         string    `json:"role"`
+	Site         string    `json:"site"`
+	InviteDigest string    `json:"invite"`
+	Statement    string    `json:"statement"`
+	RecordSig    string    `json:"record_sig"`
+	NewSig       string    `json:"new_sig"`
+	At           time.Time `json:"at"`
 }
 
 // Employee is a first-class org roster entry — employment is org-scoped, not

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"identity-agent-core/agentbody"
+	"identity-agent-core/agentpeer"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 )
@@ -54,6 +55,10 @@ const (
 	// the answer — the ask stays open, so the reply or failure that closes it
 	// can still follow, and any number of notes may come before it.
 	KindProgress = "progress"
+	// KindAddendum is more to say about an ask already answered by a reply:
+	// from the one who answered to the one who asked, a person or an AI agent.
+	// It owes no answer, takes no turn and leaves the ask answered (ADR-081).
+	KindAddendum = "addendum"
 	// KindClose is the one who opened a conversation saying the work is done,
 	// or the organisation's owner stopping it. It takes no turn and carries no
 	// words. Nothing closes a conversation for being quiet.
@@ -145,6 +150,21 @@ func CheckOpeningGrant(limits map[string]interface{}, to string) error {
 	if !named {
 		return fmt.Errorf("the grant does not let its AI agent open a conversation toward %s", to)
 	}
+	return checkOpeningRate(limits)
+}
+
+// CheckPeerOpeningGrant is CheckOpeningGrant for an opening toward an AI agent
+// another Identity Agent holds (ADR-085): the grant must name that contact (and
+// the AI agent, when it names any) under agent.message.peer, and state the same
+// rate.
+func CheckPeerOpeningGrant(limits map[string]interface{}, contact, agent string) error {
+	if err := agentpeer.CheckPeerGrant(limits, contact, agent); err != nil {
+		return err
+	}
+	return checkOpeningRate(limits)
+}
+
+func checkOpeningRate(limits map[string]interface{}) error {
 	open, _ := limits[CapabilityMessageOpen].(map[string]interface{})
 	if n, ok := open["per_hour"].(float64); !ok || n < 1 || n > MaxOpeningsPerHour || n != float64(int64(n)) {
 		return fmt.Errorf("the grant states no count of conversations its AI agent may open per hour: an opening needs a whole %q from 1 to %d under %s", "per_hour", MaxOpeningsPerHour, CapabilityMessageOpen)
@@ -167,12 +187,40 @@ func IsPerson(party string) (string, bool) {
 	return "", false
 }
 
+// PeerPrefix marks a party that is an AI agent ANOTHER Identity Agent holds
+// (ADR-085): "peer:" then that Identity Agent's identifier, a slash and the AI
+// agent's. This Identity Agent holds no keys for it, so the entries it speaks in
+// are countersigned by this Identity Agent, as a person's are, and carry the
+// other Identity Agent's signed statement (PeerProof).
+const PeerPrefix = "peer:"
+
+// Peer names an AI agent another Identity Agent holds as a party to a
+// conversation.
+func Peer(holder, agent string) string { return PeerPrefix + holder + "/" + agent }
+
+// IsPeer reports whether a party is an AI agent another Identity Agent holds,
+// and which Identity Agent and AI agent.
+func IsPeer(party string) (holder, agent string, ok bool) {
+	rest, found := strings.CutPrefix(party, PeerPrefix)
+	if !found {
+		return "", "", false
+	}
+	holder, agent, found = strings.Cut(rest, "/")
+	if !found || holder == "" || agent == "" || strings.Contains(agent, "/") {
+		return "", "", false
+	}
+	return holder, agent, true
+}
+
 // Countersigner is the identity that countersigns a message sent by from: the
 // Identity Agent, on a person's behalf, for a person's words; the AI agent
 // itself for its own. The body that receives a message, the export that
 // gathers its keys and the verifier that checks it all ask this one question.
 func Countersigner(from, identityAgent string) string {
 	if _, person := IsPerson(from); person {
+		return identityAgent
+	}
+	if _, _, peer := IsPeer(from); peer {
 		return identityAgent
 	}
 	return from
@@ -315,7 +363,7 @@ func (s Statement) Check() error {
 		}
 	}
 	switch s.Kind {
-	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress, KindClose, KindReopen, KindLimit:
+	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress, KindAddendum, KindClose, KindReopen, KindLimit:
 	default:
 		return fmt.Errorf("%q is not a kind of message", s.Kind)
 	}
@@ -563,6 +611,10 @@ type Record struct {
 	// with no words in it (ADR-067, ADR-068). The same record, in the same
 	// chain, holds a person's entry whichever way they signed it.
 	PersonProof *PersonProof `json:"person_proof,omitempty"`
+	// PeerProof is the other Identity Agent's own statement, for an entry an AI
+	// agent another Identity Agent holds sent (ADR-085). Checked with that
+	// Identity Agent's keys (CheckPeerProof), which this record does not carry.
+	PeerProof *PeerProof `json:"peer_proof,omitempty"`
 	// Refusal is why the Identity Agent refused a person's write before
 	// forwarding anything. A refusal is an entry of the chain with a person's
 	// proof, so it records who tried, when and why, and holds no words.
@@ -583,10 +635,47 @@ type Record struct {
 	OpenedBy string `json:"opened_by"`
 }
 
+// PeerProof is what another Identity Agent signed to say an AI agent it holds
+// sent words to an AI agent this Identity Agent holds: the signed exchange
+// message (agentpeer), without the words and without their salt.
+type PeerProof = agentpeer.Signed
+
+// CheckPeerProof verifies a record whose sender is an AI agent another Identity
+// Agent holds, with that Identity Agent's keys (sender): its entry is signed by
+// them, and says what the record says, which is the same message between the
+// same two AI agents with the same words. self is the Identity Agent whose
+// record this is: the statement must be for it, and from another. Which keys
+// are the sender's, and that they were its keys at the time, is for whoever
+// holds its key log.
+func (r Record) CheckPeerProof(sender *didcomm.DID, self string) error {
+	if r.PeerProof == nil {
+		return errors.New("the record carries no proof from another Identity Agent")
+	}
+	if r.Statement != nil || r.ControllerProof != nil || r.PersonProof != nil {
+		return errors.New("a message carries one sender's proof, not two")
+	}
+	st, err := agentpeer.ReadStatement(*r.PeerProof, sender)
+	if err != nil {
+		return err
+	}
+	if st.ToAID != self || st.FromAID == self {
+		return errors.New("the other Identity Agent signed this for someone else, or for itself")
+	}
+	if r.From != Peer(st.FromAID, st.FromAgent) || r.To != st.ToAgent || r.Kind != st.Kind ||
+		r.MessageID != st.MessageID || r.InReplyTo != st.InReplyTo || r.BodyHash != st.Fingerprint {
+		return errors.New("the record does not say what the other Identity Agent signed")
+	}
+	return nil
+}
+
 // CheckSenderProof verifies the sender's own signature on a record, and that
-// it agrees with what the record says.
+// it agrees with what the record says. A record from an AI agent another
+// Identity Agent holds cannot be checked without that Identity Agent's keys, so
+// here it fails closed: use CheckPeerProof.
 func (r Record) CheckSenderProof() error {
 	switch {
+	case r.PeerProof != nil && r.Outcome == nil:
+		return errors.New("an entry from an AI agent another Identity Agent holds is checked with that Identity Agent's keys")
 	case r.Outcome != nil:
 		return r.checkOutcome()
 	case r.Kind == KindOutcome:
@@ -699,6 +788,11 @@ func CountersignWith(as string, pack func(m *didcomm.JWM) (*didcomm.Envelope, er
 	to := r.To
 	if aid, ok := IsPerson(to); ok {
 		to = aid
+	}
+	// An AI agent another Identity Agent holds is addressed through that
+	// Identity Agent: the AI agent is named in the record, which is the body.
+	if holder, _, ok := IsPeer(to); ok {
+		to = holder
 	}
 	if to == "" {
 		// A close, a reopen and an outcome name no recipient: the envelope is

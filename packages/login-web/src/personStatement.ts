@@ -5,7 +5,7 @@
  * `signed-fingerprint-vectors.json` by `person-statement-vectors.test.mjs`.
  *
  * A utility app's hosted page signs with it what its person says (`ask`), closes or reopens a conversation, and lists
- * their conversations for one other utility app (`list`, which names that app as its audience, ADR-072 Amendment 10).
+ * their conversations for one other utility app (`list`, which names that app as its audience, ADR-072 Amendment 16).
  * The key is the browser's, non-extractable, in this page's own IndexedDB: nothing here can read it out, only sign.
  */
 import { blake3Qb64, matterFixedQb64 } from "@identity-agent/login-verify/browser";
@@ -109,7 +109,7 @@ export interface PersonProof {
 /** What a page says about a statement it signs. The page, not its caller, decides every other field: the key, who the
  *  person is here (`from`), the id, the nonce, the time and the salt are made here, so whoever asks for a signature
  *  cannot ask for those. */
-export interface StatementRequest {
+export interface PersonStatementRequest {
   /** The Identity Agent that holds the conversation (it is signed in, so another Identity Agent refuses a copy). */
   agent: string;
   kind: PersonKind;
@@ -125,7 +125,7 @@ export interface StatementRequest {
   words?: string;
 }
 
-export interface SignedStatement {
+export interface SignedPersonStatement {
   statement: PersonProof;
   /** The salt of the fingerprint, unpadded base64url. It travels with the words and is never in a record. */
   salt: string;
@@ -141,7 +141,7 @@ const NO_BREAKS = /[\r\n]/;
 /** Signs one statement with the browser's key. Refuses what the core would: a list that names no audience, or any
  *  other kind that names one, a list for a conversation, an ask with no words or no recipient, a close or reopen with
  *  words or a recipient, and a field with a line break in it. */
-export async function signPersonStatement(key: BrowserKey, r: StatementRequest, env: SigningEnvironment = {}): Promise<SignedStatement> {
+export async function signPersonStatement(key: BrowserKey, r: PersonStatementRequest, env: SigningEnvironment = {}): Promise<SignedPersonStatement> {
   const words = r.words ?? "";
   const isList = r.kind === "list";
   const conversation = isList ? LIST_CONVERSATION : r.conversation ?? "";

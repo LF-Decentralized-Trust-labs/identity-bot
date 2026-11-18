@@ -636,6 +636,9 @@ type InstalledAppKeyFacts struct {
 	// Level is "strongbox" or "tee" (android), "secure_enclave" (apple) or
 	// "tpm" (tpm).
 	Level string
+	// EKIssuer is, for a TPM, who certified the endorsement key of the chip that signed, and
+	// its class (TPMClassPhysical: the only one accepted). Nil for the other platforms.
+	EKIssuer *EKIssuer
 	// AppPackages and AppSigners are the Android package names and signing
 	// certificate digests the hardware stated; AppleAppID is the App Attest
 	// application identifier ("<team id>.<bundle id>"). TPM proves no app.

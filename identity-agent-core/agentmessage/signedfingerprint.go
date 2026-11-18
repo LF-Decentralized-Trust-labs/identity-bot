@@ -1,15 +1,13 @@
 package agentmessage
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"identity-agent-core/agentbody"
-	"identity-agent-core/iacrypto"
+	"identity-agent-core/fingerprint"
 )
 
 // A person signs a salted fingerprint of their words, never the words
@@ -29,38 +27,18 @@ const (
 
 // Salt sizes, in bytes.
 const (
-	MinSalt = 16
-	MaxSalt = 1024
+	MinSalt = fingerprint.MinSalt
+	MaxSalt = fingerprint.MaxSalt
 )
-
-const fingerprintTagV1 = "IA-FINGERPRINT-V1"
 
 // NewSalt is a fresh random salt of the shortest allowed size. A signer makes
 // one for every message.
-func NewSalt() ([]byte, error) {
-	salt := make([]byte, MinSalt)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	return salt, nil
-}
+func NewSalt() ([]byte, error) { return fingerprint.NewSalt() }
 
 // Fingerprint is the version 1 fingerprint of words under a salt. For an
 // entry the Identity Agent holds only as ciphertext, words is the ciphertext.
-func Fingerprint(salt, words []byte) (string, error) {
-	if len(salt) < MinSalt {
-		return "", fmt.Errorf("a salt of at least %d bytes is needed", MinSalt)
-	}
-	if len(salt) > MaxSalt {
-		return "", fmt.Errorf("a salt of at most %d bytes is allowed", MaxSalt)
-	}
-	pre := make([]byte, 0, len(fingerprintTagV1)+2+len(salt)+len(words))
-	pre = append(pre, fingerprintTagV1...)
-	pre = binary.BigEndian.AppendUint16(pre, uint16(len(salt)))
-	pre = append(pre, salt...)
-	pre = append(pre, words...)
-	return iacrypto.Blake3QB64Must(pre), nil
-}
+// The construction is package fingerprint's.
+func Fingerprint(salt, words []byte) (string, error) { return fingerprint.Of(salt, words) }
 
 // CheckFingerprint says whether fingerprint is the one of words under salt, at
 // the version stated. Version 0 has no salt and is checked only when
@@ -125,7 +103,7 @@ const (
 	PersonKindLimit = "limit"
 	// PersonKindList is a person asking a utility app's back end to list their
 	// own conversations across every utility app that keeps one (ADR-072
-	// Amendment 9). It is for no conversation, to nobody, answers nothing and
+	// Amendment 15). It is for no conversation, to nobody, answers nothing and
 	// carries no words: the statement is never an entry of a trail.
 	PersonKindList = "list"
 )
@@ -163,7 +141,7 @@ type PersonStatement struct {
 	// Audience is the utility app's asset id a list statement is for: the
 	// one that presents it. It is inside the signed bytes (IA-PERSON-MSG-V2),
 	// so a list signed for one utility app is no list for another (ADR-072
-	// Amendment 10). Only a list carries one, and every list does; every other
+	// Amendment 16). Only a list carries one, and every list does; every other
 	// kind is signed as IA-PERSON-MSG-V1 exactly as before.
 	Audience           string `json:"audience,omitempty"`
 	Nonce              string `json:"nonce"`

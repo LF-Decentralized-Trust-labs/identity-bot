@@ -1,0 +1,247 @@
+{
+ "format": "statement-signature/1",
+ "note": "Byte-exact vectors. Statements are UTF-8; line breaks are LF; no trailing newline. Built by a consumer written in Python and read by the Go core: both must agree on every byte.",
+ "envelope_header": "statement-signature/1",
+ "decision_approvals": [
+  {
+   "decision": {
+    "id": 7,
+    "title": "Use the existing queue for retries",
+    "decided_by": "agent-a",
+    "impact": "small",
+    "undo_minutes": 5
+   },
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "title_hash": "EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo",
+   "envelope_for_asker": {
+    "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve"
+   }
+  },
+  {
+   "decision": {
+    "id": 1203,
+    "title": "Rotate the relay key now, not at the next window",
+    "decided_by": "agent-c",
+    "impact": "architectural",
+    "undo_minutes": 240
+   },
+   "statement": "decision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=agent-c\nimpact=architectural\nundo-minutes=240\nverdict=approve",
+   "title_hash": "EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho",
+   "envelope_for_asker": {
+    "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=1203\ntitle-hash=EDJRTh9p0sdE6wYqlTNi6hMzVpxDKrVB4VQkRev2h7ho\ndecided-by=agent-c\nimpact=architectural\nundo-minutes=240\nverdict=approve"
+   }
+  },
+  {
+   "decision": {
+    "id": 9,
+    "title": "Show “naïve” 日本語 and an emoji 🍇 as written",
+    "decided_by": "agent-b",
+    "impact": "moderate",
+    "undo_minutes": 0
+   },
+   "statement": "decision-approval/1\ndecision=9\ntitle-hash=EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc\ndecided-by=agent-b\nimpact=moderate\nundo-minutes=0\nverdict=approve",
+   "title_hash": "EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc",
+   "envelope_for_asker": {
+    "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+    "bytes": "statement-signature/1\nasker: EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0\n\ndecision-approval/1\ndecision=9\ntitle-hash=EBRcU76WRJWSIpuchHZSQ1Fy-IIy9fL230YRJGXg2wRc\ndecided-by=agent-b\nimpact=moderate\nundo-minutes=0\nverdict=approve"
+   }
+  }
+ ],
+ "disagreements": [
+  {
+   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,agent-c\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
+   "subject": {
+    "kind": "decision",
+    "ref": "7",
+    "text": "Use the existing queue for retries"
+   },
+   "correction": "Use the dead-letter queue",
+   "addressed": [
+    "agent-a",
+    "agent-c"
+   ]
+  }
+ ],
+ "generic_ok": [
+  {
+   "name": "decision approval",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "header": "decision-approval/1"
+  },
+  {
+   "name": "disagreement",
+   "statement": "disagreement/1\nsubject=decision:7\nsubject-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\nto=agent-a,agent-c\ncorrection-hash=EM1-jbXy19h_px3f6B7SrS5Ys4gCisQgCwPWkU6iLJMB\nverdict=disagree",
+   "header": "disagreement/1"
+  },
+  {
+   "name": "plain text of two lines",
+   "statement": "my-note/1\nI agree.",
+   "header": "my-note/1"
+  },
+  {
+   "name": "non-ASCII text",
+   "statement": "my-note/1\nNaïve 日本語 🍇",
+   "header": "my-note/1"
+  }
+ ],
+ "refused": [
+  {
+   "name": "empty",
+   "statement": "",
+   "refused_because": "there is no statement"
+  },
+  {
+   "name": "no header shape",
+   "statement": "just some words",
+   "refused_because": "first line is not a name and version"
+  },
+  {
+   "name": "header with capitals",
+   "statement": "My-Note/1\nx",
+   "refused_because": "first line is not a name and version"
+  },
+  {
+   "name": "a key event",
+   "statement": "{\"v\":\"KERI10JSON000000_\",\"t\":\"icp\"}",
+   "refused_because": "first line is not a name and version"
+  },
+  {
+   "name": "trailing newline",
+   "statement": "my-note/1\nx\n",
+   "refused_because": "ends with a line break"
+  },
+  {
+   "name": "carriage return",
+   "statement": "my-note/1\r\nx",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "tab",
+   "statement": "my-note/1\nx\ty",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "NUL",
+   "statement": "my-note/1\nx\u0000y",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "right-to-left override",
+   "statement": "my-note/1\nsafe ‮txt.exe",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "bidi isolate",
+   "statement": "my-note/1\n⁦hidden⁩",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "zero width space",
+   "statement": "my-note/1\nap​prove",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "soft hyphen",
+   "statement": "my-note/1\nap­prove",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "tag character",
+   "statement": "my-note/1\nx󠁁",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "variation selector",
+   "statement": "my-note/1\nx️",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "braille blank",
+   "statement": "my-note/1\nx⠀",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "hangul filler",
+   "statement": "my-note/1\nxㅤ",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "object replacement",
+   "statement": "my-note/1\nx￼",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "line separator",
+   "statement": "my-note/1\nx y",
+   "refused_because": "cannot be shown as it is"
+  },
+  {
+   "name": "25 lines",
+   "statement": "my-note/1\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+   "refused_because": "more than 24 lines"
+  },
+  {
+   "name": "over 2048 bytes",
+   "statement": "my-note/1\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "refused_because": "longer than 2048 bytes"
+  },
+  {
+   "name": "approval with an extra line",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve\nverdict=approve",
+   "refused_because": "wrong number of lines"
+  },
+  {
+   "name": "approval with the lines swapped",
+   "statement": "decision-approval/1\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecision=7\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "refused_because": "line 2 is not decision="
+  },
+  {
+   "name": "approval with a trailing space",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small \nundo-minutes=5\nverdict=approve",
+   "refused_because": "impact is small, moderate or architectural"
+  },
+  {
+   "name": "approval with a verdict that is not approve",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=reject",
+   "refused_because": "not verdict=approve"
+  },
+  {
+   "name": "approval with an impact it is not",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=tiny\nundo-minutes=5\nverdict=approve",
+   "refused_because": "impact is small, moderate or architectural"
+  },
+  {
+   "name": "approval with a leading zero id",
+   "statement": "decision-approval/1\ndecision=07\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "refused_because": "are numbers"
+  },
+  {
+   "name": "approval with a title that is not the one hashed",
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "refused_because": "not the sentence the statement is of",
+   "title": "Use a different queue for retries"
+  },
+  {
+   "name": "a title on a statement with no sentence",
+   "statement": "my-note/1\nx",
+   "refused_because": "no sentence to check it against",
+   "title": "anything"
+  }
+ ],
+ "title_ok": [
+  {
+   "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+   "title": "Use the existing queue for retries"
+  }
+ ],
+ "signature_vector": {
+  "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "public_key_hex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+  "asker": "EDLI8WYplNwjvaT1JL-07pEY6Xp2jerK8yLuGj4VlXC0",
+  "statement": "decision-approval/1\ndecision=7\ntitle-hash=EDS0LpyaphaKTKlw2gBORDWVoL4W7gflPx4juoPqWkSo\ndecided-by=agent-a\nimpact=small\nundo-minutes=5\nverdict=approve",
+  "signature_hex": "b8e130e6b98aa813906cb88cf86081395120c4d5951bcdfbe5dae5b0b68fba3f72528e2c6ec313c3d9067bd0e7be057e147637efee63d898bf8aa38877c4010d",
+  "signature_qb64": "AAC44TDmuYqoE5BsuIz4YIE5USDE1ZUbzfvl2uWwto-6P3JSjixuwxPD2QZ70Oe-BX4Udjfv7mPYmL-Ko4h3xAEN"
+ }
+}

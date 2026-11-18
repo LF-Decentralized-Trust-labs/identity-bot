@@ -115,6 +115,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Put("/{id}/front-ends/offered", s.assetHandler.HandleSetOfferedFrontEnds)
 		r.Put("/{id}/relay-id", s.assetHandler.HandleSetRelayID)
 		r.Put("/{id}/back-end", s.assetHandler.HandleSetBackEnd)
+		r.Put("/{id}/sign-in-lifetime", s.assetHandler.HandleSetSignInLifetime)
 		r.Get("/{id}/app-key-grants", s.handleListAppKeyGrants)
 		r.Delete("/{id}/app-key-grants/{key}", s.handleEndAppKeyGrant)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
@@ -196,4 +197,34 @@ func (s *CoreServer) wireAssetHandlerHooks(h *asset.Handler) {
 		}
 	}
 	// The delegator for per-asset delegated inception is the agent's root identity AID.
+}
+
+// reviveAssetIdentities hands the engine every asset's identity at start-up.
+// The engine forgets every identity on a restart, and an asset's is otherwise
+// rebuilt only when something asks for its key log by name, so what reads the
+// log without that rebuild (the cross-check a watcher asks for, a signature
+// made as the asset) found nothing until an unrelated request came first. An
+// asset already held is left alone, one waiting for its approval has no log to
+// rebuild, and one that cannot be revived is reported and rebuilt on use, as it
+// was before.
+func (s *CoreServer) reviveAssetIdentities() {
+	if s.assetHandler == nil || s.KeriDriver == nil {
+		return
+	}
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		log.Printf("[identity-agent-core] the assets cannot be listed to be revived: %v", err)
+		return
+	}
+	for _, a := range assets {
+		if a.ApprovalPending || a.SigningIndex == 0 {
+			continue
+		}
+		if k, err := s.KeriDriver.GetKel(a.DisplayName); err == nil && k != nil && k.AID == a.PairwiseAID {
+			continue
+		}
+		if err := s.reviveAssetIdentity(a); err != nil {
+			log.Printf("[identity-agent-core] asset identity %s not revived at start: %v", a.DisplayName, err)
+		}
+	}
 }

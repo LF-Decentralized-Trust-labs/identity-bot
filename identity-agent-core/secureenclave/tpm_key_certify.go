@@ -40,8 +40,7 @@ package secureenclave
 // check would pass the moment a root is pinned. So the credential's key is the
 // core's alone and the app learns the credential only from the TPM, by
 // TPM2_ActivateCredential on a blob the core made with TPM2_MakeCredential
-// (the core's side of that exchange is not built yet, and until it is no
-// TPM key can be proved). verifyTPMKeyCertify refuses, in code, a
+// (the core's side of that exchange is MakeTPMCredential). verifyTPMKeyCertify refuses, in code, a
 // credentialKey that is short or is the challenge. Two values derive:
 //
 //	extraData  = SHA-256("identity-agent-tpm-key-certify-v1" 0x00 || challenge)
@@ -76,11 +75,16 @@ package secureenclave
 //     caller needs, and accepting one would be accepting a key that cannot be
 //     the app's signing key.
 //
-// PINNED ROOTS. tpmManufacturerRoots is EMPTY in this file and verification
-// FAILS CLOSED while it is. The real roots (Infineon, STMicroelectronics,
-// Nuvoton, Intel PTT, AMD fTPM, Microsoft's virtual-TPM root, ...) must be
-// supplied by the vendor-roots process from the manufacturers' published
-// certificates; none are invented here.
+// PINNED ROOTS. tpmManufacturerRoots is the PEM files committed in tpmroots
+// (tpm_roots.go), and verification FAILS CLOSED while there are none. Which
+// manufacturers' roots to trust is the owner's decision, made by committing
+// them (tpmroots/README.md); none are invented here.
+//
+// THE CREDENTIAL EXCHANGE is built (tpm_make_credential.go) and was checked
+// against a software TPM, the reference implementation of the TPM 2.0 library,
+// which opened the core's credential with TPM2_ActivateCredential and certified
+// a key whose evidence this file accepts (testdata/tpmsim). What a real
+// manufacturer's TPM and certificate chain do has not been seen.
 //
 // NOT PROVEN WITHOUT A REAL TPM: see tpm_key_certify_test.go. The structures
 // are parsed from the TCG spec, and the tests use synthetic structures built
@@ -98,15 +102,19 @@ import (
 	"crypto/sha512"
 	"crypto/subtle"
 	"crypto/x509"
+	"encoding/asn1"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math/big"
 	"time"
 )
 
 // tpmManufacturerRoots are the TPM manufacturer root certificates an EK
-// certificate must chain to. Empty on purpose: verification fails closed until
-// the vendor roots are supplied.
-var tpmManufacturerRoots []*x509.Certificate
+// certificate must chain to: the physical roots pinned in tpmroots (ADR-072
+// Amendment 10). Verification fails closed if none are loaded.
+var tpmManufacturerRoots []*x509.Certificate // set from tpmroots by tpm_roots.go
 
 const (
 	tpmGeneratedValue  = 0xFF544347
@@ -168,13 +176,34 @@ func tpmCredentialSecret(credentialKey, akName, ekPublicDER []byte) []byte {
 // It proves the key is a non-exportable signing key generated inside a genuine
 // TPM. It does NOT prove which app holds it: AppIDPresent is always false.
 func VerifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time) (*InstalledAppKeyFacts, error) {
+	loadTPMPins()
 	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, tpmManufacturerRoots)
+}
+
+// VerifyTPMKeyCertifyClasses is VerifyTPMKeyCertify for a caller that says whether the owner
+// opted in to virtual and cloud TPMs (asset.InstalledAppIdentity.AcceptsVirtualTPM). A chip of
+// a pinned physical issuer is accepted either way; a virtual TPM only with allowVirtual, and
+// then the proof says so (EKIssuer.Class is TPMClassVirtual).
+func VerifyTPMKeyCertifyClasses(evidence, challenge, credentialKey []byte, now time.Time, allowVirtual bool) (*InstalledAppKeyFacts, error) {
+	loadTPMPins()
+	return verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey, now, tpmManufacturerRoots, allowVirtual)
+}
+
+// VerifyTPMKeyCertifyAgainstRoots is VerifyTPMKeyCertify for roots the caller
+// names, for the tool that checks the exchange against a software TPM
+// (testdata/tpmsim). The server never calls it: it takes the pinned roots.
+func VerifyTPMKeyCertifyAgainstRoots(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
+	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, roots)
 }
 
 // TPMCredentialKeyLen is the least length of the secret the core keeps for one attestation.
 const TPMCredentialKeyLen = 32
 
 func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate) (*InstalledAppKeyFacts, error) {
+	return verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey, now, roots, false)
+}
+
+func verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey []byte, now time.Time, roots []*x509.Certificate, allowVirtual bool) (*InstalledAppKeyFacts, error) {
 	if len(roots) == 0 {
 		return nil, notAttested("no TPM manufacturer roots are pinned in this build, so no TPM can be trusted")
 	}
@@ -267,7 +296,7 @@ func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 	}
 
 	// The EK certificate, and the AK's binding to that EK.
-	ekCert, err := verifyEKCertificate(ev.EKCert, ev.EKChain, roots, now)
+	ekCert, ekIssuer, err := verifyEKCertificateClass(ev.EKCert, ev.EKChain, roots, now, allowVirtual)
 	if err != nil {
 		return nil, err
 	}
@@ -281,26 +310,82 @@ func verifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 	}
 
 	// AppIDPresent stays false: a TPM does not say which app asked for a key.
-	return &InstalledAppKeyFacts{Public: pub, Platform: "tpm", Level: "tpm"}, nil
+	return &InstalledAppKeyFacts{Public: pub, Platform: "tpm", Level: "tpm", EKIssuer: ekIssuer}, nil
 }
 
 func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time) (*x509.Certificate, error) {
+	leaf, _, err := verifyEKCertificateIssuer(der, chain, roots, now)
+	return leaf, err
+}
+
+// ErrVirtualTPM is the refusal of an endorsement key certified by an issuer of a virtual or
+// cloud TPM (errors.Is), so a caller can tell the person in plain words.
+var ErrVirtualTPM = errors.New("the TPM is a virtual or cloud one")
+
+// TPMClassPhysical is the class of a chip whose endorsement key a pinned physical
+// issuer certified: a discrete chip, a firmware TPM in the CPU, or Pluton. It is the only class
+// accepted unless the owner opted in to virtual TPMs. A virtual or cloud TPM (a key the hypervisor operator can read) is refused otherwise.
+const TPMClassPhysical = "physical"
+
+// TPMClassVirtual is the class of a virtual or cloud TPM (Microsoft's own software TPM in
+// Hyper-V or Azure): the hypervisor's operator can read its keys. It is carried by a proof
+// only for an owner who opted in (VerifyTPMKeyCertifyClasses).
+const TPMClassVirtual = "virtual"
+
+// EKIssuer says who certified a proved TPM's endorsement key.
+type EKIssuer struct {
+	Subject string // the issuer's subject, as the certificate gives it
+	SHA256  string // hex SHA-256 of the issuer certificate
+	Class   string // TPMClassPhysical, or TPMClassVirtual where the owner opted in to it
+}
+
+func sha256Hex(c *x509.Certificate) string {
+	h := sha256.Sum256(c.Raw)
+	return hex.EncodeToString(h[:])
+}
+
+func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time) (*x509.Certificate, *EKIssuer, error) {
+	return verifyEKCertificateClass(der, chain, roots, now, false)
+}
+
+// verifyEKCertificateClass is verifyEKCertificateIssuer for a caller that says whether a
+// virtual or cloud TPM may pass (an owner's opt-in). Without it a virtual TPM is refused.
+func verifyEKCertificateClass(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time, allowVirtual bool) (*x509.Certificate, *EKIssuer, error) {
+	loadTPMPins()
 	if len(der) == 0 {
-		return nil, notAttested("no endorsement key certificate")
+		return nil, nil, notAttested("no endorsement key certificate")
 	}
 	leaf, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, notAttested("the endorsement key certificate: %v", err)
+		return nil, nil, notAttested("the endorsement key certificate: %v", err)
+	}
+	// A real endorsement key certificate names its TPM in a critical subject alternative
+	// name crypto/x509 does not read; that one form, and no other critical extension, is
+	// taken as handled (tpm_ek_subject_alt_name.go).
+	if err := acceptTCGSubjectAltName(leaf); err != nil {
+		return nil, nil, notAttested("the endorsement key certificate: %v", err)
 	}
 	if len(chain) > 8 {
-		return nil, notAttested("the endorsement key certificate chain is too long")
+		return nil, nil, notAttested("the endorsement key certificate chain is too long")
 	}
 	inter := x509.NewCertPool()
 	for _, c := range chain {
 		ic, err := x509.ParseCertificate(c)
 		if err != nil {
-			return nil, notAttested("an issuer certificate: %v", err)
+			// A front end sends the issuers its TPM carries, among them the ones crypto/x509
+			// will not read. Such a certificate cannot help build a chain and is trusted only
+			// if it is pinned (tpm_lenient.go), so it is passed over, not refused.
+			continue
 		}
+		inter.AddCert(ic)
+	}
+	// The issuers the pinned package carries need not be sent by the front end.
+	for _, ic := range tpmManufacturerIssuers {
+		inter.AddCert(ic)
+	}
+	// The virtual issuers too, so a virtual TPM's chain is built, and then refused or
+	// accepted by its class, whether or not the front end sent them.
+	for _, ic := range tpmVirtualIssuers {
 		inter.AddCert(ic)
 	}
 	pool := x509.NewCertPool()
@@ -310,12 +395,137 @@ func verifyEKCertificate(der []byte, chain [][]byte, roots []*x509.Certificate, 
 	// EK certificates carry the TCG EK-certificate extended key usage, not
 	// server or client auth, so any usage is accepted; the chain to a pinned
 	// root is the claim being checked.
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, Intermediates: inter, CurrentTime: now,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
-		return nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
+	chains, err := leaf.Verify(x509.VerifyOptions{Roots: pool, Intermediates: inter, CurrentTime: now,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+	var issuer *EKIssuer
+	if err != nil {
+		// An issuer crypto/x509 cannot read is checked directly (tpm_lenient.go), and only
+		// when its verifier found no issuer: any other refusal (an unhandled critical
+		// extension, say) is final.
+		var unknown x509.UnknownAuthorityError
+		if errors.As(err, &unknown) {
+			issuer = lenientIssuer(leaf, roots, now)
+		}
+		if issuer == nil {
+			return nil, nil, notAttested("the endorsement key certificate does not chain to a pinned TPM manufacturer root: %v", err)
+		}
+	} else if issuer, err = classifyIssuer(chains, roots, allowVirtual); err != nil {
+		return nil, nil, err
 	}
-	return leaf, nil
+	// A manufacturer's CA signs other things too (vTPM and device certificates), so a
+	// chain is not enough: the leaf must be an endorsement key certificate, which the TCG
+	// profile marks with its own extended key usage, and it must not be a CA.
+	if leaf.IsCA {
+		return nil, nil, notAttested("the endorsement key certificate is a CA certificate")
+	}
+	hasEKU := false
+	for _, o := range leaf.UnknownExtKeyUsage {
+		if o.Equal(tpmEKCertificateEKU) {
+			hasEKU = true
+		}
+	}
+	if !hasEKU {
+		return nil, nil, notAttested("the certificate is not marked as a TPM endorsement key certificate (2.23.133.8.1)")
+	}
+	return leaf, issuer, nil
 }
+
+// classifyIssuer picks, among the chains that verified, one whose every certificate above
+// the leaf is positively a physical TPM's, and says who issued the leaf. The Microsoft
+// root anchors issuers of firmware TPMs and Microsoft's own software TPM alike, and a front
+// end may send issuers of its own, so chaining to a pinned root is not enough:
+//   - no certificate of the chain may be one the package marks as a virtual or cloud TPM's;
+//   - the leaf's direct issuer must itself be pinned as physical (a pinned issuer, or a pinned
+//     root that has no pinned issuers under it), so an issuer the front end sent is not trusted
+//     for being sent, and a root that issues through pinned issuers is trusted only through them.
+//
+// allowVirtual is the owner's separate opt-in to virtual and cloud TPMs. Where it is set, a
+// chain whose leaf's direct issuer is pinned as a virtual issuer is accepted, with Class
+// TPMClassVirtual; an issuer the front end sent is trusted for neither class. Where it is not,
+// a virtual issuer anywhere in any chain refuses the key, as it always has.
+func classifyIssuer(chains [][]*x509.Certificate, roots []*x509.Certificate, allowVirtual bool) (*EKIssuer, error) {
+	virtual := map[string]bool{}
+	for _, c := range tpmVirtualIssuers {
+		virtual[sha256Hex(c)] = true
+	}
+	pinned := map[string]bool{}
+	for _, c := range tpmManufacturerIssuers {
+		pinned[sha256Hex(c)] = true
+	}
+	// A virtual or cloud TPM's issuer anywhere in any chain refuses the key outright, unless the
+	// owner opted in to such a TPM, in which case it is accepted as virtual only through a
+	// pinned virtual issuer directly above the leaf.
+	var viaVirtual *EKIssuer
+	var virtualRefusal error
+	for _, ch := range chains {
+		if len(ch) < 2 {
+			continue
+		}
+		for _, c := range ch[1:] {
+			if !virtual[sha256Hex(c)] {
+				continue
+			}
+			if !allowVirtual {
+				return nil, fmt.Errorf("%w: %w: the endorsement key was certified by %q, an issuer of a virtual or cloud TPM: only a physical TPM chip is accepted", ErrNotAttested, ErrVirtualTPM, c.Subject.CommonName)
+			}
+			if iss := ch[1]; virtual[sha256Hex(iss)] {
+				viaVirtual = &EKIssuer{Subject: iss.Subject.String(), SHA256: sha256Hex(iss), Class: TPMClassVirtual}
+			} else if virtualRefusal == nil {
+				virtualRefusal = notAttested("the endorsement key was certified by %q, which is not pinned as a virtual TPM's issuer", iss.Subject.CommonName)
+			}
+			break
+		}
+	}
+	// A key with any virtual chain is a virtual TPM's: it is never reported as the stronger class.
+	if viaVirtual != nil {
+		return viaVirtual, nil
+	}
+	if virtualRefusal != nil {
+		return nil, virtualRefusal
+	}
+	// Otherwise each chain is judged on its own: one through an issuer that is not
+	// pinned (say, a copy the front end sent) does not hide another through the
+	// pinned issuer, since x509 returns the chains in no set order.
+	var refusal error
+	for _, ch := range chains {
+		if len(ch) < 2 {
+			continue
+		}
+		iss := ch[1]
+		id := sha256Hex(iss)
+		ok := pinned[id]
+		if !ok { // a pinned root issues directly only if nothing pinned sits beneath it
+			for _, r := range roots {
+				if r.Equal(iss) && !hasPinnedIssuerUnder(iss) {
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			if refusal == nil {
+				refusal = notAttested("the endorsement key was certified by %q, which is not pinned as a physical TPM chip's issuer", iss.Subject.CommonName)
+			}
+			continue
+		}
+		return &EKIssuer{Subject: iss.Subject.String(), SHA256: id, Class: TPMClassPhysical}, nil
+	}
+	if refusal == nil {
+		refusal = notAttested("the endorsement key certificate is issued by no pinned issuer")
+	}
+	return nil, refusal
+}
+
+func hasPinnedIssuerUnder(root *x509.Certificate) bool {
+	for _, c := range tpmManufacturerIssuers {
+		if bytes.Equal(c.AuthorityKeyId, root.SubjectKeyId) && len(root.SubjectKeyId) > 0 && c.CheckSignatureFrom(root) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// tpmEKCertificateEKU is the TCG extended key usage of an endorsement key certificate.
+var tpmEKCertificateEKU = asn1.ObjectIdentifier{2, 23, 133, 8, 1}
 
 // ---- TPM structure parsing (TCG TPM 2.0 Part 2, big-endian) ----
 
@@ -360,6 +570,9 @@ type tpmPublic struct {
 	x, y    []byte
 	mod     []byte
 	exp     uint32
+	// The symmetric algorithm of a decrypt key (an EK's), which sizes the
+	// credential's encryption: its algorithm, key size in bits and mode.
+	symAlg, symBits, symMode int
 }
 
 func parseTPM2BPublic(b []byte) (*tpmPublic, error) {
@@ -376,8 +589,9 @@ func parseTPM2BPublic(b []byte) (*tpmPublic, error) {
 	a.sized() // authPolicy
 	skipSym := func() {
 		if alg := a.u16(); alg != tpmAlgNull {
-			a.u16() // keyBits
-			a.u16() // mode
+			p.symAlg = alg
+			p.symBits = a.u16()
+			p.symMode = a.u16()
 		}
 	}
 	readScheme := func() {
@@ -500,8 +714,12 @@ func verifyTPMSignature(ak *tpmPublic, msg, sig []byte) error {
 	switch {
 	case ak.typ == tpmAlgRSA && (sigAlg == tpmAlgRSASSA || sigAlg == tpmAlgRSAPSS):
 		s := r.sized()
-		if r.err || len(r.b) != 0 || len(ak.mod) < 128 {
+		if r.err || len(r.b) != 0 {
 			return errTPM("malformed RSA signature")
+		}
+		// An RSA attestation key is 2048 bits or more, as a TPM 2.0 makes one.
+		if new(big.Int).SetBytes(ak.mod).BitLen() < 2048 {
+			return errTPM("the RSA attestation key is shorter than 2048 bits")
 		}
 		e := int(ak.exp)
 		if e == 0 {
@@ -531,3 +749,9 @@ func verifyTPMSignature(ak *tpmPublic, msg, sig []byte) error {
 	}
 	return errTPM("signature algorithm does not match the attestation key")
 }
+
+// TPMCertifyExtraData is the qualifying data an app gives TPM2_Certify for an
+// ask's challenge (see the header). It is exported for the tool that makes the
+// exchange's vector from a software TPM (testdata/tpmsim), and for a front end's
+// own port to be held to.
+func TPMCertifyExtraData(challenge []byte) []byte { return tpmCertifyExtraData(challenge) }

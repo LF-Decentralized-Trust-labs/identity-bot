@@ -196,7 +196,13 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 }
 
 func (s *CoreServer) fetchKELFromOOBI(oobiURL string) ([]map[string]interface{}, error) {
-	resp, err := s.peerClient(15*time.Second, oobiURL).Get(oobiURL)
+	return fetchKELWith(s.peerClient(15*time.Second, oobiURL), oobiURL)
+}
+
+// fetchKELWith reads the key log served at oobiURL through client, which the
+// caller chooses by who wrote the address.
+func fetchKELWith(client *http.Client, oobiURL string) ([]map[string]interface{}, error) {
+	resp, err := client.Get(oobiURL)
 	if err != nil {
 		return nil, err
 	}

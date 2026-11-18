@@ -15,6 +15,7 @@ import (
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 	"net/http"
 	"time"
@@ -64,6 +65,12 @@ func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, err
 func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
 	return h.s.endBrowserKeys(r, thumbprint, person)
 }
+func (h hostWrapper) AppKeyStillSpeaks(callerAsset, thumbprint, person string) bool {
+	return h.s.appKeyStillSpeaks(callerAsset, thumbprint, person)
+}
+func (h hostWrapper) EndAppKey(r *http.Request, callerAsset, thumbprint string) (int, error) {
+	return h.s.endAppKey(r, callerAsset, thumbprint)
+}
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
 }
@@ -90,8 +97,14 @@ func (h hostWrapper) StartFrontEndKeySignIn(r *http.Request, callerAsset, assetI
 func (h hostWrapper) BeginInstalledAppKey(r *http.Request, callerAsset, assetID string) (InstalledAppKeyAsk, error) {
 	return h.s.beginInstalledAppKey(r, callerAsset, assetID)
 }
+func (h hostWrapper) MakeInstalledAppKeyCredential(r *http.Request, callerAsset, assetID, ask string, req TPMCredentialRequest) (*secureenclave.TPMCredential, error) {
+	return h.s.makeInstalledAppKeyCredential(r, callerAsset, assetID, ask, req)
+}
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
+}
+func (h hostWrapper) BrowserKeySpeaksUntil(assetID, pairwiseAID, thumbprint string) (time.Time, bool, error) {
+	return h.s.browserKeySpeaksUntil(assetID, pairwiseAID, thumbprint)
 }
 func (h hostWrapper) BrowserKeySignInResult(siteAID, session, collector string) (BrowserKeySignInResult, error) {
 	return h.s.browserKeySignInResult(siteAID, session, collector)
@@ -129,6 +142,21 @@ func (h hostWrapper) IssueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 }
 func (h hostWrapper) IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool {
 	return h.s.issuedUnderFirstVersionTooLate(rec)
+}
+func (h hostWrapper) BackupSealKeyOf(appAID string, epoch uint32) ([]byte, error) {
+	return h.s.backupSealKeyOf(appAID, epoch)
+}
+func (h hostWrapper) BackupSlotOpens(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte) (int, bool, error) {
+	return h.s.backupSlotOpens(appAID, maxEpoch, fileID, slots)
+}
+func (h hostWrapper) ResealBackupSlot(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, toAppAID string, toEpoch uint32) ([]byte, error) {
+	return h.s.resealBackupSlot(appAID, maxEpoch, fileID, slots, toAppAID, toEpoch)
+}
+func (h hostWrapper) SealBackupOpenReply(appAID string, maxEpoch uint32, fileID []byte, slots [][]byte, restoreKey, digest []byte) ([]byte, int, error) {
+	return h.s.sealBackupOpenReply(appAID, maxEpoch, fileID, slots, restoreKey, digest)
+}
+func (h hostWrapper) IsOwnBackupSealKey(pub []byte, epochs map[string]uint32) bool {
+	return h.s.isOwnBackupSealKey(pub, epochs)
 }
 func (h hostWrapper) KeyCanSign() error    { return h.s.keyCanSign() }
 func (h hostWrapper) KeyIsElsewhere() bool { return h.s.keyIsElsewhere() }

@@ -98,7 +98,7 @@ type Addon struct {
 	// ConversationsOfAPerson is every conversation held here that party
 	// (agentmessage.Person of a person's identifier) is a party to, with the
 	// utility app that keeps it, its head and count, and whether it holds an
-	// open ask (ADR-072 Amendment 9). The core serves them on
+	// open ask (ADR-072 Amendment 15). The core serves them on
 	// GET /api/people/me/conversations, for the person whose own signed
 	// statement the request carries.
 	ConversationsOfAPerson func(s *CoreServer, party string) ([]ConversationOfAPerson, error)

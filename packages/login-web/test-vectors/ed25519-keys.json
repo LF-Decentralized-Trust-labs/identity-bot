@@ -1,0 +1,96 @@
+{
+  "about": "Ed25519 keys as a witness key (code B) or a verification key (code D), written in qb64, that a reader must take (`ok`) or refuse: a key that is not a point on the curve, one in a non-canonical encoding, and one of small order (the identity point, say, under which a signature of R = identity and s = 0 verifies over every message) name no single signer. The core (identity-agent-core/iacrypto), login-verify and login-dart read the same cases (an_ed25519_key_is_one_point_vectors_test.go, an-ed25519-key-is-one-point.test.mjs, the Dart test of the same name).",
+  "cases": [
+    {
+      "name": "the identifier's own key",
+      "raw_hex": "8866d4ce6aa8ccfd06c18a6ddb76725a763d0d9135b27bfdcc1f3ece4add793b",
+      "b": "BIhm1M5qqMz9BsGKbdt2clp2PQ2RNbJ7_cwfPs5K3Xk7",
+      "d": "DIhm1M5qqMz9BsGKbdt2clp2PQ2RNbJ7_cwfPs5K3Xk7",
+      "ok": true
+    },
+    {
+      "name": "a witness's key",
+      "raw_hex": "4460057dcf2bc360b32e3aa2778167df0ea1ee40d9ba093bd55beffde7f85327",
+      "b": "BERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+      "d": "DERgBX3PK8Ngsy46oneBZ98Ooe5A2boJO9Vb7_3n-FMn",
+      "ok": true
+    },
+    {
+      "name": "the identity point",
+      "raw_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "b": "BAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "d": "DAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "ok": false
+    },
+    {
+      "name": "the point of order 2",
+      "raw_hex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "b": "BOz_______________________________________9_",
+      "d": "DOz_______________________________________9_",
+      "ok": false
+    },
+    {
+      "name": "a point of order 4",
+      "raw_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "b": "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "d": "DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "ok": false
+    },
+    {
+      "name": "the other point of order 4",
+      "raw_hex": "0000000000000000000000000000000000000000000000000000000000000080",
+      "b": "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACA",
+      "d": "DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACA",
+      "ok": false
+    },
+    {
+      "name": "a point of order 8",
+      "raw_hex": "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+      "b": "BCbolY_CsiewRcP0ifLvmPDV36wF08YzObE4AohtU_wF",
+      "d": "DCbolY_CsiewRcP0ifLvmPDV36wF08YzObE4AohtU_wF",
+      "ok": false
+    },
+    {
+      "name": "a point of order 8, other sign",
+      "raw_hex": "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+      "b": "BCbolY_CsiewRcP0ifLvmPDV36wF08YzObE4AohtU_yF",
+      "d": "DCbolY_CsiewRcP0ifLvmPDV36wF08YzObE4AohtU_yF",
+      "ok": false
+    },
+    {
+      "name": "a point of order 8, y as another",
+      "raw_hex": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+      "b": "BMcXanA9TdhPujwLdg0QZw8qIFP6LDnMxk7H_XeSrAN6",
+      "d": "DMcXanA9TdhPujwLdg0QZw8qIFP6LDnMxk7H_XeSrAN6",
+      "ok": false
+    },
+    {
+      "name": "a point of order 8, other sign",
+      "raw_hex": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+      "b": "BMcXanA9TdhPujwLdg0QZw8qIFP6LDnMxk7H_XeSrAP6",
+      "d": "DMcXanA9TdhPujwLdg0QZw8qIFP6LDnMxk7H_XeSrAP6",
+      "ok": false
+    },
+    {
+      "name": "a second encoding of a key of large order: y written as y+p",
+      "raw_hex": "f0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "b": "BPD_______________________________________9_",
+      "d": "DPD_______________________________________9_",
+      "ok": false
+    },
+    {
+      "name": "a y no point has",
+      "raw_hex": "0200000000000000000000000000000000000000000000000000000000000000",
+      "b": "BAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "d": "DAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "ok": false
+    },
+    {
+      "name": "the identity written with the sign bit set",
+      "raw_hex": "0100000000000000000000000000000000000000000000000000000000000080",
+      "b": "BAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACA",
+      "d": "DAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACA",
+      "ok": false
+    }
+  ]
+}

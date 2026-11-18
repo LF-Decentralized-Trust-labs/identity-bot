@@ -104,6 +104,63 @@
       "outcome": "The individual signs a vouch over the organization's AID (stored by the counterpart as proof) and is enrolled as the active owner (the super-admin role). No delegated inception — the organization controls its own keys; the signer only attests.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    },
+    {
+      "code": 6,
+      "key": "sign_statement",
+      "name": "Sign a statement",
+      "summary": "A utility app asks a person to sign a statement with their own Identity Agent's root key, after reading exactly what it says, so the utility app can prove the person said it. Code 5 stays reserved as issue (ADR-021).",
+      "who_mints": "relying_party",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "site_aid": { "type": "string", "required": true, "kind": "open" },
+        "site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "audience": { "type": "string", "required": true, "kind": "open" },
+        "nonce": { "type": "string", "required": true, "kind": "open" },
+        "dt": { "type": "string", "required": true, "kind": "open" },
+        "expiry": { "type": "string", "required": true, "kind": "open" },
+        "statement": { "type": "string", "required": true, "kind": "open" },
+        "title": { "type": "string", "required": false, "kind": "open" },
+        "session_token": { "type": "string", "required": true, "kind": "open" },
+        "sig": { "type": "string", "required": true, "kind": "open" },
+        "signer_oobi": { "type": "string", "required": true, "kind": "open" }
+      },
+      "preview_contract": { "title": "Sign a statement for {site}", "conveys": ["site", "the exact statement"] },
+      "discloses": [],
+      "outcome": "The person's Identity Agent signs, with the root key in force, the envelope in docs/statement-signature.md (a fixed header, the asker's identifier, the statement exactly as shown) and posts the signature, the signer's identifier and the sequence number of the key event the key was set at to the asker's callback. Nothing is signed without the person's approval on that device.",
+      "tiers": null,
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    },
+    {
+      "code": 7,
+      "key": "bind_site",
+      "name": "Join a site with one identity",
+      "summary": "An organization asks a person to say that their identifier at one of the organization's sites and an identifier they already have with the organization are the same person; the person's Identity Agent signs one statement with both keys.",
+      "who_mints": "organization",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "org_name": { "type": "string", "required": true, "kind": "open" },
+        "org_aid": { "type": "string", "required": true, "kind": "open" },
+        "org_oobi": { "type": "string", "required": true, "kind": "open" },
+        "site_aid": { "type": "string", "required": true, "kind": "open" },
+        "site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "site_name": { "type": "string", "required": false, "kind": "open" },
+        "record_site_aid": { "type": "string", "required": true, "kind": "open" },
+        "record_site_oobi": { "type": "string", "required": true, "kind": "open" },
+        "role": { "type": "string", "required": true, "kind": "open" },
+        "invite_token": { "type": "string", "required": true, "kind": "open" },
+        "signer_oobi": { "type": "string", "required": true, "kind": "open" },
+        "redeem_url": { "type": "string", "required": true, "kind": "open" },
+        "org_sig": { "type": "string", "required": true, "kind": "open" },
+        "expiry": { "type": "string", "required": false, "kind": "open" }
+      },
+      "preview_contract": { "title": "Join {site} as the same person you are to {org}.", "conveys": ["org", "site"] },
+      "discloses": [],
+      "outcome": "The individual's Identity Agent derives its identifier for the site, signs one statement naming both identifiers, the organization, the site and the invite with the key of each, and sends it to the organization, which checks both signatures. Declining signs nothing. The linking is the point of it, so the individual is told that the organization keeps a statement that proves it to anyone it shows it to, and that it cannot be undone except by leaving.",
+      "tiers": null,
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }
   ]
 }

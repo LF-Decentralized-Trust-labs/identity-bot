@@ -20,7 +20,7 @@ import (
 )
 
 // A person lists their own conversations across utility apps with a statement
-// they sign (ADR-072 Amendment 9). The core lists for the person the statement
+// they sign (ADR-072 Amendment 15). The core lists for the person the statement
 // names, only to a utility app the owner gave the capability, only once, only
 // for this request, and only the metadata the Identity Agent holds.
 
@@ -225,7 +225,7 @@ func TestAListIsRefusedWhenAnythingAboutItIsNotThePersons(t *testing.T) {
 // The person's own Identity Agent signs one list per utility app, each under
 // the key of that app's sign-in, each for the one that presents it: the core
 // answers each for that one party, tagged with the asset it is for, and never
-// merges two (ADR-072 Amendment 10).
+// merges two (ADR-072 Amendment 16).
 func TestAListSignedUnderAnotherAppsKeyListsThatPartyAndOnlyThatOne(t *testing.T) {
 	var asked []string
 	w, keys := aListWorld(t, &asked)

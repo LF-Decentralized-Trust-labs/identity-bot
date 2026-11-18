@@ -111,6 +111,15 @@ func theListAPersonSigns(r *http.Request) (nonce string, ok bool) {
 // when every check below holds. A request that carries these headers and is not
 // an app's is refused where it is read (thePersonAsking).
 func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, body []byte) (named coretypes.Signer, statement, salt []byte, err error) {
+	return s.thePersonSpeaksFor(r, app, nil, body)
+}
+
+// thePersonSpeaksFor is thePersonAnAppSpeaksFor, and also the holder of a
+// self-owned Identity Agent saying a conversation is done (holder non-nil,
+// app unused): the same statement, held to the same checks, but only on the
+// route a person closes, reopens or limits a conversation on, signed by the
+// Identity Agent's own key, and standing as its owner (ADR-077 amendment).
+func (s *CoreServer) thePersonSpeaksFor(r *http.Request, app AppCaller, holder *selfOwnedHolder, body []byte) (named coretypes.Signer, statement, salt []byte, err error) {
 	who := strings.TrimSpace(r.Header.Get(headerSpeakingFor))
 	raw := strings.TrimSpace(r.Header.Get(headerPersonStatement))
 	rawSalt := strings.TrimSpace(r.Header.Get(headerPersonSalt))
@@ -147,6 +156,10 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 		msg   agentmessage.PersonMessage
 	)
 	cid, controlKind, isControl := theControlAPersonSigns(r)
+	if holder != nil && !isControl {
+		return refuse(errors.New("the holder of a self-owned Identity Agent signs here only to close a conversation, " +
+			"take a close back or raise its turn limit"))
+	}
 	listNonce, isList := theListAPersonSigns(r)
 	if isList {
 		// A list is for no conversation, to nobody, answers nothing and carries no
@@ -168,7 +181,7 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 			return refuse(errors.New("the statement is for another request than this one"))
 		case st.Audience != app.Asset:
 			// The statement names the one utility app it is for, and only that
-			// utility app's back end may present it (ADR-072 Amendment 10).
+			// utility app's back end may present it (ADR-072 Amendment 16).
 			return refuse(errors.New("the statement is for another utility app than the one that presented it"))
 		}
 	} else if isControl {
@@ -239,7 +252,10 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 	var roster trail.KeyRoster = keysSpeakingAt{s: s, asset: app.Asset}
 	personAt := app.Asset
 	var listedAt browserKeyRecord
-	if isList {
+	switch {
+	case holder != nil:
+		roster = holder
+	case isList:
 		roster = keysSpeakingAtTheirOwnAsset{s: s, found: &listedAt}
 	}
 	if verr := trail.CheckAuthor(trail.Write{Statement: st, Verkey: proof.Verkey, Signature: proof.Signature},
@@ -256,6 +272,9 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, app AppCaller, bod
 		return refuse(uerr)
 	} else if used {
 		return refuse(errors.New("this statement was already used"))
+	}
+	if holder != nil {
+		return coretypes.Signer{AID: who, Standing: "owner", Name: "The owner"}, js, salt, nil
 	}
 	if isList {
 		personAt = listedAt.Asset

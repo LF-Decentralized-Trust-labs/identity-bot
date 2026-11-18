@@ -12,7 +12,7 @@ import (
 )
 
 // A person lists their own conversations, across every utility app that keeps
-// one (ADR-072 Amendment 9).
+// one (ADR-072 Amendment 15).
 //
 // The route is for the one utility app an owner has chosen to be a person's
 // central place. Its back end carries the person's own signed statement of kind
@@ -47,7 +47,7 @@ type ConversationOfAPerson struct {
 type ThePeopleConversationsReply struct {
 	// ListedAt is the asset id of the utility app whose sign-in named the key
 	// that signed the statement: the one party this answer is for, as the
-	// person is known there (ADR-072 Amendment 10). One statement is one party:
+	// person is known there (ADR-072 Amendment 16). One statement is one party:
 	// the core never merges the answers for two.
 	ListedAt      string                  `json:"listed_at"`
 	Conversations []ConversationOfAPerson `json:"conversations"`

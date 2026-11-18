@@ -1,0 +1,117 @@
+{
+ "a_aid": "EDeviceAPairwiseAID000000000000000000000000",
+ "c_aid": "EDeviceCPairwiseAID000000000000000000000000",
+ "rot1_event": {
+  "d": "EMXxSRE9p00RRPj8bAt6iWjDwXpyXmxKd3h2SJsoSxra",
+  "hand_over": true,
+  "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDJjOF8iLCJ0Ijoicm90IiwiZCI6IkVNWHhTUkU5cDAwUlJQajhiQXQ2aVdqRHdYcHlYbXhLZDNoMlNKc29TeHJhIiwiaSI6IkVPQ2VZbXdhZTNFR0VFa2sxYUtxclhPNHdkSGZCaS1HZ1JBTFhnT25JWjNFIiwicyI6IjEiLCJwIjoiRU9DZVltd2FlM0VHRUVrazFhS3FyWE80d2RIZkJpLUdnUkFMWGdPbklaM0UiLCJrdCI6IjMiLCJrIjpbIkRKZy1WM1VJRWpXbnd0b0R6WW9lR3pVTUtFcTFTeXFnZjlyczBNcEE3ME54IiwiRE5LNDI4VHh1bXN2RkN5LVJtNVNONVl1UDdlMU1VSlVDRkpSTWU3QnBVLVMiLCJEQ1kwNVBjckVIWi1jNHhIQWQ5S3hrNjJnZlc0WTc3QkZfSXRHS29uUnVoRSJdLCJudCI6IjIiLCJuIjpbIkVJbl9aaWMyRWU3ME1qME1pdnlBSGdqSFY4NWpiTTBkdXpSWUg4aTdiSkxZIiwiRUYyMXNjc05qS0dzYWNDa1RiR0hxVGVNc3Z2bnlnRFg3dk5Takctd3k1bUoiXSwiYnQiOiIxIiwiYnIiOltdLCJiYSI6W10sImEiOlt7ImkiOiJFRGV2aWNlQVBhaXJ3aXNlQUlEMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwicyI6IjAiLCJkIjoiRURldmljZUFQYWlyd2lzZUFJRDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCJ9LHsiaSI6IkVEZXZpY2VDUGFpcndpc2VBSUQwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJzIjoiMCIsImQiOiJFRGV2aWNlQ1BhaXJ3aXNlQUlEMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIn1dfQ==",
+  "stage": "rot1",
+  "threshold": 2
+ },
+ "rot1_terms": {
+  "adds": [],
+  "aid": "EOCeYmwae3EGEEkk1aKqrXO4wdHfBi-GgRALXgOnIZ3E",
+  "anchors": [
+   {
+    "d": "EDeviceAPairwiseAID000000000000000000000000",
+    "i": "EDeviceAPairwiseAID000000000000000000000000",
+    "s": "0"
+   },
+   {
+    "d": "EDeviceCPairwiseAID000000000000000000000000",
+    "i": "EDeviceCPairwiseAID000000000000000000000000",
+    "s": "0"
+   }
+  ],
+  "cuts": [],
+  "d": "EMXxSRE9p00RRPj8bAt6iWjDwXpyXmxKd3h2SJsoSxra",
+  "hand_over": true,
+  "own_key": "DJg-V3UIEjWnwtoDzYoeGzUMKEq1Syqgf9rs0MpA70Nx",
+  "own_next_digests": [],
+  "owners": [
+   {
+    "after": [
+     "EJJrt-_zwNS0Rjc98ZAJe0VvTa0ej1rYoZktABJ0KWcf"
+    ],
+    "aid": "EDeviceAPairwiseAID000000000000000000000000",
+    "key": "DNK428TxumsvFCy-Rm5SN5YuP7e1MUJUCFJRMe7BpU-S",
+    "name": "A",
+    "next": [
+     "EIn_Zic2Ee70Mj0MivyAHgjHV85jbM0duzRYH8i7bJLY"
+    ],
+    "next_key": "DJX0GIYtxOTqQrxguW_TRbU8zlQh-Mm0--tst8gn_Xz0",
+    "signed": false
+   },
+   {
+    "after": [
+     "EEZHSSzIVBBx9q0Mu9hDQVKWlvB7QF1H2fA103jGXwjL"
+    ],
+    "aid": "EDeviceCPairwiseAID000000000000000000000000",
+    "key": "DCY05PcrEHZ-c4xHAd9Kxk62gfW4Y77BF_ItGKonRuhE",
+    "name": "C",
+    "next": [
+     "EF21scsNjKGsacCkTbGHqTeMsvvnygDX7vNSjG-wy5mJ"
+    ],
+    "next_key": "DBwGMqkQwNYmciAFQ2LOKUOrdBDkp4L3wbE-FQbTviGc",
+    "signed": false
+   }
+  ],
+  "prior": "EOCeYmwae3EGEEkk1aKqrXO4wdHfBi-GgRALXgOnIZ3E",
+  "sn": "1",
+  "stage": "rot1",
+  "status": "signing",
+  "threshold": 2,
+  "toad": "1"
+ },
+ "rot2_event": {
+  "d": "EPfetLd6VJyLvevirSWlB8LNZQa8xY42bRV5c8mBC-PQ",
+  "hand_over": true,
+  "raw_b64": "eyJ2IjoiS0VSSTEwSlNPTjAwMDFiZV8iLCJ0Ijoicm90IiwiZCI6IkVQZmV0TGQ2Vkp5THZldmlyU1dsQjhMTlpRYTh4WTQyYlJWNWM4bUJDLVBRIiwiaSI6IkVPQ2VZbXdhZTNFR0VFa2sxYUtxclhPNHdkSGZCaS1HZ1JBTFhnT25JWjNFIiwicyI6IjIiLCJwIjoiRU1YeFNSRTlwMDBSUlBqOGJBdDZpV2pEd1hweVhteEtkM2gyU0pzb1N4cmEiLCJrdCI6IjIiLCJrIjpbIkRKWDBHSVl0eE9UcVFyeGd1V19UUmJVOHpsUWgtTW0wLS10c3Q4Z25fWHowIiwiREJ3R01xa1F3TlltY2lBRlEyTE9LVU9yZEJEa3A0TDN3YkUtRlFiVHZpR2MiXSwibnQiOiIyIiwibiI6WyJFSkpydC1fendOUzBSamM5OFpBSmUwVnZUYTBlajFyWW9aa3RBQkowS1djZiIsIkVFWkhTU3pJVkJCeDlxME11OWhEUVZLV2x2QjdRRjFIMmZBMTAzakdYd2pMIl0sImJ0IjoiMSIsImJyIjpbXSwiYmEiOltdLCJhIjpbXX0=",
+  "stage": "rot2",
+  "threshold": 2
+ },
+ "rot2_terms": {
+  "adds": [],
+  "aid": "EOCeYmwae3EGEEkk1aKqrXO4wdHfBi-GgRALXgOnIZ3E",
+  "anchors": [],
+  "cuts": [],
+  "d": "EPfetLd6VJyLvevirSWlB8LNZQa8xY42bRV5c8mBC-PQ",
+  "hand_over": true,
+  "own_key": "DJg-V3UIEjWnwtoDzYoeGzUMKEq1Syqgf9rs0MpA70Nx",
+  "own_next_digests": [],
+  "owners": [
+   {
+    "after": [
+     "EJJrt-_zwNS0Rjc98ZAJe0VvTa0ej1rYoZktABJ0KWcf"
+    ],
+    "aid": "EDeviceAPairwiseAID000000000000000000000000",
+    "key": "DNK428TxumsvFCy-Rm5SN5YuP7e1MUJUCFJRMe7BpU-S",
+    "name": "A",
+    "next": [
+     "EIn_Zic2Ee70Mj0MivyAHgjHV85jbM0duzRYH8i7bJLY"
+    ],
+    "next_key": "DJX0GIYtxOTqQrxguW_TRbU8zlQh-Mm0--tst8gn_Xz0",
+    "signed": false
+   },
+   {
+    "after": [
+     "EEZHSSzIVBBx9q0Mu9hDQVKWlvB7QF1H2fA103jGXwjL"
+    ],
+    "aid": "EDeviceCPairwiseAID000000000000000000000000",
+    "key": "DCY05PcrEHZ-c4xHAd9Kxk62gfW4Y77BF_ItGKonRuhE",
+    "name": "C",
+    "next": [
+     "EF21scsNjKGsacCkTbGHqTeMsvvnygDX7vNSjG-wy5mJ"
+    ],
+    "next_key": "DBwGMqkQwNYmciAFQ2LOKUOrdBDkp4L3wbE-FQbTviGc",
+    "signed": false
+   }
+  ],
+  "prior": "EMXxSRE9p00RRPj8bAt6iWjDwXpyXmxKd3h2SJsoSxra",
+  "sn": "2",
+  "stage": "rot2",
+  "status": "signing",
+  "threshold": 2,
+  "toad": "1"
+ }
+}
