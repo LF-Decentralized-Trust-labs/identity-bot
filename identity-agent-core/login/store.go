@@ -56,6 +56,17 @@ func (s *RelationshipStore) Get(siteAID string) (SiteRelationship, bool) {
 	return r, ok
 }
 
+// All lists every relationship, in no particular order.
+func (s *RelationshipStore) All() []SiteRelationship {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]SiteRelationship, 0, len(s.items))
+	for _, r := range s.items {
+		out = append(out, r)
+	}
+	return out
+}
+
 func (s *RelationshipStore) Put(rel SiteRelationship) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -70,6 +81,18 @@ func (s *RelationshipStore) Put(rel SiteRelationship) error {
 		s.highWater = rel.RelationshipIndex
 	}
 	s.items[rel.SiteAID] = rel
+	return s.saveLocked()
+}
+
+// Delete removes the relationship at siteAID. Its index is not given out again:
+// the high-water mark is kept, so a later relationship never reuses its key.
+func (s *RelationshipStore) Delete(siteAID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.items[siteAID]; !ok {
+		return nil
+	}
+	delete(s.items, siteAID)
 	return s.saveLocked()
 }
 

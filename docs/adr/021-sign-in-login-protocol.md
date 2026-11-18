@@ -31,7 +31,7 @@ Every RP-initiated interaction is an **Ask**: a signed, typed request that the u
 | 4 | `contact` | Share contact information |
 | 5 | `issue` | Receive an offered credential |
 
-*(Amended 2026-11-15: this table is stale. The registry, `identity-agent-core/actions/registry.json`, and `docs/action-code-registry.md` are the authority on what each code means: 1 login, 2 add-contact, 3 add-employee, 4 sign-org, 6 sign-statement; 5 stays reserved as `issue`.)* Only `login` (t=1) is implemented in this change; the rest are reserved registry slots so future interaction types extend the same envelope rather than inventing new ones. The action registry lives in `packages/login-verify/src/types.ts` (`AskAction`).
+*(Amended 2026-11-15: this table is stale. The registry, `identity-agent-core/actions/registry.json`, and `docs/action-code-registry.md` are the authority on what each code means: 1 login, 2 add-contact, 3 add-employee, 4 sign-org, 6 sign-statement, 7 bind-site; 5 stays reserved as `issue`.)* Only `login` (t=1) is implemented in this change; the rest are reserved registry slots so future interaction types extend the same envelope rather than inventing new ones. The action registry lives in `packages/login-verify/src/types.ts` (`AskAction`).
 
 ### The login challenge / assertion flow
 

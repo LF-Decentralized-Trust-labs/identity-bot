@@ -132,6 +132,17 @@ type SiteRelationship struct {
 	// which is the only thing that ties the pairwise key to the identifier.
 	// Empty for relationships made before it was kept; those are rebuilt.
 	InceptionB64 string `json:"inception_b64,omitempty"`
+	// Bound is set when this person joined this relationship's identifier to a
+	// record they already had, by a statement signed with both keys (ADR-082).
+	Bound *BoundRecord `json:"bound,omitempty"`
+}
+
+// BoundRecord is what a person's Identity Agent keeps of a joining it signed.
+type BoundRecord struct {
+	OrgAID           string `json:"org_aid"`
+	Role             string `json:"role"`
+	RecordIdentifier string `json:"record_identifier"`
+	At               string `json:"at"`
 }
 
 type StartLoginRequest struct {

@@ -47,3 +47,11 @@ there, and both tests say which side disagrees.
 seal its answers (ADR-072 Amendment 4): `SealKeyFromSeed`, `SealKey.OpenRequest`,
 `Reply.Seal`, and `SealKeyStatement` for the `seal` part of the sign-in link. It is held
 to `packages/login-web/test-vectors/seal.json`, the same file the page's TypeScript is.
+
+## An installed front end's sign-in
+
+`installed_app.go` fixes what a utility app's back end reads from an installed front
+end: `ReadFrontEndStart` (a start that names its kind and carries the hardware's
+evidence for the key, which the Identity Agent verifies), the statement the key
+signs (`InstalledAppStatement`) and the thumbprint that names it. Held to
+`../login-web/test-vectors/installed-app.json`, which `login-dart` runs too.

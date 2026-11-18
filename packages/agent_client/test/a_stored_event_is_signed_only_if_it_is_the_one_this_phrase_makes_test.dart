@@ -89,11 +89,10 @@ void main() {
       rawsOfTheLast.add(signed.rawB64);
     }
     final data = core.dataDir!;
-    final port = Uri.parse(core.base).port;
     await core.close();
     await Future<void>.delayed(const Duration(milliseconds: 500));
     await leaveUnsigned(data, aid, unsigned);
-    core = await anotherCore(bin, km, dataDir: data, port0: port);
+    core = await anotherCore(bin, km, dataDir: data);
     cores.add(core);
     return (core, aid, placed);
   }
