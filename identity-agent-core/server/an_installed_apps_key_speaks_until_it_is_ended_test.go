@@ -599,7 +599,9 @@ func TestATPMSignInIsGivenTheCoresSecretCredentialKey(t *testing.T) {
 	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
 	a.InstalledApp.TPMKeys = true
 	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	// A real TPM proof names the issuer of its chip's endorsement key and its class.
 	iw.said.Platform = "tpm"
+	iw.said.EKIssuer = &secureenclave.EKIssuer{Subject: "CN=a chip maker", Class: secureenclave.TPMClassPhysical}
 	var gotChallenge, gotKey []byte
 	inner := verifyTPMInstalledKey
 	verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time, allowVirtual bool) (*secureenclave.InstalledAppKeyFacts, error) {
