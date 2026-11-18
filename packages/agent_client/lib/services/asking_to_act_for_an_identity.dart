@@ -86,6 +86,61 @@ class AskingToActForAnIdentity {
     return offer;
   }
 
+  /// The short code this computer shows to ask to act for the identity at
+  /// [agentOrigin]: a bare pointer to its signed offer, left at that Identity
+  /// Agent (ADR-041 Amendment 1).
+  ///
+  /// Two steps, in two places. The core beside this app signs the offer, as
+  /// [aSignedOfferFor] always has; then the offer is left at the Identity Agent
+  /// it is for, which the owner's phone can reach where it cannot reach this
+  /// computer, and which answers with a token. The code is that Identity
+  /// Agent's `https://{agent}/i/{token}`, read by the owner's Identity Agent
+  /// through the same scan gate as every other code.
+  ///
+  /// Each call is a new offer and a new code, and makes the previous code from
+  /// this computer stop working. The code expires with the offer
+  /// ([AControllerRequest.expiresAt]); nothing renews it unless the screen
+  /// asks again, which by default it does not.
+  ///
+  /// Returns null when this hardware cannot act for an identity at all, as
+  /// [aSignedOfferFor] does. Leaving the offer never grants anything: the
+  /// owner's own signed approval does.
+  Future<AControllerRequest?> aShortCodeFor(String agentOrigin,
+      {String orgName = '', String label = ''}) async {
+    final origin = agentOrigin.trim().replaceAll(RegExp(r'/+$'), '');
+    final offer = await aSignedOfferFor(origin, orgName: orgName);
+    if (offer == null) return null;
+    // Unsigned, deliberately: this computer has no standing at the Identity
+    // Agent yet, and the offer inside is what carries its signature.
+    final res = await _plain.post(
+      Uri.parse('$origin/api/controller/requests'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(offer.toRequestBody(label: label)),
+    );
+    if (res.statusCode == 429) {
+      throw const ControllerRequestRefused(
+          'too many codes have been asked for just now; wait a minute and '
+          'ask for a new one');
+    }
+    if (res.statusCode != 200) {
+      throw ControllerRequestRefused('the Identity Agent at $origin would not '
+          'take this computer\'s request (${res.statusCode}): ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final url = (body['url'] ?? '').toString();
+    final token = (body['token'] ?? '').toString();
+    final expiresAt = DateTime.tryParse((body['expires_at'] ?? '').toString());
+    // The pointer must be the Identity Agent this computer signed its offer
+    // for: the owner's Identity Agent refuses a request served from anywhere
+    // else, so a code pointing elsewhere would only fail on the phone.
+    if (token.isEmpty || url != '$origin/i/$token' || expiresAt == null) {
+      throw ControllerRequestRefused('the Identity Agent at $origin answered '
+          'with a code this computer cannot show: ${res.body}');
+    }
+    return AControllerRequest(
+        url: url, token: token, expiresAt: expiresAt.toUtc(), offer: offer);
+  }
+
   /// What the agent at [agentOrigin] says this machine has been granted.
   ///
   /// Signed as this machine, because the agent has never seen this connection
@@ -304,6 +359,40 @@ class AskingToActForAnIdentity {
     _disposed = true;
     if (_ownClient) _plain.close();
   }
+}
+
+/// The short code a computer shows to ask to act for an identity.
+class AControllerRequest {
+  const AControllerRequest({
+    required this.url,
+    required this.token,
+    required this.expiresAt,
+    required this.offer,
+  });
+
+  /// `https://{agent}/i/{token}`: what the QR holds, and all it holds.
+  final String url;
+  final String token;
+
+  /// When the code stops working, which is when the offer inside it does. The
+  /// screen shows it, says plainly once it has passed, and offers a new code.
+  final DateTime expiresAt;
+
+  /// The signed offer left at the Identity Agent behind the pointer.
+  final ControllerOffer offer;
+
+  bool hasExpired([DateTime? now]) =>
+      !(now ?? DateTime.now()).toUtc().isBefore(expiresAt);
+}
+
+/// An Identity Agent would not take, or answered strangely to, a computer's
+/// request. Its message is written for a person.
+class ControllerRequestRefused implements Exception {
+  const ControllerRequestRefused(this.reason);
+  final String reason;
+
+  @override
+  String toString() => reason;
 }
 
 /// What an agent tells a machine it has been granted.

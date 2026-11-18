@@ -192,6 +192,11 @@ func (s *CoreServer) handleChallengeBundleServe(w http.ResponseWriter, r *http.R
 	b, ok := s.challenges[token]
 	s.challengeMu.Unlock()
 	if !ok {
+		if raw, cok := s.controllerRequestAskBytes(token); cok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+			return
+		}
 		if raw, sok := s.statementAskBytes(token); sok {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(raw)

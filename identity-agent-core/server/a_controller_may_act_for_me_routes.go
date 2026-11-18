@@ -89,6 +89,8 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error(), "")
 		return
 	}
+	// The machine's waiting code, if it left one here, has done its job.
+	s.retireControllerRequestsFor(granted.ControllerAID)
 	writeJSON(w, map[string]any{"ok": true, "grant": onTheWire(granted, now)})
 }
 

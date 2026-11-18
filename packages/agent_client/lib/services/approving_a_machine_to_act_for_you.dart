@@ -124,6 +124,40 @@ class AMachineAsking {
     this.agentOrigin = '',
   });
 
+  /// The scan gate's action name for a computer asking to act for an identity
+  /// (action code 8, ADR-041 Amendment 1). A decoded preview with this action
+  /// is approved through [ApprovingAMachineToActForYou.approve], never by the
+  /// scan alone.
+  static const action = 'act_for_identity';
+  static const actionCode = 8;
+
+  /// The machine an approved scan of a computer's short code names, or null
+  /// when the answer is not one.
+  ///
+  /// [executeResult] is what `POST /api/scan/execute` answered for that code
+  /// after the person approved. The owner's Identity Agent has already checked
+  /// the computer's signature over its offer, that it is fresh, and that it was
+  /// served by the Identity Agent it names. Approving on the scan gate grants
+  /// nothing (`granted` is false): the grant is the owner's own signed request,
+  /// [ApprovingAMachineToActForYou.approve], to the agent this device owns
+  /// that matches [agentOrigin].
+  static AMachineAsking? fromApprovedScan(Map<String, dynamic> executeResult) {
+    if (executeResult['approved'] != true) return null;
+    final m = executeResult['machine'];
+    if (m is! Map) return null;
+    final aid = (m['controller_aid'] ?? '').toString();
+    final key = (m['public_key'] ?? '').toString();
+    final origin = (m['agent_origin'] ?? '').toString();
+    if (aid.isEmpty || key.isEmpty || origin.isEmpty) return null;
+    return AMachineAsking(
+      aid: aid,
+      publicKey: key,
+      protectedBy: (m['protected_by'] ?? '').toString(),
+      suggestedLabel: (m['label'] ?? '').toString(),
+      agentOrigin: origin,
+    );
+  }
+
   final String aid;
   final String publicKey;
 

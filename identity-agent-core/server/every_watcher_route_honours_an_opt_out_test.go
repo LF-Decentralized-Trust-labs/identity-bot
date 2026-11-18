@@ -110,6 +110,8 @@ func TestEveryWatcherRouteHonoursAnOptOut(t *testing.T) {
 		"GET /api/kerl":              discovery,
 		"GET /api/didcomm/did":       discovery,
 		"GET /api/identity/proof":    discovery,
+		"POST /api/controller/requests": "holds a computer's own signed offer behind a token and answers with the token, " +
+			"never anything the watcher recorded",
 		"GET /api/attestation":       discovery,
 		"GET /api/local-owner/proof": discovery,
 

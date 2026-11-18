@@ -110,7 +110,13 @@ var publicRoutes = map[string]string{
 	"GET /api/identity/proof": "proof this address holds the identifier's keys in force — a signed answer to a challenge the asker chose, checked against the identifier's own key log",
 
 	// --- the sign-in handshake: the relying party and the browser drive these ---
-	"GET /i/{token}":                                "the scanned pointer — the QR resolves to a signed challenge",
+	"GET /i/{token}": "the scanned pointer — the QR resolves to a signed challenge",
+	// --- a computer asking to act for this identity ---
+	// The computer has no standing here yet; asking is how it gets some. It
+	// only leaves its own signed offer for the owner to see by token, rate
+	// limited, size and count capped, expiring with the offer. Granting stays
+	// owner-only (POST /api/controllers).
+	"POST /api/controller/requests":                 "a computer leaves its signed offer to act for this identity, for the owner to approve by scanning its short code",
 	"POST /api/login/challenge":                     "a site mints a challenge for its own sign-in page",
 	"POST /api/login/callback":                      "the completed assertion is posted back by the agent that signed it",
 	"GET /api/login/challenge/{token}/status":       "the waiting browser polls for completion",

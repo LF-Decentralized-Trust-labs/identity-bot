@@ -5,17 +5,15 @@ import 'package:http/http.dart' as http;
 import '../config/agent_config.dart';
 import 'the_owner_at_this_computer.dart';
 
-/// A controller's signed, offline offer to act for an identity — the protocol
-/// QR two of one person's own devices exchange.
+/// A controller's signed offer to act for an identity.
 ///
-/// A controller offer is NOT an Ask. An Ask is the rails for a transaction
-/// between two DIFFERENT identities: a pointer fetched live from a relay, whose
-/// scope is one identity asking something of another. This is two of the same
-/// person's own devices meeting — there is no counterparty to fetch from and no
-/// reason to be online, so the whole offer travels inside the QR, the same way
-/// pairing a computer does. The scheme is what keeps it out
-/// of the Ask engine, and the line is deliberate: anything internal and
-/// device-to-device is a protocol QR, not an Ask.
+/// The offer is the Ask a computer makes (action 8, `act_for_identity`, ADR-041
+/// Amendment 1). The computer cannot be reached from the owner's phone, but it
+/// can reach the Identity Agent it asks to act for, and so can the phone: so it
+/// leaves this offer there and shows that Identity Agent's short pointer,
+/// `https://{agent}/i/{token}`, and the phone answers it through the same scan
+/// gate as a sign-in. It used to travel whole inside the QR as a dense
+/// self-contained code, which is withdrawn (see `toScannableLink`).
 ///
 /// It carries a signature, which the bare offer it replaces did not. A bare
 /// offer was a public key and a claim anybody who photographed the screen could
@@ -97,12 +95,31 @@ class ControllerOffer {
         orgName: (m['org_name'] ?? '').toString(),
       );
 
+  /// What a computer leaves at the Identity Agent it asks to act for
+  /// (`POST /api/controller/requests`), which holds it behind the short pointer
+  /// the computer shows instead of this whole offer (ADR-041 Amendment 1).
+  /// [label] is what the computer suggests calling itself, display only.
+  Map<String, dynamic> toRequestBody({String label = ''}) => {
+        ...toVerifyBody(),
+        if (label.isNotEmpty) 'label': label,
+        if (orgName.isNotEmpty) 'org_name': orgName,
+      };
+
   /// The `identity-agent://controller?…` link this offer shows as a QR.
+  ///
+  /// WITHDRAWN AS WHAT A COMPUTER SHOWS (ADR-041 Amendment 1). A computer now
+  /// shows the short pointer `AskingToActForAnIdentity.aShortCodeFor` returns,
+  /// which the owner's Identity Agent answers through the same scan gate as
+  /// every other code. This stays, with [parse] and [verifyControllerOffer],
+  /// only while a phone that has not yet learned the pointer must still read a
+  /// code an older computer shows, and goes in the change after both apps
+  /// show and read the pointer.
   ///
   /// Every signed field is carried whole, because the owner's device rebuilds
   /// the exact string the core signed to check the signature — drop one and the
-  /// check cannot run. Same scheme and shape as a pairing link, so the one Scan
-  /// button routes it without a scanner of its own.
+  /// check cannot run.
+  @Deprecated('Show the short pointer from AskingToActForAnIdentity.aShortCodeFor '
+      '(ADR-041 Amendment 1)')
   String toScannableLink() {
     final q = <String, String>{
       'aid': aid,
