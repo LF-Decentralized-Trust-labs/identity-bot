@@ -778,19 +778,20 @@ func (s *CoreServer) Start() error {
 		if s.listener, bindErr = net.Listen("tcp4", rootListenAddr(0)); bindErr == nil {
 			s.Port = s.listener.Addr().(*net.TCPAddr).Port
 		}
-	}
-	for attempt := 0; s.listener == nil && requestedPort != 0 && attempt < 10; attempt++ {
-		tryPort := requestedPort + attempt
-		addr := rootListenAddr(tryPort)
-		s.listener, bindErr = net.Listen("tcp4", addr)
-		if bindErr == nil {
-			if tryPort != requestedPort {
-				log.Printf("[identity-agent-core] Port %d in use — using fallback port %d", requestedPort, tryPort)
+	} else {
+		for attempt := 0; attempt < 10; attempt++ {
+			tryPort := requestedPort + attempt
+			addr := rootListenAddr(tryPort)
+			s.listener, bindErr = net.Listen("tcp4", addr)
+			if bindErr == nil {
+				if tryPort != requestedPort {
+					log.Printf("[identity-agent-core] Port %d in use — using fallback port %d", requestedPort, tryPort)
+				}
+				s.Port = tryPort
+				break
 			}
-			s.Port = tryPort
-			break
+			log.Printf("[identity-agent-core] Port %d unavailable: %v", tryPort, bindErr)
 		}
-		log.Printf("[identity-agent-core] Port %d unavailable: %v", tryPort, bindErr)
 	}
 	if s.listener == nil {
 		if requestedPort == 0 {

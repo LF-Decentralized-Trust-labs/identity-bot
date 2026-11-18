@@ -69,20 +69,23 @@ class TheCoreRunning {
 }
 
 /// The line a core logs once it holds its port, naming the port.
-final _listening = RegExp(r'Server listening on [0-9.]+:(\d+)');
+final _listening = RegExp(r'Server listening on [0-9.]+:(\d+)\s*$');
 
 /// Starts the core at [bin] with its data in [dataDir] and [ownerSecret] as
 /// the secret its owner's requests carry, on a port the system gives it, and
 /// returns once it answers `/api/health` there. Test files run in parallel, so
 /// a port picked by the test could be taken by another file's core before
 /// this one binds it. The core names the port it took in its log, and that is
-/// the port used. A core that exits, or does not answer within [within],
-/// fails the test with everything it logged.
+/// the port used. A core that exits, or does not answer within [within] (well
+/// inside a test's own 30 s limit, so the core's log is not lost to it), fails
+/// the test with everything it logged. [arguments] are given to the binary,
+/// for a test of a core that never answers.
 Future<TheCoreRunning> startTheCore(String bin,
     {required String dataDir,
     required String ownerSecret,
-    Duration within = const Duration(seconds: 30)}) async {
-  final p = await Process.start(bin, [], environment: {
+    Duration within = const Duration(seconds: 15),
+    List<String> arguments = const []}) async {
+  final p = await Process.start(bin, arguments, environment: {
     ...Platform.environment,
     'PORT': '0',
     'HOST': '127.0.0.1',
@@ -91,25 +94,31 @@ Future<TheCoreRunning> startTheCore(String bin,
   });
   final logs = StringBuffer();
   final port = Completer<int>();
-  void read(String chunk) {
-    logs.write(chunk);
-    final m = port.isCompleted ? null : _listening.firstMatch('$logs');
+  // Each whole line as it arrives, so a port split across two reads is never
+  // taken for a shorter one.
+  void line(String l) {
+    logs.writeln(l);
+    final m = port.isCompleted ? null : _listening.firstMatch(l);
     if (m != null) port.complete(int.parse(m[1]!));
   }
 
-  final read1 = p.stdout.transform(utf8.decoder).listen(read).asFuture<void>();
-  final read2 = p.stderr.transform(utf8.decoder).listen(read).asFuture<void>();
+  Future<void> read(Stream<List<int>> s) => s
+      .transform(utf8.decoder)
+      .transform(const LineSplitter())
+      .listen(line)
+      .asFuture<void>();
+  final reading = Future.wait([read(p.stdout), read(p.stderr)]);
   int? exitCode;
   unawaited(p.exitCode.then((c) => exitCode = c));
 
   Future<Never> notStarted(String why) async {
     if (exitCode == null) {
-      p.kill();
-      await p.exitCode;
+      p.kill(ProcessSignal.sigkill);
+      await p.exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
     }
     // Everything it wrote, which ends once its output is closed.
-    await Future.wait([read1, read2])
-        .timeout(const Duration(seconds: 5), onTimeout: () => const []);
+    await reading.timeout(const Duration(seconds: 5),
+        onTimeout: () => const []);
     fail('the core at $bin $why. What it logged:\n$logs');
   }
 
@@ -117,8 +126,7 @@ Future<TheCoreRunning> startTheCore(String bin,
   final bound = await Future.any<int?>([
     port.future,
     p.exitCode.then((_) => null),
-    Future<int?>.delayed(within, () => null),
-  ]);
+  ]).timeout(within, onTimeout: () => null);
   if (bound == null) {
     return notStarted(exitCode != null
         ? 'exited with code $exitCode before it took a port'

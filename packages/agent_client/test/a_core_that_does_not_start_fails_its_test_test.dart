@@ -16,6 +16,7 @@ void main() {
   test('a core is started on the port the system gives it, and answers there',
       () async {
     final data = await Directory.systemTemp.createTemp('a-core-that-starts');
+    addTearDown(() => data.delete(recursive: true));
     final core =
         await startTheCore(bin, dataDir: data.path, ownerSecret: ownerSecret);
     addTearDown(core.process.kill);
@@ -30,6 +31,7 @@ void main() {
       'logged', () async {
     // Its data directory would be inside a file, which no core can make.
     final dir = await Directory.systemTemp.createTemp('a-core-that-fails');
+    addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/not-a-directory');
     await file.writeAsString('');
     await expectLater(
@@ -39,5 +41,22 @@ void main() {
             .having((f) => f.message, 'message', contains('exited with code'))
             .having((f) => f.message, 'message',
                 contains('failed to create store directory'))));
+  });
+
+  test(
+      'a core that never answers fails the test that started it, with what it '
+      'logged', () async {
+    // The core asked to compute instead of serve, waiting for a request that
+    // never comes: it never takes a port and never answers.
+    final data = await Directory.systemTemp.createTemp('a-core-that-hangs');
+    addTearDown(() => data.delete(recursive: true));
+    await expectLater(
+        startTheCore(bin,
+            dataDir: data.path,
+            ownerSecret: ownerSecret,
+            within: const Duration(seconds: 2),
+            arguments: const ['keymath', 'never-asked']),
+        throwsA(isA<TestFailure>().having((f) => f.message, 'message',
+            contains('did not say which port it took within 2 s'))));
   });
 }
