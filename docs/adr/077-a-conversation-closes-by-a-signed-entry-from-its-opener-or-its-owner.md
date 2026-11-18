@@ -5,6 +5,7 @@
 **Deciders:** to be decided; the kinds below become public wire once this ships, and third parties then check them
 **Amends:** ADR-047 (it no longer says a conversation closes after 30 minutes with nothing said, or at a hard limit with an ask unanswered; a progress note no longer restarts an idle clock)
 **Builds on:** ADR-047 (AI agents talk through the Identity Agent that holds them, including Amendment 3), ADR-067 (a person signs a salted fingerprint of their words), ADR-068 (a conversation's trail keeps who said what, never the words)
+**Amended:** 2026-11-18 — Who may write close and limit is ADR-086's table: the opener may still close, only the owner raises a limit, and reopen is withdrawn (new work is a new conversation); a close says completed, failed or cancelled, and pause, resume and adopted are added (see ADR-086)
 
 ---
 

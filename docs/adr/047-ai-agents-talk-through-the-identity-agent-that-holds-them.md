@@ -8,6 +8,7 @@
 **Amended:** 2026-11-12 — A conversation closes by a signed entry from its opener or its owner, never for being quiet (see ADR-077)
 **Amended:** 2026-11-14 — An ask to an AI agent another Identity Agent holds rests on the AI agent's own grant and the owner's per-contact rule, not on the person's reach, and a conversation may be opened by an AI agent another Identity Agent holds (see ADR-085)
 **Amended:** 2026-11-15 — A body says a turn started on a message with a second receipt (see §Amendment 4)
+**Amended:** 2026-11-18 — A conversation is opened for an objective and bounded by budgets its grant states; running out pauses it and tells a person, in place of the limit of 40 entries (see ADR-086)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context
