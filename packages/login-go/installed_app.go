@@ -26,6 +26,21 @@ const (
 	PlatformAndroid = "android"
 	PlatformApple   = "apple"
 	PlatformTPM     = "tpm"
+	// PlatformSoftware is a key held in software, which nothing vouches for. The
+	// Identity Agent takes it only for a utility app whose owner does not require a
+	// hardware key, and keeps the sign-in at the software grade (ADR-072 Amendment
+	// 17). Its evidence is the key's own uncompressed point, 0x04 then x then y.
+	PlatformSoftware = "software"
+)
+
+// The grades the Identity Agent keeps an installed front end's key at, as a
+// verified sign-in's KeyGrade says them (ADR-072 Amendment 17).
+const (
+	// KeyGradeHardware: the device's secure hardware proved the key.
+	KeyGradeHardware = "hardware"
+	// KeyGradeSoftware: the key signed the sign-in and nothing proves where it is
+	// kept. A back end may hold such a session to less than a hardware key's.
+	KeyGradeSoftware = "software"
 )
 
 // Where an installed front end asks its back end for an ask, and starts its
@@ -67,6 +82,11 @@ type InstalledAsk struct {
 	AssetID   string `json:"asset_id"`
 	Challenge string `json:"challenge"` // unpadded base64url of the challenge bytes
 	Expires   string `json:"expires"`
+	// Accepts are the platforms the Identity Agent takes a key on for this app, as
+	// its owner set them: the hardware platforms the owner named, and "software"
+	// unless the owner requires a hardware key. The front end uses a key that
+	// will be accepted; the Identity Agent still decides when the proof arrives.
+	Accepts []string `json:"accepts,omitempty"`
 }
 
 // InstalledAppStatement is what an installed front end's key signs to start a
@@ -137,13 +157,31 @@ func ReadFrontEndStart(body []byte) (FrontEndStart, error) {
 		if p == nil || len(p.Evidence) == 0 || p.Ask == "" || len(p.KeySignature) == 0 {
 			return FrontEndStart{}, errors.New("login: an installed app's sign-in needs the hardware's evidence for its key")
 		}
-		if p.Platform != PlatformAndroid && p.Platform != PlatformApple && p.Platform != PlatformTPM {
+		switch p.Platform {
+		case PlatformAndroid, PlatformApple, PlatformTPM:
+		case PlatformSoftware:
+			// Nothing vouches for a key in software: its evidence is its own point,
+			// and it must be the key the start names.
+			if !bytes.Equal(p.Evidence, uncompressedPoint(s.JWK)) {
+				return FrontEndStart{}, errors.New("login: a key in software gives its own point, and this is not the key given")
+			}
+		default:
 			return FrontEndStart{}, errors.New("login: the proof names a platform that cannot vouch for a key")
 		}
 	default:
 		return FrontEndStart{}, errors.New("login: the sign-in does not say which front end it is for, 'browser' or 'installed_app'")
 	}
 	return s, nil
+}
+
+// uncompressedPoint is 0x04, x, y of a P-256 JWK, or nil when it is not one.
+func uncompressedPoint(k FrontEndJWK) []byte {
+	x, ex := base64.RawURLEncoding.DecodeString(k.X)
+	y, ey := base64.RawURLEncoding.DecodeString(k.Y)
+	if ex != nil || ey != nil || len(x) != 32 || len(y) != 32 {
+		return nil
+	}
+	return append(append([]byte{4}, x...), y...)
 }
 
 // InstalledCredentialRequest is a TPM front end's request for a credential, for

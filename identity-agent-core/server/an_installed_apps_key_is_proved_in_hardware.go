@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -37,6 +38,12 @@ import (
 //     they accept that (InstalledAppIdentity.TPMKeys).
 //
 // The attested public key must be the key the sign-in names.
+//
+// A key held in software (platform "software") is accepted too, unless the
+// asset's owner requires a hardware key (asset.Asset.RequireHardwareKey, ADR-072
+// Amendment 17): the key still signs the sign-in for a fresh ask, so it is held
+// by whoever starts the sign-in, but nothing proves where it is kept, so the grant
+// it leads to is kept at the software grade and lapses as a browser's does.
 
 // InstalledAppKeyProof is the evidence an add-on's back end carries from its
 // installed front end: the platform that vouches, and that platform's own
@@ -44,7 +51,9 @@ import (
 // 4 bytes big-endian; Apple: the CBOR attestation object; TPM: the JSON
 // document secureenclave.VerifyTPMKeyCertify reads).
 type InstalledAppKeyProof struct {
-	Platform string `json:"platform"` // "android", "apple" or "tpm"
+	Platform string `json:"platform"` // "android", "apple", "tpm" or "software"
+	// Evidence is the platform's own evidence; for "software" it is the key's
+	// uncompressed P-256 point (65 bytes, 0x04 first), which nothing vouches for.
 	Evidence []byte `json:"evidence"`
 	// Ask names the ask (beginInstalledAppKey) the evidence was made for, and
 	// KeySignature is the key's own signature over InstalledAppSignInStatement
@@ -123,6 +132,81 @@ func inWordsForPerson(err error) error {
 
 var errNoProof = errors.New("an installed-app sign-in needs a hardware attestation of the installed app's key, and this request has none")
 
+// The two grades an installed app's key is kept at (ADR-072 Amendment 17), as the
+// sign-in's result and the owner's list of grants say them.
+const (
+	// KeyGradeHardware: the core verified the device's secure hardware's own
+	// attestation of the key (Android, Apple, or a TPM the owner accepts).
+	KeyGradeHardware = "hardware"
+	// KeyGradeSoftware: the key signed the sign-in, and nothing proves where it is
+	// kept. Accepted only where the owner does not require a hardware key.
+	KeyGradeSoftware = "software"
+)
+
+// PlatformSoftware is the "platform" of a key held in software.
+const PlatformSoftware = "software"
+
+// errHardwareKeyRequired is what the person is told when the owner requires a
+// hardware key and this device's key is not one the hardware proves.
+var errHardwareKeyRequired = errors.New("This app's owner requires a sign-in key kept in a device's secure hardware, and this device's key is not one. Sign in from a phone or a computer whose security hardware the app accepts, or ask the app's owner.")
+
+// Grade is the grade the key was kept at: software for a key nothing vouched for,
+// hardware for one a platform's attestation proved.
+func (f installedAppFact) Grade() string {
+	if f.Platform == PlatformSoftware {
+		return KeyGradeSoftware
+	}
+	return KeyGradeHardware
+}
+
+// accepts are the platforms the core will take an installed app's key on for this
+// asset, as its owner set it: what the ask tells the front end, so it uses the key
+// the Identity Agent will accept. It informs and decides nothing: the proof is
+// still checked against the owner's setting when it arrives.
+func accepts(a asset.Asset) []string {
+	out := []string{}
+	if a.InstalledApp.AndroidPackage != "" {
+		out = append(out, "android")
+	}
+	if a.InstalledApp.AppleAppID != "" {
+		out = append(out, "apple")
+	}
+	if a.InstalledApp.TPMKeys {
+		out = append(out, "tpm")
+	}
+	if !a.RequireHardwareKey {
+		out = append(out, PlatformSoftware)
+	}
+	return out
+}
+
+// verifySoftwareKey is whether a key held in software signed the sign-in for this
+// ask. The ask is spent before anything is checked, as for a hardware key. The
+// owner's requirement of a hardware key is asked first, and refuses before the ask
+// is touched: there is no fallback the caller can choose.
+func (s *CoreServer) verifySoftwareKey(a asset.Asset, key string, proof *InstalledAppKeyProof, now time.Time) (installedAppFact, error) {
+	if a.RequireHardwareKey {
+		return installedAppFact{}, errHardwareKeyRequired
+	}
+	ask, err := s.takeInstalledAppAsk(proof.Ask, a.ID, now)
+	if err != nil {
+		return installedAppFact{}, err
+	}
+	x, y := elliptic.Unmarshal(elliptic.P256(), proof.Evidence)
+	if x == nil {
+		return installedAppFact{}, errors.New("a key held in software is given as its uncompressed P-256 point")
+	}
+	pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
+	tp, err := thumbprintOfECKey(pub)
+	if err != nil || tp != key {
+		return installedAppFact{}, errors.New("the key given is not the key this sign-in names")
+	}
+	if err := verifyKeyPossession(PlatformSoftware, pub, proof.KeySignature, a.ID, ask, key, ""); err != nil {
+		return installedAppFact{}, err
+	}
+	return installedAppFact{Platform: PlatformSoftware, Level: KeyGradeSoftware, Proved: now.UTC()}, nil
+}
+
 // verifyInstalledAppKey is whether the proof shows that key (a P-256 thumbprint,
 // RFC 7638) is held in hardware by the program the owner named for the asset.
 func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *InstalledAppKeyProof, now time.Time) (installedAppFact, error) {
@@ -135,6 +219,9 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 	a, found, err := s.assetHandler.Store.GetAsset(assetID)
 	if err != nil || !found {
 		return installedAppFact{}, errors.New("no such asset")
+	}
+	if proof.Platform == PlatformSoftware {
+		return s.verifySoftwareKey(a, key, proof, now)
 	}
 	if a.InstalledApp.IsEmpty() {
 		return installedAppFact{}, errors.New("the owner of this app has not said which installed program is its own, so no installed-app key can be accepted")
@@ -167,7 +254,7 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 		}
 		facts, err = verifyTPMInstalledKey(proof.Evidence, challenge, ask.credentialKey, now, a.InstalledApp.AcceptsVirtualTPM())
 	default:
-		return installedAppFact{}, fmt.Errorf("a key is proved on 'android', 'apple' or 'tpm', not '%s'", proof.Platform)
+		return installedAppFact{}, fmt.Errorf("a key is proved on 'android', 'apple' or 'tpm', or given as 'software', not '%s'", proof.Platform)
 	}
 	if err != nil {
 		if errors.Is(err, secureenclave.ErrVirtualTPM) {

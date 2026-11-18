@@ -37,6 +37,11 @@ type Handler struct {
 	// OnMemberRemoved is told after a person is removed from the asset, so a
 	// grant that does not lapse cannot wake when they are added again.
 	OnMemberRemoved func(assetID, memberAID string)
+	// OnHardwareKeyRequired is told, after the owner's setting is saved, that
+	// the utility app now requires a hardware key, so every grant held by a key in
+	// software is ended and not merely refused (ADR-072 Amendment 17). Nil is told
+	// nothing.
+	OnHardwareKeyRequired func(assetID string)
 
 	// VaultHas reports whether the credential vault holds an entry of a name,
 	// so a brain's reference to one is shown and a key in its place is not.

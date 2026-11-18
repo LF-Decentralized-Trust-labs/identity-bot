@@ -30,8 +30,10 @@ class UtilityAppSignInScreen extends StatefulWidget {
   final void Function(String link)? onLinkUsed;
   final http.Client Function() makeClient;
 
-  /// The key and the grant store for the link opened (an installed app: a
-  /// `HardwareFrontEndKey` and a `SecureGrantStore`).
+  /// The key and the grant store for the link opened (an installed app:
+  /// `openInstalledFrontEndKey`, which uses the hardware's key where the app's
+  /// owner accepts it and a key in software where the owner allows that, and a
+  /// `SecureGrantStore`).
   final Future<FrontEndKey> Function(AppLink link) keyFor;
   final GrantStore Function(AppLink link) storeFor;
 

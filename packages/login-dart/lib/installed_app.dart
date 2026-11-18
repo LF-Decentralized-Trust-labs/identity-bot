@@ -17,11 +17,24 @@ enum FrontEndKind {
   const FrontEndKind(this.wire);
 }
 
-/// The platforms that can vouch for an installed front end's key.
+/// The platforms that can vouch for an installed front end's key, and
+/// [software], a key nothing vouches for, which the Identity Agent takes only for
+/// a utility app whose owner does not require a hardware key (ADR-072 Amendment 17).
 abstract class InstalledPlatform {
   static const android = 'android';
   static const apple = 'apple';
   static const tpm = 'tpm';
+  static const software = 'software';
+}
+
+/// The grades the Identity Agent keeps an installed front end's key at
+/// (ADR-072 Amendment 17).
+abstract class KeyGrade {
+  /// The device's secure hardware proved the key.
+  static const hardware = 'hardware';
+
+  /// The key signed the sign-in, and nothing proves where it is kept.
+  static const software = 'software';
 }
 
 /// Where an installed front end asks its back end for an ask (a sealed call).
@@ -93,7 +106,13 @@ class InstalledAsk {
   /// Unpadded base64url of the challenge bytes the hardware attests.
   final String challenge;
   final String expires;
-  const InstalledAsk(this.ask, this.assetId, this.challenge, this.expires);
+
+  /// The platforms the Identity Agent takes a key on for this app, as its owner
+  /// set them ([InstalledPlatform]), or null where the back end did not say. It
+  /// tells the front end which key to use; the Identity Agent still decides.
+  final List<String>? accepts;
+  const InstalledAsk(this.ask, this.assetId, this.challenge, this.expires,
+      {this.accepts});
 
   factory InstalledAsk.fromJson(Object? j) {
     if (j is! Map ||
@@ -103,11 +122,17 @@ class InstalledAsk {
         (j['asset_id'] as String).isEmpty ||
         j['challenge'] is! String ||
         b64uDecode(j['challenge']) == null ||
-        j['expires'] is! String) {
+        j['expires'] is! String ||
+        (j['accepts'] != null &&
+            (j['accepts'] is! List ||
+                (j['accepts'] as List).any((p) => p is! String)))) {
       throw const TrustRefused('the app\'s ask for evidence is not readable');
     }
     return InstalledAsk(j['ask'] as String, j['asset_id'] as String,
-        j['challenge'] as String, j['expires'] as String);
+        j['challenge'] as String, j['expires'] as String,
+        accepts: j['accepts'] == null
+            ? null
+            : List.unmodifiable((j['accepts'] as List).cast<String>()));
   }
 }
 

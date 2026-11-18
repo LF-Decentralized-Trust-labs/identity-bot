@@ -148,8 +148,9 @@ func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom s
 		RelayID:              found.RelayID,
 		BackEnd:              found.BackEnd,
 	}
-	// Only a proved installed app's key names a device: the platform is the
-	// proof's, not the request's.
+	// Only a key the hardware proved names a device: the platform is the
+	// proof's, not the request's. A key held in software (ADR-072 Amendment 17)
+	// proves no device, so its challenge names none, platform or name.
 	if device != nil && installedAppKey && frontEnd == asset.FrontEndInstalledApp {
 		platform, ok := signedDevicePlatform(*device)
 		if !ok {
@@ -157,8 +158,10 @@ func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom s
 			// not shown to the person either.
 			return "", "", http.StatusForbidden, "this device's security chip is of no known kind, so it cannot sign in"
 		}
-		bundle.DevicePlatform = platform
-		bundle.DeviceName = device.DeviceName
+		if platform != "" {
+			bundle.DevicePlatform = platform
+			bundle.DeviceName = device.DeviceName
+		}
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,
@@ -343,6 +346,10 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			if fe, ok := st["front_end"].(string); ok {
 				resp["front_end"] = fe
 			}
+			// How an installed app's key was established (ADR-072 Amendment 17).
+			if g, ok := st["key_grade"].(string); ok {
+				resp["key_grade"] = g
+			}
 			// Membership-admitted logins: who the admitting roster says this is
 			// (e.g. role + display_name), so the RP needs no org-internal lookups.
 			if mi, ok := st["member_info"]; ok {
@@ -383,10 +390,19 @@ func sameOrigin(a, b string) bool {
 // opted in to those) is named as one, so the person's consent can say that
 // whoever runs its host can read the key, rather than "a computer". A TPM's
 // key is named only for a class the proof recorded: false for one with none,
-// which fails closed rather than reading as a physical chip.
+// which fails closed rather than reading as a physical chip. A key held in
+// software names no device ("", true): nothing proved one. Any other platform
+// is false, so a platform the person's Identity Agent does not know
+// (login.CheckDevice) is never signed into a challenge it would refuse.
 func signedDevicePlatform(f installedAppFact) (string, bool) {
-	if f.Platform != login.DeviceTPM {
+	switch f.Platform {
+	case PlatformSoftware:
+		return "", true
+	case login.DeviceAndroid, login.DeviceApple:
 		return f.Platform, true
+	case login.DeviceTPM:
+	default:
+		return "", false
 	}
 	switch f.EKClass {
 	case secureenclave.TPMClassVirtual:

@@ -164,6 +164,14 @@ class AppSession {
     }
   }
 
+  Future<T> _guardAsync<T>(Future<T> Function() f) async {
+    try {
+      return await f();
+    } on TrustRefused catch (e) {
+      throw SignInFailed(e.message);
+    }
+  }
+
   Map<String, dynamic> _ok(AppAnswer r, String what) {
     if (r.status == 200) return r.json();
     if (r.status == 502 || r.status == 503 || r.status == 504) {
@@ -191,7 +199,7 @@ class AppSession {
           await _send('POST', installedAskPath, '{}', (_) async => {}),
           'Asking the app for evidence of this device\'s key');
       final ask = _guard(() => InstalledAsk.fromJson(asked));
-      proof = await key.prove(ask, exchange: (enrolment) async {
+      proof = await _guardAsync(() => key.prove(ask, exchange: (enrolment) async {
         onPhase?.call(SignInPhase.credential);
         final j = _ok(
             await _send(
@@ -201,7 +209,7 @@ class AppSession {
                 (_) async => {}),
             'Asking the app for a credential for this device\'s TPM');
         return _guard(() => TpmCredential.fromJson(j));
-      });
+      }));
       if (proof == null) {
         throw const SignInFailed(
             'This device cannot prove its key to the app, so it cannot sign in as the app\'s installed front end.');

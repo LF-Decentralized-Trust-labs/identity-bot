@@ -185,6 +185,12 @@ func TestAVirtualTPMIsNamedAsOneOnTheConsent(t *testing.T) {
 		{physical, login.DeviceTPM, true},
 		{installedAppFact{Platform: "android"}, "android", true},
 		{installedAppFact{Platform: "tpm"}, "", false},
+		{installedAppFact{Platform: "apple"}, "apple", true},
+		// A key held in software proves no device, so it names none and is not refused.
+		{installedAppFact{Platform: PlatformSoftware}, "", true},
+		// A platform the person's Identity Agent does not know is never signed.
+		{installedAppFact{Platform: "windows"}, "", false},
+		{installedAppFact{}, "", false},
 	} {
 		if got, ok := signedDevicePlatform(c.f); got != c.want || ok != c.ok {
 			t.Fatalf("%+v: signed as %q %v, want %q %v", c.f, got, ok, c.want, c.ok)
@@ -251,5 +257,31 @@ func TestTheSignInConsentListsTheFrontEndDeviceAndLasting(t *testing.T) {
 	}
 	if gp.Warning != shareWarning(true) {
 		t.Errorf("the consent closes with %q", gp.Warning)
+	}
+}
+
+// A key held in software (ADR-072 Amendment 17) proves no device, so its
+// sign-in names none, platform or name, whatever name the installed app gives,
+// and the person's Identity Agent shows and approves it. Fails if the software
+// grade's platform reaches the challenge, which the person's Identity Agent
+// refuses as no platform it knows.
+func TestAKeyHeldInSoftwareNamesNoDevice(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	k := newSoftwareKey(t)
+	p := k.softwareProof(t, iw)
+	p.DeviceName = "Ann's Pixel"
+	in, err := k.start(iw, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pv, err := aPersonsIdentityAgent(t).Preview(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: iw.srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pv.DevicePlatform != "" || pv.DeviceName != "" {
+		t.Fatalf("a key held in software names a device: %+v", pv)
+	}
+	if err := approve(t, iw, in); err != nil {
+		t.Fatalf("the person's Identity Agent refused a key held in software: %v", err)
 	}
 }

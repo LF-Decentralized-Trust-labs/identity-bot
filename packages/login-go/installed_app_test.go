@@ -1,6 +1,7 @@
 package login
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -8,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -186,5 +189,71 @@ func TestACredentialRequestIsReadStrictly(t *testing.T) {
 		if _, err := ReadInstalledCredentialRequest([]byte(body)); err == nil {
 			t.Errorf("%s: was read", name)
 		}
+	}
+}
+
+// A verified installed front end's sign-in says how its key was established, and
+// the back end is handed that grade with who signed in (ADR-072 Amendment 17).
+func TestAVerifiedSignInCarriesTheGradeOfItsKey(t *testing.T) {
+	for _, grade := range []string{KeyGradeSoftware, KeyGradeHardware} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"state":"verified","app_session_token":"EPerson","front_end":"installed_app","key_grade":"` + grade + `"}`))
+		}))
+		c, err := ConfirmSession(t.Context(), HTTPAgent{URL: srv.URL, AssetID: "app"}, ConfirmOptions{SessionToken: "s", CollectorSecret: "c"})
+		srv.Close()
+		if err != nil || c.State != Verified || c.KeyGrade != grade || c.FrontEnd != FrontEndInstalledApp {
+			t.Fatalf("%s: %+v %v", grade, c, err)
+		}
+	}
+}
+
+// A key held in software proves the sign-in by its own signature over the
+// statement for the ask, and its evidence is its own point: the vector login-dart
+// makes, checked here as the Identity Agent checks it (ADR-072 Amendment 17).
+func TestAKeyInSoftwareSignsTheStatementLoginDartMakes(t *testing.T) {
+	var v struct {
+		P struct {
+			AssetID   string `json:"asset_id"`
+			Challenge string `json:"challenge_b64u"`
+			X         string `json:"x"`
+			Y         string `json:"y"`
+			Thumb     string `json:"thumbprint"`
+			Evidence  []byte `json:"evidence"`
+			Sig       []byte `json:"key_signature"`
+		} `json:"software_proof"`
+	}
+	raw, err := os.ReadFile("../login-web/test-vectors/installed-app.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	p := v.P
+	if KeyThumbprint(p.X, p.Y) != p.Thumb {
+		t.Fatal("the vector's thumbprint is not its key's")
+	}
+	jwk := FrontEndJWK{Kty: "EC", Crv: "P-256", X: p.X, Y: p.Y}
+	if !bytes.Equal(uncompressedPoint(jwk), p.Evidence) {
+		t.Fatal("the evidence is not the key's own point")
+	}
+	x, y := elliptic.Unmarshal(elliptic.P256(), p.Evidence)
+	if x == nil {
+		t.Fatal("the evidence is not a P-256 point")
+	}
+	pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
+	ch, _ := b64uDecodeForTest(p.Challenge)
+	d := InstalledAppStatementDigest(p.AssetID, ch, p.Thumb)
+	if !ecdsa.VerifyASN1(pub, d[:], p.Sig) {
+		t.Fatal("the key's signature over the statement does not verify")
+	}
+	other := InstalledAppStatementDigest("another-app", ch, p.Thumb)
+	if ecdsa.VerifyASN1(pub, other[:], p.Sig) {
+		t.Fatal("the signature verifies for another app's statement")
+	}
+	body, _ := json.Marshal(FrontEndStart{FrontEnd: FrontEndInstalledApp, BrowserKey: p.Thumb, JWK: jwk,
+		Proof: &InstalledKeyProof{Platform: PlatformSoftware, Evidence: p.Evidence, Ask: "a", KeySignature: p.Sig}})
+	if _, err := ReadFrontEndStart(body); err != nil {
+		t.Fatalf("a back end refuses the start login-dart writes for a key in software: %v", err)
 	}
 }

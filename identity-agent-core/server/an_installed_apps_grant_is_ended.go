@@ -32,10 +32,32 @@ import (
 //     use (assetStillStands);
 //   - the person is removed from the asset (OnMemberRemoved), so the grant
 //     cannot wake if they are added again.
+//   - for a key held in software, the owner requires a hardware key
+//     (OnHardwareKeyRequired, ADR-072 Amendment 17), or its lapse time passes.
 // An asset that is gone speaks for no one (assetStillStands).
 
 // EndKind ends every record at the asset of the front-end kind, and says how many.
 func (b *browserKeys) EndKind(asset, kind string) (int, error) {
+	return b.endWhere(asset, func(r browserKeyRecord) bool {
+		rk := r.FrontEnd
+		if rk == "" {
+			rk = login.FrontEndBrowser
+		}
+		return rk == kind
+	})
+}
+
+// EndSoftwareAppKeys ends every installed app's grant at the asset that a key
+// held in software holds: what the owner's requiring a hardware key ends (ADR-072
+// Amendment 17). Its back ends are told, as for any other ending.
+func (b *browserKeys) EndSoftwareAppKeys(asset string) (int, error) {
+	return b.endWhere(asset, func(r browserKeyRecord) bool {
+		return r.FrontEnd == login.FrontEndInstalledApp && r.Grade() != KeyGradeHardware
+	})
+}
+
+// endWhere ends every record at the asset that ends says to, and says how many.
+func (b *browserKeys) endWhere(asset string, ends func(browserKeyRecord) bool) (int, error) {
 	browserKeysLock.Lock()
 	defer browserKeysLock.Unlock()
 	all, err := b.load()
@@ -45,11 +67,7 @@ func (b *browserKeys) EndKind(asset, kind string) (int, error) {
 	n := 0
 	var gone []browserKeyRecord
 	for k, r := range all {
-		rk := r.FrontEnd
-		if rk == "" {
-			rk = login.FrontEndBrowser
-		}
-		if r.Asset == asset && rk == kind {
+		if r.Asset == asset && ends(r) {
 			delete(all, k)
 			n++
 			gone = append(gone, r)
@@ -98,6 +116,11 @@ type appKeyGrantView struct {
 	Platform string    `json:"platform,omitempty"`
 	Level    string    `json:"level,omitempty"`
 	Since    time.Time `json:"since,omitempty"`
+	// Grade is "hardware" when the device's secure hardware proved the key and
+	// "software" when nothing did (ADR-072 Amendment 17). Until is when a key in
+	// software stops speaking; a hardware key's grant has none.
+	Grade string     `json:"grade,omitempty"`
+	Until *time.Time `json:"until,omitempty"`
 	// For a TPM key, who certified the chip's endorsement key and its class: "physical", or
 	// "virtual" where the owner opted in to virtual TPMs. Notice says, for a virtual one, what
 	// that means for the owner, in the words every screen uses.
@@ -111,6 +134,11 @@ func (s *CoreServer) handleListAppKeyGrants(w http.ResponseWriter, r *http.Reque
 	out := []appKeyGrantView{}
 	for _, g := range s.browserKeys().AppKeyGrants(chi.URLParam(r, "id"), time.Now()) {
 		v := appKeyGrantView{Key: g.Thumbprint, Person: g.Person}
+		v.Grade = g.Grade()
+		if !g.Until.IsZero() {
+			until := g.Until
+			v.Until = &until
+		}
 		if g.Proof != nil {
 			v.Platform, v.Level, v.Since = g.Proof.Platform, g.Proof.Level, g.Proof.Proved
 			v.EKIssuer, v.EKClass = g.Proof.EKIssuer, g.Proof.EKClass

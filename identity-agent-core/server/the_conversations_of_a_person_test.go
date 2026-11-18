@@ -500,3 +500,39 @@ func (w *anAppWorld) copyWithBody(t *testing.T, r *http.Request, body string) *h
 	}
 	return b
 }
+
+// A list may be signed under an installed front end's key held in software
+// (ADR-072 Amendment 17), and is then held to that grade on every use: once the
+// utility app's owner requires a hardware key, the key no longer speaks for the
+// person, and its list is refused. Fails if the list's key lookup skips the
+// owner's requirement.
+func TestAListUnderAKeyHeldInSoftwareStopsWhenItsOwnerRequiresHardware(t *testing.T) {
+	var asked []string
+	w, keys := aListWorld(t, &asked)
+	key := newBrowsersKey(t)
+	keys["soft"] = key
+	soft := installedAppFact{Platform: PlatformSoftware, Level: KeyGradeSoftware, Proved: time.Now().UTC()}
+	if err := w.cw.s.browserKeys().RecordSoftwareAppKeyAt("", "app-b", "Eann-b", thumbOf(t, key), time.Now().Add(time.Hour), time.Now(), nil, soft); err != nil {
+		t.Fatal(err)
+	}
+	// The second utility app's own key for Ann is a browser's; only the software
+	// key is the installed front end's.
+	if _, err := w.cw.s.browserKeys().End("app-b", thumbOf(t, keys["ann-b"]), "Eann-b"); err != nil {
+		t.Fatal(err)
+	}
+	if rec := w.list(t, keys, aListRequest{who: "Eann-b", key: "soft"}); rec.Code != http.StatusOK {
+		t.Fatalf("a list under a key held in software was refused: %d %s", rec.Code, rec.Body)
+	}
+	st := w.cw.s.assetHandler.Store
+	a, _, err := st.GetAsset("app-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.RequireHardwareKey = true
+	if err := st.UpsertAsset(a); err != nil {
+		t.Fatal(err)
+	}
+	if rec := w.list(t, keys, aListRequest{who: "Eann-b", key: "soft"}); rec.Code == http.StatusOK {
+		t.Fatalf("a key held in software listed after its owner required hardware: %s", rec.Body)
+	}
+}

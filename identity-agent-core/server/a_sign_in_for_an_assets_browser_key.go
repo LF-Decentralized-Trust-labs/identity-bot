@@ -56,6 +56,11 @@ type BrowserKeySignInResult struct {
 	// front end it named, both from the challenge itself: so whoever asks can
 	// check the sign-in was started for it, and for the kind it expects.
 	SiteAID, FrontEnd string
+	// KeyGrade is, for a verified installed_app sign-in, how the core established
+	// the key: "hardware" (the device's secure hardware proved it) or "software"
+	// (nothing did, and the owner does not require it). Empty for a browser's.
+	// ADR-072 Amendment 17.
+	KeyGrade string
 }
 
 // startBrowserKeySignIn is the core's signed challenge for the asset, naming
@@ -83,7 +88,11 @@ func (s *CoreServer) startBrowserKeySignIn(assetID, audience, browserKey, public
 //   - the asset is the calling app's own, never another's;
 //   - the key must be proved by a hardware attestation that the core verifies
 //     itself, held to the program the OWNER named for the asset
-//     (verifyInstalledAppKey). The app's say-so is not read as proof.
+//     (verifyInstalledAppKey). The app's say-so is not read as proof. Where the
+//     owner does not require a hardware key, a key held in software that signs
+//     the sign-in for a fresh ask is accepted instead, at the software grade
+//     (ADR-072 Amendment 17); where the owner does, it is refused here, and the
+//     caller has no way to ask for the weaker path.
 func (s *CoreServer) startFrontEndKeySignIn(r *http.Request, callerAsset, assetID, audience, key, frontEnd, publicURL string, proof *InstalledAppKeyProof) (BrowserKeySignIn, error) {
 	if key == "" {
 		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in for a front end's key names the key"}
@@ -170,6 +179,9 @@ func (s *CoreServer) browserKeySignInResult(siteAID, session, collector string) 
 		// else is not read as "verified with nothing disclosed", which would
 		// quietly drop what the person chose to show: it is an error.
 		out := BrowserKeySignInResult{State: "verified", BrowserKey: fmt.Sprint(st["browser_key"]), SiteAID: b.SiteAID, FrontEnd: b.FrontEnd}
+		if g, ok := st["key_grade"].(string); ok {
+			out.KeyGrade = g
+		}
 		pairwise, ok := st["pairwise_aid"].(string)
 		if !ok || pairwise == "" {
 			return BrowserKeySignInResult{}, errors.New("the verified sign-in carries no identifier for the person")

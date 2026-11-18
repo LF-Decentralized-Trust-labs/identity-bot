@@ -66,8 +66,29 @@
    "name": "a proof with no evidence",
    "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
    "refuse": "needs the hardware"
+  },
+  {
+   "name": "an installed app whose key is held in software gives its own point",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"software\",\"evidence\":\"BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "expect": "installed_app"
+  },
+  {
+   "name": "a key in software whose point is another key",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"software\",\"evidence\":\"BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0E=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "not the key given"
   }
  ],
+ "software_proof": {
+  "about": "A key held in software (ADR-072 Amendment 17): its evidence is its own uncompressed P-256 point, and its key_signature is ECDSA P-256 (ASN.1 DER) over the SHA-256 of the sign-in statement for the ask, made deterministically (RFC 6979) from scalar_hex. login-dart makes it; login-go checks it as the Identity Agent does.",
+  "scalar_hex": "1112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30",
+  "asset_id": "Eapp0123456789",
+  "challenge_b64u": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+  "x": "TGM247iz3ncbYTocehc0g0zWnBpPX_7LJAxjvA3bFXQ",
+  "y": "9olsXRTKROADd5HCMAMzJZpxuQHlJYV10QfluKxItCQ",
+  "thumbprint": "yy-O9naQnsmrLXkXiTkf_zC_hJXS34-yqEIqYrW3_F8",
+  "evidence": "BExjNuO4s953G2E6HHoXNINM1pwaT1/+yyQMY7wN2xV09olsXRTKROADd5HCMAMzJZpxuQHlJYV10QfluKxItCQ=",
+  "key_signature": "MEYCIQCckTHmdCjHCh3rmPbCWQJ87j4tJtg0fBe5a2nqhmChnQIhAJCJxh2tpQ1qdjWNesBqKXmPLuBYtum2sM4+hNx/6Ajg"
+ },
  "apple_assertion": {
   "about": "An App Attest assertion over the SHA-256 of the proof text, made by Apple's published steps with a software key (no device produced it). Held by login-go and the Identity Agent's own VerifyAppleAssertion.",
   "app_id": "TEAM123456.org.example.portal",

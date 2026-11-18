@@ -133,6 +133,12 @@ type Asset struct {
 	// their browser's key speak for them, as its owner set it; 0 is the default.
 	// Read it through SignInLifetime, which applies the default and the ceiling.
 	SignInLifetimeHours int `json:"sign_in_lifetime_hours,omitempty"`
+	// RequireHardwareKey is the owner's word that an installed front end of this
+	// utility app signs in only with a key its device's secure hardware proves
+	// (ADR-072 Amendment 17). False, the default, also accepts a key held in
+	// software, at the lower grade. Only the owner's route and an add-on acting for
+	// the owner set it (SetRequireHardwareKey); nothing the app sends is read for it.
+	RequireHardwareKey bool `json:"require_hardware_key"`
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
 	// raw private key is never persisted. >0 means the asset can sign login challenges.

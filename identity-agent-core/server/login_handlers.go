@@ -331,6 +331,9 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// keyGrade is how an installed app's key was established: hardware or software
+	// (ADR-072 Amendment 17), told to whoever reads the result.
+	keyGrade := ""
 	// The person's own assertion named this browser key (ADR-066): keep that the
 	// key speaks for them at this asset, which is what later lets a statement
 	// signed by the key be taken as theirs (trail.CheckAuthor).
@@ -355,7 +358,33 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 				http.Error(w, "not authorized", http.StatusForbidden)
 				return
 			}
-			err = s.browserKeys().RecordAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
+			if fact.Grade() == KeyGradeSoftware {
+				// The owner's word, again at approval: a sign-in started just before the
+				// owner required a hardware key must not be kept after it (ADR-072
+				// Amendment 17). A key in software is kept as a browser's is, until the
+				// lifetime the owner set, not until it is ended.
+				if site.RequireHardwareKey {
+					s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": errHardwareKeyRequired.Error()})
+					http.Error(w, "not authorized", http.StatusForbidden)
+					return
+				}
+				err = s.browserKeys().RecordSoftwareAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now.Add(site.SignInLifetime()), now, presented, fact)
+				// And once more after it is kept: the owner's setting is saved before
+				// the grants it ends are ended, so an owner who turned it on while this
+				// was being kept either ended it already or is seen here, and it never
+				// outlives the setting to wake if the owner turns it off again.
+				if err == nil {
+					if latest, found, rerr := s.assetHandler.Store.GetAsset(assetID); rerr != nil || !found || latest.RequireHardwareKey {
+						_, _ = s.browserKeys().End(assetID, a.BrowserKey, "")
+						s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": errHardwareKeyRequired.Error()})
+						http.Error(w, "not authorized", http.StatusForbidden)
+						return
+					}
+				}
+			} else {
+				err = s.browserKeys().RecordAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
+			}
+			keyGrade = fact.Grade()
 		} else {
 			// How long is the asset's to say: its owner's setting, within the
 			// core's ceiling (asset.Asset.SignInLifetime). It is read here, at
@@ -405,6 +434,11 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// whoever reads the result can see which kind of front end was approved.
 	if bundle.FrontEnd != "" {
 		st["front_end"] = a.FrontEnd
+	}
+	// The grade the installed app's key was kept at, so the app's back end knows
+	// whether the device's hardware proved it (ADR-072 Amendment 17).
+	if keyGrade != "" {
+		st["key_grade"] = keyGrade
 	}
 	// Membership-admitted logins carry the member's info (role, display name)
 	// from the admitting resolver, so the relying party gets "who this is" in

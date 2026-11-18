@@ -255,19 +255,3 @@ class FakeHardware implements HardwareKeyPlatform {
     return rawToDer(b64uDecode(await key.sign(b64uEncode(statementDigest)))!);
   }
 }
-
-/// ASN.1 DER of a raw r||s signature, as hardware gives it.
-Uint8List rawToDer(Uint8List raw) {
-  Uint8List part(Uint8List v) {
-    var i = 0;
-    while (i < v.length - 1 && v[i] == 0) {
-      i++;
-    }
-    var b = v.sublist(i);
-    if (b[0] & 0x80 != 0) b = Uint8List.fromList([0, ...b]);
-    return Uint8List.fromList([0x02, b.length, ...b]);
-  }
-
-  final r = part(raw.sublist(0, 32)), s = part(raw.sublist(32));
-  return Uint8List.fromList([0x30, r.length + s.length, ...r, ...s]);
-}

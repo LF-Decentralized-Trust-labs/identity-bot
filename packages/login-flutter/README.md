@@ -3,7 +3,12 @@
 Sign in with Identity Agent for an **installed front end** of a utility app
 (ADR-072): the sign-in screen (`UtilityAppSignInScreen`: the button, the code to
 compare, the waiting state), the device's hardware key (`MethodChannelHardwareKey`) and
-the grant kept across restarts (`SecureGrantStore`). It is a thin layer on
+the grant kept across restarts (`SecureGrantStore`). `openInstalledFrontEndKey` gives
+the key to sign in with: the hardware's where the app's owner accepts this device's
+hardware, and otherwise, where the owner does not require a hardware key, a key held in
+software and kept in the platform's secure storage. The Identity Agent keeps a sign-in
+with a key in software at the lower grade and lets it lapse, and refuses one outright for
+an app whose owner requires a hardware key (ADR-072 Amendment 17). It is a thin layer on
 `../login-dart`, whose `AppSession` does everything that is believed, signed or sealed.
 A browser front end uses `login-web` instead (a Flutter web build is loaded by that page).
 

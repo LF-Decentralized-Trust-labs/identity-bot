@@ -18,7 +18,10 @@ Windows). A browser does not use it: its page is `login-web`.
   `start`, `wait`, then the grant is kept in a `GrantStore` until it is ended.
 - `lib/front_end_key.dart` — `FrontEndKey`: `HardwareFrontEndKey`, an installed
   front end's key in its device's secure hardware (the platform supplies a
-  `HardwareKeyPlatform`: login-flutter), and `SoftwareFrontEndKey` for tests.
+  `HardwareKeyPlatform`: login-flutter); `InstalledFrontEndKey`, which an installed
+  front end uses: the hardware's key where the app's owner accepts it, and a key held
+  in software where the owner does not require a hardware key (ADR-072 Amendment 17,
+  kept in a `KeyStore`); and `SoftwareFrontEndKey` for tests.
 - `lib/apple_attest.dart` — the public key of an Apple App Attest attestation object (the
   device gives that key only as an identifier).
 - `lib/installed_app.dart` — the evidence an installed front end's key is proved by

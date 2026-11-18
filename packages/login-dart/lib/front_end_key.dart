@@ -11,10 +11,13 @@ import 'installed_app.dart';
 /// P-256 key whose name in the protocol is its RFC 7638 thumbprint. Every request
 /// after sign-in is signed with it, so a copied session or grant alone lets nobody in.
 ///
-/// Three kinds, one interface:
+/// Four kinds, one interface:
 ///  - [HardwareFrontEndKey]: an installed front end's key, made and held in the
-///    device's secure hardware, which can prove that ([prove]). The only kind the
-///    Identity Agent accepts for an installed app.
+///    device's secure hardware, which can prove that ([prove]).
+///  - [InstalledFrontEndKey]: what an installed front end uses: the hardware's key
+///    where the app's owner accepts that hardware, and otherwise, where the owner
+///    does not require a hardware key, a key held in software, which the Identity
+///    Agent keeps at the lower grade (ADR-072 Amendment 17).
 ///  - [SoftwareFrontEndKey]: held in memory, for tests and for a front end that
 ///    is a browser's (which the Identity Agent takes only as a browser's).
 ///  - the browser's own key, which a page holds: its SDK is login-web, not this.
@@ -287,4 +290,203 @@ Uint8List derToRaw(Uint8List der) {
   } on RangeError {
     throw const FormatException('truncated DER signature');
   }
+}
+
+/// Where an [InstalledFrontEndKey] keeps which key it holds, and a key held in
+/// software itself, across restarts: login-flutter keeps it in the platform's
+/// secure storage. It holds a secret, so it is never a plain file.
+abstract class KeyStore {
+  Future<String?> read();
+  Future<void> write(String value);
+  Future<void> clear();
+}
+
+/// A [KeyStore] in memory, for tests and for a front end that signs in each run.
+class MemoryKeyStore implements KeyStore {
+  String? _value;
+  @override
+  Future<String?> read() async => _value;
+  @override
+  Future<void> write(String value) async => _value = value;
+  @override
+  Future<void> clear() async => _value = null;
+}
+
+/// An installed front end's key (ADR-072 section 2 step 3, Amendment 17).
+///
+/// A sign-in starts with an ask from the app's back end, which says which
+/// platforms the Identity Agent takes a key on for this app, as its owner set them
+/// ([InstalledAsk.accepts]). This key is then made in the device's secure hardware
+/// where that hardware is one the owner accepts, and otherwise, where the owner
+/// does not require a hardware key, in software. The Identity Agent decides, not
+/// this: a key in software is refused for an app whose owner requires a hardware
+/// key, whatever a front end sends, and accepted elsewhere at the lower grade.
+class InstalledFrontEndKey extends FrontEndKey {
+  /// The device's secure hardware, or null where this device has none an app's key
+  /// can be proved in.
+  final HardwareKeyPlatform? hardware;
+  final String label;
+  final KeyStore keyStore;
+
+  /// What the installed app calls the device it runs on, sent with a hardware
+  /// key's proof for the person's consent (ADR-072 Amendment 14), where it is
+  /// shown as the app's word, not checked. A key in software proves no device,
+  /// so the Identity Agent names none for it.
+  final String? deviceName;
+  HardwareFrontEndKey? _hardwareKey;
+  SoftwareFrontEndKey? _softwareKey;
+
+  InstalledFrontEndKey._(
+      this.hardware, this.label, this.keyStore, this.deviceName);
+
+  static const _keptHardware = 'hardware';
+  static const _keptSoftware = 'software:';
+
+  /// The key this front end holds, as [keyStore] kept it; none yet where it has
+  /// not signed in. A key is made when a sign-in is started ([prove]).
+  static Future<InstalledFrontEndKey> open(
+      {HardwareKeyPlatform? hardware,
+      required String label,
+      required KeyStore keyStore,
+      String? deviceName}) async {
+    final k = InstalledFrontEndKey._(hardware, label, keyStore, deviceName);
+    final kept = await keyStore.read();
+    if (kept == _keptHardware && hardware != null) {
+      // A key the hardware no longer holds is no key: the next sign-in makes one.
+      if (await hardware.publicPoint(label) != null) {
+        k._hardwareKey = await HardwareFrontEndKey.open(hardware, label,
+            deviceName: deviceName);
+      }
+    } else if (kept != null && kept.startsWith(_keptSoftware)) {
+      final d = b64uDecode(kept.substring(_keptSoftware.length));
+      if (d != null && d.length == 32) {
+        k._softwareKey = SoftwareFrontEndKey.fromScalar(d);
+      }
+    }
+    return k;
+  }
+
+  FrontEndKey get _key =>
+      _hardwareKey ??
+      _softwareKey ??
+      (throw StateError(
+          'this front end has no key yet: it is made when a sign-in is started'));
+
+  /// [KeyGrade.hardware] or [KeyGrade.software] for the key held, or null before
+  /// one is made.
+  String? get grade => _hardwareKey != null
+      ? KeyGrade.hardware
+      : _softwareKey != null
+          ? KeyGrade.software
+          : null;
+
+  @override
+  String get x => _key.x;
+  @override
+  String get y => _key.y;
+
+  @override
+  bool get isNonExtractable => _hardwareKey != null;
+
+  @override
+  bool get signsAssertions => _hardwareKey?.signsAssertions ?? false;
+
+  @override
+  FrontEndKind get kind => FrontEndKind.installedApp;
+
+  @override
+  Future<String> sign(String message) => _key.sign(message);
+
+  @override
+  Future<InstalledKeyProof?> prove(InstalledAsk ask,
+      {CredentialExchange? exchange}) async {
+    final accepts = ask.accepts;
+    final hw = hardware;
+    final hardwareAccepted =
+        hw != null && (accepts == null || accepts.contains(hw.platform));
+    // A back end that does not say leaves the Identity Agent to decide, so a device
+    // with no hardware tries software; one that says is believed.
+    final softwareAccepted =
+        accepts == null || accepts.contains(InstalledPlatform.software);
+    if (hardwareAccepted) {
+      // Only the hardware's own failure may lead to a key in software: a refusal or
+      // failure from the app's back end during a TPM's credential exchange is passed on.
+      var backEndFailed = false;
+      final ex = exchange == null
+          ? null
+          : (TpmEnrolment e) async {
+              try {
+                return await exchange(e);
+              } catch (_) {
+                backEndFailed = true;
+                rethrow;
+              }
+            };
+      try {
+        final k =
+            await HardwareFrontEndKey.open(hw, label, deviceName: deviceName);
+        final proof = await k.prove(ask, exchange: ex);
+        _hardwareKey = k;
+        _softwareKey = null;
+        await keyStore.write(_keptHardware);
+        return proof;
+      } catch (_) {
+        // The hardware could not make or prove the key. Where the owner explicitly
+        // accepts a key in software, sign in with one; otherwise say why it failed.
+        if (backEndFailed ||
+            accepts == null ||
+            !accepts.contains(InstalledPlatform.software)) {
+          rethrow;
+        }
+      }
+    }
+    if (!softwareAccepted) {
+      throw const TrustRefused(
+          'This app\'s owner requires a sign-in key kept in a device\'s secure hardware, '
+          'and this device has none the app accepts. Sign in from another device, or ask the app\'s owner.');
+    }
+    final challenge = b64uDecode(ask.challenge);
+    if (challenge == null) {
+      throw const TrustRefused('the ask\'s challenge is not readable');
+    }
+    // A new key for each sign-in, as the hardware makes one.
+    final k = SoftwareFrontEndKey.generate();
+    final statement = installedAppStatement(ask.assetId, challenge, k.thumbprint);
+    final raw = b64uDecode(await k.sign(statement))!;
+    await keyStore.write(_keptSoftware + b64uEncode(_fixed32(k._private.d!)));
+    _softwareKey = k;
+    _hardwareKey = null;
+    return InstalledKeyProof(
+        platform: InstalledPlatform.software,
+        evidence: Uint8List.fromList(
+            [4, ...b64uDecode(k.x)!, ...b64uDecode(k.y)!]),
+        ask: ask.ask,
+        keySignature: rawToDer(raw));
+  }
+
+  /// Forgets the key, as signing out does.
+  Future<void> forget() async {
+    _hardwareKey = null;
+    _softwareKey = null;
+    await keyStore.clear();
+  }
+}
+
+/// ASN.1 DER of an ECDSA signature given as r then s, 32 bytes each: the form a
+/// TPM and Android give, and the one the Identity Agent reads a key's signature
+/// over the sign-in statement in.
+Uint8List rawToDer(List<int> raw) {
+  if (raw.length != 64) throw const FormatException('not r then s');
+  Uint8List part(List<int> v) {
+    var i = 0;
+    while (i < v.length - 1 && v[i] == 0) {
+      i++;
+    }
+    var b = v.sublist(i);
+    if (b[0] & 0x80 != 0) b = [0, ...b];
+    return Uint8List.fromList([0x02, b.length, ...b]);
+  }
+
+  final r = part(raw.sublist(0, 32)), s = part(raw.sublist(32));
+  return Uint8List.fromList([0x30, r.length + s.length, ...r, ...s]);
 }

@@ -256,6 +256,8 @@ var controllerOwnerOnly = map[string]string{
 	"PUT /api/assets/{id}/back-end": "this sets the back-end address a utility app's sign-in challenges are signed for",
 	// A longer sign-in widens what the owner allowed, so only the owner lengthens it.
 	"PUT /api/assets/{id}/sign-in-lifetime": "this decides how long a person's sign-in to a utility app lets their browser's key speak for them",
+	// Turning it off lowers what the owner required; turning it on ends people's sign-ins.
+	"PUT /api/assets/{id}/require-hardware-key": "this decides whether a utility app's installed front end must prove its sign-in key in the device's secure hardware",
 	// A grant that never lapses is the owner's to end, from the device holding the key.
 	"DELETE /api/assets/{id}/app-key-grants/{key}": "ending a person's installed-app grant takes away what the owner allowed",
 
