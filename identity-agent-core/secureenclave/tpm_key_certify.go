@@ -176,6 +176,7 @@ func tpmCredentialSecret(credentialKey, akName, ekPublicDER []byte) []byte {
 // It proves the key is a non-exportable signing key generated inside a genuine
 // TPM. It does NOT prove which app holds it: AppIDPresent is always false.
 func VerifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Time) (*InstalledAppKeyFacts, error) {
+	loadTPMPins()
 	return verifyTPMKeyCertify(evidence, challenge, credentialKey, now, tpmManufacturerRoots)
 }
 
@@ -184,6 +185,7 @@ func VerifyTPMKeyCertify(evidence, challenge, credentialKey []byte, now time.Tim
 // a pinned physical issuer is accepted either way; a virtual TPM only with allowVirtual, and
 // then the proof says so (EKIssuer.Class is TPMClassVirtual).
 func VerifyTPMKeyCertifyClasses(evidence, challenge, credentialKey []byte, now time.Time, allowVirtual bool) (*InstalledAppKeyFacts, error) {
+	loadTPMPins()
 	return verifyTPMKeyCertifyClasses(evidence, challenge, credentialKey, now, tpmManufacturerRoots, allowVirtual)
 }
 
@@ -349,6 +351,7 @@ func verifyEKCertificateIssuer(der []byte, chain [][]byte, roots []*x509.Certifi
 // verifyEKCertificateClass is verifyEKCertificateIssuer for a caller that says whether a
 // virtual or cloud TPM may pass (an owner's opt-in). Without it a virtual TPM is refused.
 func verifyEKCertificateClass(der []byte, chain [][]byte, roots []*x509.Certificate, now time.Time, allowVirtual bool) (*x509.Certificate, *EKIssuer, error) {
+	loadTPMPins()
 	if len(der) == 0 {
 		return nil, nil, notAttested("no endorsement key certificate")
 	}

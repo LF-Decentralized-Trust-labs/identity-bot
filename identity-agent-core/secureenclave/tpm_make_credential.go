@@ -48,6 +48,7 @@ type TPMCredential struct {
 // of the standard kind, so the core never makes a credential for a key that is
 // not a TPM's. credentialKey is the core's secret for this ask.
 func MakeTPMCredential(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, credentialKey []byte, now time.Time) (*TPMCredential, error) {
+	loadTPMPins()
 	return makeTPMCredential(ekPublic, ekCert, ekChain, akPublic, credentialKey, now, tpmManufacturerRoots, rand.Reader)
 }
 
@@ -55,6 +56,7 @@ func MakeTPMCredential(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, cred
 // in to virtual and cloud TPMs: the exchange must pass the same class the later proof will
 // (VerifyTPMKeyCertifyClasses), or an opted-in sign-in would stop at its first step.
 func MakeTPMCredentialClasses(ekPublic, ekCert []byte, ekChain [][]byte, akPublic, credentialKey []byte, now time.Time, allowVirtual bool) (*TPMCredential, error) {
+	loadTPMPins()
 	return makeTPMCredentialClasses(ekPublic, ekCert, ekChain, akPublic, credentialKey, now, tpmManufacturerRoots, rand.Reader, allowVirtual)
 }
 

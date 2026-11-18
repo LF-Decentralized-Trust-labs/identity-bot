@@ -9,11 +9,13 @@ import (
 	"identity-agent-core/tpmcert"
 	"io/fs"
 	"strings"
+	"sync"
 )
 
 // The roots are the PEM files committed in tpmroots: Microsoft's trusted TPM root list,
 // of which tools/tpmroots keeps only what it can classify as a physical TPM chip's
-// (tpmroots/README.md). The list is read once.
+// (tpmroots/README.md). The list is read once, when a TPM's evidence is first checked
+// (loadTPMPins), never as the program starts.
 //
 //go:embed tpmroots tpmintermediates tpmvirtual tpmlenient
 var tpmRootFiles embed.FS
@@ -32,11 +34,43 @@ var tpmVirtualIssuers []*x509.Certificate
 // are never trust anchors, and are used only where tpm_lenient.go says.
 var tpmLenientIssuers []*tpmcert.Certificate
 
-func init() {
-	tpmLenientIssuers = pinnedLenientTPMCerts(tpmRootFiles, "tpmlenient")
-	tpmVirtualIssuers = pinnedTPMCerts(tpmRootFiles, "tpmvirtual")
-	tpmManufacturerRoots = pinnedTPMCerts(tpmRootFiles, "tpmroots")
-	tpmManufacturerIssuers = pinnedTPMCerts(tpmRootFiles, "tpmintermediates")
+// tpmPinsRead makes loadTPMPins read the package once, however many sign-ins ask at once.
+var tpmPinsRead sync.Once
+
+// tpmPinsLoaded is whether that read succeeded.
+var tpmPinsLoaded bool
+
+// loadTPMPins reads the pinned package into the variables above, the first time it is called.
+// Every path that reads them passes through a function that calls it first: the exported
+// checks, and verifyEKCertificateClass, which every chain check goes through.
+//
+// The four sets are assigned together, only once all of them are read, so a file that does not
+// read leaves none of them set rather than some: an empty issuer set beside a full root set
+// would weaken the checks. Such a file panics here, on the first check and on every one after,
+// as it would have stopped the program had it been read at start.
+//
+// Reading it parses some two and a half thousand certificates, tens of milliseconds and 28 MB
+// of allocation. Done in init, every start of the binary paid that, and the binary is started
+// for far more than checking a TPM: a client of the core runs it once for each key operation
+// (keymath), most of them in a row while a person waits, and none of those reads a TPM pin.
+// Read here, the package is also linked only into a binary that can check a TPM, rather than
+// adding its 7 MB to every build of the core.
+func loadTPMPins() {
+	tpmPinsRead.Do(func() {
+		lenient, virtual, roots, issuers := readTPMPins(tpmRootFiles)
+		tpmLenientIssuers, tpmVirtualIssuers, tpmManufacturerRoots, tpmManufacturerIssuers = lenient, virtual, roots, issuers
+		tpmPinsLoaded = true
+	})
+	if !tpmPinsLoaded {
+		panic("the pinned TPM package could not be read")
+	}
+}
+
+// readTPMPins reads the four sets of the pinned package in fsys, or panics naming the file
+// that does not read.
+func readTPMPins(fsys fs.FS) (lenient []*tpmcert.Certificate, virtual, roots, issuers []*x509.Certificate) {
+	return pinnedLenientTPMCerts(fsys, "tpmlenient"), pinnedTPMCerts(fsys, "tpmvirtual"),
+		pinnedTPMCerts(fsys, "tpmroots"), pinnedTPMCerts(fsys, "tpmintermediates")
 }
 
 func pinnedTPMRoots(fsys fs.FS) []*x509.Certificate { return pinnedTPMCerts(fsys, "tpmroots") }

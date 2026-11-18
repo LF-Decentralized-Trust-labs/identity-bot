@@ -134,9 +134,10 @@ func (zeroReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// The roots are the committed PEM files, and a bad file stops the program at
-// start rather than being skipped, which would pin fewer roots than were meant.
-func TestThePinnedRootsAreTheCommittedFilesAndABadOneStopsTheStart(t *testing.T) {
+// The roots are the committed PEM files, and a bad file stops the read of the
+// package (on the first TPM check) rather than being skipped, which would pin
+// fewer roots than were meant.
+func TestThePinnedRootsAreTheCommittedFilesAndABadOneIsNeverSkipped(t *testing.T) {
 	v, _ := loadTPMExchange(t, "tpm_credential_exchange_rsa.json")
 	good := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: v.Root})
 	roots := pinnedTPMRoots(fstest.MapFS{"tpmroots/a.pem": {Data: good}, "tpmroots/README.md": {Data: []byte("x")}})
