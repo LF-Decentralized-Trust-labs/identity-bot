@@ -69,7 +69,11 @@ type Status struct {
 	// AppleAppID is, for a verified installed_app sign-in, the application
 	// identifier the owner named for the app's Apple builds: what an App Attest
 	// assertion by the key is checked for (VerifyAppleAssertion).
-	AppleAppID       string
+	AppleAppID string
+	// KeyGrade is, for a verified installed_app sign-in, how the Identity Agent
+	// established the key: KeyGradeHardware or KeyGradeSoftware (ADR-072
+	// Amendment 17). Empty for a browser's.
+	KeyGrade         string
 	IdentityWithheld bool
 }
 
@@ -161,6 +165,9 @@ type Confirmed struct {
 	FrontEnd string
 	// AppleAppID is Status.AppleAppID, passed on.
 	AppleAppID string
+	// KeyGrade is Status.KeyGrade, passed on: whether an installed front end's
+	// key was proved by its device's hardware or is held in software.
+	KeyGrade string
 	// Reason is why a sign-in was declined.
 	Reason string
 }
@@ -200,7 +207,7 @@ func ConfirmSession(ctx context.Context, a Agent, o ConfirmOptions) (Confirmed, 
 			}
 		}
 		return Confirmed{State: Verified, PairwiseAID: body.AppSessionToken, Disclosures: body.Disclosures,
-			MemberInfo: body.MemberInfo, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd, AppleAppID: body.AppleAppID}, nil
+			MemberInfo: body.MemberInfo, BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd, AppleAppID: body.AppleAppID, KeyGrade: body.KeyGrade}, nil
 	}
 	if body.State == "declined" {
 		return Confirmed{State: Declined, Reason: body.Reason}, nil

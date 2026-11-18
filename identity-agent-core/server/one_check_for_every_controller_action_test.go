@@ -222,6 +222,10 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		// How long a sign-in to a utility app lasts: a longer one widens what
 		// the owner allowed.
 		"PUT /api/assets/{id}/sign-in-lifetime",
+		// Whether a utility app's installed front end must prove its key in
+		// hardware (ADR-072 Amendment 17): either way it changes what the owner
+		// required.
+		"PUT /api/assets/{id}/require-hardware-key",
 		"DELETE /api/assets/{id}/app-key-grants/{key}",
 		// The lock of a logged-out identity (ADR-074): a peer never opens or
 		// closes this device's identity.

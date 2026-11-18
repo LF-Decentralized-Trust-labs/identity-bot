@@ -320,6 +320,10 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			if fe, ok := st["front_end"].(string); ok {
 				resp["front_end"] = fe
 			}
+			// How an installed app's key was established (ADR-072 Amendment 17).
+			if g, ok := st["key_grade"].(string); ok {
+				resp["key_grade"] = g
+			}
 			// Membership-admitted logins: who the admitting roster says this is
 			// (e.g. role + display_name), so the RP needs no org-internal lookups.
 			if mi, ok := st["member_info"]; ok {

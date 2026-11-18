@@ -127,6 +127,11 @@ type InstalledAppKeyAsk struct {
 	Challenge []byte `json:"challenge"`
 	// Expires is when the ask stops being usable.
 	Expires time.Time `json:"expires"`
+	// Accepts are the platforms the Identity Agent takes a key on for this app, as
+	// its owner set them ("android", "apple", "tpm", and "software" unless the owner
+	// requires a hardware key), so the front end uses a key that will be accepted
+	// (ADR-072 Amendment 17). It decides nothing: the proof is checked when it comes.
+	Accepts []string `json:"accepts"`
 }
 
 // InstalledAppSignInStatement is what an installed app's key signs to start a
@@ -172,6 +177,14 @@ func (s *CoreServer) beginInstalledAppKey(r *http.Request, callerAsset, assetID 
 	if aPageAsked(r) {
 		return InstalledAppKeyAsk{}, &SignInRefused{http.StatusForbidden, "a request that came from a web page cannot ask for an installed-app attestation"}
 	}
+	// What the owner accepts, as a hint to the front end; an asset that cannot be
+	// read accepts nothing, and its ask fails where the proof is checked.
+	accepted := []string{}
+	if s.assetHandler != nil {
+		if a, found, err := s.assetHandler.Store.GetAsset(assetID); err == nil && found {
+			accepted = accepts(a)
+		}
+	}
 	random := func(n int) []byte {
 		b := make([]byte, n)
 		_, _ = rand.Read(b)
@@ -198,7 +211,7 @@ func (s *CoreServer) beginInstalledAppKey(r *http.Request, callerAsset, assetID 
 	}
 	until := now.Add(installedAppAskLife)
 	s.installedAppAsks[id] = installedAppAsk{asset: assetID, challenge: challenge, credentialKey: credKey, until: until}
-	return InstalledAppKeyAsk{ID: id, Challenge: challenge, Expires: until}, nil
+	return InstalledAppKeyAsk{ID: id, Challenge: challenge, Expires: until, Accepts: accepted}, nil
 }
 
 var errAskNotHeld = errors.New("the attestation was not asked for by this core for this app, or was used already, or has expired")
@@ -216,7 +229,9 @@ func (s *CoreServer) takeInstalledAppAsk(id, assetID string, now time.Time) (ins
 }
 
 // verifyKeyPossession is whether the key signed the sign-in statement for this
-// ask: so the sign-in is started by whoever holds the key, now.
+// ask: so the sign-in is started by whoever holds the key, now. An Apple key signs
+// an App Attest assertion; every other key, a key held in software included, an
+// ECDSA (ASN.1) signature of the statement's SHA-256.
 func verifyKeyPossession(platform string, pub *ecdsa.PublicKey, signature []byte, assetID string, ask installedAppAsk, thumbprint, appleAppID string) error {
 	if len(signature) == 0 {
 		return errors.New("the installed app's key did not sign this sign-in")

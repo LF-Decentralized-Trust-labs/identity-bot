@@ -121,15 +121,34 @@ func (b *browserKeys) RecordAppKeyAt(push, asset, person, thumbprint string, now
 	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, time.Time{}, now, presented, &proof, push)
 }
 
+// RecordSoftwareAppKeyAt keeps that an installed app's key held in software
+// speaks for person at asset until the time given: nothing proves where the key
+// is kept, so it lapses as a browser's does (ADR-072 Amendment 17). Its back end
+// is told at push when it ends early.
+func (b *browserKeys) RecordSoftwareAppKeyAt(push, asset, person, thumbprint string, until, now time.Time, presented []interface{}, proof installedAppFact) error {
+	if until.IsZero() || proof.Grade() != KeyGradeSoftware {
+		return errors.New("a key held in software is kept with a lapse time, at the software grade")
+	}
+	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, until, now, presented, &proof, push)
+}
+
 // liveAt: a record with a lapse time lives until it; only an installed app's
 // grant, which the core recorded after proving the key in hardware, lives
-// without one. A browser record with no lapse time is not forever: it speaks
-// for no one.
+// without one. A browser record, or an installed app's record of a key held in
+// software, with no lapse time is not forever: it speaks for no one.
 func (b *browserKeyRecord) liveAt(now time.Time) bool {
 	if b.Until.IsZero() {
-		return b.FrontEnd == login.FrontEndInstalledApp
+		return b.FrontEnd == login.FrontEndInstalledApp && b.Proof != nil && b.Proof.Grade() == KeyGradeHardware
 	}
 	return now.Before(b.Until)
+}
+
+// Grade is the grade an installed app's key was kept at, or "" for a browser's.
+func (b browserKeyRecord) Grade() string {
+	if b.FrontEnd != login.FrontEndInstalledApp || b.Proof == nil {
+		return ""
+	}
+	return b.Proof.Grade()
 }
 
 func (b *browserKeys) record(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}) error {
@@ -398,6 +417,12 @@ func (s *CoreServer) assetStillStands(rec browserKeyRecord) bool {
 			return false
 		}
 		if !tpmProofStillAllowed(rec.Proof, a.InstalledApp) {
+			return false
+		}
+		// The owner's requirement of a hardware key, asked on every use: a key in
+		// software stops speaking the moment the owner requires one (ADR-072
+		// Amendment 17), however it was approved.
+		if a.RequireHardwareKey && rec.FrontEnd == login.FrontEndInstalledApp && rec.Grade() != KeyGradeHardware {
 			return false
 		}
 	}

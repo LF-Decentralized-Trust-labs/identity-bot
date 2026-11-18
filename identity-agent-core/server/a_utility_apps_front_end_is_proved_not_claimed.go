@@ -35,8 +35,10 @@ func refuseFrontEnd(a asset.Asset, kind, browserKey string, fromAPage, installed
 		return "", http.StatusForbidden, "this sign-in does not say which front end it is for, 'browser' or 'installed_app'"
 	}
 	// installedAppKey is the caller's PROOF, never its claim: it is true only
-	// where the core has itself verified a hardware attestation of the key
-	// (startFrontEndKeySignIn), and never for a request from a page.
+	// where the core has itself verified the key (startFrontEndKeySignIn): a
+	// hardware attestation, or, where the owner does not require a hardware key,
+	// the key's own signature for a fresh ask (ADR-072 Amendment 17). Never for a
+	// request from a page.
 	anInstalledApp := installedAppKey && kind == asset.FrontEndInstalledApp && !fromAPage
 	if (browserKey != "" || fromAPage) && kind != "" && kind != asset.FrontEndBrowser && !anInstalledApp {
 		return "", http.StatusForbidden, "a sign-in asked for from a web page, or for a browser's key, is a browser front end's"

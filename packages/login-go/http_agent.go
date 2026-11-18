@@ -113,6 +113,7 @@ func (h HTTPAgent) Status(ctx context.Context, sessionToken, collectorSecret str
 		Reason           string         `json:"reason"`
 		BrowserKey       string         `json:"browser_key"`
 		FrontEnd         string         `json:"front_end"`
+		KeyGrade         string         `json:"key_grade"`
 		IdentityWithheld bool           `json:"identity_withheld"`
 		MemberInfo       *struct {
 			Role        string `json:"role"`
@@ -124,7 +125,7 @@ func (h HTTPAgent) Status(ctx context.Context, sessionToken, collectorSecret str
 		return Status{State: "pending"}, nil
 	}
 	st := Status{State: body.State, AppSessionToken: body.AppSessionToken, Disclosures: body.Disclosures, Reason: body.Reason,
-		BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd, IdentityWithheld: body.IdentityWithheld}
+		BrowserKey: body.BrowserKey, FrontEnd: body.FrontEnd, KeyGrade: body.KeyGrade, IdentityWithheld: body.IdentityWithheld}
 	if body.MemberInfo != nil {
 		st.MemberInfo = &MemberInfo{Role: body.MemberInfo.Role, DisplayName: body.MemberInfo.DisplayName}
 	}

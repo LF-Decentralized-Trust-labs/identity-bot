@@ -1,10 +1,13 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:login_dart/app_session.dart';
+import 'package:login_dart/front_end_key.dart';
 
 /// Keeps an app-key grant in the platform's secure storage, so an installed
 /// front end stays signed in across restarts until the grant is ended (an
-/// app-key grant has no lapse of its own, ADR-072 Amendment 3).
-class SecureGrantStore implements GrantStore {
+/// app-key grant has no lapse of its own, ADR-072 Amendment 3). The same store,
+/// under [keySlot], keeps an [InstalledFrontEndKey]'s key when it is held in
+/// software (ADR-072 Amendment 17).
+class SecureGrantStore implements GrantStore, KeyStore {
   final FlutterSecureStorage _storage;
   final String _slot;
 
@@ -26,3 +29,7 @@ class SecureGrantStore implements GrantStore {
 /// same app with another relay or back end is another place.
 String grantSlot(String aid, String rid, String api) =>
     'identity-agent.grant:$aid|$rid|$api';
+
+/// What an installed front end's key is kept under, beside its grant ([grantSlot]).
+String keySlot(String aid, String rid, String api) =>
+    'identity-agent.key:$aid|$rid|$api';

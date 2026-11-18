@@ -441,9 +441,19 @@ func TestOnlyAnInstalledAppRecordMayHaveNoLapseTime(t *testing.T) {
 	if r.liveAt(time.Now()) {
 		t.Fatal("a record of no kind with no lapse time is forever")
 	}
-	r = browserKeyRecord{FrontEnd: login.FrontEndInstalledApp}
+	r = browserKeyRecord{FrontEnd: login.FrontEndInstalledApp, Proof: &installedAppFact{Platform: "android"}}
 	if !r.liveAt(time.Now()) {
 		t.Fatal("an installed app's grant does not live without a lapse time")
+	}
+	// Only a key the hardware proved: a record that says nothing of its proof, or
+	// a key held in software, is not forever (ADR-072 Amendment 17).
+	r = browserKeyRecord{FrontEnd: login.FrontEndInstalledApp}
+	if r.liveAt(time.Now()) {
+		t.Fatal("an installed app's record with no proof and no lapse time is forever")
+	}
+	r = browserKeyRecord{FrontEnd: login.FrontEndInstalledApp, Proof: &installedAppFact{Platform: PlatformSoftware}}
+	if r.liveAt(time.Now()) {
+		t.Fatal("a key held in software with no lapse time is forever")
 	}
 }
 

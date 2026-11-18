@@ -1,9 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:login_dart/app_checks.dart';
 import 'package:login_dart/apple_attest.dart';
 import 'package:login_dart/front_end_key.dart';
 import 'package:login_dart/installed_app.dart';
 import 'package:login_dart/tpm_evidence.dart';
+
+import 'secure_grant_store.dart';
 
 /// The device's secure hardware, reached through the platform's own code (the
 /// plugin's android/, darwin/ and windows/ folders). One channel, four calls, the ones
@@ -140,4 +144,28 @@ class MethodChannelHardwareKey implements HardwareKeyPlatform {
         credentialSecret: need(r, 'credential_secret'));
     return (point: point, evidence: tpmEvidence(enrolment, attested));
   }
+}
+
+/// The installed front end's key for [link] (ADR-072 Amendment 17): made in this
+/// device's secure hardware where the app's owner accepts it, and otherwise, where
+/// the owner does not require a hardware key, held in software in the platform's
+/// secure storage. A device with no secure hardware an app's key can be proved in
+/// (Linux, for one) has only the second. The Identity Agent decides which it takes.
+Future<InstalledFrontEndKey> openInstalledFrontEndKey(AppLink link,
+    {HardwareKeyPlatform? hardware,
+    FlutterSecureStorage? storage,
+    String label = 'identity-agent.app-key'}) {
+  HardwareKeyPlatform? here = hardware;
+  if (here == null) {
+    try {
+      here = MethodChannelHardwareKey();
+    } on UnsupportedError {
+      here = null;
+    }
+  }
+  return InstalledFrontEndKey.open(
+      hardware: here,
+      label: '$label:${link.aid}',
+      keyStore: SecureGrantStore(keySlot(link.aid, link.rid, link.api),
+          storage: storage));
 }

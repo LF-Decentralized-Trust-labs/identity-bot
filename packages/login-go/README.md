@@ -55,3 +55,10 @@ end: `ReadFrontEndStart` (a start that names its kind and carries the hardware's
 evidence for the key, which the Identity Agent verifies), the statement the key
 signs (`InstalledAppStatement`) and the thumbprint that names it. Held to
 `../login-web/test-vectors/installed-app.json`, which `login-dart` runs too.
+
+Where the app's owner does not require a hardware key, the start may carry a key held
+in software (`PlatformSoftware`, its own point as evidence), which the Identity Agent
+takes at the lower grade. A verified sign-in says which in `Confirmed.KeyGrade`
+(`KeyGradeHardware` or `KeyGradeSoftware`), and an ask's `Accepts` lists what the owner
+accepts (ADR-072 Amendment 17). A back end may hold a session at the software grade to
+less than a hardware one.

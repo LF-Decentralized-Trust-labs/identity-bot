@@ -116,6 +116,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Put("/{id}/relay-id", s.assetHandler.HandleSetRelayID)
 		r.Put("/{id}/back-end", s.assetHandler.HandleSetBackEnd)
 		r.Put("/{id}/sign-in-lifetime", s.assetHandler.HandleSetSignInLifetime)
+		r.Put("/{id}/require-hardware-key", s.assetHandler.HandleSetRequireHardwareKey)
 		r.Get("/{id}/app-key-grants", s.handleListAppKeyGrants)
 		r.Delete("/{id}/app-key-grants/{key}", s.handleEndAppKeyGrant)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
@@ -189,6 +190,11 @@ func (s *CoreServer) wireAssetHandlerHooks(h *asset.Handler) {
 			if _, err := s.browserKeys().EndKind(assetID, k); err != nil {
 				log.Printf("[identity-agent-core] the %s keys of %s could not be ended when the owner switched them off: %v", k, assetID, err)
 			}
+		}
+	}
+	h.OnHardwareKeyRequired = func(assetID string) {
+		if _, err := s.browserKeys().EndSoftwareAppKeys(assetID); err != nil {
+			log.Printf("[identity-agent-core] the software keys of %s could not be ended when the owner required a hardware key: %v", assetID, err)
 		}
 	}
 	h.OnMemberRemoved = func(assetID, aid string) {
