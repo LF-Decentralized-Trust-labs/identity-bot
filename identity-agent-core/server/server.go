@@ -62,7 +62,11 @@ import (
 )
 
 type CoreServer struct {
-	DataStore store.Store
+	// statementAsks are the statements this Identity Agent has asked a person to sign, as an
+	// asker, until they are answered or expire (a_person_signs_a_statement_for_an_app.go).
+	statementMu   sync.Mutex
+	statementAsks map[string]*statementAsk
+	DataStore     store.Store
 	// pairwiseReg is what this core publishes for its pairwise identifiers
 	// (pairwise_registry.go).
 	pairwiseMu     sync.Mutex
@@ -98,6 +102,13 @@ type CoreServer struct {
 	// system's trust store. Tests set them to trust an in-process relay.
 	relayTLS    *tls.Config
 	relayClient *http.Client
+	// grantPushClient, when set, sends grant-ended notices instead of the client that
+	// dials public addresses only (a test reaches a relay on this machine).
+	grantPushClient *http.Client
+	// grantBackoff, when set, is the wait before each notice attempt instead of grantEndedBackoff.
+	grantBackoff []time.Duration
+	// grantFresh, when set, is how old a notice may be when an attempt starts instead of grantEndedFresh.
+	grantFresh time.Duration
 	// relayGen counts relay starts. A start that a newer one has overtaken
 	// (the settings changed while it was enrolling) installs nothing.
 	relayGen int
@@ -163,6 +174,11 @@ type CoreServer struct {
 	founding sync.Mutex
 
 	loginHandler *login.Handler
+	// siteIsDelegatedBy replaces the login handler's check that a site is an organisation's,
+	// for a test that has no log to read.
+	siteIsDelegatedBy func(siteAID, siteOOBI, orgAID, orgOOBI string) error
+	// organisationKeyOf replaces reading an organisation's key from its key log, for a test that serves none.
+	organisationKeyOf func(oobi, aid string) ([]byte, error)
 	// redeemedInvites remembers where, and as whom, this agent redeemed an invite,
 	// so it can later ask the inviting app what it published for it.
 	redeemedInvites   redeemedInviteBook
@@ -170,6 +186,11 @@ type CoreServer struct {
 	ownerRosterSource func() []asset.Employee // the roster in use when an overlay owns it; see SetOwnerRoster
 	assetStoreErr     error                   // why assetHandler is nil, when a store file could not be read
 	inboundDIDComm    InboundDIDCommHandler   // overlay hook for inbound DIDComm messages; nil = deliver-only
+
+	// Who keeps AI agents' conversations, and what a contact says its AI agents
+	// are called (ADR-085). Nil: nothing of either is taken.
+	peerMessageKeeper   PeerMessageKeeper
+	peerDirectoryKeeper PeerDirectoryKeeper
 
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
@@ -652,6 +673,9 @@ func New(cfg Config) (*CoreServer, error) {
 	} else if err != nil {
 		log.Printf("[identity-agent-core] ERROR: assets are unavailable until this is fixed; a file the asset store needs could not be read, and nothing was changed: %v", err)
 	}
+	// The engine holds nothing after a restart: every asset's identity is
+	// handed back to it now, after the owner's log it may be approved in.
+	s.reviveAssetIdentities()
 	// A ceremony record from an earlier version held its invite codes in the
 	// clear: carried to digests now, and the server does not start if it cannot be.
 	if err := s.migrateCeremony(); err != nil {
@@ -1434,6 +1458,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 			s.mountEmployeeRoutes(r)
 			s.mountSignerRoutes(r)
 		}
+		s.mountBindingRoutes(r)
 		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
@@ -4000,7 +4025,7 @@ func (s *CoreServer) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
-		"contacts": contacts,
+		"contacts": s.viewsOfContacts(contacts),
 		"count":    len(contacts),
 	})
 }
@@ -4022,7 +4047,7 @@ func (s *CoreServer) handleGetContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonreply.Write(w, http.StatusOK, contact)
+	jsonreply.Write(w, http.StatusOK, s.viewOfContact(*contact))
 }
 
 func (s *CoreServer) handleGetContactKEL(w http.ResponseWriter, r *http.Request) {
@@ -4515,7 +4540,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	jsonreply.Write(w, http.StatusCreated, contact)
+	jsonreply.Write(w, http.StatusCreated, s.viewOfContact(contact))
 }
 
 func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
@@ -4673,7 +4698,7 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_category=%s", contact.Alias, aid, contact.ContactCategory)
 
-	jsonreply.Write(w, http.StatusOK, contact)
+	jsonreply.Write(w, http.StatusOK, s.viewOfContact(*contact))
 }
 
 func (s *CoreServer) countWitnesses() int {
@@ -4750,7 +4775,7 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 	notifications := s.unreadNotifications()
 
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
-		"alerts":              contacts,
+		"alerts":              s.viewsOfContacts(contacts),
 		"count":               len(contacts),
 		"pending_requests":    pendingReqs,
 		"pending_count":       len(pendingReqs),

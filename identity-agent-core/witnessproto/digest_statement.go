@@ -8,7 +8,7 @@ import (
 
 // DigestStatementTag opens every signed digest statement. It keeps a signature
 // over a digest answer from being a valid signature over anything else a
-// watcher key signs (a receipt over an event SAID, for one).
+// watcher key signs (a receipt over an event's bytes, for one).
 const DigestStatementTag = "kel-digest-response/v1"
 
 // DigestStatement is the exact text a watcher signs when it answers

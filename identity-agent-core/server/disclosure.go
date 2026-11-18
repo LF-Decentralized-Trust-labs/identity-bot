@@ -37,7 +37,7 @@ const (
 // consent screen so what the user reads and what the code sends cannot drift.
 var disclosureLabels = map[string]string{
 	discloseName:  "Name",
-	disclosePhoto: "Photo",
+	disclosePhoto: "Avatar",
 	discloseEmail: "Email",
 	disclosePhone: "Phone",
 	discloseOrg:   "Organization",
@@ -121,7 +121,7 @@ func disclosureRows(fields []string, p *store.ProfileData) []PreviewDetail {
 
 // disclosureRowLabel says whose data a row describes. A consent screen also
 // lists facts about the request ("Organization: Acme"), so a bare "Name" would
-// be ambiguous — every disclosure row reads "Your name", "Your photo".
+// be ambiguous — every disclosure row reads "Your name", "Your avatar".
 func disclosureRowLabel(field string) string {
 	return "Your " + strings.ToLower(disclosureLabels[field])
 }

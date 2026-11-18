@@ -83,7 +83,7 @@ func seen(t *testing.T, ws *Service, aid string, seq int, digest string) {
 	now := time.Now().UTC()
 	if err := ws.Store.RecordFirstSeen(FirstSeenRecord{
 		AID: aid, SequenceNum: seq, KelDigest: digest, FirstSeenAt: now, LastConfirmedAt: now,
-		SeenCount: 1, SourceType: SourceOOBI,
+		SeenCount: 1, SourceType: SourceOOBI, Proven: true,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,11 +1,11 @@
 """Make the witness-receipt test vectors with keripy's own code.
 
-    python3 -I interop/make_witness_receipt_vectors.py > drivers/testdata/keripy_witness_receipts.json   # needs keri==1.3.6
+    python3 -I interop/make_witness_receipt_vectors.py > witnessproto/testdata/keripy_witness_receipts.json   # needs keri==1.3.6
 
 A controller incepts with two witnesses; each witness, a keripy Hab, receipts
 the inception with Hab.witness (keripy/app/habbing.py). What it prints is what
 keripy produced and nothing of ours: the event, the receipt message, and the
-indexed signature. drivers/a_receipt_is_the_one_keripy_makes_test.go checks that our reader
+indexed signature. witnessproto/a_receipt_is_the_one_keripy_makes_test.go checks that our reader
 accepts them and that our writer reproduces them byte for byte.
 """
 import base64

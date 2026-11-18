@@ -15,6 +15,7 @@ func init() {
 	registerAsk(2, addContactAsk{})
 	registerAsk(3, addEmployeeAsk{})
 	registerAsk(4, addSignerAsk{})
+	registerAsk(ActionBindSite, bindSiteAsk{})
 }
 
 // tierRank orders the escalation tiers so we only ever escalate, never downgrade.

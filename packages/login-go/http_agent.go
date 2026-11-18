@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,11 @@ func (h HTTPAgent) Scope() string { return h.base() + "|" + h.AssetID }
 
 // Start implements Agent.
 func (h HTTPAgent) Start(ctx context.Context, r StartRequest) (Started, error) {
+	if r.InstalledAppKey != nil {
+		// A site's public routes never take an installed app's key: the Identity
+		// Agent refuses them from a page, so the proof would be dropped silently.
+		return Started{}, errors.New("login: an installed app's sign-in is not made through a site's public routes")
+	}
 	b := h.base()
 	body := map[string]any{"audience": r.Audience, "requestDisclosures": r.RequestDisclosures}
 	if r.BrowserKey != "" {

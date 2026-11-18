@@ -19,13 +19,17 @@ try {
   page.window = page;
   vm.runInNewContext(code + "\n;globalThis.__app = IdentityAgentApp;", page);
   const app = page.__app;
-  for (const name of ["appSession", "loadPinnedApp", "mountSignIn", "mountSessions", "pinnedAppLink", "readPinnedApp", "readAppLink", "signInProblem"]) {
+  for (const name of ["appSession", "loadPinnedApp", "mountSignIn", "mountSessions", "pinnedAppLink", "readPinnedApp", "readAppLink", "signInProblem", "statementWords", "previewStatementState"]) {
     assert.strictEqual(typeof app[name], "function", `the built page lacks ${name}`);
   }
   // The built page has no unpinned read of a link: one with no pin is refused before it is read.
   assert.throws(() => app.readAppLink("#aid=x"), /not set up to sign anybody in/);
   assert.strictEqual(app.readAppLink, app.readPinnedAppLink);
   assert.strictEqual(typeof app.SessionEnded, "function", "the built page lacks SessionEnded");
+  assert.strictEqual(typeof app.StatementNotSigned, "function", "the built page lacks StatementNotSigned");
+  // The session a page opens offers signStatement, with the SDK's own screen for the wait.
+  assert.strictEqual(typeof app.appSession.length, "number");
+  assert.match(app.statementWords({ state: "waiting", pointer: "p", statement: "s" }).body, /Nothing is signed until you approve on it/);
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

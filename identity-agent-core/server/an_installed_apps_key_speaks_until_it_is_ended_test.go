@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,7 +79,7 @@ func anInstalledAppsWorld(t *testing.T, offered, off []string) *anInstalledAppWo
 			}
 			return fake(ev, ch, now)
 		}
-		verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
+		verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time, allowVirtual bool) (*secureenclave.InstalledAppKeyFacts, error) {
 			if len(credKey) < secureenclave.TPMCredentialKeyLen || bytes.Equal(credKey, ch) {
 				return nil, errors.New("no secret credential key from the core")
 			}
@@ -249,7 +250,7 @@ func TestAnInstalledAppSignInRestsOnProofAndNotOnTheCallersWord(t *testing.T) {
 		"no signing certificate stated": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.AppSigners = nil },
 			why: "names no signing certificate"},
 		"a TPM key the owner did not accept": {req: app, asset: "the-website", proof: good, mod: func() { iw.said.Platform = "tpm" },
-			why: "not accepted a TPM key"},
+			why: "has not allowed sign-in from a Windows computer's security chip"},
 		"a platform that vouches as another": {req: app, asset: "the-website", proof: func() *InstalledAppKeyProof {
 			p := good()
 			p.Platform = "apple" // the stand-in attests android
@@ -601,9 +602,9 @@ func TestATPMSignInIsGivenTheCoresSecretCredentialKey(t *testing.T) {
 	iw.said.Platform = "tpm"
 	var gotChallenge, gotKey []byte
 	inner := verifyTPMInstalledKey
-	verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time) (*secureenclave.InstalledAppKeyFacts, error) {
+	verifyTPMInstalledKey = func(ev, ch, credKey []byte, now time.Time, allowVirtual bool) (*secureenclave.InstalledAppKeyFacts, error) {
 		gotChallenge, gotKey = ch, credKey
-		return inner(ev, ch, credKey, now)
+		return inner(ev, ch, credKey, now, allowVirtual)
 	}
 	p := iw.proof()
 	if _, err := iw.start(anAppsRequest("the-website", nil), "the-website", p); err != nil {
@@ -970,5 +971,144 @@ func TestEndingASignInTheOwnerAlreadyEndedDropsItFromTheListAndSaysSo(t *testing
 	_ = json.Unmarshal(lr.Body.Bytes(), &l)
 	if len(l.L) != 0 {
 		t.Fatalf("a sign-in the host says is not live is still listed: %+v", l.L)
+	}
+}
+
+// A TPM's credential is made for the ask the app's back end holds, for the app's
+// own asset only, never for a page, and a few times at most; the ask stays open
+// for the evidence, and the credential is made from the core's own secret for it.
+func TestTheCoreMakesATPMCredentialOnlyForAnAsksOwnApp(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	var madeWith []byte
+	inner := makeTPMCredentialFor
+	t.Cleanup(func() { makeTPMCredentialFor = inner })
+	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte, allowVirtual bool) (*secureenclave.TPMCredential, error) {
+		madeWith = key
+		return &secureenclave.TPMCredential{CredentialBlob: []byte{0, 1, 2}, Secret: []byte{0, 1, 3}}, nil
+	}
+	ask, err := iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := TPMCredentialRequest{}
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, req); err != nil {
+		t.Fatalf("the app's own ask was refused: %v", err)
+	}
+	iw.org.installedAppAskMu.Lock()
+	held := iw.org.installedAppAsks[ask.ID].credentialKey
+	iw.org.installedAppAskMu.Unlock()
+	if len(held) == 0 || !bytes.Equal(held, madeWith) || bytes.Equal(madeWith, ask.Challenge) {
+		t.Fatal("the credential was not made from the core's own secret for the ask")
+	}
+	// The ask is still open: the evidence spends it.
+	if _, err := iw.org.takeInstalledAppAsk(ask.ID, "the-website", time.Now()); err != nil {
+		t.Fatalf("making a credential spent the ask: %v", err)
+	}
+
+	// Another app's ask, a page, and an ask nobody issued get nothing.
+	ask, _ = iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("some-other-app", nil), "", "some-other-app", ask.ID, req); err == nil {
+		t.Fatal("another app's ask was used to make a credential")
+	}
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"}), "", "the-website", ask.ID, req); err == nil {
+		t.Fatal("a web page got a credential")
+	}
+	if _, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", "no-such-ask", req); err == nil {
+		t.Fatal("an ask nobody issued got a credential")
+	}
+	// The cap.
+	var last error
+	for i := 0; i < installedAppCredentialsPerAsk+1; i++ {
+		_, last = iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, req)
+	}
+	if last == nil {
+		t.Fatal("one ask has no limit on the credentials made for it")
+	}
+}
+
+// An add-on that has authenticated the app's machine ends that app's key (a person signed out of an
+// installed app), and no other app's: callerAsset is the app the add-on found, held to its own asset.
+func TestAnAppsMachineEndsItsOwnKeysGrantAndNoOneElses(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.signedIn(t)
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); !ok {
+		t.Fatal("the key does not speak after its sign-in")
+	}
+	person, _ := iw.org.browserKeys().Whose("the-website", iw.key, time.Now())
+	if !iw.org.appKeyStillSpeaks("the-website", iw.key, person) || iw.org.appKeyStillSpeaks("some-other-app", iw.key, person) || iw.org.appKeyStillSpeaks("the-website", iw.key, "another") {
+		t.Fatal("a key speaks for its own person at its own app, and for no other")
+	}
+	if _, err := iw.org.endAppKey(anAppsRequest("some-other-app", nil), "some-other-app", iw.key); err != nil {
+		t.Fatal(err) // another app's own asset has nothing under this key: it ends nothing
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); !ok {
+		t.Fatal("another app ended this app's key")
+	}
+	if _, err := iw.org.endAppKey(anAppsRequest("the-website", map[string]string{"Origin": "https://evil.example"}), "the-website", iw.key); err == nil {
+		t.Fatal("a web page's request ended an app's key")
+	}
+	if n, err := iw.org.endAppKey(anAppsRequest("the-website", nil), "the-website", iw.key); err != nil || n != 1 {
+		t.Fatalf("the app ending its own key: %d %v", n, err)
+	}
+	if _, ok := iw.org.browserKeys().Whose("the-website", iw.key, time.Now()); ok || iw.org.appKeyStillSpeaks("the-website", iw.key, person) {
+		t.Fatal("the grant spoke after the app ended it")
+	}
+	if _, err := iw.org.endAppKey(anAppsRequest("the-website", nil), "the-website", ""); err == nil {
+		t.Fatal("an end that names no key was taken")
+	}
+}
+
+// A TPM key the owner has not accepted is refused with a sentence the person can act on,
+// not the technical reason; and a key the owner has accepted records which chip's issuer
+// certified it and that it is a physical one, on the proof an auditor reads.
+func TestATPMKeyTheOwnerHasNotAllowedIsRefusedInPlainWordsAndAnAcceptedOneNamesItsIssuer(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	iw.said.Platform = "tpm"
+	iw.said.EKIssuer = &secureenclave.EKIssuer{Subject: "CN=IFX-KEYID-1", SHA256: "ab", Class: secureenclave.TPMClassPhysical}
+	_, err := iw.start(anAppsRequest("the-website", nil), "the-website", iw.proof())
+	const sentence = "This app's owner has not allowed sign-in from a Windows computer's security chip. Ask them to allow it, or sign in from a phone."
+	var refused *SignInRefused
+	if !errors.As(err, &refused) || refused.Reason != sentence {
+		t.Fatalf("refusal = %v", err)
+	}
+
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	f, err := iw.org.verifyInstalledAppKey("the-website", iw.key, iw.proof(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.EKIssuer != "CN=IFX-KEYID-1" || f.EKClass != "physical" {
+		t.Fatalf("the proof does not say which chip's issuer certified it: %+v", f)
+	}
+}
+
+// Before the TPM is asked to open anything, an owner who has not allowed TPM keys gets the
+// person their sentence, and a virtual TPM's refusal is said as one, not as a certificate fault.
+func TestACredentialIsRefusedInPlainWordsWhenTPMKeysAreNotAllowedOrTheTPMIsVirtual(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	made := 0
+	inner := makeTPMCredentialFor
+	t.Cleanup(func() { makeTPMCredentialFor = inner })
+	makeTPMCredentialFor = func(req TPMCredentialRequest, key []byte, allowVirtual bool) (*secureenclave.TPMCredential, error) {
+		made++
+		return nil, fmt.Errorf("%w: %w: certified by MSFT-KEYID-1", secureenclave.ErrNotAttested, secureenclave.ErrVirtualTPM)
+	}
+	ask, _ := iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	_, err := iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, TPMCredentialRequest{})
+	var refused *SignInRefused
+	if !errors.As(err, &refused) || refused.Reason != errTPMKeysNotAllowed.Error() || made != 0 {
+		t.Fatalf("not allowed: %v (the TPM was asked %d times)", err, made)
+	}
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	_, err = iw.org.makeInstalledAppKeyCredential(anAppsRequest("the-website", nil), "", "the-website", ask.ID, TPMCredentialRequest{})
+	if !errors.As(err, &refused) || refused.Reason != errVirtualTPM.Error() || strings.Contains(refused.Reason, "MSFT") {
+		t.Fatalf("virtual: %v", err)
 	}
 }

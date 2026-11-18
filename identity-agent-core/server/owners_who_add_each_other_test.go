@@ -35,6 +35,8 @@ type ownerPeer struct {
 	witnessKey string
 	identKey   string
 	base       string
+	// entityType is what this peer publishes about itself; empty publishes "individual".
+	entityType string
 }
 
 func startOwnerPeer(t *testing.T, aid string) *ownerPeer {
@@ -100,9 +102,13 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 	r := chi.NewRouter()
 	// What this agent publishes about itself, for the other's owner to add.
 	r.Get("/public/oobi/{aid}", func(w http.ResponseWriter, _ *http.Request) {
+		published := "individual"
+		if p.entityType != "" {
+			published = p.entityType
+		}
 		doc := map[string]any{
 			"aid": aid, "public_key": p.identKey, "alias": "peer-" + aid[len(aid)-1:],
-			"backend_type": witness.BackendDesktop, "witness_key": wkey, "entity_type": "individual",
+			"backend_type": witness.BackendDesktop, "witness_key": wkey, "entity_type": published,
 		}
 		if serveKeyHistory {
 			// With the bytes it is checked by: a log without them is not kept as verified.
@@ -113,6 +119,8 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 	})
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/contacts", p.core.handleAddContact)
+		r.Get("/contacts", p.core.handleGetContacts)
+		r.Get("/contacts/{aid}", p.core.handleGetContact)
 		r.Post("/contacts/{aid}/accept", p.core.handleAcceptContact)
 		p.core.mountWitnessRoutes(r)
 		r.Post("/witness/request", p.core.handleWitnessRequest)

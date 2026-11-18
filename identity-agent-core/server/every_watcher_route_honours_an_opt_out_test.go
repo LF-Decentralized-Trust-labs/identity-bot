@@ -116,6 +116,7 @@ func TestEveryWatcherRouteHonoursAnOptOut(t *testing.T) {
 		"GET /i/{token}":                                signIn,
 		"POST /api/login/challenge":                     signIn,
 		"POST /api/login/callback":                      signIn,
+		"POST /api/statement/callback":                  "checks the signer's own key log, fetched from the OOBI the signer names, and answers only whether it accepted; it reads nothing the watcher saw",
 		"GET /api/login/challenge/{token}/status":       signIn,
 		"POST /api/login/session/{asset_id}":            signIn,
 		"GET /api/login/session/{asset_id}/{token}":     signIn,

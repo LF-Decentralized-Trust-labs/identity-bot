@@ -192,6 +192,11 @@ func (s *CoreServer) handleChallengeBundleServe(w http.ResponseWriter, r *http.R
 	b, ok := s.challenges[token]
 	s.challengeMu.Unlock()
 	if !ok {
+		if raw, sok := s.statementAskBytes(token); sok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+			return
+		}
 		// Fall back to an IA-minted Ask (e.g. an add-contact "add me" QR).
 		if raw, mok := getMintedAsk(token); mok {
 			w.Header().Set("Content-Type", "application/json")
@@ -317,9 +322,9 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 3) The owner's front-end setting, again: a challenge issued just before
-	// the owner switched a front end off must not be approved after it. This is
-	// all switching off does today, it applies to new sign-ins only; sessions
-	// already open carry on until ADR-072 section 6's revocation push exists.
+	// the owner switched a front end off must not be approved after it. Grants
+	// already held end when it is switched off, and an installed app's back end
+	// is told (an_apps_back_end_is_told_its_grant_ended.go).
 	if why := s.frontEndRefusalNow(bundle); why != "" {
 		s.recordRefusal(token, why)
 		http.Error(w, "not authorized", http.StatusForbidden)
@@ -350,7 +355,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 				http.Error(w, "not authorized", http.StatusForbidden)
 				return
 			}
-			err = s.browserKeys().RecordAppKey(assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
+			err = s.browserKeys().RecordAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
 		} else {
 			// How long is the asset's to say: its owner's setting, within the
 			// core's ceiling (asset.Asset.SignInLifetime). It is read here, at

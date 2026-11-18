@@ -1,0 +1,87 @@
+{
+ "statement": [
+  {
+   "name": "one",
+   "asset_id": "Eapp0123456789",
+   "challenge_b64u": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+   "thumbprint": "t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo",
+   "text": "identity-agent installed-app sign-in v1\nEapp0123456789\nZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM\nt1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo",
+   "sha256_hex": "c22ed02f031f1c41cb3c753df6f9d8d22106b290b0b3326d0d68f7f44ec51c96"
+  }
+ ],
+ "thumbprint": [
+  {
+   "x": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+   "y": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+   "thumbprint": "t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo"
+  }
+ ],
+ "starts": [
+  {
+   "name": "an installed app with its proof",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "expect": "installed_app"
+  },
+  {
+   "name": "a browser without a proof",
+   "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"}}",
+   "expect": "browser"
+  },
+  {
+   "name": "an installed app without a proof",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"}}",
+   "refuse": "needs the hardware"
+  },
+  {
+   "name": "a browser with a proof",
+   "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "carries no hardware proof"
+  },
+  {
+   "name": "a platform that cannot vouch",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"linux\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "cannot vouch"
+  },
+  {
+   "name": "a key that is not the one named",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "not the key given"
+  },
+  {
+   "name": "a kind that is neither",
+   "body": "{\"frontEnd\":\"desktop\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "does not say which front end"
+  },
+  {
+   "name": "a field it should not have",
+   "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"extra\":1}",
+   "refuse": "not readable"
+  },
+  {
+   "name": "a proof with no evidence",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\"}}",
+   "refuse": "needs the hardware"
+  }
+ ],
+ "apple_assertion": {
+  "about": "An App Attest assertion over the SHA-256 of the proof text, made by Apple's published steps with a software key (no device produced it). Held by login-go and the Identity Agent's own VerifyAppleAssertion.",
+  "app_id": "TEAM123456.org.example.portal",
+  "key_x_hex": "f58fc1d880bc7174709f8141d8e6e3af7a0ffce49d661ff729987d535a552c2c",
+  "key_y_hex": "ee5fb36ec74c80f2279218ff69ba6d14b8a51a4f19e008506a182e07ac7ca4d5",
+  "proof_text": "IABK1\nGET\n/session/whoami\n2026-11-11T12:00:00Z\nnonce\nbinding\nbody",
+  "assertion_hex": "a2697369676e61747572655846304402206edceafa0c2a74721faf0bfdcf2ed9344662833241e2b8d22657b978ff0e7df102206e59daf81b771c5debad8b4b165a5fc2bf60f47fbec7e757b57f4d882438df8b7161757468656e74696361746f724461746158258e5d3f5dae9c29baf9afb4c500132179f94fbf5c27187e942c8b73b044cb42aa4000000007",
+  "counter": 7,
+  "refusals": [
+   {
+    "name": "a different program",
+    "app_id": "TEAM123456.org.evil",
+    "refuse": "different program"
+   },
+   {
+    "name": "another call's proof text",
+    "proof_text": "IABK1\nGET\n/session/other\n2026-11-11T12:00:00Z\nnonce\nbinding\nbody",
+    "refuse": "not the key's"
+   }
+  ]
+ }
+}

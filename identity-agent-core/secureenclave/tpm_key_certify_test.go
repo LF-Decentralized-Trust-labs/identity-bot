@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -100,9 +101,10 @@ func newCA(t *testing.T, cn string) (*x509.Certificate, *ecdsa.PrivateKey) {
 }
 
 func ekCertFor(t *testing.T, ek *ecdsa.PublicKey, ca *x509.Certificate, caKey *ecdsa.PrivateKey) []byte {
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "EK"},
+	// Shaped as a real one is: an empty subject, and the TPM named in a critical SAN.
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{}, UnknownExtKeyUsage: []asn1.ObjectIdentifier{tpmEKCertificateEKU},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
-		KeyUsage: x509.KeyUsageKeyEncipherment, UnknownExtKeyUsage: nil}
+		KeyUsage: x509.KeyUsageKeyEncipherment, ExtraExtensions: []pkix.Extension{tcgSubjectAltName(t)}}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, ek, caKey)
 	if err != nil {
 		t.Fatal(err)

@@ -15,6 +15,7 @@ import (
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 	"net/http"
 	"time"
@@ -64,6 +65,12 @@ func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, err
 func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
 	return h.s.endBrowserKeys(r, thumbprint, person)
 }
+func (h hostWrapper) AppKeyStillSpeaks(callerAsset, thumbprint, person string) bool {
+	return h.s.appKeyStillSpeaks(callerAsset, thumbprint, person)
+}
+func (h hostWrapper) EndAppKey(r *http.Request, callerAsset, thumbprint string) (int, error) {
+	return h.s.endAppKey(r, callerAsset, thumbprint)
+}
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
 }
@@ -89,6 +96,9 @@ func (h hostWrapper) StartFrontEndKeySignIn(r *http.Request, callerAsset, assetI
 }
 func (h hostWrapper) BeginInstalledAppKey(r *http.Request, callerAsset, assetID string) (InstalledAppKeyAsk, error) {
 	return h.s.beginInstalledAppKey(r, callerAsset, assetID)
+}
+func (h hostWrapper) MakeInstalledAppKeyCredential(r *http.Request, callerAsset, assetID, ask string, req TPMCredentialRequest) (*secureenclave.TPMCredential, error) {
+	return h.s.makeInstalledAppKeyCredential(r, callerAsset, assetID, ask, req)
 }
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
