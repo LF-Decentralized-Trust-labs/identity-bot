@@ -102,6 +102,13 @@ type CoreServer struct {
 	// system's trust store. Tests set them to trust an in-process relay.
 	relayTLS    *tls.Config
 	relayClient *http.Client
+	// grantPushClient, when set, sends grant-ended notices instead of the client that
+	// dials public addresses only (a test reaches a relay on this machine).
+	grantPushClient *http.Client
+	// grantBackoff, when set, is the wait before each notice attempt instead of grantEndedBackoff.
+	grantBackoff []time.Duration
+	// grantFresh, when set, is how old a notice may be when an attempt starts instead of grantEndedFresh.
+	grantFresh time.Duration
 	// relayGen counts relay starts. A start that a newer one has overtaken
 	// (the settings changed while it was enrolling) installs nothing.
 	relayGen int

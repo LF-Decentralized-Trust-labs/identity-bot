@@ -40,6 +40,7 @@ import (
 	"identity-agent-core/limits"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
 	"net/http"
@@ -114,6 +115,15 @@ type Host interface {
 	// never one the caller names. It returns how many
 	// records ended. An app calls it when it signs a person out.
 	EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error)
+	// AppKeyStillSpeaks is whether the key with this thumbprint still speaks for the
+	// person at the app's own asset (callerAsset, found by the add-on as for EndAppKey):
+	// not ended, not lapsed, its front-end kind not switched off, the person still admitted.
+	AppKeyStillSpeaks(callerAsset, thumbprint, person string) bool
+	// EndAppKey is EndBrowserKeys for an add-on that has authenticated the app's
+	// machine itself: callerAsset is the app it found asking (never from the request
+	// body), the same rules as StartFrontEndKeySignIn hold, and only the named key of
+	// that app's own asset ends. How many records ended is returned.
+	EndAppKey(r *http.Request, callerAsset, thumbprint string) (int, error)
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error
 	EngineSigns()
@@ -147,6 +157,17 @@ type Host interface {
 	// names the ask and carries the key's signature over
 	// server.InstalledAppSignInStatement for it.
 	BeginInstalledAppKey(r *http.Request, callerAsset, assetID string) (server.InstalledAppKeyAsk, error)
+	// MakeInstalledAppKeyCredential is the extra step of a TPM's attestation (the
+	// other platforms need none): for the ask BeginInstalledAppKey issued, it
+	// makes the credential the installed app's TPM must open with
+	// TPM2_ActivateCredential to show its attestation key shares a TPM with an
+	// endorsement key a manufacturer certified. The credential is keyed by a
+	// secret the core keeps and never gives out, so only a TPM can release what
+	// is inside; the app's back end passes the credential to the front end and
+	// the released value comes back in the evidence. The ask stays open, up to a
+	// few credentials; the evidence passed to StartFrontEndKeySignIn spends it.
+	// The same caller rules as BeginInstalledAppKey.
+	MakeInstalledAppKeyCredential(r *http.Request, callerAsset, assetID, ask string, req server.TPMCredentialRequest) (*secureenclave.TPMCredential, error)
 	// AssetStillAdmits is whether the asset's enrolment policy lets in the
 	// person known to it as pairwiseAID now, by MEMBERSHIP only: the
 	// membership check the sign-in made, asked again, so a person removed
