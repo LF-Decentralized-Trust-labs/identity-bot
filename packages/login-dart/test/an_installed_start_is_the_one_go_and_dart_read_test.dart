@@ -38,19 +38,25 @@ void main() {
   });
 
   test('the start body this side writes is one the shared cases accept', () {
-    final ok = of('starts').firstWhere((c) => c['expect'] == 'installed_app');
-    final j = jsonDecode(ok['body'] as String) as Map<String, dynamic>;
-    final p = j['proof'] as Map<String, dynamic>;
-    final mine = frontEndStartBody(
-        kind: FrontEndKind.installedApp,
-        jwk: (j['jwk'] as Map).cast<String, String>(),
-        thumbprint: j['browserKey'] as String,
-        proof: InstalledKeyProof(
-            platform: p['platform'] as String,
-            evidence: base64.decode(p['evidence'] as String),
-            ask: p['ask'] as String,
-            keySignature: base64.decode(p['key_signature'] as String)));
-    expect(jsonDecode(mine), j);
+    final oks = of('starts').where((c) => c['expect'] == 'installed_app');
+    // One case carries the app's name for its device; it must be written too.
+    expect(
+        oks.any((c) => (c['body'] as String).contains('device_name')), isTrue);
+    for (final ok in oks) {
+      final j = jsonDecode(ok['body'] as String) as Map<String, dynamic>;
+      final p = j['proof'] as Map<String, dynamic>;
+      final mine = frontEndStartBody(
+          kind: FrontEndKind.installedApp,
+          jwk: (j['jwk'] as Map).cast<String, String>(),
+          thumbprint: j['browserKey'] as String,
+          proof: InstalledKeyProof(
+              platform: p['platform'] as String,
+              evidence: base64.decode(p['evidence'] as String),
+              ask: p['ask'] as String,
+              keySignature: base64.decode(p['key_signature'] as String),
+              deviceName: p['device_name'] as String?));
+      expect(jsonDecode(mine), j, reason: ok['name'] as String);
+    }
   });
 
   test('what Go refuses, this side will not write', () {

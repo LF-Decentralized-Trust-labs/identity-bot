@@ -174,8 +174,13 @@ abstract class HardwareKeyPlatform {
 class HardwareFrontEndKey extends FrontEndKey {
   final HardwareKeyPlatform hardware;
   final String label;
+
+  /// What the installed app calls the device it runs on, sent with the proof
+  /// for the person's consent (shown there as the app's word, not checked).
+  final String? deviceName;
   String? _x, _y;
-  HardwareFrontEndKey._(this.hardware, this.label, this._x, this._y);
+  HardwareFrontEndKey._(
+      this.hardware, this.label, this._x, this._y, this.deviceName);
 
   @override
   String get x => _x ?? (throw StateError(_noKey));
@@ -194,12 +199,16 @@ class HardwareFrontEndKey extends FrontEndKey {
 
   /// The key [label] names, made on first use. A refusal from the hardware (no
   /// secure hardware, a key that is not P-256) is the platform's to throw.
+  /// [deviceName], if given, is what the app calls its device.
   static Future<HardwareFrontEndKey> open(
-      HardwareKeyPlatform hardware, String label) async {
+      HardwareKeyPlatform hardware, String label,
+      {String? deviceName}) async {
     final p = await hardware.publicPoint(label);
-    if (p == null) return HardwareFrontEndKey._(hardware, label, null, null);
+    if (p == null) {
+      return HardwareFrontEndKey._(hardware, label, null, null, deviceName);
+    }
     final (x, y) = _coordinates(p);
-    return HardwareFrontEndKey._(hardware, label, x, y);
+    return HardwareFrontEndKey._(hardware, label, x, y, deviceName);
   }
 
   @override
@@ -235,7 +244,8 @@ class HardwareFrontEndKey extends FrontEndKey {
         platform: hardware.platform,
         evidence: made.evidence,
         ask: ask.ask,
-        keySignature: await hardware.signStatement(label, digest));
+        keySignature: await hardware.signStatement(label, digest),
+        deviceName: deviceName);
   }
 }
 

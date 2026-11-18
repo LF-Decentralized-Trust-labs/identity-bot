@@ -93,6 +93,13 @@ class LoginPreview {
   /// screen says so before the person approves.
   final bool lastsUntilEnded;
 
+  /// The kind of device an installed app's key was proved to be held on
+  /// (`android`, `apple`, `tpm` or `virtual_tpm`), which the core checked, and the label the
+  /// installed app gave its device, which nothing proves: show the name as the
+  /// installed app's word. Both are empty when the sign-in names no device.
+  final String devicePlatform;
+  final String deviceName;
+
   LoginPreview({
     required this.sessionToken,
     required this.rpSessionUrl,
@@ -107,6 +114,8 @@ class LoginPreview {
     this.requestedScore,
     this.frontEnd = '',
     this.lastsUntilEnded = false,
+    this.devicePlatform = '',
+    this.deviceName = '',
   });
 
   factory LoginPreview.fromJson(Map<String, dynamic> json) {
@@ -128,6 +137,8 @@ class LoginPreview {
       pairwiseAid: json['pairwise_aid'],
       frontEnd: json['front_end'] as String? ?? '',
       lastsUntilEnded: json['lasts_until_ended'] == true,
+      devicePlatform: json['device_platform'] as String? ?? '',
+      deviceName: json['device_name'] as String? ?? '',
       requestedCredentials: ((json['requested_credentials'] as List<dynamic>?) ?? [])
           .map((e) => LoginCredentialRequest.fromJson(e as Map<String, dynamic>))
           .toList(),
