@@ -62,6 +62,15 @@ func membershipResolverFor(source string) MembershipResolver {
 	return membershipResolvers[source]
 }
 
+// HasMembershipResolver reports whether a resolver is registered for source. An
+// add-on linked into this Identity Agent that makes assets asks it before naming
+// a membership source in an asset's policy, so it names only a source this
+// Identity Agent can answer for: a source with no resolver fails closed, and a
+// policy naming one admits nobody.
+func HasMembershipResolver(source string) bool {
+	return membershipResolverFor(source) != nil
+}
+
 // AssetStore returns the core asset store (assets + members). Overlays read it to
 // resolve site AIDs / assets; they keep their own stores for org-specific rosters.
 func (s *CoreServer) AssetStore() *asset.Store {
