@@ -111,7 +111,18 @@ class PersonStatement {
 
   /// This statement signed with the Ed25519 key of [seed]: the proof the core
   /// reads (`statement`, `verkey`, `signature`).
+  ///
+  /// It refuses a field with a line break, as the core's `Check` does: one
+  /// field per line is what keeps the signed string from being read two ways.
   Map<String, dynamic> signedWith(Uint8List seed) {
+    for (final v in [
+      agent, conversation, messageId, kind, from, signer, to, inReplyTo,
+      rangeFirst, rangeLast, nonce, time, fingerprint, //
+    ]) {
+      if (v.contains('\n') || v.contains('\r')) {
+        throw ArgumentError('a statement field may not contain a line break');
+      }
+    }
     final priv = ed.newKeyFromSeed(seed);
     try {
       final pub = Uint8List.fromList(ed.public(priv).bytes);
