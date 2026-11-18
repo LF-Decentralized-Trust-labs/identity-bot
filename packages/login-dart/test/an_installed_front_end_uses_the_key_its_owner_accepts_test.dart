@@ -42,6 +42,20 @@ class _BrokenHardware extends FakeHardware {
       throw StateError('no_tpm');
 }
 
+/// A TPM that asks the app's back end for its credential, as a Windows front end does.
+class _Tpm extends FakeHardware {
+  @override
+  String get platform => InstalledPlatform.tpm;
+  @override
+  Future<({Uint8List point, Uint8List evidence})> attestNewKey(
+      String label, Uint8List challenge,
+      {CredentialExchange? exchange}) async {
+    await exchange!(TpmEnrolment(
+        ekPublic: Uint8List(1), ekCert: Uint8List(1), akPublic: Uint8List(1)));
+    return super.attestNewKey(label, challenge);
+  }
+}
+
 Future<(InstalledFrontEndKey, AppSession)> _open(FakeApp app,
     {HardwareKeyPlatform? hardware, KeyStore? store}) async {
   final key = await InstalledFrontEndKey.open(
@@ -117,6 +131,15 @@ void main() {
     final (_, s2) = await _open(required, hardware: _BrokenHardware());
     await expectLater(s2.start(), throwsA(isA<StateError>()));
     expect(required.startedWith, isNull);
+  });
+
+  test('a refusal from the app\'s back end is passed on, never turned into a key in software',
+      () async {
+    final app = _Accepting(['tpm', 'software'])..refuseCredential = true;
+    final (key, s) = await _open(app, hardware: _Tpm());
+    await expectLater(s.start(), throwsA(isA<SignInFailed>()));
+    expect(app.startedWith, isNull);
+    expect(key.grade, isNull);
   });
 
   test('a back end that does not say leaves the Identity Agent to decide', () async {

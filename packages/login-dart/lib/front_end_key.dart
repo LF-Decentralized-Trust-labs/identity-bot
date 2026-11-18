@@ -334,7 +334,10 @@ class InstalledFrontEndKey extends FrontEndKey {
     final k = InstalledFrontEndKey._(hardware, label, keyStore);
     final kept = await keyStore.read();
     if (kept == _keptHardware && hardware != null) {
-      k._hardwareKey = await HardwareFrontEndKey.open(hardware, label);
+      // A key the hardware no longer holds is no key: the next sign-in makes one.
+      if (await hardware.publicPoint(label) != null) {
+        k._hardwareKey = await HardwareFrontEndKey.open(hardware, label);
+      }
     } else if (kept != null && kept.startsWith(_keptSoftware)) {
       final d = b64uDecode(kept.substring(_keptSoftware.length));
       if (d != null && d.length == 32) {
@@ -387,9 +390,22 @@ class InstalledFrontEndKey extends FrontEndKey {
     final softwareAccepted =
         accepts == null || accepts.contains(InstalledPlatform.software);
     if (hardwareAccepted) {
+      // Only the hardware's own failure may lead to a key in software: a refusal or
+      // failure from the app's back end during a TPM's credential exchange is passed on.
+      var backEndFailed = false;
+      final ex = exchange == null
+          ? null
+          : (TpmEnrolment e) async {
+              try {
+                return await exchange(e);
+              } catch (_) {
+                backEndFailed = true;
+                rethrow;
+              }
+            };
       try {
         final k = await HardwareFrontEndKey.open(hw, label);
-        final proof = await k.prove(ask, exchange: exchange);
+        final proof = await k.prove(ask, exchange: ex);
         _hardwareKey = k;
         _softwareKey = null;
         await keyStore.write(_keptHardware);
@@ -397,7 +413,8 @@ class InstalledFrontEndKey extends FrontEndKey {
       } catch (_) {
         // The hardware could not make or prove the key. Where the owner explicitly
         // accepts a key in software, sign in with one; otherwise say why it failed.
-        if (accepts == null ||
+        if (backEndFailed ||
+            accepts == null ||
             !accepts.contains(InstalledPlatform.software)) {
           rethrow;
         }

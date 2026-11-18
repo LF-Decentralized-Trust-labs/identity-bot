@@ -138,7 +138,7 @@ type Asset struct {
 	// (ADR-072 Amendment 17). False, the default, also accepts a key held in
 	// software, at the lower grade. Only the owner's route and an add-on acting for
 	// the owner set it (SetRequireHardwareKey); nothing the app sends is read for it.
-	RequireHardwareKey bool `json:"require_hardware_key,omitempty"`
+	RequireHardwareKey bool `json:"require_hardware_key"`
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the
 	// raw private key is never persisted. >0 means the asset can sign login challenges.

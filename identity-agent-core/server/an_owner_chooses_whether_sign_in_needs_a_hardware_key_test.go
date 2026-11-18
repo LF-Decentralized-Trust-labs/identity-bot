@@ -255,6 +255,13 @@ func TestTheAskTellsTheFrontEndWhatTheOwnerAccepts(t *testing.T) {
 	if strings.Join(ask.Accepts, ",") != "android,apple" {
 		t.Fatalf("an app that requires a hardware key still says software: %v", ask.Accepts)
 	}
+	a, _, _ := iw.org.assetHandler.Store.GetAsset("the-website")
+	a.InstalledApp.TPMKeys = true
+	_ = iw.org.assetHandler.Store.UpsertAsset(a)
+	ask, _ = iw.org.beginInstalledAppKey(anAppsRequest("the-website", nil), "", "the-website")
+	if strings.Join(ask.Accepts, ",") != "android,apple,tpm" {
+		t.Fatalf("an owner who accepts TPM keys is not said to: %v", ask.Accepts)
+	}
 }
 
 func TestEndingTheKeysInSoftwareEndsOnlyThemAndTellsTheirBackEnds(t *testing.T) {

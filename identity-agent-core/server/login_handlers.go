@@ -369,6 +369,18 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 					return
 				}
 				err = s.browserKeys().RecordSoftwareAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now.Add(site.SignInLifetime()), now, presented, fact)
+				// And once more after it is kept: the owner's setting is saved before
+				// the grants it ends are ended, so an owner who turned it on while this
+				// was being kept either ended it already or is seen here, and it never
+				// outlives the setting to wake if the owner turns it off again.
+				if err == nil {
+					if latest, found, rerr := s.assetHandler.Store.GetAsset(assetID); rerr != nil || !found || latest.RequireHardwareKey {
+						_, _ = s.browserKeys().End(assetID, a.BrowserKey, "")
+						s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": errHardwareKeyRequired.Error()})
+						http.Error(w, "not authorized", http.StatusForbidden)
+						return
+					}
+				}
 			} else {
 				err = s.browserKeys().RecordAppKeyAt(bundle.Audience, assetID, res.PairwiseAID, a.BrowserKey, now, presented, fact)
 			}

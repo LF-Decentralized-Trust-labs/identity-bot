@@ -165,7 +165,7 @@ Future<InstalledFrontEndKey> openInstalledFrontEndKey(AppLink link,
   }
   return InstalledFrontEndKey.open(
       hardware: here,
-      label: '$label:${link.aid}',
+      label: '$label:${keySlot(link.aid, link.rid, link.api)}',
       keyStore: SecureGrantStore(keySlot(link.aid, link.rid, link.api),
           storage: storage));
 }
