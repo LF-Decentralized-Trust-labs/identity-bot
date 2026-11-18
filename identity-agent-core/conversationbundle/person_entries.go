@@ -124,6 +124,46 @@ func (v *verifier) checkPersonStatement(where string, rec agentmessage.Record, a
 	}
 }
 
+// checkNotice checks the Identity Agent's word to a person: its own entry, to a
+// person who is in the conversation (who opened it, or has an entry in it), in
+// a conversation that is open, and given to one person once in a conversation,
+// so that nothing can repeat it into a flood.
+func (v *verifier) checkNotice(where string, rec agentmessage.Record, m *Message) {
+	m.Sender = "identity agent"
+	if rec.From != v.b.Root {
+		v.fault(where, "a notice is the Identity Agent's, and this one is from %s", rec.From)
+	}
+	if v.closed {
+		v.fault(where, "a notice was recorded in a conversation that had been closed and not reopened")
+	}
+	aid, _ := agentmessage.IsPerson(rec.To)
+	if !v.inConversation(rec.To, rec.OpenedBy) {
+		v.fault(where, "a notice is for a person in the conversation, and %s is not in it", rec.To)
+	}
+	key := aid + " " + rec.Notice.Code
+	if v.noticed[key] {
+		v.fault(where, "%s was already given that notice in this conversation, which gives it once", rec.To)
+	}
+	if v.noticed == nil {
+		v.noticed = map[string]bool{}
+	}
+	v.noticed[key] = true
+}
+
+// inConversation is whether a person is in the conversation so far: they
+// opened it, or an entry of theirs that was not refused is in it.
+func (v *verifier) inConversation(person, openedBy string) bool {
+	if person == openedBy {
+		return true
+	}
+	for _, pe := range v.people {
+		if pe.rec.From == person && pe.state != "refused" {
+			return true
+		}
+	}
+	return false
+}
+
 // checkOutcome checks the Identity Agent's note of how an entry ended: it is
 // the Identity Agent's own, about an entry of a person's that was pending, and
 // it ends it once.

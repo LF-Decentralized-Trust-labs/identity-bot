@@ -9,6 +9,7 @@
 **Amended:** 2026-11-10 — the proof kept for a person's message carries the statement, never the words (see "What the core keeps of an app's request", below)
 **Amended:** 2026-11-11 — the app keeps the entries and the words, and the Identity Agent keeps the head and the count (see "Where the trail is kept", below)
 **Amended:** 2026-11-12 — how a conversation the Identity Agent already holds moves to the utility app that keeps it, and how long the Identity Agent keeps its copy (see "Moving a conversation the Identity Agent already holds", below)
+**Amended:** 2026-11-15 — the Identity Agent may also tell a person something, by a code with fixed words: a notice, a fifth kind of entry (ADR-083)
 
 ---
 
@@ -248,6 +249,9 @@ it, and **none holds words, a salt or a preview**:
 - **An outcome.** A record of kind `outcome`, from the Identity Agent, saying
   how an earlier entry ended (`committed`, or `not-kept` with a reason). It
   carries no sender's proof; its countersignature is the proof.
+- **A notice** (ADR-083, a fifth thing). A record of kind `notice`, from the
+  Identity Agent, telling a person something by a code whose words are fixed.
+  It holds the code, never words, and carries no sender's proof.
 - **An AI agent's entry.** The record ADR-047 already makes: countersigned by the
   AI agent, in the same chain, **committed by being countersigned**. The trail
   takes it in at the head of the chain (`Trail.AppendAgent`) without forwarding

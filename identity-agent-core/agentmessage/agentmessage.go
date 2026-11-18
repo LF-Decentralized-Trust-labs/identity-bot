@@ -36,6 +36,7 @@ import (
 	"identity-agent-core/agentpeer"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/strictjson"
 )
 
 // Kinds of message.
@@ -624,6 +625,9 @@ type Record struct {
 	CiphertextHash string `json:"ciphertext_hash,omitempty"`
 	// Outcome, on an entry of kind KindOutcome, is how an earlier entry ended.
 	Outcome *Outcome `json:"outcome,omitempty"`
+	// Notice, on an entry of kind KindNotice, is what the Identity Agent told a
+	// person, by code (ADR-083).
+	Notice *Notice `json:"notice,omitempty"`
 
 	// What the Identity Agent vouches for.
 	GrantSAID      string     `json:"grant_said,omitempty"`
@@ -674,8 +678,14 @@ func (r Record) CheckPeerProof(sender *didcomm.DID, self string) error {
 // here it fails closed: use CheckPeerProof.
 func (r Record) CheckSenderProof() error {
 	switch {
+	case r.Outcome != nil && r.Notice != nil:
+		return errors.New("an entry is an outcome or a notice, not both")
 	case r.PeerProof != nil && r.Outcome == nil:
 		return errors.New("an entry from an AI agent another Identity Agent holds is checked with that Identity Agent's keys")
+	case r.Notice != nil:
+		return r.checkNotice()
+	case r.Kind == KindNotice:
+		return errors.New("a notice names what it says")
 	case r.Outcome != nil:
 		return r.checkOutcome()
 	case r.Kind == KindOutcome:
@@ -816,9 +826,9 @@ func Open(signer *didcomm.DID, env *didcomm.Envelope) (Record, error) {
 	if jwm.Type != TypeRecord {
 		return Record{}, fmt.Errorf("%q is not a conversation entry", jwm.Type)
 	}
-	var r Record
-	if err := json.Unmarshal(jwm.Body, &r); err != nil {
-		return Record{}, errors.New("the entry is unreadable")
+	r, err := decodeRecord(jwm.Body)
+	if err != nil {
+		return Record{}, err
 	}
 	if r.MessageID != jwm.ID {
 		return Record{}, errors.New("the entry's id is not the one countersigned")
@@ -841,9 +851,24 @@ func Read(env *didcomm.Envelope) (Record, error) {
 	if err := json.Unmarshal(raw, &jwm); err != nil || jwm.Type != TypeRecord {
 		return Record{}, errors.New("the entry is unreadable")
 	}
+	return decodeRecord(jwm.Body)
+}
+
+// decodeRecord reads the record a countersigned entry carries. A notice is
+// read exactly as its contract writes it (ADR-083): internal/strictjson
+// refuses an unknown key, a key spelt in another case and a key twice, so a
+// notice carries its code and nothing a reader would skip, and a checker
+// that reads the schema strictly agrees with this one on what it carries.
+func decodeRecord(body []byte) (Record, error) {
 	var r Record
-	if err := json.Unmarshal(jwm.Body, &r); err != nil {
+	if err := json.Unmarshal(body, &r); err != nil {
 		return Record{}, errors.New("the entry is unreadable")
+	}
+	if r.Kind == KindNotice || r.Notice != nil {
+		var exact Record
+		if err := strictjson.Decode(body, &exact); err != nil {
+			return Record{}, fmt.Errorf("a notice is read exactly as its contract writes it: %v", err)
+		}
 	}
 	return r, nil
 }
