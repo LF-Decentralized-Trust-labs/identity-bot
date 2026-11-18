@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
 
@@ -150,7 +151,7 @@ func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom s
 	// Only a proved installed app's key names a device: the platform is the
 	// proof's, not the request's.
 	if device != nil && installedAppKey && frontEnd == asset.FrontEndInstalledApp {
-		bundle.DevicePlatform = device.Platform
+		bundle.DevicePlatform = signedDevicePlatform(*device)
 		bundle.DeviceName = device.DeviceName
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
@@ -369,4 +370,15 @@ func corsPreflight(w http.ResponseWriter, r *http.Request) {
 func sameOrigin(a, b string) bool {
 	norm := func(o string) string { return strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/")) }
 	return a != "" && norm(a) == norm(b)
+}
+
+// signedDevicePlatform is the platform a proved key's challenge names. A TPM
+// whose endorsement key a virtual or cloud TPM's issuer certified (its owner
+// opted in to those) is named as one, so the person's consent can say that
+// whoever runs its host can read the key, rather than "a computer".
+func signedDevicePlatform(f installedAppFact) string {
+	if f.Platform == login.DeviceTPM && f.EKClass == secureenclave.TPMClassVirtual {
+		return login.DeviceVirtualTPM
+	}
+	return f.Platform
 }

@@ -42,7 +42,7 @@ func TestTheConsentNamesTheDeviceAnInstalledAppRunsOn(t *testing.T) {
 		t.Fatalf("the preview does not name the device: %+v", pv)
 	}
 	rows := rowsByLabel(frontEndDetails(pv.FrontEnd, pv.LastsUntilEnded, pv.DevicePlatform, pv.DeviceName))
-	if rows["Device"] != "an Android device" || rows["What the app calls it"] != "Ann's Pixel" {
+	if rows["Device"] != "an Android device" || rows[deviceNameLabel] != "Ann's Pixel" {
 		t.Fatalf("the device rows say %+v", rows)
 	}
 }
@@ -56,7 +56,7 @@ func TestADeviceNameCannotSpeakAsTheIdentityAgent(t *testing.T) {
 	if rows["Device"] != "an Android device" {
 		t.Fatalf("the name reached the Device row: %+v", rows)
 	}
-	if rows["What the app calls it"] != name {
+	if rows[deviceNameLabel] != name {
 		t.Fatalf("the name is not shown as the app's word: %+v", rows)
 	}
 }
@@ -69,7 +69,7 @@ func TestTheDevicePlatformIsWhatTheHardwareProofSaidNotWhatTheNameClaims(t *test
 	if pv.DevicePlatform != "android" {
 		t.Fatalf("the platform came from the name: %+v", pv)
 	}
-	if rows := rowsByLabel(deviceDetails(pv.DevicePlatform, pv.DeviceName)); rows["Device"] != "an Android device" || rows["What the app calls it"] != "Windows PC with a TPM" {
+	if rows := rowsByLabel(deviceDetails(pv.DevicePlatform, pv.DeviceName)); rows["Device"] != "an Android device" || rows[deviceNameLabel] != "Windows PC with a TPM" {
 		t.Fatalf("the rows present the app's word as the proved kind: %+v", rows)
 	}
 }
@@ -162,10 +162,45 @@ func TestThePersonsAgentRefusesASignedChallengeThatNamesADeviceWrongly(t *testin
 // The row cleans the name again at the last step, so a name that reached it by
 // any other route still cannot reorder the row.
 func TestTheDeviceRowCleansTheNameItShows(t *testing.T) {
-	if v := rowsByLabel(deviceDetails("apple", "a‮b\nc"))["What the app calls it"]; v == "" || strings.ContainsAny(v, "‮\n") {
+	if v := rowsByLabel(deviceDetails("apple", "a‮b\nc"))[deviceNameLabel]; v == "" || strings.ContainsAny(v, "‮\n") {
 		t.Fatalf("the row shows %q", v)
 	}
 	if deviceDetails("", "Ann's Pixel") != nil || deviceDetails("windows", "x") != nil {
 		t.Fatal("a name with no proved platform is shown")
+	}
+}
+
+// A virtual or cloud TPM's key is named as one in the signed challenge, so the
+// consent says its host can read the key; a physical chip's is "a computer".
+// Fails if the class is left out of what the challenge names.
+func TestAVirtualTPMIsNamedAsOneOnTheConsent(t *testing.T) {
+	virtual := installedAppFact{Platform: "tpm", EKClass: "virtual"}
+	physical := installedAppFact{Platform: "tpm", EKClass: "physical"}
+	if signedDevicePlatform(virtual) != login.DeviceVirtualTPM || signedDevicePlatform(physical) != login.DeviceTPM ||
+		signedDevicePlatform(installedAppFact{Platform: "android"}) != "android" {
+		t.Fatal("the signed platform does not follow the chip's class")
+	}
+	w := anAppOffering(t, []string{"browser", "installed_app"}, nil)
+	token, _, code, msg := w.org.createSignedAssetChallengeOn("the-website", "https://portal.example", "", nil, strings.Repeat("A", 43), "installed_app", w.srv.URL, true, &virtual)
+	if code != 0 {
+		t.Fatal(code, msg)
+	}
+	pv, err := aPersonsIdentityAgent(t).Preview(login.StartLoginRequest{SessionToken: token, RPSessionURL: w.srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows := rowsByLabel(deviceDetails(pv.DevicePlatform, "")); !strings.Contains(rows["Device"], "host can read its key") {
+		t.Fatalf("a virtual TPM's consent reads %+v", rows)
+	}
+}
+
+// The consent's closing sentence does not claim the front end, device or
+// lifetime rows are shared.
+func TestTheConsentSaysTheDeviceRowsAreNotShared(t *testing.T) {
+	if strings.Contains(shareWarning(true), "Only what is listed above") {
+		t.Fatal("the sentence still says every row is shared")
+	}
+	if shareWarning(false) != "Only what is listed above is shared." {
+		t.Fatal("a sign-in with no front-end rows changed its sentence")
 	}
 }

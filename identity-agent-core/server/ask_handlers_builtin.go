@@ -74,9 +74,23 @@ func (loginAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview, error) {
 	return GenericPreview{
 		T: 1, Action: "login", Title: "Sign-in request",
 		Subtitle: pv.Audience, Counterparty: pv.SiteAID, Details: details,
-		Warning: "Only what is listed above is shared.",
+		Warning: shareWarning(pv.FrontEnd != "" || pv.DevicePlatform != "" || pv.LastsUntilEnded),
 	}, nil
 }
+
+// shareWarning closes the sign-in's consent. Where the list also says which
+// front end asks, on what device, and how long it lasts, those rows describe the
+// sign-in and are not shared, so the sentence names only what is.
+func shareWarning(describesTheSignIn bool) string {
+	if describesTheSignIn {
+		return "Only the details, credentials and score listed above are shared, not the front end, device or how long it lasts."
+	}
+	return "Only what is listed above is shared."
+}
+
+// deviceNameLabel heads the row that shows what an installed app calls its
+// device. Nothing checks that name, and the label says so.
+const deviceNameLabel = "What the app calls it (not checked)"
 
 // frontEndDetails are the rows that tell the person which kind of front end is
 // asking and how long approving lasts, so a screen that lists a sign-in's
@@ -101,7 +115,7 @@ func frontEndDetails(frontEnd string, lastsUntilEnded bool, devicePlatform, devi
 // deviceDetails says which device an installed app runs on. The kind of
 // device is what the core proved from the key's hardware, so it is the Device
 // row. The name is the installed app's own word, so it is a row of its own,
-// labelled as the app's, rather than quoted inside the Device row: a name can
+// labelled as the app's and as not checked, rather than quoted inside the Device row: a name can
 // hold any quotation mark, so it could close a quote it sat in and make the
 // rest read as the Identity Agent's own words. Nothing when the sign-in names
 // no proved platform.
@@ -114,12 +128,14 @@ func deviceDetails(platform, name string) []PreviewDetail {
 		kind = "an Apple device"
 	case login.DeviceTPM:
 		kind = "a computer"
+	case login.DeviceVirtualTPM:
+		kind = "a virtual computer (whoever runs its host can read its key)"
 	default:
 		return nil
 	}
 	out := []PreviewDetail{{Label: "Device", Value: kind}}
 	if name = login.CleanDeviceName(name); name != "" {
-		out = append(out, PreviewDetail{Label: "What the app calls it", Value: name})
+		out = append(out, PreviewDetail{Label: deviceNameLabel, Value: name})
 	}
 	return out
 }

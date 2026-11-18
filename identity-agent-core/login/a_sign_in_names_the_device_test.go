@@ -65,6 +65,7 @@ func TestCheckDevice(t *testing.T) {
 		{"installed app, platform and name", FrontEndInstalledApp, DeviceApple, "Ann's iPhone", true},
 		{"a browser names a device", FrontEndBrowser, DeviceAndroid, "", false},
 		{"no kind names a device", "", DeviceAndroid, "", false},
+		{"a virtual TPM", FrontEndInstalledApp, DeviceVirtualTPM, "", true},
 		{"unknown platform", FrontEndInstalledApp, "windows", "", false},
 		{"a name with no platform", FrontEndInstalledApp, "", "Ann's Pixel", false},
 		{"a name not fit to show", FrontEndInstalledApp, DeviceAndroid, "a‮b", false},
@@ -78,14 +79,22 @@ func TestCheckDevice(t *testing.T) {
 
 func TestCleanDeviceName(t *testing.T) {
 	for in, want := range map[string]string{
-		"  Ann's   Pixel \n":      "Ann's Pixel",
-		"a‮b⁦c\x00d":              "abcd",
-		"line\nbreak here":        "line break here",
-		"“”":                      "“”",
-		"":                        "",
-		" \t ":                    "",
-		strings.Repeat("é", 100):  strings.Repeat("é", MaxDeviceNameRunes),
-		strings.Repeat("a ", 100): strings.TrimSpace(strings.Repeat("a ", MaxDeviceNameRunes/2)),
+		"  Ann's   Pixel \n":                "Ann's Pixel",
+		"a‮b⁦c\x00d":                        "abcd",
+		"line\nbreak here":                  "line break here",
+		"“”":                                "“”",
+		"":                                  "",
+		" \t ":                              "",
+		strings.Repeat("é", 100):            strings.Repeat("é", MaxDeviceNameRunes),
+		strings.Repeat("a ", 100):           strings.TrimSpace(strings.Repeat("a ", MaxDeviceNameRunes/2)),
+		"\u3164\u115F\u2800":                "",
+		"\uF8FF Ann's iPhone":               "Ann's iPhone",
+		"A" + strings.Repeat("\u0336", 47):  "A\u0336\u0336",
+		"\u0301start":                       "start",
+		"\U0001F469\u200D\U0001F4BB laptop": "\U0001F469\u200D\U0001F4BB laptop",
+		"\u200Dlead trail\u200D":            "lead trail",
+		"\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645": "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645",
+		"Ann\u00A0\u2003Pixel":                             "Ann Pixel",
 	} {
 		if got := CleanDeviceName(in); got != want {
 			t.Errorf("CleanDeviceName(%q) = %q, want %q", in, got, want)
