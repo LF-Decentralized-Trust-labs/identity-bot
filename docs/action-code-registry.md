@@ -369,6 +369,26 @@ private-use range or inside an implementation.
 - **Published:** `identity-agent-core/binding/binding-vectors.json`, checked by
   `identity-agent-core/contracts/check_binding_vectors.py`.
 
+### `t = 8` · `act_for_identity`
+- **Summary:** a computer asks to act for an identity (ADR-041 Amendment 1). It leaves
+  its signed controller offer at the Identity Agent it wants to act for
+  (`POST /api/controller/requests`, public) and shows the short pointer that returns,
+  `https://{agent}/i/{token}`.
+- **Who mints:** the computer (a controller), held by the Identity Agent it asks.
+- **Request schema:** `aid`, `public_key`, `protected_by?`, `agent_origin`,
+  `timestamp`, `signature`, `expiry`, `label?`, `org_name?`.
+- **Authentication:** the computer is named by its key and publishes no key log, so
+  the Ask carries no `signer_oobi`. `signature` is the computer's over
+  `identity-agent-controller-offer-v1`, `public_key`, `agent_origin`, `timestamp`
+  (newline-separated), checked against the key `aid` names. The offer must be within
+  five minutes of `timestamp`, `expiry` may not be later than that, and the Ask must
+  be served at `agent_origin`. `label` and `org_name` are display only.
+- **Preview:** "Let this computer act for you", with the computer, what holds its key,
+  the Identity Agent and when the code expires.
+- **Outcome:** none on the scanning side. Approving hands the checked machine back for
+  the owner's device to grant with its own signed `POST /api/controllers` to
+  `agent_origin`; the grant retires the code. Declining does nothing.
+
 ---
 
 ## 11. What is open vs. proprietary (for implementers)
