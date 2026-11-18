@@ -28,6 +28,7 @@ class PersonStatement {
     this.inReplyTo = '',
     this.rangeFirst = '',
     this.rangeLast = '',
+    this.audience = '',
     this.fingerprintVersion = 1,
   });
 
@@ -41,6 +42,11 @@ class PersonStatement {
       time,
       fingerprint;
   final String to, inReplyTo, rangeFirst, rangeLast;
+
+  /// The asset id of the one utility app a `list` is for. Only a list names
+  /// one, and a statement that does is signed as `IA-PERSON-MSG-V2`, with the
+  /// audience as its last line (ADR-072 Amendment 16).
+  final String audience;
   final int fingerprintVersion;
 
   /// The kinds the holder of a self-owned Identity Agent signs to end, take
@@ -49,14 +55,15 @@ class PersonStatement {
   static const kindReopen = 'reopen';
   static const kindLimit = 'limit';
 
-  static const _tag = 'IA-PERSON-MSG-V1';
-
   /// The string a person signs: the tag and then one field per line in a fixed
-  /// order, with no trailing newline. Only a split names a range.
+  /// order, with no trailing newline. Only a split names a range. A statement
+  /// with an audience is `IA-PERSON-MSG-V2` and ends with the audience.
   Uint8List bytes() => Uint8List.fromList(utf8.encode([
-        _tag, agent, conversation, messageId, kind, from, signer, to, inReplyTo,
+        audience.isEmpty ? 'IA-PERSON-MSG-V1' : 'IA-PERSON-MSG-V2',
+        agent, conversation, messageId, kind, from, signer, to, inReplyTo,
         rangeFirst, rangeLast, nonce, time, '$fingerprintVersion',
         fingerprint, //
+        if (audience.isNotEmpty) audience,
       ].join('\n')));
 
   Map<String, dynamic> toJson() => {
@@ -70,6 +77,7 @@ class PersonStatement {
         if (inReplyTo.isNotEmpty) 'in_reply_to': inReplyTo,
         if (rangeFirst.isNotEmpty) 'range_first': rangeFirst,
         if (rangeLast.isNotEmpty) 'range_last': rangeLast,
+        if (audience.isNotEmpty) 'audience': audience,
         'nonce': nonce,
         'time': time,
         'fingerprint_version': fingerprintVersion,
@@ -117,7 +125,7 @@ class PersonStatement {
   Map<String, dynamic> signedWith(Uint8List seed) {
     for (final v in [
       agent, conversation, messageId, kind, from, signer, to, inReplyTo,
-      rangeFirst, rangeLast, nonce, time, fingerprint, //
+      rangeFirst, rangeLast, audience, nonce, time, fingerprint, //
     ]) {
       if (v.contains('\n') || v.contains('\r')) {
         throw ArgumentError('a statement field may not contain a line break');
