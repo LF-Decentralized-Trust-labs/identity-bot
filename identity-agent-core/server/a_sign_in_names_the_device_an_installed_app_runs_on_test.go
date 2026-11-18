@@ -185,6 +185,12 @@ func TestAVirtualTPMIsNamedAsOneOnTheConsent(t *testing.T) {
 		{physical, login.DeviceTPM, true},
 		{installedAppFact{Platform: "android"}, "android", true},
 		{installedAppFact{Platform: "tpm"}, "", false},
+		{installedAppFact{Platform: "apple"}, "apple", true},
+		// A key held in software proves no device, so it names none and is not refused.
+		{installedAppFact{Platform: PlatformSoftware}, "", true},
+		// A platform the person's Identity Agent does not know is never signed.
+		{installedAppFact{Platform: "windows"}, "", false},
+		{installedAppFact{}, "", false},
 	} {
 		if got, ok := signedDevicePlatform(c.f); got != c.want || ok != c.ok {
 			t.Fatalf("%+v: signed as %q %v, want %q %v", c.f, got, ok, c.want, c.ok)
