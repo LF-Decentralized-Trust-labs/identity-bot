@@ -11,13 +11,14 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-// What a controller shows on a screen for the owner to scan.
+// What a controller signs to offer itself to an owner.
 //
-// This is the offline, self-contained half of the ceremony. Unlike an Ask — the
-// rails for a transaction between two DIFFERENT identities, which fetches a
-// signed document from a pointer — a controller offer is two of one person's own
-// devices meeting, so there is no counterparty to fetch from and no reason to be
-// online. It travels whole in the QR, the same way pairing a computer does.
+// The offer no longer travels whole in the QR (ADR-041 Amendment 1). The
+// computer leaves it at the Identity Agent it asks to act for and shows that
+// Identity Agent's short Ask pointer (a_computer_asks_to_act_for_an_identity.go),
+// and the owner's Identity Agent checks it there with checkControllerOffer.
+// handleVerifyControllerOffer stays only while an older code must still be read,
+// and goes once the applications that show and read the code use the pointer.
 //
 // It carries a signature, and that is the one thing today's raw offer lacks.
 // A bare offer is a public key and a claim; anybody who photographs it can
@@ -63,7 +64,7 @@ func canonicalControllerOffer(verkey, agentOrigin, timestamp string) string {
 	}, "\n")
 }
 
-// ControllerOffer is the signed, self-contained offer a controller displays.
+// ControllerOffer is the signed offer a controller leaves at the Identity Agent it asks to act for.
 type ControllerOffer struct {
 	AID         string `json:"aid"`
 	PublicKey   string `json:"public_key"`
@@ -138,12 +139,13 @@ func (s *CoreServer) handleControllerOffer(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleVerifyControllerOffer checks a scanned controller offer before an owner
-// is asked to approve it. Called by the app on the OWNER's device.
+// handleVerifyControllerOffer checks a scanned self-contained controller offer
+// before an owner is asked to approve it. Called on the OWNER's device, and only
+// for the older code during the transition (ADR-041 Amendment 1): the pointer
+// path checks the same offer with checkControllerOffer in the scan gate.
 //
-// MANDATORY: this is the sole authentication of the offer. A missing, malformed,
-// stale, or unverifiable offer is refused here, and the owner is never shown a
-// machine to approve. There is no unsigned path.
+// A missing, malformed, stale, or unverifiable offer is refused here, and the
+// owner is never shown a machine to approve. There is no unsigned path.
 //
 //	POST /api/controller/verify-offer  {aid, public_key, agent_origin, timestamp, signature}
 func (s *CoreServer) handleVerifyControllerOffer(w http.ResponseWriter, r *http.Request) {

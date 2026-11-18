@@ -66,7 +66,14 @@ type CoreServer struct {
 	// asker, until they are answered or expire (a_person_signs_a_statement_for_an_app.go).
 	statementMu   sync.Mutex
 	statementAsks map[string]*statementAsk
-	DataStore     store.Store
+	// controllerRequests are the computers that have left a signed offer here
+	// to act for this identity, served as an Ask until the offer expires or the
+	// owner grants the machine (a_computer_asks_to_act_for_an_identity.go).
+	controllerRequestMu       sync.Mutex
+	controllerRequests        map[string]*controllerRequest
+	controllerRequestsRetired map[string]retiredOffer
+	controllerRequestLimiter  *ipRateLimiter
+	DataStore                 store.Store
 	// pairwiseReg is what this core publishes for its pairwise identifiers
 	// (pairwise_registry.go).
 	pairwiseMu     sync.Mutex
@@ -1244,14 +1251,19 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// Read by the app on this machine so it can show the person what they
 		// are approving.
 		r.Get("/controller/this-machine", s.handleThisMachineAsAController)
-		// The signed, self-contained offer this machine shows as a QR — the
-		// same thing as this-machine but bound to an agent and a moment and
-		// signed, so a photographed offer cannot be replayed or repointed.
+		// The signed offer this machine leaves at the Identity Agent it asks to
+		// act for — the same thing as this-machine but bound to that Identity
+		// Agent and a moment and signed, so a captured offer cannot be replayed
+		// or repointed.
 		r.Post("/controller/offer", s.handleControllerOffer)
 		// Called on the OWNER's device to check a scanned offer before anybody
 		// is asked to approve it. The sole authentication of an offer; a bad one
 		// is refused here and no machine is shown to approve.
 		r.Post("/controller/verify-offer", s.handleVerifyControllerOffer)
+		// A computer leaves its signed offer here, at the Identity Agent it asks
+		// to act for, and shows the short pointer this returns. Public, bounded,
+		// and never a grant (a_computer_asks_to_act_for_an_identity.go).
+		r.Post("/controller/requests", s.handleLeaveAControllerRequest)
 		// Signing a request as THIS machine, for the app on it to send to the
 		// agent it is pointed at. The only work a controller's own computer
 		// does, and it is about the controller rather than the identity.

@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-09-06
 **Relates to:** ADR-006 (Standardized Topology), ADR-036 (A computer you pair with does not publish who you are)
+**Amended by:** ADR-041 Amendment 1 (2026-11-18): the controller offer no longer travels whole in the QR. A computer leaves it at the Identity Agent it asks to act for and shows that Identity Agent's short Ask pointer. The signed prefix below is unchanged; the reference implementation no longer emits the `identity-agent://controller` code.
 
 ## Context
 

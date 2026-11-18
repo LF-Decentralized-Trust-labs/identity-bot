@@ -163,6 +163,31 @@
       "outcome": "The individual's Identity Agent derives its identifier for the site, signs one statement naming both identifiers, the organization, the site and the invite with the key of each, and sends it to the organization, which checks both signatures. Declining signs nothing. The linking is the point of it, so the individual is told that the organization keeps a statement that proves it to anyone it shows it to, and that it cannot be undone except by leaving.",
       "tiers": null,
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
+    },
+    {
+      "code": 8,
+      "key": "act_for_identity",
+      "name": "Let a computer act for you",
+      "summary": "A computer asks to act for an identity: it leaves its signed offer at the Identity Agent it wants to act for and shows that Identity Agent's short pointer, which the owner scans (ADR-041 Amendment 1).",
+      "who_mints": "controller",
+      "status": "active",
+      "version": "1.0",
+      "request_schema": {
+        "aid": { "type": "string", "required": true, "kind": "open" },
+        "public_key": { "type": "string", "required": true, "kind": "open" },
+        "protected_by": { "type": "string", "required": false, "kind": "open" },
+        "agent_origin": { "type": "string", "required": true, "kind": "open" },
+        "timestamp": { "type": "string", "required": true, "kind": "open" },
+        "signature": { "type": "string", "required": true, "kind": "open" },
+        "expiry": { "type": "string", "required": true, "kind": "open" },
+        "label": { "type": "string", "required": false, "kind": "open" },
+        "org_name": { "type": "string", "required": false, "kind": "open" }
+      },
+      "preview_contract": { "title": "Let this computer act for you", "conveys": ["the computer's identifier", "what it says holds its key", "the Identity Agent it will act for", "when the code expires"] },
+      "discloses": [],
+      "outcome": "The owner's Identity Agent checks the computer's signature over the offer (identity-agent-controller-offer-v1: key, Identity Agent origin, timestamp), that it is fresh, and that it was served by the Identity Agent it names, and shows it. Approving, with the grade chosen (scoped, using it for now, the default; or enrolled, keeping it), does not grant: the owner's device then grants with its own signed request to that Identity Agent (POST /api/controllers), which retires the code. Declining does nothing and the code expires with the offer.",
+      "tiers": ["scoped", "enrolled"],
+      "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }
   ]
 }

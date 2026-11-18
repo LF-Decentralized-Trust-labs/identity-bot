@@ -222,6 +222,7 @@ var whatAFrontEndAnswersFor = map[string]string{
 	// running at all.
 	"GET /api/controller/this-machine": "what this computer would offer if it acted for an identity",
 	"POST /api/controller/sign":        "signing this computer's own asking with its enclave key",
+	"POST /api/controller/offer":       "signing this computer's offer to act for an identity, to ask again once a borrowed grant ends",
 	"GET /api/controller/agent":        "which identity this computer is a front end for",
 
 	// The app that started this core asks it to prove it holds the secret the

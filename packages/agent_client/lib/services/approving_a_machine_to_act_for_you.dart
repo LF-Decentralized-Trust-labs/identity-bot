@@ -122,7 +122,45 @@ class AMachineAsking {
     this.protectedBy = '',
     this.suggestedLabel = '',
     this.agentOrigin = '',
+    this.orgName = '',
+    this.grade = '',
   });
+
+  /// The scan gate's action name for a computer asking to act for an identity
+  /// (action code 8, ADR-041 Amendment 1). A decoded preview with this action
+  /// is approved through [ApprovingAMachineToActForYou.approve], never by the
+  /// scan alone.
+  static const action = 'act_for_identity';
+  static const actionCode = 8;
+
+  /// The machine an approved scan of a computer's short code names, or null
+  /// when the answer is not one.
+  ///
+  /// [executeResult] is what `POST /api/scan/execute` answered for that code
+  /// after the person approved. The owner's Identity Agent has already checked
+  /// the computer's signature over its offer, that it is fresh, and that it was
+  /// served by the Identity Agent it names. Approving on the scan gate grants
+  /// nothing (`granted` is false): the grant is the owner's own signed request,
+  /// [ApprovingAMachineToActForYou.approve], to the Identity Agent this
+  /// device owns for which [isFor] is true, with [grade] as the grade.
+  static AMachineAsking? fromApprovedScan(Map<String, dynamic> executeResult) {
+    if (executeResult['approved'] != true) return null;
+    final m = executeResult['machine'];
+    if (m is! Map) return null;
+    final aid = (m['controller_aid'] ?? '').toString();
+    final key = (m['public_key'] ?? '').toString();
+    final origin = (m['agent_origin'] ?? '').toString();
+    if (aid.isEmpty || key.isEmpty || origin.isEmpty) return null;
+    return AMachineAsking(
+      aid: aid,
+      publicKey: key,
+      protectedBy: (m['protected_by'] ?? '').toString(),
+      suggestedLabel: (m['label'] ?? '').toString(),
+      agentOrigin: origin,
+      orgName: (m['org_name'] ?? '').toString(),
+      grade: (m['grade'] ?? '').toString(),
+    );
+  }
 
   final String aid;
   final String publicKey;
@@ -149,6 +187,27 @@ class AMachineAsking {
   /// would let a code somebody photographed send this device's grant wherever
   /// it liked.
   final String agentOrigin;
+
+  /// The organisation the computer says it is asking to connect to. Display
+  /// only, like [suggestedLabel].
+  final String orgName;
+
+  /// What the person chose on the scan's consent screen: `scoped` (using it for
+  /// now) or `enrolled` (keeping it). Empty when it was not chosen there, and
+  /// then the grant must be asked for some other way. Pass it to
+  /// [ApprovingAMachineToActForYou.approve] as `grade`.
+  final String grade;
+
+  /// Whether [agentOrigin] names the Identity Agent at [origin]: the same
+  /// scheme, host and path, ignoring case and a trailing slash, the way the
+  /// core compares them. Use it to find, among the Identity Agents this device
+  /// owns, the one to grant on; a code that names none of them gets no
+  /// further.
+  bool isFor(String origin) {
+    String norm(String o) =>
+        o.trim().replaceAll(RegExp(r'/+$'), '').toLowerCase();
+    return agentOrigin.trim().isNotEmpty && norm(agentOrigin) == norm(origin);
+  }
 }
 
 /// A machine already authorised, as the owner's device sees it.
