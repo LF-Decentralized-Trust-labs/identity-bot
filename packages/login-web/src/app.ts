@@ -1225,3 +1225,6 @@ async function askStatement(
 export { pollProblem, refusalInWords, refusalNextStep, refusalProblem, signInProblem, type RefusalNextStep } from "./signInProblem.js";
 import { statementProblem, type StatementView } from "./statementWords.js";
 export { statementWords, type StatementView, type StatementWords } from "./statementWords.js";
+
+export { signPersonStatement, personStatementBytes, personFingerprint, personSigner, personVerkey, lowSSignature, LIST_CONVERSATION } from "./personStatement.js";
+export type { PersonKind, PersonProof, PersonStatement, PersonStatementRequest, SignedPersonStatement } from "./personStatement.js";

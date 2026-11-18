@@ -39,10 +39,12 @@ def fingerprint(salt, words):
     return base.digest(b"IA-FINGERPRINT-V1" + len(salt).to_bytes(2, "big") + salt + words)
 
 
-KINDS = ("message", "ask", "split", "hand-off", "close", "reopen", "limit")
+KINDS = ("message", "ask", "split", "hand-off", "close", "reopen", "limit", "list")
 
 FIELDS = ("agent", "conversation", "message_id", "kind", "from", "signer", "to", "in_reply_to",
           "range_first", "range_last", "nonce", "time", "fingerprint_version", "fingerprint")
+# A list also names its audience: the field is read, and signed as a last line under V2.
+ALL_FIELDS = FIELDS + ("audience",)
 
 # RFC 3339 as Go's time.Parse reads it (an hour may be one digit): ASCII digits only, a capital T, a zone
 # that is Z or a signed hh:mm, and a fraction of one or more digits after a "."
@@ -67,9 +69,12 @@ def rfc3339(t):
 
 
 def statement_bytes(s):
-    """IA-PERSON-MSG-V1 and then the fields in FIELDS order, one per line."""
-    return "\n".join(["IA-PERSON-MSG-V1"] + [str(s.get(f, 0)) if f == "fingerprint_version" else s.get(f, "")
-                                              for f in FIELDS]).encode()
+    """IA-PERSON-MSG-V1 and then the fields in FIELDS order, one per line; with an audience, IA-PERSON-MSG-V2 and
+    the audience as a last line."""
+    lines = [str(s.get(f, 0)) if f == "fingerprint_version" else s.get(f, "") for f in FIELDS]
+    if s.get("audience", ""):
+        return "\n".join(["IA-PERSON-MSG-V2"] + lines + [s["audience"]]).encode()
+    return "\n".join(["IA-PERSON-MSG-V1"] + lines).encode()
 
 
 def no_repeats(pairs):
@@ -87,7 +92,7 @@ def refused(s):
     if not isinstance(s, dict):
         return "not an object"
     for k, v in s.items():
-        if k not in FIELDS:
+        if k not in ALL_FIELDS:
             return "unknown field " + k
         if k == "fingerprint_version":
             if type(v) is not int:  # not true, not 1.0, not "1"
@@ -108,6 +113,12 @@ def refused(s):
         return "no recipient"
     if k in ("close", "reopen", "limit") and to:
         return "recipient on a close"
+    if k == "list" and (to or s.get("in_reply_to", "")):
+        return "recipient or reply on a list"
+    if (k == "list") != (s["conversation"] == "list"):
+        return "list and its conversation"
+    if (k == "list") != bool(s.get("audience", "")):
+        return "list and its audience"
     if k == "split" and not (first and last):
         return "split range"
     if k != "split" and (first or last):

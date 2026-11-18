@@ -143,17 +143,25 @@ class InstalledKeyProof {
   final Uint8List evidence;
   final String ask;
   final Uint8List keySignature;
+
+  /// What the installed app calls the device it runs on, for the person's
+  /// consent. Optional, and nothing proves it: the Identity Agent cleans it and
+  /// shows it as the app's word, labelled as not checked.
+  final String? deviceName;
   const InstalledKeyProof(
       {required this.platform,
       required this.evidence,
       required this.ask,
-      required this.keySignature});
+      required this.keySignature,
+      this.deviceName});
 
   Map<String, Object> toJson() => {
         'platform': platform,
         'evidence': base64.encode(evidence),
         'ask': ask,
         'key_signature': base64.encode(keySignature),
+        if (deviceName != null && deviceName!.isNotEmpty)
+          'device_name': deviceName!,
       };
 }
 

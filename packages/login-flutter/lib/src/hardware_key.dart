@@ -151,10 +151,13 @@ class MethodChannelHardwareKey implements HardwareKeyPlatform {
 /// the owner does not require a hardware key, held in software in the platform's
 /// secure storage. A device with no secure hardware an app's key can be proved in
 /// (Linux, for one) has only the second. The Identity Agent decides which it takes.
+/// [deviceName], if given, is what the app calls this device, shown to the person
+/// as the app's word beside a hardware key's sign-in (ADR-072 Amendment 14).
 Future<InstalledFrontEndKey> openInstalledFrontEndKey(AppLink link,
     {HardwareKeyPlatform? hardware,
     FlutterSecureStorage? storage,
-    String label = 'identity-agent.app-key'}) {
+    String label = 'identity-agent.app-key',
+    String? deviceName}) {
   HardwareKeyPlatform? here = hardware;
   if (here == null) {
     try {
@@ -167,5 +170,6 @@ Future<InstalledFrontEndKey> openInstalledFrontEndKey(AppLink link,
       hardware: here,
       label: '$label:${keySlot(link.aid, link.rid, link.api)}',
       keyStore: SecureGrantStore(keySlot(link.aid, link.rid, link.api),
-          storage: storage));
+          storage: storage),
+      deviceName: deviceName);
 }

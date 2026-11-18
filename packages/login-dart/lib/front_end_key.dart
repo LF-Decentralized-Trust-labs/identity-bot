@@ -177,8 +177,13 @@ abstract class HardwareKeyPlatform {
 class HardwareFrontEndKey extends FrontEndKey {
   final HardwareKeyPlatform hardware;
   final String label;
+
+  /// What the installed app calls the device it runs on, sent with the proof
+  /// for the person's consent (shown there as the app's word, not checked).
+  final String? deviceName;
   String? _x, _y;
-  HardwareFrontEndKey._(this.hardware, this.label, this._x, this._y);
+  HardwareFrontEndKey._(
+      this.hardware, this.label, this._x, this._y, this.deviceName);
 
   @override
   String get x => _x ?? (throw StateError(_noKey));
@@ -197,12 +202,16 @@ class HardwareFrontEndKey extends FrontEndKey {
 
   /// The key [label] names, made on first use. A refusal from the hardware (no
   /// secure hardware, a key that is not P-256) is the platform's to throw.
+  /// [deviceName], if given, is what the app calls its device.
   static Future<HardwareFrontEndKey> open(
-      HardwareKeyPlatform hardware, String label) async {
+      HardwareKeyPlatform hardware, String label,
+      {String? deviceName}) async {
     final p = await hardware.publicPoint(label);
-    if (p == null) return HardwareFrontEndKey._(hardware, label, null, null);
+    if (p == null) {
+      return HardwareFrontEndKey._(hardware, label, null, null, deviceName);
+    }
     final (x, y) = _coordinates(p);
-    return HardwareFrontEndKey._(hardware, label, x, y);
+    return HardwareFrontEndKey._(hardware, label, x, y, deviceName);
   }
 
   @override
@@ -238,7 +247,8 @@ class HardwareFrontEndKey extends FrontEndKey {
         platform: hardware.platform,
         evidence: made.evidence,
         ask: ask.ask,
-        keySignature: await hardware.signStatement(label, digest));
+        keySignature: await hardware.signStatement(label, digest),
+        deviceName: deviceName);
   }
 }
 
@@ -317,10 +327,17 @@ class InstalledFrontEndKey extends FrontEndKey {
   final HardwareKeyPlatform? hardware;
   final String label;
   final KeyStore keyStore;
+
+  /// What the installed app calls the device it runs on, sent with a hardware
+  /// key's proof for the person's consent (ADR-072 Amendment 14), where it is
+  /// shown as the app's word, not checked. A key in software proves no device,
+  /// so the Identity Agent names none for it.
+  final String? deviceName;
   HardwareFrontEndKey? _hardwareKey;
   SoftwareFrontEndKey? _softwareKey;
 
-  InstalledFrontEndKey._(this.hardware, this.label, this.keyStore);
+  InstalledFrontEndKey._(
+      this.hardware, this.label, this.keyStore, this.deviceName);
 
   static const _keptHardware = 'hardware';
   static const _keptSoftware = 'software:';
@@ -330,13 +347,15 @@ class InstalledFrontEndKey extends FrontEndKey {
   static Future<InstalledFrontEndKey> open(
       {HardwareKeyPlatform? hardware,
       required String label,
-      required KeyStore keyStore}) async {
-    final k = InstalledFrontEndKey._(hardware, label, keyStore);
+      required KeyStore keyStore,
+      String? deviceName}) async {
+    final k = InstalledFrontEndKey._(hardware, label, keyStore, deviceName);
     final kept = await keyStore.read();
     if (kept == _keptHardware && hardware != null) {
       // A key the hardware no longer holds is no key: the next sign-in makes one.
       if (await hardware.publicPoint(label) != null) {
-        k._hardwareKey = await HardwareFrontEndKey.open(hardware, label);
+        k._hardwareKey = await HardwareFrontEndKey.open(hardware, label,
+            deviceName: deviceName);
       }
     } else if (kept != null && kept.startsWith(_keptSoftware)) {
       final d = b64uDecode(kept.substring(_keptSoftware.length));
@@ -404,7 +423,8 @@ class InstalledFrontEndKey extends FrontEndKey {
               }
             };
       try {
-        final k = await HardwareFrontEndKey.open(hw, label);
+        final k =
+            await HardwareFrontEndKey.open(hw, label, deviceName: deviceName);
         final proof = await k.prove(ask, exchange: ex);
         _hardwareKey = k;
         _softwareKey = null;

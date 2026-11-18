@@ -105,6 +105,30 @@ void main() {
     expect(again.verify('call', await again.sign('call')), isTrue);
   });
 
+  test('the app\'s name for its device goes with a hardware key\'s proof, never a software one',
+      () async {
+    // ADR-072 Amendment 14 names the device a hardware key was proved on; a key in
+    // software proves no device, so its proof carries no name either.
+    final hw = _Accepting(['android', 'software']);
+    final hwKey = await InstalledFrontEndKey.open(
+        hardware: FakeHardware(),
+        label: 'app-key',
+        keyStore: MemoryKeyStore(),
+        deviceName: 'Ann\'s Pixel');
+    await AppSession(hw.client, hw.link, hwKey, now: () => hw.clock).start();
+    expect((hw.startedWith!['proof'] as Map)['device_name'], 'Ann\'s Pixel');
+    final sw = _Accepting(['apple', 'software']);
+    final swKey = await InstalledFrontEndKey.open(
+        hardware: FakeHardware(),
+        label: 'app-key',
+        keyStore: MemoryKeyStore(),
+        deviceName: 'Ann\'s Pixel');
+    await AppSession(sw.client, sw.link, swKey, now: () => sw.clock).start();
+    final proof = sw.startedWith!['proof'] as Map;
+    expect(proof['platform'], 'software');
+    expect(proof.containsKey('device_name'), isFalse);
+  });
+
   test('where the owner requires hardware the device\'s hardware is not, nothing is sent',
       () async {
     for (final hardware in [null, FakeHardware()]) {

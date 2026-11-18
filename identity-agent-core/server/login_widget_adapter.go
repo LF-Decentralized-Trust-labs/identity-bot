@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
 
@@ -83,6 +84,16 @@ func (s *CoreServer) assetThatMaySign(assetID, audience, askedFrom string) (foun
 // pass false and an installed_app sign-in there is refused: without the proof
 // it is a bearer QR sign-in nothing tells from a browser's.
 func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool) (sessionToken, qrURL string, errCode int, errMsg string) {
+	return s.createSignedAssetChallengeOn(assetID, audience, askedFrom, disclosures, browserKey, frontEnd, publicURL, installedAppKey, nil)
+}
+
+// createSignedAssetChallengeOn is createSignedAssetChallenge for a sign-in
+// whose installed app's key the core proved: device is what the proof
+// established (the platform) and what the installed app calls its device, and
+// both go into the signed challenge so the person's consent can name the
+// device. It is nil for every other sign-in, and is used only with an
+// installedAppKey the core itself verified.
+func (s *CoreServer) createSignedAssetChallengeOn(assetID, audience, askedFrom string, disclosures []string, browserKey, frontEnd, publicURL string, installedAppKey bool, device *installedAppFact) (sessionToken, qrURL string, errCode int, errMsg string) {
 	found, audience, errCode, errMsg := s.assetThatMaySign(assetID, audience, askedFrom)
 	if errCode != 0 {
 		return "", "", errCode, errMsg
@@ -136,6 +147,21 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		FrontEnd:             frontEnd,
 		RelayID:              found.RelayID,
 		BackEnd:              found.BackEnd,
+	}
+	// Only a key the hardware proved names a device: the platform is the
+	// proof's, not the request's. A key held in software (ADR-072 Amendment 17)
+	// proves no device, so its challenge names none, platform or name.
+	if device != nil && installedAppKey && frontEnd == asset.FrontEndInstalledApp {
+		platform, ok := signedDevicePlatform(*device)
+		if !ok {
+			// A TPM proof that records no chip class speaks for no one, so it is
+			// not shown to the person either.
+			return "", "", http.StatusForbidden, "this device's security chip is of no known kind, so it cannot sign in"
+		}
+		if platform != "" {
+			bundle.DevicePlatform = platform
+			bundle.DeviceName = device.DeviceName
+		}
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,
@@ -357,4 +383,32 @@ func corsPreflight(w http.ResponseWriter, r *http.Request) {
 func sameOrigin(a, b string) bool {
 	norm := func(o string) string { return strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/")) }
 	return a != "" && norm(a) == norm(b)
+}
+
+// signedDevicePlatform is the platform a proved key's challenge names. A TPM
+// whose endorsement key a virtual or cloud TPM's issuer certified (its owner
+// opted in to those) is named as one, so the person's consent can say that
+// whoever runs its host can read the key, rather than "a computer". A TPM's
+// key is named only for a class the proof recorded: false for one with none,
+// which fails closed rather than reading as a physical chip. A key held in
+// software names no device ("", true): nothing proved one. Any other platform
+// is false, so a platform the person's Identity Agent does not know
+// (login.CheckDevice) is never signed into a challenge it would refuse.
+func signedDevicePlatform(f installedAppFact) (string, bool) {
+	switch f.Platform {
+	case PlatformSoftware:
+		return "", true
+	case login.DeviceAndroid, login.DeviceApple:
+		return f.Platform, true
+	case login.DeviceTPM:
+	default:
+		return "", false
+	}
+	switch f.EKClass {
+	case secureenclave.TPMClassVirtual:
+		return login.DeviceVirtualTPM, true
+	case secureenclave.TPMClassPhysical:
+		return login.DeviceTPM, true
+	}
+	return "", false
 }

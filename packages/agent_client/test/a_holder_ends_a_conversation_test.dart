@@ -64,6 +64,7 @@ void main() {
         inReplyTo: s['in_reply_to'] ?? '',
         rangeFirst: s['range_first'] ?? '',
         rangeLast: s['range_last'] ?? '',
+        audience: s['audience'] ?? '',
         nonce: s['nonce'],
         time: s['time'],
         fingerprint: s['fingerprint'],

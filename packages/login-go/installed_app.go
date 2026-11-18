@@ -58,13 +58,19 @@ const (
 
 // InstalledKeyProof is the evidence for an installed front end's key: the
 // platform that vouches, that platform's own evidence, the ask it was made for, and
-// the key's own signature over InstalledAppStatement for that ask. On the wire the
+// the key's own signature over InstalledAppStatement for that ask, and, if the app
+// gives one, its own name for its device. On the wire the
 // byte fields are standard base64, as the Identity Agent reads them.
 type InstalledKeyProof struct {
 	Platform     string `json:"platform"`
 	Evidence     []byte `json:"evidence"`
 	Ask          string `json:"ask"`
 	KeySignature []byte `json:"key_signature"`
+	// DeviceName is what the installed app calls the device it runs on, for the
+	// person's consent. Optional, and nothing proves it: the Identity Agent cleans
+	// it and shows it as the app's word, labelled as not checked. The back end
+	// passes it on with the rest of the proof.
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 // InstalledAsk is what the back end hands its installed front end to make the

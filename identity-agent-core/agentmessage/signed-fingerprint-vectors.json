@@ -245,6 +245,26 @@
       "words_hex": "",
       "signed": "IA-PERSON-MSG-V1\nEIDENTITYAGENT\nc_vector\nm_6\nreopen\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\n\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEEeQIVYrv1SKsGPigZvecuBG6ecvTQ9KUMRep7eDJjxU",
       "signature": "0BD_NZCyQDPsTok7qEYo5v6VXBMl5teB5AnnusdBp34tdgxlfYaCR2zsPxcZ5BsSu3UwinVSaJlWBOvHcfaTq3wM"
+    },
+    {
+      "name": "a list of the person's own conversations, for no conversation, with no words and no recipient",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "list",
+        "message_id": "m_10",
+        "kind": "list",
+        "from": "EPERSON",
+        "signer": "BFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe",
+        "audience": "ASSETCHAT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EOXXm842slSzhL2ZbQb-OJC01twJhiIMv9ZpekZa2UNx"
+      },
+      "salt_hex": "3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a",
+      "words_hex": "",
+      "signed": "IA-PERSON-MSG-V2\nEIDENTITYAGENT\nlist\nm_10\nlist\nEPERSON\nBFCynp-mOIj4ErG7yajGhMV4ANhfPlBLLhNGhSWlDZUe\n\n\n\n\nnonce-0123456789abcdef\n2026-11-06T10:00:00Z\n1\nEOXXm842slSzhL2ZbQb-OJC01twJhiIMv9ZpekZa2UNx\nASSETCHAT",
+      "signature": "0BCz7ixM-elNuS0v4K1-IfKAgAkUzdVXMYryPwBgJE5rogQtSKzUzxHlE8gJHRKEiF1eg_SJpJQC9BSxwZtD8ccH"
     }
   ],
   "refused_statements": [
@@ -353,6 +373,119 @@
         "from": "EPERSON",
         "signer": "DSIGNER",
         "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a list naming a recipient",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "list",
+        "message_id": "m_1",
+        "kind": "list",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "audience": "ASSETCHAT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a list for no utility app",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "list",
+        "message_id": "m_1",
+        "kind": "list",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a message naming a utility app",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "audience": "ASSETCHAT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a list answering a message",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "list",
+        "message_id": "m_1",
+        "kind": "list",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "in_reply_to": "m_1",
+        "audience": "ASSETCHAT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a list for a conversation",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "c_vector",
+        "message_id": "m_1",
+        "kind": "list",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "audience": "ASSETCHAT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a message for the list",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "list",
+        "message_id": "m_1",
+        "kind": "message",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
+        "to": "EAGENT",
+        "nonce": "nonce-0123456789abcdef",
+        "time": "2026-11-06T10:00:00Z",
+        "fingerprint_version": 1,
+        "fingerprint": "EFINGERPRINT"
+      }
+    },
+    {
+      "name": "a close for the list",
+      "statement": {
+        "agent": "EIDENTITYAGENT",
+        "conversation": "list",
+        "message_id": "m_1",
+        "kind": "close",
+        "from": "EPERSON",
+        "signer": "DSIGNER",
         "nonce": "nonce-0123456789abcdef",
         "time": "2026-11-06T10:00:00Z",
         "fingerprint_version": 1,
