@@ -136,9 +136,11 @@ func TestANoticeNamesACodeAndTheCodeHasFixedWords(t *testing.T) {
 		"an outcome as well": {func(r *agentmessage.Record) {
 			r.Outcome = &agentmessage.Outcome{Entry: "e1", State: agentmessage.OutcomeCommitted}
 		}, "not both"},
-		"of another kind":          {func(r *agentmessage.Record) { r.Kind = agentmessage.KindAsk }, "of the kind notice"},
-		"an AI agent's statement":  {func(r *agentmessage.Record) { r.Statement = &agentmessage.Statement{} }, "no sender's proof"},
-		"a ciphertext fingerprint": {func(r *agentmessage.Record) { r.CiphertextHash = agentmessage.HashBody(nil) }, "no sender's proof"},
+		"of another kind":              {func(r *agentmessage.Record) { r.Kind = agentmessage.KindAsk }, "of the kind notice"},
+		"an AI agent's statement":      {func(r *agentmessage.Record) { r.Statement = &agentmessage.Statement{} }, "no sender's proof"},
+		"a ciphertext fingerprint":     {func(r *agentmessage.Record) { r.CiphertextHash = agentmessage.HashBody(nil) }, "no sender's proof"},
+		"an AI agent as its recipient": {func(r *agentmessage.Record) { r.To = "EBOT" }, "a notice is for a person"},
+		"no one as its recipient":      {func(r *agentmessage.Record) { r.To = agentmessage.Person("") }, "a notice is for a person"},
 	} {
 		r := good()
 		c.change(&r)
