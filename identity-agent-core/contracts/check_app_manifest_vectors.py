@@ -7,9 +7,8 @@ secrets, resources, network and the store, front_and_back_end, when_down and
 backup definitions) and from ADR-012 Amendment 5 and ADR-084, not from the Go
 code. Each vector is read, the rules are applied to its manifest, and the
 outcome (accepted or refused) and the row a refusal is about must be the ones
-the file states. If
-this script and the vector file ever disagree, the prose no longer says what
-the code does.
+the file states. If this script and the vector file ever disagree, the prose no
+longer says what the code does.
 
 Run: python3 check_app_manifest_vectors.py app-manifest-vectors.json
 Needs nothing beyond the Python standard library.

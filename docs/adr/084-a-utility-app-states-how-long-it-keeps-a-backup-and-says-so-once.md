@@ -16,7 +16,7 @@ A utility app that keeps something about a person tells the person it can delete
 1. The `backup` row gains **`keep_days`**: how many whole days a backup is kept before it is removed, 1 to 3650. It is allowed only when something is backed up (`what` is not empty), as `every_hours` is.
 2. **It is optional.** A utility app that backs up and leaves it out states no limit; anything that tells a person how long a backup is kept says so ("not stated") and does not invent a number. Optional keeps every manifest already written valid.
 3. **One value is read by both.** What a utility app tells a person about retention is read from `keep_days`, and the runner that prunes reads the same field. A utility app that declares a backup it does not run, or a retention it does not enforce, is a fault in the runner, not a different wording.
-4. **This record fixes only the declared number.** The runtime that removes backups and tells a person how long they are kept is an add-on kept outside this repository (ADR-012, Note of 2026-10-30); it reads `keep_days` and nothing else.
+4. **This record fixes only the declared number.** The runtime that removes backups and tells a person how long they are kept is an add-on kept outside this repository (ADR-012, Note of 2026-10-30); it takes how long a backup is kept from `keep_days` alone.
 
 ## Consequences
 
