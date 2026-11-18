@@ -126,11 +126,19 @@ void main() {
           'protected_by': 'Apple Secure Enclave',
           'agent_origin': agent,
           'label': 'Study',
+          'org_name': 'Acme',
+          'grade': 'scoped',
         },
       });
       expect(machine!.aid, 'BTHISMACHINE');
       expect(machine.agentOrigin, agent);
       expect(machine.suggestedLabel, 'Study');
+      expect(machine.orgName, 'Acme');
+      expect(machine.grade, 'scoped');
+      // Found among the Identity Agents this device owns the way the core
+      // compares origins.
+      expect(machine.isFor('HTTPS://Box.Example.Test/'), isTrue);
+      expect(machine.isFor('https://other.example.test'), isFalse);
     });
 
     test('a declined or malformed answer names no machine', () {

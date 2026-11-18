@@ -21,8 +21,9 @@ import 'the_owner_at_this_computer.dart';
 /// binds the key to the agent it offers to act for and to the moment it was
 /// made, so a captured code cannot be replayed to another agent or once it
 /// ages, and the timestamp cannot be edited without breaking it. The owner's
-/// device checks it (`POST /api/controller/verify-offer`) BEFORE the person is
-/// asked to approve anything, and there is no unsigned path.
+/// Identity Agent checks it in the scan gate BEFORE the person is asked to
+/// approve anything (the older code, at `POST /api/controller/verify-offer`),
+/// and there is no unsigned path.
 ///
 /// The signature is not what authorises the machine — the owner's grant does
 /// that, and the agent refuses whatever the grant does not cover. It proves the
@@ -112,8 +113,8 @@ class ControllerOffer {
   /// which the owner's Identity Agent answers through the same scan gate as
   /// every other code. This stays, with [parse] and [verifyControllerOffer],
   /// only while a phone that has not yet learned the pointer must still read a
-  /// code an older computer shows, and goes in the change after both apps
-  /// show and read the pointer.
+  /// code an older computer shows, and goes once the applications that show
+  /// and read the code use the pointer.
   ///
   /// Every signed field is carried whole, because the owner's device rebuilds
   /// the exact string the core signed to check the signature — drop one and the

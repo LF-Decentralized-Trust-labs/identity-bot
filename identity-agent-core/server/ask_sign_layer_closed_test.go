@@ -42,10 +42,11 @@ func TestAnUnknownActionIsRefused(t *testing.T) {
 	}
 }
 
-// Login is the one action that legitimately carries no base-layer signature,
-// because it checks the asker harder than this layer could — against the key
-// the site's own address publishes, plus a delegation anchor where claimed.
-// It has to say so in code rather than by omission.
+// Login legitimately carries no base-layer signature, because it checks the
+// asker harder than this layer could — against the key the site's own address
+// publishes, plus a delegation anchor where claimed. So does a computer asking
+// to act for an identity, whose offer is checked against the key its
+// identifier is. Each has to say so in code rather than by omission.
 func TestLoginDeclaresThatItVerifiesItself(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	if err := s.verifyAskSignature([]byte(`{"v":"ASK1","t":1}`)); err != nil {
@@ -61,15 +62,16 @@ func TestLoginDeclaresThatItVerifiesItself(t *testing.T) {
 		t.Error("login passes without a signature but does not declare why")
 	}
 
-	// And every other registered action must NOT be self-verifying, or it
+	// Exactly these actions establish the asker themselves: login, and a
+	// computer asking to act for an identity, whose offer is signed by the key
+	// its identifier is. Any other registered action must NOT be, or it
 	// silently opts out of the check this test exists to enforce.
-	for _, ty := range []int{2, 3, 4} {
-		h, ok := lookupAsk(ty)
-		if !ok {
-			continue
-		}
-		if a, ok := h.(AskAuthenticator); ok && a.AskAuth() == authSelfVerifying {
-			t.Errorf("action %d (%s) declares itself self-verifying", ty, h.Action())
+	selfVerifying := map[int]bool{1: true, ActionActForIdentity: true}
+	for ty, h := range askRegistry {
+		a, ok := h.(AskAuthenticator)
+		declares := ok && a.AskAuth() == authSelfVerifying
+		if declares != selfVerifying[ty] {
+			t.Errorf("action %d (%s): self-verifying is %v, want %v", ty, h.Action(), declares, selfVerifying[ty])
 		}
 	}
 }

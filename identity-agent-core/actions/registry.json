@@ -183,10 +183,10 @@
         "label": { "type": "string", "required": false, "kind": "open" },
         "org_name": { "type": "string", "required": false, "kind": "open" }
       },
-      "preview_contract": { "title": "Let this computer act for you", "conveys": ["the computer's identifier", "what holds its key", "the Identity Agent it will act for", "when the code expires"] },
+      "preview_contract": { "title": "Let this computer act for you", "conveys": ["the computer's identifier", "what it says holds its key", "the Identity Agent it will act for", "when the code expires"] },
       "discloses": [],
-      "outcome": "The owner's Identity Agent checks the computer's signature over the offer (identity-agent-controller-offer-v1: key, Identity Agent origin, timestamp), that it is fresh, and that it was served by the Identity Agent it names, and shows it. Approving does not grant: the owner's device then grants with its own signed request to that Identity Agent (POST /api/controllers), which retires the code. Declining does nothing and the code expires with the offer.",
-      "tiers": null,
+      "outcome": "The owner's Identity Agent checks the computer's signature over the offer (identity-agent-controller-offer-v1: key, Identity Agent origin, timestamp), that it is fresh, and that it was served by the Identity Agent it names, and shows it. Approving, with the grade chosen (scoped, using it for now, the default; or enrolled, keeping it), does not grant: the owner's device then grants with its own signed request to that Identity Agent (POST /api/controllers), which retires the code. Declining does nothing and the code expires with the offer.",
+      "tiers": ["scoped", "enrolled"],
       "ui": { "share_menu": false, "icon": "", "enabled": true, "sort_order": 0, "subtitle": "" }
     }
   ]

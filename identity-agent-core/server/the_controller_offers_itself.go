@@ -64,7 +64,7 @@ func canonicalControllerOffer(verkey, agentOrigin, timestamp string) string {
 	}, "\n")
 }
 
-// ControllerOffer is the signed, self-contained offer a controller displays.
+// ControllerOffer is the signed offer a controller leaves at the Identity Agent it asks to act for.
 type ControllerOffer struct {
 	AID         string `json:"aid"`
 	PublicKey   string `json:"public_key"`
@@ -139,12 +139,13 @@ func (s *CoreServer) handleControllerOffer(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleVerifyControllerOffer checks a scanned controller offer before an owner
-// is asked to approve it. Called by the app on the OWNER's device.
+// handleVerifyControllerOffer checks a scanned self-contained controller offer
+// before an owner is asked to approve it. Called on the OWNER's device, and only
+// for the older code during the transition (ADR-041 Amendment 1): the pointer
+// path checks the same offer with checkControllerOffer in the scan gate.
 //
-// MANDATORY: this is the sole authentication of the offer. A missing, malformed,
-// stale, or unverifiable offer is refused here, and the owner is never shown a
-// machine to approve. There is no unsigned path.
+// A missing, malformed, stale, or unverifiable offer is refused here, and the
+// owner is never shown a machine to approve. There is no unsigned path.
 //
 //	POST /api/controller/verify-offer  {aid, public_key, agent_origin, timestamp, signature}
 func (s *CoreServer) handleVerifyControllerOffer(w http.ResponseWriter, r *http.Request) {

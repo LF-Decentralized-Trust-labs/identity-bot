@@ -17,8 +17,8 @@ package server
 //
 // Who may leave one: anybody, because the computer asking has no standing here yet and that is the
 // point of asking. What bounds it: the offer must verify (signed by the key it names, fresh), a body is
-// at most a few kilobytes, each caller address is rate limited, at most maxPendingControllerRequests wait
-// at once, one machine has at most one waiting (a new offer replaces its old token), and each expires
+// at most a few kilobytes, each caller address is rate limited, at most maxPendingPerCaller wait per caller and maxPendingControllerRequests in all
+// at once, one machine has at most one waiting (a newer offer replaces its old token, and a replayed one is refused), and each expires
 // with the offer's own window. Nothing lists them. The only way to read one is to hold its token, which
 // is unguessable, and what it holds is a public key and two display strings, nothing about the identity.
 
@@ -40,10 +40,18 @@ const ActionActForIdentity = 8
 
 func init() { registerAsk(ActionActForIdentity, actForIdentityAsk{}) }
 
-// maxPendingControllerRequests is how many computers may be waiting at once. A person authorises a
-// computer in the minute they stand at it, so a handful is generous; the bound is what stops a stranger
-// filling memory with requests nobody will approve.
-const maxPendingControllerRequests = 32
+// maxPendingControllerRequests is how many computers may be waiting at once. An entry is about a
+// kilobyte, so this bounds memory at about half a megabyte; it is large so that filling it takes many
+// callers, each held to maxPendingPerCaller.
+const maxPendingControllerRequests = 512
+
+// maxPendingPerCaller is how many requests one caller may have waiting at once. A person asks for one
+// code at a time; a few allows a second computer in the same room.
+const maxPendingPerCaller = 3
+
+// unknownRelayedCaller is how callerKey counts every visitor of a URL relay that names none. They are
+// many people, so the per-caller waiting limit is not applied to them; the rate limit still is.
+const unknownRelayedCaller = "relayed, address unknown"
 
 // controllerRequestsPerCaller is how many requests one caller address may leave per minute. Showing a
 // fresh code is a deliberate press, so a person never comes near it.
@@ -59,7 +67,17 @@ const controllerRequestTokenBytes = 16
 type controllerRequest struct {
 	askBytes []byte
 	aid      string
+	caller   string
+	signedAt time.Time
 	expires  time.Time
+}
+
+// retiredOffer is a machine whose code was used by a grant: an offer from it signed no later than
+// signedAt is refused until the offer would have expired, so the offer behind a used pointer cannot be
+// posted again for a new one.
+type retiredOffer struct {
+	signedAt time.Time
+	until    time.Time
 }
 
 // controllerRequestAsk is the Ask served at the pointer. The offer's six fields are exactly what the
@@ -76,7 +94,8 @@ type controllerRequestAsk struct {
 
 // handleLeaveAControllerRequest takes a computer's signed offer and holds it behind a short token.
 func (s *CoreServer) handleLeaveAControllerRequest(w http.ResponseWriter, r *http.Request) {
-	if !s.controllerRequestLimiterFor().allow(clientIP(r)) {
+	caller := callerKey(r)
+	if !s.controllerRequestLimiterFor().allow(caller) {
 		writeError(w, http.StatusTooManyRequests, "too many requests from here; wait a minute and show a new code", "")
 		return
 	}
@@ -104,9 +123,13 @@ func (s *CoreServer) handleLeaveAControllerRequest(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "the organisation name cannot be shown", err.Error())
 		return
 	}
-	token, expires, err := s.holdControllerRequest(req.ControllerOffer, label, orgName, now)
+	token, expires, err := s.holdControllerRequest(req.ControllerOffer, label, orgName, caller, now)
 	if errors.Is(err, errTooManyControllerRequests) {
 		writeError(w, http.StatusTooManyRequests, err.Error(), "")
+		return
+	}
+	if errors.Is(err, errNotANewerOffer) {
+		writeError(w, http.StatusConflict, err.Error(), "")
 		return
 	}
 	if err != nil {
@@ -131,12 +154,19 @@ var errTooManyControllerRequests = errors.New("too many computers are waiting to
 
 // holdControllerRequest stores a checked offer as the Ask for a new token, replacing any earlier one
 // from the same machine.
-func (s *CoreServer) holdControllerRequest(offer ControllerOffer, label, orgName string, now time.Time) (string, time.Time, error) {
+func (s *CoreServer) holdControllerRequest(offer ControllerOffer, label, orgName, caller string, now time.Time) (string, time.Time, error) {
 	signedAt, err := time.Parse(time.RFC3339, offer.Timestamp)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	expires := signedAt.Add(controllerOfferWindow)
+	// The offer's window runs from when it was signed, or from now for one signed by a clock running
+	// ahead: checkControllerOffer tolerates a little skew either way, and a future-dated offer must not
+	// buy a longer life.
+	from := signedAt
+	if now.Before(from) {
+		from = now
+	}
+	expires := from.Add(controllerOfferWindow)
 	ask, err := json.Marshal(controllerRequestAsk{
 		V: "ASK1", T: ActionActForIdentity, ControllerOffer: offer,
 		Label: label, OrgName: orgName, Expiry: expires.UTC().Format(time.RFC3339),
@@ -155,19 +185,52 @@ func (s *CoreServer) holdControllerRequest(offer ControllerOffer, label, orgName
 	if s.controllerRequests == nil {
 		s.controllerRequests = map[string]*controllerRequest{}
 	}
-	for t, p := range s.controllerRequests {
-		// One machine, one waiting code: a new code makes the old one stop working, so a code left on a
-		// screen somebody walked away from is not still good.
-		if !now.Before(p.expires) || p.aid == offer.AID {
-			delete(s.controllerRequests, t)
+	for aid, r := range s.controllerRequestsRetired {
+		if !now.Before(r.until) {
+			delete(s.controllerRequestsRetired, aid)
 		}
+	}
+	if r, ok := s.controllerRequestsRetired[offer.AID]; ok && !signedAt.After(r.signedAt) {
+		return "", time.Time{}, errNotANewerOffer
+	}
+	replaced := ""
+	fromCaller := 0
+	for t, p := range s.controllerRequests {
+		if !now.Before(p.expires) {
+			delete(s.controllerRequests, t)
+			continue
+		}
+		if p.caller == caller && p.aid != offer.AID {
+			fromCaller++
+		}
+		if p.aid != offer.AID {
+			continue
+		}
+		// One machine, one waiting code: a newer offer makes the old code stop working, so a code left
+		// on a screen somebody walked away from is not still good. Only a NEWER one: anybody holding the
+		// pointer can fetch the offer behind it and post it again, and that must not be a way to make
+		// the code on the computer's screen stop working.
+		if !signedAt.After(p.signedAt) {
+			return "", time.Time{}, errNotANewerOffer
+		}
+		replaced = t
+	}
+	if replaced != "" {
+		delete(s.controllerRequests, replaced)
+	}
+	if caller != unknownRelayedCaller && fromCaller >= maxPendingPerCaller {
+		return "", time.Time{}, errTooManyControllerRequests
 	}
 	if len(s.controllerRequests) >= maxPendingControllerRequests {
 		return "", time.Time{}, errTooManyControllerRequests
 	}
-	s.controllerRequests[token] = &controllerRequest{askBytes: ask, aid: offer.AID, expires: expires}
+	s.controllerRequests[token] = &controllerRequest{
+		askBytes: ask, aid: offer.AID, caller: caller, signedAt: signedAt, expires: expires}
 	return token, expires, nil
 }
+
+var errNotANewerOffer = errors.New("this computer already has a code waiting from the same moment or later; " +
+	"ask for a new code in a second")
 
 // controllerRequestAskBytes is the Ask behind a token, while it stands.
 func (s *CoreServer) controllerRequestAskBytes(token string) ([]byte, bool) {
@@ -192,6 +255,10 @@ func (s *CoreServer) retireControllerRequestsFor(aid string) {
 	for t, p := range s.controllerRequests {
 		if p.aid == aid {
 			delete(s.controllerRequests, t)
+			if s.controllerRequestsRetired == nil {
+				s.controllerRequestsRetired = map[string]retiredOffer{}
+			}
+			s.controllerRequestsRetired[aid] = retiredOffer{signedAt: p.signedAt, until: p.expires}
 		}
 	}
 }
@@ -253,19 +320,19 @@ func readActForIdentity(s *CoreServer, ctx AskContext, now time.Time) (controlle
 	if !sameOrigin(ctx.Base, a.AgentOrigin) {
 		return a, errors.New("this request was not served by the Identity Agent it asks to act for")
 	}
-	// The expiry beside the offer is unsigned, so it may shorten the window and never lengthen it.
+	// The expiry beside the offer is unsigned, so it may shorten the window and never lengthen it. It is
+	// required: the Identity Agent that holds a request always writes one, so one without it was not made
+	// here.
 	signedAt, _ := time.Parse(time.RFC3339, a.Timestamp)
-	if a.Expiry != "" {
-		exp, err := time.Parse(time.RFC3339, a.Expiry)
-		if err != nil {
-			return a, errors.New("this request's expiry cannot be read")
-		}
-		if exp.After(signedAt.Add(controllerOfferWindow)) {
-			return a, errors.New("this request claims to last longer than the computer's offer does")
-		}
-		if !now.Before(exp) {
-			return a, errors.New("this code has expired; ask the computer to show a new one")
-		}
+	exp, err := time.Parse(time.RFC3339, a.Expiry)
+	if err != nil {
+		return a, errors.New("this request does not say when it expires")
+	}
+	if exp.After(signedAt.Add(controllerOfferWindow)) {
+		return a, errors.New("this request claims to last longer than the computer's offer does")
+	}
+	if !now.Before(exp) {
+		return a, errors.New("this code has expired; ask the computer to show a new one")
 	}
 	if _, err := shownString(a.Label); err != nil {
 		return a, errors.New("the name this computer suggests cannot be shown")
@@ -281,28 +348,37 @@ func (actForIdentityAsk) Preview(s *CoreServer, ctx AskContext) (GenericPreview,
 	if err != nil {
 		return GenericPreview{}, err
 	}
-	subtitle := a.AgentOrigin
-	if a.OrgName != "" {
-		subtitle = a.OrgName
-	}
 	details := []PreviewDetail{
 		{Label: "Computer", Value: a.AID},
-		{Label: "Its key is held by", Value: orDefault(a.ProtectedBy, "not stated")},
+		// Its own word: nothing here can check what holds the key, only that the computer holds it.
+		{Label: "It says its key is held by", Value: orDefault(a.ProtectedBy, "not stated")},
 		{Label: "Identity Agent", Value: a.AgentOrigin},
 		{Label: "Code expires", Value: a.Expiry},
 	}
 	if a.Label != "" {
 		details = append(details, PreviewDetail{Label: "It calls itself", Value: a.Label})
 	}
+	if a.OrgName != "" {
+		details = append(details, PreviewDetail{Label: "It says it is connecting to", Value: a.OrgName})
+	}
 	return GenericPreview{
-		T:            ActionActForIdentity,
-		Action:       "act_for_identity",
-		Title:        "Let this computer act for you",
-		Subtitle:     subtitle,
+		T:      ActionActForIdentity,
+		Action: "act_for_identity",
+		Title:  "Let this computer act for you",
+		// The origin, which the computer signed and the Ask was served from, never the organisation name,
+		// which is the asker's own unsigned word.
+		Subtitle:     a.AgentOrigin,
 		Counterparty: a.AID,
 		Details:      details,
-		Warning: "Approve only the computer you are standing at, showing this code now. " +
-			"It will be able to act for this identity until you remove it.",
+		// The one choice the person makes, asked on the same screen as the approval: borrowed for now
+		// (the safer answer, which ends by itself) or kept. Execute hands it back with the machine.
+		TierOptions: []string{string(GradeScoped), string(GradeEnrolled)},
+		DefaultTier: string(GradeScoped),
+		// The pointer is an https link and can be sent to somebody, which a camera-only code could not.
+		// Anybody may leave a request with a key of their own, so the person is the check that this is the
+		// computer in front of them.
+		Warning: "Approve only the computer you are standing at, showing this code on its screen now. " +
+			"If this code reached you as a link or a message, decline it.",
 	}, nil
 }
 
@@ -316,6 +392,13 @@ func (actForIdentityAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) 
 	if !d.Approved {
 		return map[string]interface{}{"ok": true, "approved": false}, nil
 	}
+	grade := ControllerGrade(d.Tier)
+	if grade == "" {
+		grade = GradeScoped
+	}
+	if grade != GradeScoped && grade != GradeEnrolled {
+		return nil, fmt.Errorf("%q is neither a computer you keep nor one you are using for now", d.Tier)
+	}
 	return map[string]interface{}{
 		"ok":       true,
 		"approved": true,
@@ -328,6 +411,8 @@ func (actForIdentityAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) 
 			"agent_origin":   a.AgentOrigin,
 			"label":          a.Label,
 			"org_name":       a.OrgName,
+			// What the person chose on the same screen, for the grant to carry.
+			"grade": string(grade),
 		},
 	}, nil
 }

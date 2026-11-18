@@ -381,13 +381,16 @@ private-use range or inside an implementation.
   the Ask carries no `signer_oobi`. `signature` is the computer's over
   `identity-agent-controller-offer-v1`, `public_key`, `agent_origin`, `timestamp`
   (newline-separated), checked against the key `aid` names. The offer must be within
-  five minutes of `timestamp`, `expiry` may not be later than that, and the Ask must
-  be served at `agent_origin`. `label` and `org_name` are display only.
-- **Preview:** "Let this computer act for you", with the computer, what holds its key,
-  the Identity Agent and when the code expires.
-- **Outcome:** none on the scanning side. Approving hands the checked machine back for
-  the owner's device to grant with its own signed `POST /api/controllers` to
-  `agent_origin`; the grant retires the code. Declining does nothing.
+  five minutes of `timestamp`, `expiry` is required and may not be later than that, and
+  the Ask must be served at `agent_origin`. `label`, `org_name` and `protected_by` are
+  the computer's own word, shown as such.
+- **Preview:** "Let this computer act for you", with the computer, what it says holds its
+  key, the Identity Agent and when the code expires; tiers `scoped` (default) and
+  `enrolled` for using it for now or keeping it.
+- **Outcome:** none on the scanning side. Approving hands the checked machine back, with
+  the chosen grade, for the owner's device to grant with its own signed
+  `POST /api/controllers` to `agent_origin`; the grant retires the code. Declining does
+  nothing.
 
 ---
 

@@ -69,10 +69,11 @@ type CoreServer struct {
 	// controllerRequests are the computers that have left a signed offer here
 	// to act for this identity, served as an Ask until the offer expires or the
 	// owner grants the machine (a_computer_asks_to_act_for_an_identity.go).
-	controllerRequestMu      sync.Mutex
-	controllerRequests       map[string]*controllerRequest
-	controllerRequestLimiter *ipRateLimiter
-	DataStore                store.Store
+	controllerRequestMu       sync.Mutex
+	controllerRequests        map[string]*controllerRequest
+	controllerRequestsRetired map[string]retiredOffer
+	controllerRequestLimiter  *ipRateLimiter
+	DataStore                 store.Store
 	// pairwiseReg is what this core publishes for its pairwise identifiers
 	// (pairwise_registry.go).
 	pairwiseMu     sync.Mutex

@@ -222,7 +222,10 @@ const (
 	// authSelfVerifying — the handler establishes the asker itself, with a
 	// stronger check than this one. Login does: it verifies the challenge
 	// signature against the key the site's own address publishes, and where an
-	// anchor is claimed it requires a delegated inception naming it.
+	// anchor is claimed it requires a delegated inception naming it. A
+	// computer asking to act for an identity (act_for_identity) does: it is
+	// named by its key and publishes no key log, so its signature over the
+	// offer is checked against the key its identifier is.
 	authSelfVerifying
 )
 

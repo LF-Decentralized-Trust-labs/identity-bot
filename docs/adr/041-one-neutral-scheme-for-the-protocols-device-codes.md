@@ -187,8 +187,10 @@ asking to act for (it must, to act for it), and so can the owner's phone. So:
 4. The owner's Identity Agent fetches the Ask at the pointer (`GET /i/{token}`, as for any Ask),
    checks the computer's signature over the offer, that it is fresh, and that it was served by the
    Identity Agent it names, and shows the person what is asking.
-5. The person's approval is the **grant**: the owner's own signed `POST /api/controllers` to that
-   Identity Agent, unchanged. The grant retires the token.
+5. The person answers on that one screen: approve or decline, and whether they keep this computer
+   or are using it for now (the safer answer, which ends by itself, is the default). Approving is
+   then the **grant**: the owner's own signed `POST /api/controllers` to that Identity Agent,
+   unchanged, carrying the grade chosen. The grant retires the token.
 
 ### Who may leave a request, and what bounds it
 
@@ -198,11 +200,21 @@ and asking is how it gets some. What makes that safe:
 - **It never grants.** Leaving, fetching, previewing and approving on the scan gate record nothing.
   Only the owner's signed grant authorises a machine, and that route stays owner-only for a
   controller too, so even a computer already authorised cannot use a scan to authorise another.
-- **Only a genuine, fresh offer is held**: signed by the key its identifier names, within the
-  offer's five-minute window. Anything else is refused before it is stored.
+- **Only a well-formed, fresh offer is held**: signed by the key its identifier names, within the
+  offer's five-minute window. That proves the offer is consistent, not that anybody should approve
+  it: any keypair can produce one. What limits a stranger is the bounds below.
 - **Bounded**: a body of at most 8 KiB, display strings of at most 80 characters with no control
-  characters, 10 requests a minute per caller address, at most 32 waiting at once, one waiting per
-  machine (a new offer replaces the old token), and each dropped when its offer expires.
+  characters, 10 requests a minute per caller, at most 3 waiting per caller and 512 in all, one
+  waiting per machine, and each dropped when its offer expires. A caller is counted the way the
+  watcher's public routes count one: behind a URL relay, as the visitor address the relay passes on.
+  Visitors of a relay that passes on none are one caller for the rate and are not held to the
+  per-caller waiting limit, since they are many people. Filling every place therefore takes many
+  callers at once, and the cost of doing so is that, for a few minutes, a computer asking that
+  Identity Agent is told to try again; nothing is granted or disclosed.
+- **Not replayable against the screen.** A newer offer from the same machine replaces its old token;
+  the same or an older offer is refused, and so is the offer behind a code a grant has used, until it
+  would have expired. Anybody holding the pointer can fetch the offer behind it, and posting it again
+  must not make the code on the computer's screen stop working, nor mint a second code for it.
 - **Seen by nobody else.** Nothing lists the waiting requests. The only way to read one is to hold
   its token, and what it holds is the computer's public key, what holds that key, the origin and two
   display strings: nothing about the identity.
@@ -215,8 +227,9 @@ was not served where it says it is for.
 ### The token
 
 128 random bits, written as 22 characters of unpadded base64url, so the pointer is the origin plus 25
-characters. It is unguessable, it is used once (the owner's grant of that machine retires it), and it
-expires with the offer. It is held in memory: a restart drops waiting requests, and the computer
+characters. It is unguessable. It ends when the owner grants that machine at this Identity Agent,
+when the computer shows a newer code, or when the offer expires, whichever is first; declining
+leaves it to expire. It is held in memory: a restart drops waiting requests, and the computer
 shows a new code, which is the same thing the person does when one expires.
 
 ### What the Ask carries
@@ -224,17 +237,35 @@ shows a new code, which is the same thing the person does when one expires.
 `v` (`ASK1`), `t` (8), the six signed fields of the offer (`aid`, `public_key`, `protected_by`,
 `agent_origin`, `timestamp`, `signature`; `protected_by` is a label and is not among the signed
 bytes), `expiry`, and two display strings, `label` (what the computer suggests calling itself) and
-`org_name`. The last three are unsigned, as they were in the device code. `expiry` may only shorten
-the offer's window: the owner's Identity Agent refuses one later than the offer's time plus five
-minutes. Nothing displayed is trusted for anything, and the person names the machine.
+`org_name`. The last three are unsigned, as they were in the device code. `expiry` is required and
+may only shorten the offer's window: the owner's Identity Agent refuses an Ask without one, or with
+one later than the offer's time plus five minutes. Nothing displayed is trusted for anything: the
+consent screen names the Identity Agent by the signed origin, shows `protected_by` and `org_name` as
+what the computer says, and the person names the machine.
 
 ### Expiry and renewal
 
-The code lasts as long as the offer inside it, five minutes from when the computer signed it. The
+The code lasts as long as the offer inside it, five minutes from when the computer signed it (or
+from when it was left, for a computer whose clock runs ahead, so a future-dated offer gains no
+time). The
 answer to `POST /api/controller/requests` says when (`expires_at`), and the computer's screen shows
 it, says plainly once it has passed, and offers a new code. A new code is a new offer and a new
 token, and the old one stops working. Nothing refreshes a code by itself unless a screen chooses to;
 the default is that it does not.
+
+### A pointer can be sent, so the screen says what to do with one that was
+
+The device code was "scanned only" (the table above) because it was long and opaque. A pointer is an
+https link, so it can be sent to somebody, and anybody can leave a request with a key of their own.
+The protection is the person, at the moment it matters: the consent screen says to approve only the
+computer they are standing at, showing this code on its screen now, and to decline a code that
+reached them as a link or a message. A scanner should answer this action from its camera and not
+from a tapped link; that is the application's rule, since the Identity Agent cannot tell how a
+pointer reached it.
+
+A computer that is already a front end for an identity may still sign an offer
+(`POST /api/controller/offer` is among what such a core answers), so it can ask again once a
+borrowed grant ends.
 
 ### One exchange with sign-in, not a look-alike
 

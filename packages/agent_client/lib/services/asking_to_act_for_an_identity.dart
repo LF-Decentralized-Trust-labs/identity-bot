@@ -48,14 +48,14 @@ class AskingToActForAnIdentity {
   /// that is only ever found by somebody looking.
   bool _disposed = false;
 
-  /// A signed, self-contained offer this computer can show as a QR, bound to
-  /// the identity at [agentOrigin].
+  /// A signed offer to act for the identity at [agentOrigin], which
+  /// [aShortCodeFor] leaves at that Identity Agent.
   ///
   /// Asked of the core beside this app, which holds the enclave key and is the
   /// only thing that can sign as this machine. The core mints the timestamp off
   /// its own clock and signs the key, the agent, and that moment together, so a
   /// photograph of the code cannot be replayed to another agent or after it goes
-  /// stale — the whole reason this replaced the bare offer it used to show.
+  /// stale — the whole reason this replaced the bare offer it used to carry.
   ///
   /// Returns null when this hardware cannot act for an identity at all — no
   /// enclave, or one the software cannot use (the core answers 501). That is an
@@ -90,7 +90,7 @@ class AskingToActForAnIdentity {
   /// [agentOrigin]: a bare pointer to its signed offer, left at that Identity
   /// Agent (ADR-041 Amendment 1).
   ///
-  /// Two steps, in two places. The core beside this app signs the offer, as
+  /// Two steps, in two places. The core on this computer signs the offer, as
   /// [aSignedOfferFor] always has; then the offer is left at the Identity Agent
   /// it is for, which the owner's phone can reach where it cannot reach this
   /// computer, and which answers with a token. The code is that Identity
@@ -122,9 +122,16 @@ class AskingToActForAnIdentity {
           'too many codes have been asked for just now; wait a minute and '
           'ask for a new one');
     }
+    if (res.statusCode == 409) {
+      // A code from this same moment is already waiting: two presses inside
+      // one second. The one already shown still works.
+      throw const ControllerRequestRefused(
+          'this computer already has a code waiting; ask for a new one in a '
+          'second');
+    }
     if (res.statusCode != 200) {
       throw ControllerRequestRefused('the Identity Agent at $origin would not '
-          'take this computer\'s request (${res.statusCode}): ${res.body}');
+          'take this computer\'s request: ${_said(res.body)}');
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final url = (body['url'] ?? '').toString();
@@ -135,7 +142,7 @@ class AskingToActForAnIdentity {
     // else, so a code pointing elsewhere would only fail on the phone.
     if (token.isEmpty || url != '$origin/i/$token' || expiresAt == null) {
       throw ControllerRequestRefused('the Identity Agent at $origin answered '
-          'with a code this computer cannot show: ${res.body}');
+          'with a code this computer cannot show');
     }
     return AControllerRequest(
         url: url, token: token, expiresAt: expiresAt.toUtc(), offer: offer);
@@ -376,6 +383,8 @@ class AControllerRequest {
 
   /// When the code stops working, which is when the offer inside it does. The
   /// screen shows it, says plainly once it has passed, and offers a new code.
+  /// Wait for the grant with [AskingToActForAnIdentity.waitUntilGranted] no
+  /// longer than this (its `until`), since nobody can approve after it.
   final DateTime expiresAt;
 
   /// The signed offer left at the Identity Agent behind the pointer.
@@ -383,6 +392,19 @@ class AControllerRequest {
 
   bool hasExpired([DateTime? now]) =>
       !(now ?? DateTime.now()).toUtc().isBefore(expiresAt);
+}
+
+/// The person-facing words in an Identity Agent's error body: the detail, then
+/// the headline, then a plain sentence when the body is not one.
+String _said(String body) {
+  try {
+    final m = jsonDecode(body) as Map<String, dynamic>;
+    for (final k in ['details', 'error']) {
+      final v = (m[k] ?? '').toString().trim();
+      if (v.isNotEmpty) return v;
+    }
+  } catch (_) {}
+  return 'it gave no reason';
 }
 
 /// An Identity Agent would not take, or answered strangely to, a computer's
