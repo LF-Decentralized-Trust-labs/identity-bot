@@ -341,6 +341,30 @@ private-use range or inside an implementation.
 - **Rules and vectors:** [statement-signature.md](statement-signature.md),
   `identity-agent-core/statements/testdata/vectors.json`, and ADR-080.
 
+### `t = 7` · `bind_site`
+- **Summary:** an organization asks a person to say that their identifier at one of
+  the organization's sites and an identifier they already have with it are the same
+  person; the person's Identity Agent signs one statement with both keys (ADR-082).
+- **Who mints:** an organization.
+- **Request schema:** `org_name`, `org_aid`, `org_oobi`, `site_aid`, `site_oobi`,
+  `site_name`, `record_site_aid`, `record_site_oobi`, `role` (`person` or `owner`),
+  `invite_token`, `signer_oobi`, `redeem_url`, `org_sig`, `expiry` (when the organization stops taking
+  the statement).
+- **Authentication:** `sig` is the base-layer signature of the pairwise key at
+  `signer_oobi`, as for any Ask. `org_sig` is the organization's own identity key
+  (current, from its key log at `org_oobi`) over the fixed `ORGASK1` form of ADR-082,
+  which names `redeem_url`. An Ask the organization did not sign is refused.
+- **Preview:** "Join {site} as the same person you are to {org}," saying the role,
+  and that the organization will know the two are one person and that this cannot be
+  undone except by leaving.
+- **Outcome:** the person's Identity Agent derives its identifier for the site, signs
+  the `BIND1` statement with that key and the key it already holds for
+  `record_site_aid`, and sends it with both key logs to `redeem_url` and nowhere
+  else. Declining signs nothing. It never makes an identifier for `record_site_aid`.
+  Both sites must be the organization's own identifier or delegated by it.
+- **Published:** `identity-agent-core/binding/binding-vectors.json`, checked by
+  `identity-agent-core/contracts/check_binding_vectors.py`.
+
 ---
 
 ## 11. What is open vs. proprietary (for implementers)

@@ -174,6 +174,11 @@ type CoreServer struct {
 	founding sync.Mutex
 
 	loginHandler *login.Handler
+	// siteIsDelegatedBy replaces the login handler's check that a site is an organisation's,
+	// for a test that has no log to read.
+	siteIsDelegatedBy func(siteAID, siteOOBI, orgAID, orgOOBI string) error
+	// organisationKeyOf replaces reading an organisation's key from its key log, for a test that serves none.
+	organisationKeyOf func(oobi, aid string) ([]byte, error)
 	// redeemedInvites remembers where, and as whom, this agent redeemed an invite,
 	// so it can later ask the inviting app what it published for it.
 	redeemedInvites   redeemedInviteBook
@@ -1453,6 +1458,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 			s.mountEmployeeRoutes(r)
 			s.mountSignerRoutes(r)
 		}
+		s.mountBindingRoutes(r)
 		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
