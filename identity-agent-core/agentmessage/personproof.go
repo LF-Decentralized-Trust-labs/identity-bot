@@ -100,6 +100,11 @@ func (r Record) checkPersonProof() error {
 	if err := p.Verify(); err != nil {
 		return err
 	}
+	// A list is answered and spent, and is never an entry of a conversation
+	// (ADR-072 Amendment 15), so no trail holds one.
+	if st.Kind == PersonKindList {
+		return errors.New("a list is never an entry of a conversation")
+	}
 	if r.Kind != st.Kind || r.From != Person(st.From) || r.To != st.To || r.InReplyTo != st.InReplyTo ||
 		r.BodyHash != st.Fingerprint || r.Conversation != st.Conversation {
 		return errors.New("the record does not say what the person signed")

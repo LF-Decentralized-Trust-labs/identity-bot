@@ -72,6 +72,8 @@ await refuse({ agent: "EIA", kind: "ask", from: "p1", conversation: "c", to: "E"
 await refuse({ agent: "EIA", kind: "close", from: "p1", conversation: "c", words: "x" }, "only an ask");
 await refuse({ agent: "EIA", kind: "reopen", from: "p1", conversation: "c", to: "E" }, "only an ask");
 await refuse({ agent: "EIA", kind: "close", from: "p1" }, "conversation");
+await refuse({ agent: "EIA", kind: "close", from: "p1", conversation: "list" }, "only a list");
+await refuse({ agent: "EIA", kind: "ask", from: "p1", conversation: "list", to: "E", words: "x" }, "only a list");
 await refuse({ agent: "EIA", kind: "limit", from: "p1", conversation: "c" }, "a page signs");
 await refuse({ agent: "", kind: "list", from: "p1", audience: "A" }, "Identity Agent");
 await refuse({ agent: "EIA", kind: "list", from: "p1", audience: "A\nB" }, "line break");

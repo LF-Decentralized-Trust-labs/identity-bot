@@ -106,9 +106,9 @@ export interface PersonProof {
   signature: string;
 }
 
-/** What a page says about a statement it signs. The page, not its caller, decides every other field: the key, who the
- *  person is here (`from`), the id, the nonce, the time and the salt are made here, so whoever asks for a signature
- *  cannot ask for those. */
+/** What a page says about a statement it signs: the fields below. The page, not its caller, decides every other field:
+ *  the key, the id, the nonce, the time and the salt are made here, so whoever asks for a signature cannot ask for
+ *  those. */
 export interface PersonStatementRequest {
   /** The Identity Agent that holds the conversation (it is signed in, so another Identity Agent refuses a copy). */
   agent: string;
@@ -139,7 +139,7 @@ export interface SigningEnvironment {
 const NO_BREAKS = /[\r\n]/;
 
 /** Signs one statement with the browser's key. Refuses what the core would: a list that names no audience, or any
- *  other kind that names one, a list for a conversation, an ask with no words or no recipient, a close or reopen with
+ *  other kind that names one, a list for a conversation, any other kind for the conversation a list names, an ask with no words or no recipient, a close or reopen with
  *  words or a recipient, and a field with a line break in it. */
 export async function signPersonStatement(key: BrowserKey, r: PersonStatementRequest, env: SigningEnvironment = {}): Promise<SignedPersonStatement> {
   const words = r.words ?? "";
@@ -148,6 +148,7 @@ export async function signPersonStatement(key: BrowserKey, r: PersonStatementReq
   if (!["ask", "close", "reopen", "list"].includes(r.kind)) throw new Error("a page signs an ask, a close, a reopen or a list");
   if (isList !== !!r.audience) throw new Error("a statement names an audience if and only if it is a list");
   if (!isList && !conversation) throw new Error("name the conversation");
+  if (!isList && conversation === LIST_CONVERSATION) throw new Error(`only a list is for the conversation "${LIST_CONVERSATION}"`);
   if (isList && r.conversation) throw new Error("a list is for no conversation");
   if (r.kind === "ask" && (!r.to || !words)) throw new Error("an ask names who it is to, and has words");
   if (r.kind !== "ask" && (r.to || words)) throw new Error("only an ask has a recipient and words");
