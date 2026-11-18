@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/login"
 	"identity-agent-core/witness"
 )
 
@@ -51,7 +53,26 @@ func TestAnAddressAStrangerChoosesNeverReachesAnInternalService(t *testing.T) {
 	ask, _ := json.Marshal(signerPayload{OrgName: "O", OrgAID: "EORGAID", SiteAID: "EORGAID", InviteToken: "tok"})
 	emp, _ := json.Marshal(map[string]string{"invite_token": "tok", "org_aid": "EORGAID", "site_aid": "EORGAID"})
 
+	orgSeed := make([]byte, ed25519.SeedSize)
+	bind, _ := json.Marshal(bindSitePayload{OrgAID: "EORGAID", SiteAID: "ESITE", RecordSiteAID: "EREC", Role: "person", InviteToken: "tok",
+		RedeemURL: name + "/api/binding/invites/tok/redeem"})
+	var bm map[string]interface{}
+	_ = json.Unmarshal(bind, &bm)
+	bm["site_aid"], bm["record_site_aid"], bm["org_aid"] = "ESITE", "EREC", "EORGAID"
+	bind = signedAsOrganisation(t, bm, orgSeed)
+	if _, err := h.GetOrCreateRelationship("EREC", &login.ChallengeBundle{SiteAID: "EREC", SiteOOBI: "http://127.0.0.1:1/oobi/EREC"}); err != nil {
+		t.Skipf("no relationship to join from: %v", err)
+	}
+
 	calls := map[string]func(){
+		"the binding invite's redeem": func() {
+			// Stand-ins so the Ask is accepted as the organisation's and reaches the redeem, which is what is under test.
+			s.siteIsDelegatedBy = func(_, _, _, _ string) error { return nil }
+			s.organisationKeyOf = func(_, _ string) ([]byte, error) {
+				return ed25519.NewKeyFromSeed(orgSeed).Public().(ed25519.PublicKey), nil
+			}
+			_, _ = bindSiteAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: bind, T: ActionBindSite}, ScanDecision{Approved: true})
+		},
 		"the Ask fetch": func() { _, _ = s.buildAskContext(name + "/i/tok") },
 		"the signer invite's redeem": func() {
 			_, _ = addSignerAsk{}.Execute(s, AskContext{Base: name, Token: "tok", AskBytes: ask, T: 4}, ScanDecision{Approved: true})

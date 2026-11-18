@@ -19,6 +19,7 @@ import (
 	"identity-agent-core/atomicfile"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/trail"
 )
 
@@ -59,18 +60,28 @@ type browserKeyRecord struct {
 	// so the same gate can be asked again whenever the key is used: a credential
 	// that has lapsed or been revoked since stops the key speaking.
 	Presented []interface{} `json:"presented,omitempty"`
+	// Push is the address the app's back end took this sign-in at (the origin the
+	// person approved it for), where the core tells it the grant has ended
+	// (ADR-072 section 6). Only an installed app's grant keeps one.
+	Push string `json:"push,omitempty"`
 }
 
 // browserKeys is the record, kept in a file of its own beside the others so a
 // restart does not make everyone sign in again.
 type browserKeys struct {
 	dataDir string
+	// ended is told which installed-app grants an End just removed, after the
+	// record is saved. It must not wait on anything: the owner's or the person's
+	// own action is not held up by an app's back end.
+	ended func([]browserKeyRecord)
 }
 
 // One lock for the process, for the reason grantsLock is.
 var browserKeysLock sync.Mutex
 
-func (s *CoreServer) browserKeys() *browserKeys { return &browserKeys{dataDir: s.DataDir} }
+func (s *CoreServer) browserKeys() *browserKeys {
+	return &browserKeys{dataDir: s.DataDir, ended: s.tellBackEndsGrantsEnded}
+}
 
 func (b *browserKeys) path() string { return filepath.Join(b.dataDir, "browser_key_sign_ins.json") }
 
@@ -101,7 +112,13 @@ func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.T
 // RecordAppKey keeps that an installed app's hardware key speaks for person at
 // asset until it is ended (an app-key grant, ADR-072 section 4).
 func (b *browserKeys) RecordAppKey(asset, person, thumbprint string, now time.Time, presented []interface{}, proof installedAppFact) error {
-	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, time.Time{}, now, presented, &proof)
+	return b.RecordAppKeyAt("", asset, person, thumbprint, now, presented, proof)
+}
+
+// RecordAppKeyAt is RecordAppKey for a grant whose back end is told when it ends,
+// at push.
+func (b *browserKeys) RecordAppKeyAt(push, asset, person, thumbprint string, now time.Time, presented []interface{}, proof installedAppFact) error {
+	return b.recordWith(asset, person, thumbprint, login.FrontEndInstalledApp, time.Time{}, now, presented, &proof, push)
 }
 
 // liveAt: a record with a lapse time lives until it; only an installed app's
@@ -116,13 +133,13 @@ func (b *browserKeyRecord) liveAt(now time.Time) bool {
 }
 
 func (b *browserKeys) record(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}) error {
-	return b.recordWith(asset, person, thumbprint, frontEnd, until, now, presented, nil)
+	return b.recordWith(asset, person, thumbprint, frontEnd, until, now, presented, nil, "")
 }
 
 // errGrantHeld is a live app-key grant for another person at the key.
 var errGrantHeld = errors.New("this key already speaks for another person: that grant must end first")
 
-func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}, proof *installedAppFact) error {
+func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, until, now time.Time, presented []interface{}, proof *installedAppFact, push string) error {
 	if asset == "" || person == "" {
 		return errors.New("a browser key speaks for a person at an asset")
 	}
@@ -148,7 +165,7 @@ func (b *browserKeys) recordWith(asset, person, thumbprint, frontEnd string, unt
 			delete(all, k)
 		}
 	}
-	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, FrontEnd: frontEnd, Proof: proof, Presented: presented}
+	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, FrontEnd: frontEnd, Proof: proof, Presented: presented, Push: push}
 	return b.save(all)
 }
 
@@ -217,6 +234,7 @@ func (b *browserKeys) End(asset, thumbprint, person string) (int, error) {
 		return 0, err
 	}
 	n := 0
+	var gone []browserKeyRecord
 	for k, r := range all {
 		if r.Asset != asset {
 			continue
@@ -224,12 +242,33 @@ func (b *browserKeys) End(asset, thumbprint, person string) (int, error) {
 		if (thumbprint != "" && r.Thumbprint == thumbprint) || (thumbprint == "" && r.Person == person) {
 			delete(all, k)
 			n++
+			gone = append(gone, r)
 		}
 	}
 	if n == 0 {
 		return 0, nil
 	}
-	return n, b.save(all)
+	if err := b.save(all); err != nil {
+		return n, err
+	}
+	b.tell(gone)
+	return n, nil
+}
+
+// tell passes on the installed-app grants a call just removed.
+func (b *browserKeys) tell(gone []browserKeyRecord) {
+	if b.ended == nil {
+		return
+	}
+	var apps []browserKeyRecord
+	for _, r := range gone {
+		if r.FrontEnd == login.FrontEndInstalledApp {
+			apps = append(apps, r)
+		}
+	}
+	if len(apps) > 0 {
+		b.ended(apps)
+	}
 }
 
 // keysSpeakingAt is the trail.KeyRoster for one app asset: a key speaks for a
@@ -358,11 +397,37 @@ func (s *CoreServer) assetStillStands(rec browserKeyRecord) bool {
 		if a.FrontEndRefusal(kind) != "" {
 			return false
 		}
+		if !tpmProofStillAllowed(rec.Proof, a.InstalledApp) {
+			return false
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	ok, _ := s.authorizeAssetAccess(ctx, a.PairwiseAID, rec.Person, rec.Presented)
 	return ok
+}
+
+// tpmProofStillAllowed is whether the owner still accepts the kind of chip a TPM key was
+// proved in, asked on every use as the front-end switch is: an owner who withdraws
+// tpm_keys stops every grant held by a TPM key, and one who withdraws virtual_tpm_keys
+// stops every grant held by a virtual or cloud TPM's key, however long ago it was approved.
+// A key proved on another platform is not this rule's.
+func tpmProofStillAllowed(p *installedAppFact, id asset.InstalledAppIdentity) bool {
+	if p == nil || p.Platform != "tpm" {
+		return true
+	}
+	if !id.TPMKeys {
+		return false
+	}
+	switch p.EKClass {
+	case secureenclave.TPMClassPhysical:
+		return true
+	case secureenclave.TPMClassVirtual:
+		return id.AcceptsVirtualTPM()
+	default:
+		// A TPM proof that names no class was not kept by this core; it is not trusted for one.
+		return false
+	}
 }
 
 // personStandsAtAsset is whether the asset still stands behind the person: by
@@ -400,6 +465,40 @@ func (s *CoreServer) endBrowserKeys(r *http.Request, thumbprint, person string) 
 		}
 	}
 	return s.browserKeys().End(app.Asset, thumbprint, person)
+}
+
+// endAppKey ends one key's records at the app's own asset, for a call an add-on
+// has authenticated itself (the app's machine, sealed to this Identity Agent): callerAsset
+// is the app the add-on found asking, as for startFrontEndKeySignIn, and the rules are
+// those of theAppAsking. Ending only takes power away, so the app that signed the person in may.
+func (s *CoreServer) endAppKey(r *http.Request, callerAsset, thumbprint string) (int, error) {
+	if thumbprint == "" {
+		return 0, errors.New("ending an app key names the key")
+	}
+	if err := s.theAppAsking(r, callerAsset, callerAsset); err != nil {
+		return 0, err
+	}
+	if aPageAsked(r) {
+		return 0, errors.New("a request that came from a web page cannot end an app's key")
+	}
+	if err := login.CheckBrowserKeyThumbprint(thumbprint); err != nil {
+		return 0, err
+	}
+	return s.browserKeys().End(callerAsset, thumbprint, "")
+}
+
+// appKeyStillSpeaks is whether the key still speaks for the person at the app's own
+// asset, by the same rule every use of it is held to: a live record, not ended by the
+// person, the owner or the app, whose front-end kind the owner has not switched off, and
+// whose person the asset still admits. For an app's back end, which holds its own session
+// for the key and asks this now and then (an add-on that has authenticated the machine:
+// callerAsset is the app it found asking).
+func (s *CoreServer) appKeyStillSpeaks(callerAsset, thumbprint, person string) bool {
+	rec, ok := s.browserKeys().Get(callerAsset, thumbprint, time.Now())
+	if !ok || rec.Person != person {
+		return false
+	}
+	return s.assetStillStands(rec)
 }
 
 // assetIDOfSite is the id of the asset whose pairwise identifier is siteAID.

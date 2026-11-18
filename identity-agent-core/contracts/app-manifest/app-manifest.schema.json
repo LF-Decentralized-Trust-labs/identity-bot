@@ -846,7 +846,8 @@
               "description": "SHA-256 digests of the app's signing certificates, lower-case hex."
             },
             "apple_app_id": { "type": "string", "pattern": "^[A-Za-z0-9]+\\.[A-Za-z0-9.-]+$", "description": "The App Attest application identifier, '<team id>.<bundle id>'." },
-            "tpm_keys": { "type": "boolean", "description": "The owner accepts that a TPM proves a key is in the computer's TPM and not which program holds it." }
+            "tpm_keys": { "type": "boolean", "description": "The owner accepts a key in a physical TPM chip (a discrete chip, a firmware TPM in the CPU, or Pluton), which proves the key is in the computer's chip and not which program holds it. A virtual or cloud TPM is accepted only with virtual_tpm_keys." },
+            "virtual_tpm_keys": { "type": "boolean", "description": "On top of tpm_keys: the owner also accepts a key in a virtual or cloud TPM (a virtual machine's, in Hyper-V or Azure). Whoever runs the virtual machine's host can read such a key and sign in as the person; allow it only if you trust them. Without tpm_keys it is refused; the schema cannot express that, so the Identity Agent enforces it when the identity is saved and again when a key is checked." }
           }
         }
       },

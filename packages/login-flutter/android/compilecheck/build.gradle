@@ -1,0 +1,10 @@
+// Compiles the plugin's Kotlin with the plugin's own build (../build.gradle, included by
+// settings.gradle), with no Flutter app around it (`./compile.sh`). It adds only what a Flutter
+// app's build gives a plugin: Flutter's embedding, from Flutter's Maven repository, at the engine
+// version of the Flutter on PATH. It proves the Kotlin compiles; it does not run it.
+allprojects {
+    repositories { google(); mavenCentral(); maven { url 'https://storage.googleapis.com/download.flutter.io' } }
+}
+project(':login_flutter').afterEvaluate { p ->
+    p.dependencies { compileOnly "io.flutter:flutter_embedding_debug:1.0.0-${System.getenv('FLUTTER_ENGINE_VERSION')}" }
+}

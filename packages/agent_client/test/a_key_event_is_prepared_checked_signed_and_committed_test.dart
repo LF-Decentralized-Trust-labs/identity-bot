@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
@@ -52,26 +51,11 @@ void main() {
     // attest, as a production build rightly refuses to.
     final bin = await buildTheCore('prepare-commit-core', dev: true);
     km = await keyMathOf(bin);
-    final port = 20000 + Random().nextInt(20000);
-    base = 'http://127.0.0.1:$port';
     final data = await Directory('${File(bin).parent.path}/data').create();
-    core = await Process.start(bin, [], environment: {
-      ...Platform.environment,
-      'PORT': '$port',
-      'HOST': '127.0.0.1',
-      'AGENT_DATA_DIR': data.path,
-      'IDENTITY_AGENT_LOCAL_OWNER_SECRET': ownerSecret,
-    });
-    core.stdout.drain<void>();
-    core.stderr.drain<void>();
-    for (var i = 0; i < 100; i++) {
-      try {
-        if ((await http.get(Uri.parse('$base/api/health'))).statusCode == 200)
-          return;
-      } catch (_) {}
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    fail('the core did not start');
+    final running =
+        await startTheCore(bin, dataDir: data.path, ownerSecret: ownerSecret);
+    core = running.process;
+    base = running.base;
   });
 
   tearDownAll(() => core.kill());

@@ -102,6 +102,13 @@ type CoreServer struct {
 	// system's trust store. Tests set them to trust an in-process relay.
 	relayTLS    *tls.Config
 	relayClient *http.Client
+	// grantPushClient, when set, sends grant-ended notices instead of the client that
+	// dials public addresses only (a test reaches a relay on this machine).
+	grantPushClient *http.Client
+	// grantBackoff, when set, is the wait before each notice attempt instead of grantEndedBackoff.
+	grantBackoff []time.Duration
+	// grantFresh, when set, is how old a notice may be when an attempt starts instead of grantEndedFresh.
+	grantFresh time.Duration
 	// relayGen counts relay starts. A start that a newer one has overtaken
 	// (the settings changed while it was enrolling) installs nothing.
 	relayGen int
@@ -167,6 +174,11 @@ type CoreServer struct {
 	founding sync.Mutex
 
 	loginHandler *login.Handler
+	// siteIsDelegatedBy replaces the login handler's check that a site is an organisation's,
+	// for a test that has no log to read.
+	siteIsDelegatedBy func(siteAID, siteOOBI, orgAID, orgOOBI string) error
+	// organisationKeyOf replaces reading an organisation's key from its key log, for a test that serves none.
+	organisationKeyOf func(oobi, aid string) ([]byte, error)
 	// redeemedInvites remembers where, and as whom, this agent redeemed an invite,
 	// so it can later ask the inviting app what it published for it.
 	redeemedInvites   redeemedInviteBook
@@ -514,7 +526,7 @@ func New(cfg Config) (*CoreServer, error) {
 		if id == nil {
 			return ""
 		}
-		return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", cfg.Port, id.AID)
+		return fmt.Sprintf("http://127.0.0.1:%d/public/oobi/%s", s.Port, id.AID)
 	}
 	// What kind of entity this agent belongs to, which decides which peers may
 	// witness for it. Read live rather than captured, because the profile is
@@ -757,23 +769,34 @@ func (s *CoreServer) Start() error {
 		return fmt.Errorf("OpenExtraRoutes names routes no overlay mounts, or gives no reason: %v", bad)
 	}
 
-	// Try the configured port first, then fallback to 5051–5059
+	// Try the configured port first, then fallback to 5051–5059. Port 0
+	// asks the system for a free port, so there is nothing to fall back to:
+	// the port it gave is read back, and is what .port and the log report.
 	requestedPort := s.Port
 	var bindErr error
-	for attempt := 0; attempt < 10; attempt++ {
-		tryPort := requestedPort + attempt
-		addr := rootListenAddr(tryPort)
-		s.listener, bindErr = net.Listen("tcp4", addr)
-		if bindErr == nil {
-			if tryPort != requestedPort {
-				log.Printf("[identity-agent-core] Port %d in use — using fallback port %d", requestedPort, tryPort)
-			}
-			s.Port = tryPort
-			break
+	if requestedPort == 0 {
+		if s.listener, bindErr = net.Listen("tcp4", rootListenAddr(0)); bindErr == nil {
+			s.Port = s.listener.Addr().(*net.TCPAddr).Port
 		}
-		log.Printf("[identity-agent-core] Port %d unavailable: %v", tryPort, bindErr)
+	} else {
+		for attempt := 0; attempt < 10; attempt++ {
+			tryPort := requestedPort + attempt
+			addr := rootListenAddr(tryPort)
+			s.listener, bindErr = net.Listen("tcp4", addr)
+			if bindErr == nil {
+				if tryPort != requestedPort {
+					log.Printf("[identity-agent-core] Port %d in use — using fallback port %d", requestedPort, tryPort)
+				}
+				s.Port = tryPort
+				break
+			}
+			log.Printf("[identity-agent-core] Port %d unavailable: %v", tryPort, bindErr)
+		}
 	}
 	if s.listener == nil {
+		if requestedPort == 0 {
+			return fmt.Errorf("failed to bind on a port the system assigns: %w", bindErr)
+		}
 		return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
 	}
 
@@ -1446,6 +1469,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 			s.mountEmployeeRoutes(r)
 			s.mountSignerRoutes(r)
 		}
+		s.mountBindingRoutes(r)
 		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
