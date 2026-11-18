@@ -90,7 +90,6 @@ void main() {
     }
     final data = core.dataDir!;
     await core.close();
-    await Future<void>.delayed(const Duration(milliseconds: 500));
     await leaveUnsigned(data, aid, unsigned);
     core = await anotherCore(bin, km, dataDir: data);
     cores.add(core);

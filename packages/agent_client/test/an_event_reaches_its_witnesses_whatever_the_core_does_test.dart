@@ -53,7 +53,7 @@ void main() {
   });
 
   tearDownAll(() async {
-    core.kill();
+    await stopTheCore(core);
     for (final w in [w1, w2, w3]) {
       await w.close();
     }

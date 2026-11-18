@@ -235,7 +235,9 @@ class ACore {
               (await TheKeyStateThisDeviceReads(client, keyMath ?? _km, base)
                       .read(seed))
                   .now);
-  Future<void> close() async => _process.kill();
+
+  /// Stops the core, returning once it has exited and let go of [dataDir].
+  Future<void> close() => stopTheCore(_process);
 }
 
 /// Another core, which proposes [witnesses] (at the addresses they are
