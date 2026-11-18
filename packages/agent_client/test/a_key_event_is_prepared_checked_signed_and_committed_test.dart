@@ -58,7 +58,7 @@ void main() {
     base = running.base;
   });
 
-  tearDownAll(() => core.kill());
+  tearDownAll(() => stopTheCore(core));
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
