@@ -6,8 +6,9 @@ import 'package:test/test.dart';
 /// unchecked: a key event's bytes passed to such a call would be signed without
 /// `ExpectedEvent` ever having judged them (ADR-061 section 5). An event is
 /// signed in `TheKeyEventsThisDeviceMakes` and `signing_an_event.dart`, after
-/// it is parsed and compared with the event this phrase makes; an owner request
-/// and a presentation are signed in the two other places named here.
+/// it is parsed and compared with the event this phrase makes; an owner request,
+/// a presentation and a person's statement are signed in the other places
+/// named here.
 void main() {
   final lib = Directory('lib');
 
@@ -30,14 +31,21 @@ void main() {
             RegExp(r'\bed\.sign\(').hasMatch(f.readAsStringSync()))
           f.path.replaceAll('\\', '/')
     };
-    expect(signs, {
-      // An event, after ExpectedEvent has judged it.
-      'lib/services/the_key_events_this_device_makes.dart',
-      'lib/services/signing_an_event.dart',
-      // A presentation, whose said is the credential's own.
-      'lib/services/local_core_keri_service.dart',
-      // An owner's request, over the path and key state it names.
-      'lib/crypto/owner_signature.dart',
-    }, reason: 'a new place that signs must be added here, and judge its bytes');
+    expect(
+        signs,
+        {
+          // An event, after ExpectedEvent has judged it.
+          'lib/services/the_key_events_this_device_makes.dart',
+          'lib/services/signing_an_event.dart',
+          // A presentation, whose said is the credential's own.
+          'lib/services/local_core_keri_service.dart',
+          // An owner's request, over the path and key state it names.
+          'lib/crypto/owner_signature.dart',
+          // A person's statement (ADR-067), which it builds itself: its own tag
+          // first and one field per line, refusing a field with a line break.
+          'lib/crypto/person_statement.dart',
+        },
+        reason:
+            'a new place that signs must be added here, and judge its bytes');
   });
 }
