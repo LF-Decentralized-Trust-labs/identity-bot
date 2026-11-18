@@ -48,6 +48,7 @@ func anAddOnWithAnAppRoute() Addon {
 var theAppRoutes = []string{
 	"GET /api/app-reads/{id}",
 	"GET /api/conversations/{id}/head",
+	"GET /api/people/me/conversations",
 	"POST /api/mcp/agents/{id}/conversations",
 	"POST /api/mcp/conversations/{cid}/close",
 	"POST /api/mcp/conversations/{cid}/limit",
