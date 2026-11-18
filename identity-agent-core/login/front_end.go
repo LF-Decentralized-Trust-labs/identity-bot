@@ -2,6 +2,7 @@ package login
 
 import (
 	"fmt"
+	"unicode"
 
 	"identity-agent-core/backendaddr"
 	"identity-agent-core/buildmode"
@@ -23,6 +24,129 @@ func CheckFrontEnd(kind string) error {
 		return nil
 	}
 	return fmt.Errorf("a sign-in names a front end that is not 'browser' or 'installed_app'")
+}
+
+// The platforms an installed app's key can be proved on (the core's hardware
+// verifiers: Android key attestation, Apple App Attest, a TPM). A TPM the core
+// proved is a virtual or cloud computer's (its owner opted in to those) signs
+// as DeviceVirtualTPM, so the person is told that whoever runs its host can read
+// the key.
+const (
+	DeviceAndroid    = "android"
+	DeviceApple      = "apple"
+	DeviceTPM        = "tpm"
+	DeviceVirtualTPM = "virtual_tpm"
+)
+
+// MaxDeviceNameRunes bounds the label an installed app gives its device, so it
+// fits a row of the consent screen and cannot push the rest off it.
+const MaxDeviceNameRunes = 48
+
+// maxMarksPerLetter bounds the combining marks kept after one character, so a
+// name cannot stack marks that draw over the rows around it. Two is enough for
+// the scripts that use more than one (Vietnamese, Devanagari).
+const maxMarksPerLetter = 2
+
+// blankLetters are characters Unicode counts as letters, symbols or marks
+// that draw nothing, so a name of them would look empty or hide a gap.
+var blankLetters = map[rune]bool{
+	0x115F: true, 0x1160: true, 0x3164: true, 0xFFA0: true, // Hangul fillers
+	0x2800: true,               // braille pattern blank
+	0x034F: true,               // combining grapheme joiner
+	0x17B4: true, 0x17B5: true, // Khmer inherent vowels, which draw nothing
+}
+
+// CleanDeviceName makes what an installed app calls its device fit to show.
+// It keeps only letters, digits, punctuation, symbols and spaces, so control,
+// line-break, direction-changing, private-use, unassigned and invisible
+// characters are dropped (a name that reorders the text around it could make a
+// row read as something else). It keeps at most maxMarksPerLetter combining
+// marks after a character, and a zero-width joiner or non-joiner only between
+// two visible characters (emoji sequences and Persian or Indic names need them).
+// Runs of spaces become one, and it is cut to MaxDeviceNameRunes. "" if nothing
+// is left. Lookalike letters from other scripts are not changed: the name is
+// shown as the installed app's word, never as a fact.
+func CleanDeviceName(s string) string {
+	var out []rune
+	space, joiner := false, rune(0)
+	marks := 0
+	put := func(r rune) bool {
+		if len(out)+1 > MaxDeviceNameRunes {
+			return false
+		}
+		out = append(out, r)
+		return true
+	}
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r) || unicode.Is(unicode.Zs, r):
+			space, joiner = len(out) > 0, 0
+			continue
+		case r == 0x200C || r == 0x200D:
+			if len(out) > 0 && !space {
+				joiner = r
+			}
+			continue
+		case blankLetters[r]:
+			continue
+		case unicode.Is(unicode.M, r):
+			// A mark belongs to the character before it: none at the start or
+			// after a space, and only a few on one character.
+			if len(out) == 0 || space || joiner != 0 || marks >= maxMarksPerLetter {
+				continue
+			}
+			if !put(r) {
+				return string(out)
+			}
+			marks++
+			continue
+		case !unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S):
+			continue
+		}
+		if space {
+			if len(out)+2 > MaxDeviceNameRunes {
+				break
+			}
+			out = append(out, ' ')
+			space = false
+		}
+		if joiner != 0 {
+			if len(out)+2 > MaxDeviceNameRunes {
+				break
+			}
+			out = append(out, joiner)
+			joiner = 0
+		}
+		if !put(r) {
+			break
+		}
+		marks = 0
+	}
+	return string(out)
+}
+
+// CheckDevice refuses a signed challenge that names a device it should not:
+// only an installed app's sign-in has one, the platform is one of those the
+// core proves, a name comes only with a platform, and the name is already as
+// CleanDeviceName leaves it. The person's Identity Agent runs it before it
+// shows consent, so what the screen says about the device is bounded whoever
+// signed the challenge.
+func CheckDevice(frontEnd, platform, name string) error {
+	if platform == "" && name == "" {
+		return nil
+	}
+	if frontEnd != FrontEndInstalledApp {
+		return fmt.Errorf("a sign-in names a device only for an installed app")
+	}
+	switch platform {
+	case DeviceAndroid, DeviceApple, DeviceTPM, DeviceVirtualTPM:
+	default:
+		return fmt.Errorf("a sign-in names a device that is not 'android', 'apple', 'tpm' or 'virtual_tpm'")
+	}
+	if name != CleanDeviceName(name) {
+		return fmt.Errorf("a sign-in names a device with a name that is not fit to show")
+	}
+	return nil
 }
 
 // inDev says whether this is a development build, which may name a back end on

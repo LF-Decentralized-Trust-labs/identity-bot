@@ -79,6 +79,27 @@ func TestASignInStartIsReadAsTheSharedCasesRead(t *testing.T) {
 	}
 }
 
+// A back end reads the installed app's name for its device and passes it on with
+// the proof, so the person's consent can show it. Fails if the reader refuses
+// the field or drops it on the way to the Identity Agent.
+func TestAnInstalledAppsNameForItsDeviceIsPassedOn(t *testing.T) {
+	for _, c := range readInstalledVectors(t).Starts {
+		if !strings.Contains(c.Body, "device_name") {
+			continue
+		}
+		s, err := ReadFrontEndStart([]byte(c.Body))
+		if err != nil || s.Proof == nil || s.Proof.DeviceName != "Ann\u2019s Pixel" {
+			t.Fatalf("%s: %v %+v", c.Name, err, s.Proof)
+		}
+		out, err := json.Marshal(s.Proof)
+		if err != nil || !strings.Contains(string(out), "\"device_name\":\"Ann\u2019s Pixel\"") {
+			t.Fatalf("%s: the proof passed on is %s", c.Name, out)
+		}
+		return
+	}
+	t.Fatal("no shared case names a device")
+}
+
 func TestASitesPublicRoutesNeverDropAnInstalledAppsProofSilently(t *testing.T) {
 	_, err := HTTPAgent{}.Start(t.Context(), StartRequest{FrontEnd: FrontEndInstalledApp, InstalledAppKey: &InstalledKeyProof{}})
 	if err == nil || !strings.Contains(err.Error(), "public routes") {

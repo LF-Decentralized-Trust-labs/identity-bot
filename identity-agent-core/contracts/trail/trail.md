@@ -154,6 +154,8 @@ sender's proof, in place of `controller_proof`. Its `kind` is the statement's,
 `from` is `person:` and the statement's `from`, `to` and `in_reply_to` are the
 statement's, and `body_hash` is the statement's `fingerprint`. Its id
 (`message_id`) is `e` and its `seq`: the id the app keeps the words under.
+A `list` statement is never an entry, and a record carrying one is refused
+(ADR-072 Amendment 15).
 
 On an app's request to `/api/mcp/agents/{asset id}/conversations...`, the
 statement's `to` is the AI agent's identifier (the one its entries are addressed

@@ -52,6 +52,11 @@ type InstalledAppKeyProof struct {
 	// for Apple.
 	Ask          string `json:"ask"`
 	KeySignature []byte `json:"key_signature"`
+	// DeviceName is what the installed app calls the device it runs on, for
+	// the person's consent screen. Nothing proves it: it is the installed
+	// app's word, shown as that, cleaned (login.CleanDeviceName) and never
+	// used to decide anything. The platform, by contrast, is proved.
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 // The verifiers, as variables only so a test can stand in for the hardware
@@ -69,6 +74,9 @@ type installedAppFact struct {
 	Platform string    `json:"platform"`
 	Level    string    `json:"level"`
 	Proved   time.Time `json:"proved"`
+	// DeviceName is the installed app's own label for its device (see
+	// InstalledAppKeyProof.DeviceName), already cleaned.
+	DeviceName string `json:"device_name,omitempty"`
 	// For a TPM key: who certified the endorsement key of the chip that signed, and its
 	// class ("physical", or "virtual" where the owner opted in to virtual TPMs), so an owner
 	// or auditor can see which chip it was and whether a hypervisor's operator could read it.
@@ -185,7 +193,7 @@ func (s *CoreServer) verifyInstalledAppKey(assetID, key string, proof *Installed
 	if err := verifyKeyPossession(facts.Platform, facts.Public, proof.KeySignature, a.ID, ask, key, a.InstalledApp.AppleAppID); err != nil {
 		return installedAppFact{}, err
 	}
-	f := installedAppFact{Platform: facts.Platform, Level: facts.Level, Proved: now.UTC()}
+	f := installedAppFact{Platform: facts.Platform, Level: facts.Level, Proved: now.UTC(), DeviceName: login.CleanDeviceName(proof.DeviceName)}
 	if facts.EKIssuer != nil {
 		f.EKIssuer, f.EKClass = facts.EKIssuer.Subject, facts.EKIssuer.Class
 	}
