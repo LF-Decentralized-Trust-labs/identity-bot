@@ -23,6 +23,11 @@
    "expect": "installed_app"
   },
   {
+   "name": "an installed app with its proof and its name for its device",
+   "body": "{\"frontEnd\":\"installed_app\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"},\"proof\":{\"platform\":\"android\",\"evidence\":\"ZXZpZGVuY2U=\",\"ask\":\"ask1\",\"key_signature\":\"c2ln\",\"device_name\":\"Ann’s Pixel\"}}",
+   "expect": "installed_app"
+  },
+  {
    "name": "a browser without a proof",
    "body": "{\"frontEnd\":\"browser\",\"browserKey\":\"t1ZI8tOt77KZ9YepYcUiqtqXcpIYInMJhkFb6casAFo\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"y\":\"ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A\"}}",
    "expect": "browser"

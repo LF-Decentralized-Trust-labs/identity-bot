@@ -153,7 +153,7 @@ func TestThePersonsAgentRefusesASignedChallengeThatNamesADeviceWrongly(t *testin
 		w.org.challengeMu.Unlock()
 		if _, err := aPersonsIdentityAgent(t).Preview(login.StartLoginRequest{SessionToken: token, RPSessionURL: w.srv.URL}); err == nil {
 			t.Fatalf("%s: the consent was shown", why)
-		} else if !strings.Contains(err.Error(), "device") && !strings.Contains(err.Error(), "front end") {
+		} else if !strings.Contains(err.Error(), "names a device") {
 			t.Fatalf("%s: refused for another reason: %v", why, err)
 		}
 	}
@@ -202,5 +202,39 @@ func TestTheConsentSaysTheDeviceRowsAreNotShared(t *testing.T) {
 	}
 	if shareWarning(false) != "Only what is listed above is shared." {
 		t.Fatal("a sign-in with no front-end rows changed its sentence")
+	}
+}
+
+// The sign-in's consent itself, as a client draws it from the login ask's
+// preview, lists the front end, the proved device, the app's unchecked name for
+// it and how long approving lasts, and its closing sentence does not call them
+// shared. Fails if loginAsk.Preview stops adding the rows.
+func TestTheSignInConsentListsTheFrontEndDeviceAndLasting(t *testing.T) {
+	iw := anInstalledAppsWorld(t, []string{"browser", "installed_app"}, nil)
+	p := iw.proof()
+	p.DeviceName = "Ann's Pixel"
+	in, err := iw.start(anAppsRequest("the-website", nil), "the-website", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := &CoreServer{loginHandler: aPersonsIdentityAgent(t)}
+	gp, err := loginAsk{}.Preview(person, AskContext{Token: in.Session, Base: iw.srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByLabel(gp.Details)
+	want := map[string]string{
+		"Front end":     "an installed app",
+		"Device":        "an Android device",
+		deviceNameLabel: "Ann's Pixel",
+		"Lasts":         "until you end it, in My apps",
+	}
+	for label, v := range want {
+		if rows[label] != v {
+			t.Errorf("the consent's %q row is %q, want %q (rows %+v)", label, rows[label], v, gp.Details)
+		}
+	}
+	if gp.Warning != shareWarning(true) {
+		t.Errorf("the consent closes with %q", gp.Warning)
 	}
 }

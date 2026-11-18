@@ -53,6 +53,20 @@ void main() {
     expect(await s.signedIn, isTrue);
   });
 
+  test('an installed front end sends its name for its device with its proof, '
+      'and none when it gives none', () async {
+    final app = FakeApp();
+    await open(app,
+            await HardwareFrontEndKey.open(FakeHardware(), 'k',
+                deviceName: 'Ann\'s Pixel'))
+        .start();
+    expect((app.startedWith!['proof'] as Map)['device_name'], "Ann's Pixel");
+    final bare = FakeApp();
+    await open(bare, await HardwareFrontEndKey.open(FakeHardware(), 'k')).start();
+    expect((bare.startedWith!['proof'] as Map).containsKey('device_name'),
+        isFalse);
+  });
+
   test(
       'every call after sign-in is sealed, carries the grant and a proof the key made, and is answered',
       () async {

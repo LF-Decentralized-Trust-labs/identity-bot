@@ -50,7 +50,7 @@ type ChallengeBundle struct {
 	// DevicePlatform and DeviceName say which device an installed app runs on,
 	// when the sign-in is for an installed app's key. DevicePlatform is what
 	// the core that checked the key's hardware proof established, "android",
-	// "apple" or "tpm"; DeviceName is the label the installed app gave its
+	// "apple", "tpm" or "virtual_tpm"; DeviceName is the label the installed app gave its
 	// device, which nothing proves. Both are signed in the challenge, so a
 	// relay cannot change them, and both are omitted when empty so a
 	// challenge for anything else keeps its form. See CheckDevice.

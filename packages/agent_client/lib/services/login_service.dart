@@ -94,7 +94,7 @@ class LoginPreview {
   final bool lastsUntilEnded;
 
   /// The kind of device an installed app's key was proved to be held on
-  /// (`android`, `apple` or `tpm`), which the core checked, and the label the
+  /// (`android`, `apple`, `tpm` or `virtual_tpm`), which the core checked, and the label the
   /// installed app gave its device, which nothing proves: show the name as the
   /// installed app's word. Both are empty when the sign-in names no device.
   final String devicePlatform;

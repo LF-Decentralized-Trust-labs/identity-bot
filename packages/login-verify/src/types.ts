@@ -71,7 +71,7 @@ export interface LoginChallenge {
    *  back end can see the challenge is not for it. */
   api?: string;
   /** For an installed app whose key the core proved in hardware: the platform
-   *  the proof showed (`android`, `apple` or `tpm`) and the label the installed
+   *  the proof showed (`android`, `apple`, `tpm` or `virtual_tpm`) and the label the installed
    *  app gave its device, which nothing proves (ADR-072 Amendment 14). Signed;
    *  shown on the person's consent, not repeated in the assertion. */
   device_platform?: string;
