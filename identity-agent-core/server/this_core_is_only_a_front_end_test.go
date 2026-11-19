@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/drivers/signedlog"
+	"identity-agent-core/keriengine"
 	"identity-agent-core/update"
 
 	"github.com/go-chi/chi/v5"
@@ -419,6 +421,74 @@ func TestAFrontEndStillProvesItHoldsTheStartSecret(t *testing.T) {
 	}
 	if strings.Contains(body, "EAGENT") || strings.Contains(body, "box.example.test") {
 		t.Fatalf("the answer named the identity this computer fronts for: %s", body)
+	}
+}
+
+// A computer that is already a front end can still check who is at an address.
+//
+// After a person approves the computer again, it checks the key history of the
+// Identity Agent that approved it before recording the approval, and it asks
+// its own core to do that. The first approval never showed the fault, because
+// the core is not yet a front end at that moment; every later one was refused
+// here, so an approval the Identity Agent had accepted could not be recorded.
+//
+// Through the real router and the real handler, against a key history a second
+// party really signed, so what is proved is the whole answer and not only that
+// the gate stepped aside.
+func TestAFrontEndStillChecksWhoIsAtAnAddress(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	s.KeriDriver = keriengine.New()
+	s.engineSigns()
+	real := s.buildRouter()
+
+	theirs := signedlog.Incept(t, signedlog.NewKeys(t, 2)).Rotate()
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"kel": theirs.Records()})
+	}))
+	t.Cleanup(elsewhere.Close)
+	// The other party here is a test server on this machine, and a local
+	// address is dialled only where the owner recorded it.
+	ownerRecordsContactAt(t, s, theirs.AID, elsewhere.URL)
+
+	if err := s.beAFrontEndFor(AFrontEndFor{
+		AgentAID: theirs.AID, AgentURL: elsewhere.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(aid string) (*httptest.ResponseRecorder, verifyIdentityResponse) {
+		body := `{"aid":"` + aid + `","oobi_url":"` + elsewhere.URL + `/public/oobi/` + theirs.AID + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
+			strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
+		rec := httptest.NewRecorder()
+		real.ServeHTTP(rec, req)
+		var out verifyIdentityResponse
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec, out
+	}
+
+	rec, out := check(theirs.AID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a front end answered %d when asked who is at an address, so it cannot "+
+			"record an approval it has just been given: %s", rec.Code, rec.Body.String())
+	}
+	if !out.Verified || out.AID != theirs.AID || out.PublicKey != theirs.Key() {
+		t.Fatalf("the history published there checks out, and the answer was %+v", out)
+	}
+
+	// Being a front end changes who may ask, never what the answer is: the same
+	// history does not vouch for an identifier it does not belong to.
+	rec, out = check("ESomebodyElseEntirely")
+	if rec.Code != http.StatusOK || out.Verified {
+		t.Fatalf("a history was accepted for an identity it does not belong to: %d %+v",
+			rec.Code, out)
+	}
+
+	// And it stays the one thing about another identity that is answered.
+	if rec := ask(t, real, http.MethodGet, "/api/credentials"); rec.Code != http.StatusConflict {
+		t.Fatalf("a question about an identity was answered by a front end: %d", rec.Code)
 	}
 }
 

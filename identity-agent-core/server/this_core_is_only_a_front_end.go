@@ -225,6 +225,15 @@ var whatAFrontEndAnswersFor = map[string]string{
 	"POST /api/controller/offer":       "signing this computer's offer to act for an identity, to ask again once a borrowed grant ends",
 	"GET /api/controller/agent":        "which identity this computer is a front end for",
 
+	// Checking the key history an identity publishes at another address says
+	// nothing about an identity here: the answer comes from that history and
+	// this computer's own key engine. A front end has to be able to ask it,
+	// because that is how it learns which Identity Agent has just approved it.
+	// Refused, a computer approved a second time could not record an approval
+	// the Identity Agent had already accepted, while the first approval worked
+	// only because this core was not yet a front end when it asked.
+	"POST /api/verify/identity-elsewhere": "checking the key history of an identity kept at another address",
+
 	// The app that started this core asks it to prove it holds the secret the
 	// app gave it before sending that secret anywhere. A front end is started
 	// by that app the same way, so it is asked the same question, and a core
