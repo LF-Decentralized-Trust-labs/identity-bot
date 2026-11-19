@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"identity-agent-core/drivers/signedlog"
@@ -442,7 +443,9 @@ func TestAFrontEndStillChecksWhoIsAtAnAddress(t *testing.T) {
 	real := s.buildRouter()
 
 	theirs := signedlog.Incept(t, signedlog.NewKeys(t, 2)).Rotate()
+	var asked atomic.Int32
 	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		asked.Add(1)
 		json.NewEncoder(w).Encode(map[string]interface{}{"kel": theirs.Records()})
 	}))
 	t.Cleanup(elsewhere.Close)
@@ -456,10 +459,37 @@ func TestAFrontEndStillChecksWhoIsAtAnAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := func(aid string) (*httptest.ResponseRecorder, verifyIdentityResponse) {
+	askedFor := func(aid string) *http.Request {
 		body := `{"aid":"` + aid + `","oobi_url":"` + elsewhere.URL + `/public/oobi/` + theirs.AID + `"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
+		return httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
 			strings.NewReader(body))
+	}
+
+	// ANSWERING IT IS NOT OPENING IT. Being listed makes the refusal above step
+	// aside, which leaves authorisation as the only thing between this route
+	// and anybody on the network, and the route makes this computer fetch an
+	// address the caller chose. So somebody who is not the owner at this
+	// computer is still refused, and nothing is fetched for them. Asked first,
+	// while a request arriving at the other address can only be theirs.
+	for who, from := range map[string]string{
+		"somebody else on the network":                  "192.0.2.7:51000",
+		"something on this computer without the secret": "127.0.0.1:1234",
+	} {
+		req := askedFor(theirs.AID)
+		req.RemoteAddr = from
+		rec := httptest.NewRecorder()
+		real.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s asked a front end to check an address and was answered %d: %s",
+				who, rec.Code, rec.Body.String())
+		}
+		if n := asked.Load(); n != 0 {
+			t.Fatalf("%s was refused, and the address they named was fetched anyway (%d times)", who, n)
+		}
+	}
+
+	check := func(aid string) (*httptest.ResponseRecorder, verifyIdentityResponse) {
+		req := askedFor(aid)
 		req.RemoteAddr = "127.0.0.1:1234"
 		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 		rec := httptest.NewRecorder()
@@ -478,11 +508,21 @@ func TestAFrontEndStillChecksWhoIsAtAnAddress(t *testing.T) {
 		t.Fatalf("the history published there checks out, and the answer was %+v", out)
 	}
 
+	if asked.Load() == 0 {
+		t.Fatal("the answer did not come from the history published at that address")
+	}
+
 	// Being a front end changes who may ask, never what the answer is: the same
-	// history does not vouch for an identifier it does not belong to.
-	rec, out = check("ESomebodyElseEntirely")
-	if rec.Code != http.StatusOK || out.Verified {
-		t.Fatalf("a history was accepted for an identity it does not belong to: %d %+v",
+	// history does not vouch for an identifier it does not belong to. A second
+	// identity that really exists, so the refusal is about whose history this
+	// is and not about an identifier that could not be read.
+	somebodyElse := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	if somebodyElse.AID == theirs.AID {
+		t.Fatal("precondition: the two identities are the same one")
+	}
+	rec, out = check(somebodyElse.AID)
+	if rec.Code != http.StatusOK || out.Verified || out.PublicKey != "" {
+		t.Fatalf("one identity's history was accepted for another identity: %d %+v",
 			rec.Code, out)
 	}
 
