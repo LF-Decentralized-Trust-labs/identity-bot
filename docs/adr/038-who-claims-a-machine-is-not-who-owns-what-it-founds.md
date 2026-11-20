@@ -5,6 +5,7 @@
 **Builds on:** ADR-032 (an identity can name who owns it, from its first event),
 ADR-034 (an instance is told who may claim it, before anyone can reach it),
 ADR-036 (a computer you pair with does not publish who you are)
+**Amended:** 2026-11-19 — The owner's proof is also an anchor kept in the owner's own log, made by the identity named as owner (see ADR-087)
 
 ## Context
 
