@@ -18,7 +18,7 @@ import (
 func TestAnIdentityToClaimWithCanBeMintedWithoutARequest(t *testing.T) {
 	s := adoptingOwner(t)
 
-	aid, oobi, err := s.mintAnIdentityToClaimAMachineWith()
+	aid, oobi, err := s.mintAnIdentityToClaimAMachineWith("")
 	if err != nil {
 		t.Fatalf("could not mint an identity to claim a machine with: %v", err)
 	}
@@ -43,11 +43,11 @@ func TestAnIdentityToClaimWithCanBeMintedWithoutARequest(t *testing.T) {
 func TestEachMachineGetsAnIdentityOfItsOwn(t *testing.T) {
 	s := adoptingOwner(t)
 
-	first, _, err := s.mintAnIdentityToClaimAMachineWith()
+	first, _, err := s.mintAnIdentityToClaimAMachineWith("")
 	if err != nil {
 		t.Fatalf("first mint failed: %v", err)
 	}
-	second, _, err := s.mintAnIdentityToClaimAMachineWith()
+	second, _, err := s.mintAnIdentityToClaimAMachineWith("")
 	if err != nil {
 		t.Fatalf("second mint failed: %v", err)
 	}

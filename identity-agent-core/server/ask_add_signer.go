@@ -217,7 +217,7 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	// an ordinary thing to do, and refusing here would leave an organisation
 	// with no owner at all, which cannot be repaired afterwards.
 	machineOwnerAID := ""
-	if aid, _, merr := s.mintAnIdentityToClaimAMachineWith(); merr == nil {
+	if aid, _, merr := s.mintAnIdentityToClaimAMachineWith(machineKindOrganisation); merr == nil {
 		machineOwnerAID = aid
 	} else {
 		log.Printf("[sign_org] signing for %s without an identity to claim a machine with "+
