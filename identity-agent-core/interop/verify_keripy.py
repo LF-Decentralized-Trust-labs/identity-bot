@@ -37,6 +37,7 @@ EXPECTED = {
     "core/recovery-superseding",
     "core/move-to-a-new-phrase",
     "core/witnessed-founding",
+    "core/owner-log-anchoring",
     "core/break-glass-old-root",
     "core/break-glass-new-root",
     "core/break-glass-superseding-old-root",

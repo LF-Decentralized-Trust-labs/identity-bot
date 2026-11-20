@@ -7,8 +7,10 @@ the core produces when an app prepares, signs and commits them.
    `/api/events/commit` with app-side Ed25519 signatures for: a founding, a
    rotation, interactions, a recovery rotation superseding interactions (the
    stored log, and the replay a verifier that saw the superseded interactions
-   would get), a move to a new phrase (two rotations), and a founding with two
-   witnesses (receipted by the test playing the witnesses). Each event has the
+   would get), a move to a new phrase (two rotations), a founding with two
+   witnesses (receipted by the test playing the witnesses), and an owner
+   identity's log whose interaction seals the inception of the Identity Agent
+   that names it as owner (ADR-087). Each event has the
    app's shape: two next-key digests (the next signing key and a post-quantum
    reserve) with a threshold of one, and the founding anchors a messaging
    keyset. The recovery rotation is committed by `commitRecoveryRotation`, what
