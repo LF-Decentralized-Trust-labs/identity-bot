@@ -2368,11 +2368,16 @@ class CoreService {
   ///
   /// Only the identifier comes back. Where its key comes from stays on the
   /// device that minted it and is looked up again at adoption.
-  Future<String> mintMachineOwner() async {
+  ///
+  /// [kind] is what the identity is minted to own: `individual` for a
+  /// person's own machine, `organisation` for an organisation's Identity
+  /// Agent. No key log carries it, so the core keeps it from this moment
+  /// (ADR-087 decision 13). Left out, the core records nothing, never a guess.
+  Future<String> mintMachineOwner({String? kind}) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/machines/owner-identity'),
       headers: {'Content-Type': 'application/json'},
-      body: '{}',
+      body: jsonEncode({if (kind != null) 'kind': kind}),
     );
     RootSeedRefused.throwIfRefused(response);
     if (response.statusCode != 200) {
