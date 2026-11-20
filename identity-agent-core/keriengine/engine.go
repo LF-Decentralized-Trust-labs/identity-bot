@@ -955,19 +955,10 @@ func (e *Engine) GetKel(name string) (*drivers.DriverKelResponse, error) {
 // whatever name it is held under. Read only: an identity the engine does not
 // hold is an error, never a reason to make one.
 func (e *Engine) GetKelByAID(aid string) (*drivers.DriverKelResponse, error) {
-	e.state.mu.RLock()
-	var found *identity
-	for _, id := range e.state.identities {
-		if id.AID != aid {
-			continue
-		}
-		if found != nil && found != id {
-			e.state.mu.RUnlock()
-			return nil, fmt.Errorf("%s is held twice, under %q and %q", aid, found.Name, id.Name)
-		}
-		found = id
+	found, err := e.heldByAID(aid)
+	if err != nil {
+		return nil, err
 	}
-	e.state.mu.RUnlock()
 	if found == nil {
 		return nil, fmt.Errorf("no identity %s is held", aid)
 	}
