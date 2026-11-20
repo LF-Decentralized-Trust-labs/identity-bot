@@ -367,7 +367,8 @@ func (s *CoreServer) engineSigns() {
 // signEventFor signs an event the engine is about to append to aid's key log:
 // with the signature the device holding the key made, when it was signed
 // there; with the record identity's key, for its log; with this identity's
-// key, where it is held here. Anything else is not signed, so not appended.
+// key, where it is held here; with an owner identity's key, for an event
+// reserved in its log. Anything else is not signed, so not appended.
 func (s *CoreServer) signEventFor(aid, key string, raw []byte) (string, error) {
 	b64 := base64.StdEncoding.EncodeToString(raw)
 	if v, ok := s.signedElsewhere.Load(b64); ok {
@@ -392,6 +393,18 @@ func (s *CoreServer) signEventFor(aid, key string, raw []byte) (string, error) {
 		if seed, err := s.foundingSeedForKey(key, raw); err == nil {
 			return signEventBytes(raw, seed)
 		}
+	}
+	// An owner identity minted to own a machine: its key is found by the
+	// index stored when it was minted, and signs only an event reserved in
+	// its log (ADR-061 section 4).
+	// Where the record cannot be read, nothing else is tried: whether aid is
+	// an owner identity, whose key signs only reserved bytes, is then not
+	// known, and the ways of finding a seed below know nothing of
+	// reservations.
+	if _, minted, err := s.DataStore.MachineOwnerIdentity(aid); err != nil {
+		return "", err
+	} else if minted {
+		return s.signReservedOwnerLogEvent(aid, raw)
 	}
 	// One of this identity's pairwise identities, whose keys it derives.
 	if seed, err := s.signingSeedForAID(aid); err == nil {

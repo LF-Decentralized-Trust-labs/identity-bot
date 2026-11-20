@@ -253,6 +253,9 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		}
 		rotResult, result = committed, committed
 	} else {
+		if s.refuseAnIdentityNotOurOwn(w, req.Name) {
+			return
+		}
 		if err := s.mayRotateHere(req.Name); err != nil {
 			writeKeyNotHeldHere(w)
 			return
