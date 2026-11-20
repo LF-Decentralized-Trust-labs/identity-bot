@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/signedlog"
 )
 
@@ -65,15 +66,18 @@ func TestARestoredDatabaseNeverEndsWithTwoEventsAtOnePlaceInAnOwnerLog(t *testin
 		}
 		wholeLog(t, into, long)
 	})
-	t.Run("a different event reserved at one place refuses the restore", func(t *testing.T) {
+	t.Run("a different event done at one place marks the identity and the held log stands", func(t *testing.T) {
 		into := holding(t, long, true)
-		err := into.ImportSnapshot(snapshotOf(t, holding(t, otherLong, true)))
-		if err == nil || !strings.Contains(err.Error(), "reserved a different event") {
-			t.Fatalf("the restore was not refused: %v", err)
+		if err := into.ImportSnapshot(snapshotOf(t, holding(t, otherLong, true))); err != nil {
+			t.Fatalf("the restore was refused: %v", err)
 		}
 		wholeLog(t, into, long)
+		if id, _, _ := into.MachineOwnerIdentity(founded.AID); id.DuplicitousAt == nil || *id.DuplicitousAt != 1 {
+			t.Fatalf("the parting was not recorded: %+v", id)
+		}
+		reservationsAre(t, into, founded.AID, long)
 	})
-	t.Run("of two logs that part, the longer stands whole and the identity is marked", func(t *testing.T) {
+	t.Run("of two logs that part, the held one stands whole and the identity is marked", func(t *testing.T) {
 		// The held log is the longer: a row-by-row restore would put the
 		// backup's event at place 1 under the held events after it.
 		into := holding(t, long, false)
@@ -85,13 +89,12 @@ func TestARestoredDatabaseNeverEndsWithTwoEventsAtOnePlaceInAnOwnerLog(t *testin
 			t.Fatalf("the parting was not recorded: %+v", id)
 		}
 
-		// The backup's is the longer: it replaces the held one from where
-		// they part, and nothing of the held one is left after it.
+		// The backup's is the longer: the held one still stands, whole.
 		into = holding(t, long, false)
 		if err := into.ImportSnapshot(snapshotOf(t, holding(t, otherLong, false))); err != nil {
 			t.Fatal(err)
 		}
-		wholeLog(t, into, otherLong)
+		wholeLog(t, into, long)
 		if id, _, _ := into.MachineOwnerIdentity(founded.AID); id.DuplicitousAt == nil || *id.DuplicitousAt != 1 {
 			t.Fatalf("the parting was not recorded: %+v", id)
 		}
@@ -132,7 +135,7 @@ func TestARestoredDatabaseNeverEndsWithTwoEventsAtOnePlaceInAnOwnerLog(t *testin
 			t.Fatalf("the identity reads %+v (found=%v)", id, found)
 		}
 	})
-	t.Run("one owner identity anchoring two Identity Agents refuses the restore", func(t *testing.T) {
+	t.Run("of two Identity Agents recorded as anchored, the one whose reservation stands is kept", func(t *testing.T) {
 		into := holding(t, founded, true)
 		from := holding(t, founded, true)
 		if _, err := into.ReserveOwnerLogPlace(reservationFor(short), machineOne); err != nil {
@@ -141,8 +144,226 @@ func TestARestoredDatabaseNeverEndsWithTwoEventsAtOnePlaceInAnOwnerLog(t *testin
 		if _, err := from.db.Exec(`UPDATE machine_owner_identities SET anchored_m = ?`, machineTwo); err != nil {
 			t.Fatal(err)
 		}
-		if err := into.ImportSnapshot(snapshotOf(t, from)); err == nil {
-			t.Fatal("the restore was not refused")
+		if err := into.ImportSnapshot(snapshotOf(t, from)); err != nil {
+			t.Fatalf("the restore was refused: %v", err)
+		}
+		if id, _, _ := into.MachineOwnerIdentity(founded.AID); id.AnchoredM != machineOne || id.DuplicitousAt != nil {
+			t.Fatalf("the identity reads %+v", id)
+		}
+	})
+}
+
+// reservationsAre checks that the reservations held in aid's log are those
+// of l's events after its founding, all done, and nothing else.
+func reservationsAre(t *testing.T, s *SQLiteStore, aid string, l *signedlog.Log) {
+	n := l.Len()
+	t.Helper()
+	res, err := s.OwnerLogReservations(aid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != n-1 {
+		t.Fatalf("%d reservations are held, want %d: %+v", len(res), n-1, res)
+	}
+	for i, r := range res {
+		want := reservationFor(l.Cut(i + 2))
+		if r.SN != i+1 || r.RawB64 != want.RawB64 || r.State != OwnerLogDone {
+			t.Fatalf("the reservation at %d is %+v, want the done reservation of %s", r.SN, r, want.Digest)
+		}
+	}
+}
+
+// A restore is never refused for what two databases say about an owner
+// identity's log. The device that restores an older backup, anchors, and
+// then restores a newer backup that anchored differently at the same place
+// gets everything the newer backup holds, and the owner identity is marked
+// as having two events at that place.
+func TestARestoreIsNotLockedOutByTwoAnchorsAtOnePlace(t *testing.T) {
+	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	anchoredFirst := founded.Fork().Interact("first")
+	anchoredHere := founded.Fork().Interact("here")
+
+	// The first device: a backup before it anchored, and one after, with a
+	// contact and a credential.
+	_, first := openStore(t)
+	mintedOwner(t, first, founded, 1)
+	older := snapshotOf(t, first)
+	extended(t, first, anchoredFirst, machineOne)
+	if err := first.SaveContact(ContactRecord{AID: "EContactFromTheNewerBackup", Alias: "Newer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SaveCredential(CredentialRecord{SAID: "ECredentialFromTheNewerBackup", Status: "issued"}); err != nil {
+		t.Fatal(err)
+	}
+	newer := snapshotOf(t, first)
+
+	// This device restores the older backup and anchors at the same place.
+	_, here := openStore(t)
+	if err := here.ImportSnapshot(older); err != nil {
+		t.Fatal(err)
+	}
+	extended(t, here, anchoredHere, machineOne)
+
+	for try := 1; try <= 2; try++ {
+		if err := here.ImportSnapshot(newer); err != nil {
+			t.Fatalf("restore %d of the newer backup was refused: %v", try, err)
+		}
+		if c, err := here.GetContact("EContactFromTheNewerBackup"); err != nil || c == nil {
+			t.Fatalf("the contact was not restored: %v", err)
+		}
+		if c, err := here.GetCredential("ECredentialFromTheNewerBackup"); err != nil || c == nil {
+			t.Fatalf("the credential was not restored: %v", err)
+		}
+		id, _, _ := here.MachineOwnerIdentity(founded.AID)
+		if id.DuplicitousAt == nil || *id.DuplicitousAt != 1 || id.AnchoredM != machineOne {
+			t.Fatalf("the owner identity reads %+v", id)
+		}
+		if got, want := digestsOf(t, here, founded.AID), digestsIn(anchoredHere); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("the log is %v, want this device's %v", got, want)
+		}
+		reservationsAre(t, here, founded.AID, anchoredHere)
+	}
+}
+
+// Each way two databases can disagree about one place in an owner log is
+// settled without refusing the restore.
+func TestTwoDatabasesThatDisagreeAboutAnOwnerLogAreSettled(t *testing.T) {
+	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	a := founded.Fork().Interact("a")
+	b := founded.Fork().Interact("b")
+
+	// done keeps l's events after the founding; waiting reserves l's last
+	// event and keeps nothing.
+	done := func(t *testing.T, l *signedlog.Log, m string) *SQLiteStore {
+		_, s := openStore(t)
+		mintedOwner(t, s, founded, 1)
+		extended(t, s, l, m)
+		return s
+	}
+	waiting := func(t *testing.T, l *signedlog.Log, m string) *SQLiteStore {
+		_, s := openStore(t)
+		mintedOwner(t, s, founded, 1)
+		if _, err := s.ReserveOwnerLogPlace(reservationFor(l), m); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// broken spoils the signature of the event at place 1.
+	broken := func(t *testing.T, s *SQLiteStore) *SQLiteStore {
+		if _, err := s.db.Exec(`UPDATE kel SET cesr_signature = (SELECT cesr_signature FROM kel WHERE seq_num = 0)
+			WHERE seq_num = 1`); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	restore := func(t *testing.T, into, from *SQLiteStore) MachineOwnerIdentity {
+		t.Helper()
+		if err := into.ImportSnapshot(snapshotOf(t, from)); err != nil {
+			t.Fatalf("the restore was refused: %v", err)
+		}
+		id, _, _ := into.MachineOwnerIdentity(founded.AID)
+		return id
+	}
+	logIs := func(t *testing.T, s *SQLiteStore, l *signedlog.Log) {
+		t.Helper()
+		if got, want := digestsOf(t, s, founded.AID), digestsIn(l); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("the log is %v, want %v", got, want)
+		}
+	}
+	waitingIs := func(t *testing.T, s *SQLiteStore, l *signedlog.Log) {
+		t.Helper()
+		res, _ := s.OwnerLogReservations(founded.AID)
+		want := reservationFor(l)
+		if len(res) != 1 || res[0].RawB64 != want.RawB64 || res[0].State != OwnerLogReserved {
+			t.Fatalf("the reservations are %+v, want %s waiting", res, want.Digest)
+		}
+	}
+
+	t.Run("both done with different events, each verified: marked, this device's stands", func(t *testing.T) {
+		into := done(t, a, machineOne)
+		id := restore(t, into, done(t, b, machineTwo))
+		if id.DuplicitousAt == nil || *id.DuplicitousAt != 1 || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, a)
+		reservationsAre(t, into, founded.AID, a)
+	})
+	t.Run("done in the backup, only reserved here: the done one is taken", func(t *testing.T) {
+		into := waiting(t, b, machineTwo)
+		id := restore(t, into, done(t, a, machineOne))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, a)
+		reservationsAre(t, into, founded.AID, a)
+	})
+	t.Run("done here, only reserved in the backup: the done one stays", func(t *testing.T) {
+		into := done(t, a, machineOne)
+		id := restore(t, into, waiting(t, b, machineTwo))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, a)
+		reservationsAre(t, into, founded.AID, a)
+	})
+	t.Run("both only reserved with different events: this device's stays", func(t *testing.T) {
+		into := waiting(t, a, machineOne)
+		id := restore(t, into, waiting(t, b, machineTwo))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, founded)
+		waitingIs(t, into, a)
+	})
+	t.Run("only reserved in the backup: it is taken", func(t *testing.T) {
+		_, into := openStore(t)
+		mintedOwner(t, into, founded, 1)
+		id := restore(t, into, waiting(t, b, machineTwo))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineTwo {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		waitingIs(t, into, b)
+	})
+	t.Run("the backup's log does not verify: nothing is marked and this device's stands", func(t *testing.T) {
+		into := done(t, a, machineOne)
+		id := restore(t, into, broken(t, done(t, b, machineTwo)))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, a)
+		reservationsAre(t, into, founded.AID, a)
+	})
+	t.Run("this device's log does not verify: nothing is marked and the backup's is taken", func(t *testing.T) {
+		into := broken(t, done(t, a, machineOne))
+		id := restore(t, into, done(t, b, machineTwo))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineTwo {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, b)
+		reservationsAre(t, into, founded.AID, b)
+	})
+	t.Run("neither verifies: nothing is marked and this device's stands", func(t *testing.T) {
+		into := broken(t, done(t, a, machineOne))
+		id := restore(t, into, broken(t, done(t, b, machineTwo)))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		events, _ := into.GetEvents(founded.AID)
+		if d, _ := drivers.EventIDOfRawB64(events[1].RawBytesB64); len(events) != 2 || d != a.SAID(1) {
+			t.Fatalf("the log holds %d events", len(events))
+		}
+	})
+	t.Run("a log only the backup holds is taken only if it verifies", func(t *testing.T) {
+		_, into := openStore(t)
+		id := restore(t, into, broken(t, done(t, a, machineOne)))
+		if events, _ := into.GetEvents(founded.AID); len(events) != 0 {
+			t.Fatalf("a log that does not verify was taken: %d events", len(events))
+		}
+		if res, _ := into.OwnerLogReservations(founded.AID); len(res) != 0 {
+			t.Fatalf("its reservations were taken: %+v", res)
+		}
+		if id.KeyIndex != 1 {
+			t.Fatalf("the identity reads %+v", id)
 		}
 	})
 }

@@ -910,94 +910,41 @@ func mergeContactKELs(ctx context.Context, tx *sql.Tx) (int, error) {
 }
 
 // mergeOwnerLogs restores what the backup holds about owner identities: the
-// places reserved in their key logs, what is kept beside each identity, and
-// the logs themselves.
+// logs themselves, the places reserved in them, and what is kept beside each
+// identity.
 //
 // Every one of these exists to keep an owner identity's log from ever holding
 // two events at one place (ADR-087 decision 10), so none is merged by
-// replacing rows:
+// replacing rows. And none of them refuses the restore: a disagreement about
+// one owner identity never keeps contacts, credentials or anything else from
+// being restored, now or the next time it is tried. Per owner identity:
 //
-//   - A reservation is merged by owner identity and sequence number. Where
-//     both databases reserved the same event, the one further along stands.
-//     Where they reserved different events at one place, the restore is
-//     refused whole: either choice would discard a digest that may already
-//     be signed.
-//   - What is kept beside an identity only ever gains: a kind, the Identity
-//     Agent anchored, having been given up, a known duplicity. Two different
-//     Identity Agents anchored by one owner identity is refused.
-//   - A log is taken whole. The longer of two verified logs stands where one
-//     carries on from the other. Where they part, two signed events at one
-//     place are now known: the longer stands, the held one on a tie, and the
-//     owner identity is marked so that it anchors nothing again.
+//   - A log is taken whole. Of two logs that each verify, where one carries
+//     on from the other, the longer stands. Where they part, each holds a
+//     validly signed event at one place, which is duplicity: the owner
+//     identity is marked there, so that it anchors nothing again, and this
+//     device's log stands. A log that does not verify up to the place where
+//     they part proves nothing there and marks nothing. Of two logs, the one
+//     that verifies stands, this device's where both or neither do, and a log
+//     only the backup holds is taken only if it verifies.
+//   - The places reserved follow the log that stands. A place it holds an
+//     event at keeps the reservation of that event, done, and no other. The
+//     place after its tip keeps one waiting reservation, and only one that
+//     follows the tip: one whose event was kept elsewhere over one never
+//     kept, then this device's. A reservation never kept was never signed
+//     and sent, so dropping it publishes nothing. Nothing beyond that place
+//     is kept.
+//   - What is kept beside an identity only ever gains: a kind, having been
+//     given up, a known duplicity. Its key index is this device's where it
+//     holds one. The Identity Agent it anchors is the one recorded by the
+//     side whose log and reservations stand.
 func mergeOwnerLogs(ctx context.Context, tx *sql.Tx) error {
-	var owner string
-	var sn int
-	switch err := tx.QueryRowContext(ctx, `
-		SELECT r.owner_aid, r.seq_num
-		  FROM restored.owner_log_reservations r
-		  JOIN main.owner_log_reservations m ON m.owner_aid = r.owner_aid AND m.seq_num = r.seq_num
-		 WHERE m.digest != r.digest OR m.event_bytes_b64 != r.event_bytes_b64 OR m.prior_digest != r.prior_digest
-		 ORDER BY r.owner_aid, r.seq_num LIMIT 1`).Scan(&owner, &sn); {
-	case err == nil:
-		return fmt.Errorf("the backup and this device each reserved a different event at sequence number %d "+
-			"of the key log of owner identity %s, and one log cannot hold both, so nothing was restored", sn, owner)
-	case err != sql.ErrNoRows:
-		return fmt.Errorf("compare the reserved places of the owner logs: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO main.owner_log_reservations
-		       (owner_aid, seq_num, prior_digest, digest, event_bytes_b64, state, reserved_at)
-		SELECT owner_aid, seq_num, prior_digest, digest, event_bytes_b64, state, reserved_at
-		  FROM restored.owner_log_reservations`); err != nil {
-		return fmt.Errorf("restore the reserved places of the owner logs: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE main.owner_log_reservations SET state = ?
-		 WHERE EXISTS (SELECT 1 FROM restored.owner_log_reservations r
-		                WHERE r.owner_aid = main.owner_log_reservations.owner_aid
-		                  AND r.seq_num = main.owner_log_reservations.seq_num AND r.state = ?)`,
-		OwnerLogDone, OwnerLogDone); err != nil {
-		return fmt.Errorf("restore the reserved places of the owner logs: %w", err)
-	}
-
-	switch err := tx.QueryRowContext(ctx, `
-		SELECT r.aid FROM restored.machine_owner_identities r
-		  JOIN main.machine_owner_identities m ON m.aid = r.aid
-		 WHERE m.key_index != r.key_index
-		    OR (m.anchored_m != '' AND r.anchored_m != '' AND m.anchored_m != r.anchored_m)
-		 ORDER BY r.aid LIMIT 1`).Scan(&owner); {
-	case err == nil:
-		return fmt.Errorf("the backup and this device disagree about where the key of owner identity %s comes "+
-			"from or which Identity Agent it anchors, and it can have one of each, so nothing was restored", owner)
-	case err != sql.ErrNoRows:
-		return fmt.Errorf("compare the owner identities: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE main.machine_owner_identities AS m SET
-		    kind = CASE WHEN m.kind != '' THEN m.kind ELSE r.kind END,
-		    anchored_m = CASE WHEN m.anchored_m != '' THEN m.anchored_m ELSE r.anchored_m END,
-		    given_up_for = CASE WHEN m.given_up_for != '' THEN m.given_up_for ELSE r.given_up_for END,
-		    duplicitous_at = CASE
-		        WHEN m.duplicitous_at IS NULL THEN r.duplicitous_at
-		        WHEN r.duplicitous_at IS NULL THEN m.duplicitous_at
-		        ELSE MIN(m.duplicitous_at, r.duplicitous_at) END
-		  FROM restored.machine_owner_identities r
-		 WHERE r.aid = m.aid`); err != nil {
-		return fmt.Errorf("restore the owner identities: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO main.machine_owner_identities
-		       (aid, key_index, minted_at, kind, anchored_m, given_up_for, duplicitous_at)
-		SELECT aid, key_index, minted_at, kind, anchored_m, given_up_for, duplicitous_at
-		  FROM restored.machine_owner_identities`); err != nil {
-		return fmt.Errorf("restore the owner identities: %w", err)
-	}
-
-	var owners []string
-	rows, err := tx.QueryContext(ctx, `SELECT aid FROM main.machine_owner_identities ORDER BY aid`)
+	rows, err := tx.QueryContext(ctx, `SELECT aid FROM restored.machine_owner_identities
+		UNION SELECT aid FROM main.machine_owner_identities ORDER BY aid`)
 	if err != nil {
 		return fmt.Errorf("list the owner identities: %w", err)
 	}
+	var owners []string
 	for rows.Next() {
 		var aid string
 		if err := rows.Scan(&aid); err != nil {
@@ -1011,89 +958,254 @@ func mergeOwnerLogs(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("list the owner identities: %w", err)
 	}
 	for _, aid := range owners {
-		if err := mergeOwnerLog(ctx, tx, aid); err != nil {
+		if err := mergeOwnerIdentity(ctx, tx, aid); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// mergeOwnerLog merges the backup's copy of one owner identity's key log into
-// the held one, by the rule mergeOwnerLogs states.
-func mergeOwnerLog(ctx context.Context, tx *sql.Tx, aid string) error {
-	read := func(schema string) ([]EventRecord, error) {
-		rows, err := tx.QueryContext(ctx, fmt.Sprintf(
-			`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
-			        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
-			   FROM %s.kel WHERE aid = ? ORDER BY seq_num ASC`, schema), aid)
-		if err != nil {
-			return nil, fmt.Errorf("read the key log of owner identity %s: %w", aid, err)
-		}
-		defer rows.Close()
-		return scanEvents(rows)
+// ownerSide is what one database holds about one owner identity.
+type ownerSide struct {
+	schema   string
+	id       MachineOwnerIdentity
+	found    bool
+	events   []EventRecord
+	reserved map[int]OwnerLogReservation
+}
+
+func readOwnerSide(ctx context.Context, tx *sql.Tx, schema, aid string) (ownerSide, error) {
+	side := ownerSide{schema: schema, reserved: map[int]OwnerLogReservation{}}
+	id, err := scanMachineOwner(tx.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT %s FROM %s.machine_owner_identities WHERE aid = ?`, machineOwnerColumns, schema), aid))
+	switch {
+	case err == nil:
+		side.id, side.found = id, true
+	case err != sql.ErrNoRows:
+		return side, fmt.Errorf("read owner identity %s: %w", aid, err)
 	}
-	held, err := read("main")
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(
+		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
+		   FROM %s.kel WHERE aid = ? ORDER BY seq_num ASC`, schema), aid)
+	if err != nil {
+		return side, fmt.Errorf("read the key log of owner identity %s: %w", aid, err)
+	}
+	side.events, err = scanEvents(rows)
+	rows.Close()
+	if err != nil {
+		return side, fmt.Errorf("read the key log of owner identity %s: %w", aid, err)
+	}
+	res, err := tx.QueryContext(ctx, fmt.Sprintf(
+		`SELECT owner_aid, seq_num, prior_digest, digest, event_bytes_b64, state
+		   FROM %s.owner_log_reservations WHERE owner_aid = ?`, schema), aid)
+	if err != nil {
+		return side, fmt.Errorf("read the reserved places of owner identity %s: %w", aid, err)
+	}
+	defer res.Close()
+	for res.Next() {
+		var r OwnerLogReservation
+		if err := res.Scan(&r.OwnerAID, &r.SN, &r.PriorDigest, &r.Digest, &r.RawB64, &r.State); err != nil {
+			return side, fmt.Errorf("read the reserved places of owner identity %s: %w", aid, err)
+		}
+		side.reserved[r.SN] = r
+	}
+	return side, res.Err()
+}
+
+// mergeOwnerIdentity merges what the backup holds about one owner identity
+// into what this device holds, by the rules mergeOwnerLogs states.
+func mergeOwnerIdentity(ctx context.Context, tx *sql.Tx, aid string) error {
+	held, err := readOwnerSide(ctx, tx, "main", aid)
 	if err != nil {
 		return err
 	}
-	offered, err := read("restored")
+	offered, err := readOwnerSide(ctx, tx, "restored", aid)
 	if err != nil {
 		return err
 	}
-	from, forkedAt := ownerLogToTake(aid, held, offered)
-	if forkedAt >= 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE main.machine_owner_identities
-			SET duplicitous_at = MIN(COALESCE(duplicitous_at, ?), ?) WHERE aid = ?`, forkedAt, forkedAt, aid); err != nil {
-			return fmt.Errorf("record the two events at one place of owner identity %s: %w", aid, err)
-		}
-	}
-	if from < 0 {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM main.kel WHERE aid = ? AND seq_num >= ?`, aid, from); err != nil {
-		return fmt.Errorf("restore the key log of owner identity %s: %w", aid, err)
-	}
-	for _, ev := range offered {
-		if ev.SequenceNumber < from {
-			continue
-		}
-		if err := saveEvent(tx, ev); err != nil {
+
+	// The log.
+	from, forkedAt := ownerLogToTake(aid, held.events, offered.events)
+	kept := held.events
+	if from >= 0 {
+		kept = append(append([]EventRecord{}, held.events[:from]...), offered.events[from:]...)
+		if _, err := tx.ExecContext(ctx, `DELETE FROM main.kel WHERE aid = ? AND seq_num >= ?`, aid, from); err != nil {
 			return fmt.Errorf("restore the key log of owner identity %s: %w", aid, err)
 		}
+		for _, ev := range offered.events[from:] {
+			if err := saveEvent(tx, ev); err != nil {
+				return fmt.Errorf("restore the key log of owner identity %s: %w", aid, err)
+			}
+		}
+	}
+
+	// The places reserved.
+	places := map[int]bool{}
+	for sn := range held.reserved {
+		places[sn] = true
+	}
+	for sn := range offered.reserved {
+		places[sn] = true
+	}
+	heldKept, offeredKept := false, false
+	for sn := range places {
+		h, inHeld := held.reserved[sn]
+		o, inOffered := offered.reserved[sn]
+		keep, state := reservationToKeep(kept, sn, h, inHeld, o, inOffered)
+		switch keep {
+		case "main":
+			heldKept = true
+			offeredKept = offeredKept || (inOffered && o.RawB64 == h.RawB64)
+			if _, err := tx.ExecContext(ctx, `UPDATE main.owner_log_reservations SET state = ?
+				WHERE owner_aid = ? AND seq_num = ?`, state, aid, sn); err != nil {
+				return fmt.Errorf("restore the reserved places of owner identity %s: %w", aid, err)
+			}
+			continue
+		case "restored":
+			offeredKept = true
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM main.owner_log_reservations
+			WHERE owner_aid = ? AND seq_num = ?`, aid, sn); err != nil {
+			return fmt.Errorf("restore the reserved places of owner identity %s: %w", aid, err)
+		}
+		if keep == "restored" {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO main.owner_log_reservations
+				       (owner_aid, seq_num, prior_digest, digest, event_bytes_b64, state, reserved_at)
+				SELECT owner_aid, seq_num, prior_digest, digest, event_bytes_b64, ?, reserved_at
+				  FROM restored.owner_log_reservations WHERE owner_aid = ? AND seq_num = ?`,
+				state, aid, sn); err != nil {
+				return fmt.Errorf("restore the reserved places of owner identity %s: %w", aid, err)
+			}
+		}
+	}
+
+	// What is kept beside it.
+	merged := held.id
+	if !held.found {
+		merged = offered.id
+	}
+	if merged.Kind == "" {
+		merged.Kind = offered.id.Kind
+	}
+	if merged.GivenUpFor == "" {
+		merged.GivenUpFor = offered.id.GivenUpFor
+	}
+	for _, at := range []*int{held.id.DuplicitousAt, offered.id.DuplicitousAt, &forkedAt} {
+		if at != nil && *at >= 0 && (merged.DuplicitousAt == nil || *at < *merged.DuplicitousAt) {
+			v := *at
+			merged.DuplicitousAt = &v
+		}
+	}
+	// The side whose log stands first, and only a side whose reservations
+	// stand, unless neither has any.
+	first, second := held, offered
+	firstKept, secondKept := heldKept, offeredKept
+	if from >= 0 {
+		first, second, firstKept, secondKept = offered, held, offeredKept, heldKept
+	}
+	merged.AnchoredM = ""
+	for _, c := range []struct {
+		side ownerSide
+		ok   bool
+	}{{first, firstKept}, {second, secondKept}, {first, !heldKept && !offeredKept}, {second, !heldKept && !offeredKept}} {
+		if c.ok && c.side.id.AnchoredM != "" {
+			merged.AnchoredM = c.side.id.AnchoredM
+			break
+		}
+	}
+	var dup any
+	if merged.DuplicitousAt != nil {
+		dup = *merged.DuplicitousAt
+	}
+	if held.found {
+		_, err = tx.ExecContext(ctx, `UPDATE main.machine_owner_identities
+			SET kind = ?, anchored_m = ?, given_up_for = ?, duplicitous_at = ? WHERE aid = ?`,
+			merged.Kind, merged.AnchoredM, merged.GivenUpFor, dup, aid)
+	} else {
+		_, err = tx.ExecContext(ctx, `INSERT INTO main.machine_owner_identities
+			       (aid, key_index, minted_at, kind, anchored_m, given_up_for, duplicitous_at)
+			SELECT aid, key_index, minted_at, ?, ?, ?, ? FROM restored.machine_owner_identities WHERE aid = ?`,
+			merged.Kind, merged.AnchoredM, merged.GivenUpFor, dup, aid)
+	}
+	if err != nil {
+		return fmt.Errorf("restore owner identity %s: %w", aid, err)
 	}
 	return nil
 }
 
-// ownerLogToTake decides what of the backup's copy of an owner identity's key
-// log replaces the held one. from is the sequence number from which the
-// backup's events are taken, replacing every held event from there on, or -1
-// to keep the held log as it is. forkedAt is the first place where two
-// verified logs hold different events, or -1.
+// reservationToKeep decides which reservation stands at place sn of an owner
+// identity's log, once kept is the log that stands: "main" for this device's,
+// "restored" for the backup's, or "" for none, and the state it stands in.
+func reservationToKeep(kept []EventRecord, sn int, h OwnerLogReservation, inHeld bool,
+	o OwnerLogReservation, inOffered bool) (string, string) {
+	switch {
+	case sn < len(kept):
+		// The log holds an event here: only its own reservation stands.
+		if inHeld && h.RawB64 == kept[sn].RawBytesB64 {
+			return "main", OwnerLogDone
+		}
+		if inOffered && o.RawB64 == kept[sn].RawBytesB64 {
+			return "restored", OwnerLogDone
+		}
+		return "", ""
+	case sn == len(kept) && sn > 0:
+		// The place after the tip: one reservation that follows the tip. One
+		// whose event was kept somewhere was signed, and may have been sent,
+		// so it stands over one that never was, to be finished with the same
+		// bytes rather than any others.
+		tip, _ := drivers.EventIDOfRawB64(kept[sn-1].RawBytesB64)
+		follows := func(r OwnerLogReservation) bool { return tip != "" && r.PriorDigest == tip }
+		heldFits, offeredFits := inHeld && follows(h), inOffered && follows(o)
+		switch {
+		case offeredFits && o.State == OwnerLogDone && !(heldFits && h.State == OwnerLogDone):
+			return "restored", OwnerLogReserved
+		case heldFits:
+			return "main", OwnerLogReserved
+		case offeredFits:
+			return "restored", OwnerLogReserved
+		}
+	}
+	return "", ""
+}
+
+// ownerLogToTake decides which copy of an owner identity's key log stands.
+// from is the sequence number from which the backup's events replace every
+// held event, or -1 to keep the held log as it is. forkedAt is the first place
+// at which the two logs hold different events, each verified up to and
+// including its own, or -1.
 func ownerLogToTake(aid string, held, offered []EventRecord) (from, forkedAt int) {
+	forkedAt = -1
 	if len(offered) == 0 {
 		return -1, -1
 	}
+	offeredVerifies := isVerifiedLogOf(aid, offered)
 	if len(held) == 0 {
-		return 0, -1
-	}
-	if !isVerifiedLogOf(aid, offered) {
+		if offeredVerifies {
+			return 0, -1
+		}
 		return -1, -1
 	}
-	if !isVerifiedLogOf(aid, held) {
-		return 0, -1
-	}
+	heldVerifies := isVerifiedLogOf(aid, held)
+	parted := -1
 	for i := 0; i < len(held) && i < len(offered); i++ {
 		if held[i].RawBytesB64 != offered[i].RawBytesB64 {
-			if len(offered) > len(held) {
-				return i, i
-			}
-			return -1, i
+			parted = i
+			break
 		}
 	}
-	if len(offered) > len(held) {
-		return len(held), -1
+	if parted >= 0 && isVerifiedLogOf(aid, held[:parted+1]) && isVerifiedLogOf(aid, offered[:parted+1]) {
+		forkedAt = parted
 	}
-	return -1, -1
+	switch {
+	case !offeredVerifies:
+		return -1, forkedAt
+	case !heldVerifies:
+		return 0, forkedAt
+	case parted < 0 && len(offered) > len(held):
+		return len(held), forkedAt
+	}
+	return -1, forkedAt
 }
 
 // isVerifiedLogOf says whether stored events are aid's key log, complete from
