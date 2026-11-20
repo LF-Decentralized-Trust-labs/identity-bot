@@ -104,3 +104,65 @@ against, and cannot tell from that identifier who rented the hardware or where.
 The cost is borne once, at founding, by the party best placed to pay it: the
 device holding the seed, which is deriving one identity already and can derive
 two.
+
+## Amendment 1 (2026-11-19): what each party signs when a separate owner is named, and who confirms the owner's history
+
+**Status:** Accepted. **Amends:** Decision item 3 of this ADR. **Relates to:** ADR-034 (an
+instance is told who may claim it), ADR-016 (the witness protocol).
+
+### What changes
+
+Decision item 3 asked the owner for "a signature over the same challenge" and did not say what the
+bytes are. It now does, and the claim signs for the owner it names. The owner's key log is put to
+its witnesses as the claimant's is. With that, "to the same standard" in item 3 is true.
+
+### What is signed
+
+Each input is a JSON object of strings with its keys in sorted order and no whitespace, signed as
+UTF-8 by the key the signer's own key log puts in force. `challenge` and `machine_public_key` are
+what the machine offered, and `claim_token` is the code the claim presents.
+
+String values are escaped as JSON requires, and five characters are written as escapes as well:
+`<`, `>` and `&` as `\u003c`, `\u003e` and `\u0026`, and U+2028 and U+2029 as `\u2028` and `\u2029`.
+Identifiers, keys and the challenge never hold any of these. A `claim_token` is chosen by whoever
+set the machine up and may, so an implementation that signs or checks these inputs escapes them
+the same way.
+
+**A claim that names no separate owner signs what it always did.** These bytes do not change:
+
+```
+{"challenge":"…","claim_token":"…","machine_public_key":"…","owner_aid":"<claimer>"}
+```
+
+**A claim that names a separate owner signs for that owner.** The claimer signs:
+
+```
+{"challenge":"…","claim_token":"…","founded_owner_aid":"<owner>","machine_public_key":"…","owner_aid":"<claimer>"}
+```
+
+**The owner signs as an owner, for that claimer.** The owner signs:
+
+```
+{"challenge":"…","claim_token":"…","claimer_aid":"<claimer>","founded_owner_aid":"<owner>","machine_public_key":"…","role":"founded_owner"}
+```
+
+Why it matters: the owner decides the outcome as much as the machine's key does. A claim that did
+not sign for its owner could have the owner replaced on the way, or removed so that the claiming
+identity is sealed as owner after all. An owner that signed only the exchange would have agreed to
+be named by whoever presented its signature. The three inputs have different keys, so a signature
+over one is never a signature over another.
+
+### What a machine refuses
+
+A request that names a separate owner is refused, before anything is founded, unless it carries the
+owner's key, its key log and its signature. The key must be the one the log puts in force.
+
+### Who confirms the owner's history
+
+A key log shows nothing of an event withheld from it, so a key an identity has rotated away from
+still signs correctly against the log as it stood before. The owner's log is therefore put to the
+witnesses it designates, by the one check the claimant's is put to: a history a witness contradicts,
+or one that cannot be checked, is refused on every machine, and a history nobody confirms is refused
+on a machine that was told whom to expect by whoever set it up. A computer paired from its own
+screen may have no network, so there an unconfirmed history is accepted and recorded, for the owner
+as for the claimant.

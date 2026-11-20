@@ -92,6 +92,10 @@ type pairingBeginResponse struct {
 // The same evidence the claim itself carries, because it is answering a question
 // of the same weight: an owner is named once, at inception, and can never be
 // replaced afterwards.
+//
+// None of it is optional. A request naming an owner is refused unless it
+// carries the owner's key, its key log and its signature over this exchange
+// (see foundedOwnerSigningInput).
 type foundedOwner struct {
 	AID       string                   `json:"aid"`
 	PublicKey string                   `json:"public_key"`
@@ -122,6 +126,10 @@ type pairingCompleteRequest struct {
 	//
 	// Absent, the claimant is the owner. A computer somebody pairs from its own
 	// screen told nobody anything, so there is nobody to correlate against.
+	//
+	// Present, it is proved or the request is refused: it must carry its key,
+	// its key log and its signature over this exchange, and the claim's own
+	// signature must cover its identifier.
 	FoundedOwner *foundedOwner `json:"founded_owner,omitempty"`
 	// FoundAsRoot asks this instance to found an identity of its own, naming
 	// who owns it, rather than become somebody's delegated agent.
@@ -417,6 +425,19 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	if err := s.verifyClaimantControlsTheIdentity(req, challenge, offeredPublicKey); err != nil {
 		writeError(w, http.StatusForbidden, "This claim does not prove who is making it", err.Error())
 		return
+	}
+	// A separate owner is proved to the same standard, in the same exchange, and
+	// for the same reason: it is about to be named in an inception for good.
+	if req.FoundedOwner != nil {
+		if err := s.verifyTheOwnerBeingSealed(req.FoundedOwner, req.OwnerAID, challenge, req.AdoptionCode, offeredPublicKey); err != nil {
+			writeError(w, http.StatusForbidden, "This claim does not prove who would own what is founded", err.Error())
+			return
+		}
+		if req.FoundedOwner.PublicKey == "" {
+			writeError(w, http.StatusBadRequest, "This identity needs its owner's key",
+				"founded_owner.public_key is required: without it the owner is named but cannot sign, and nothing later can repair that")
+			return
+		}
 	}
 	// Checked here, before anything is minted, because the alternative is
 	// unrecoverable: the identity is founded and persisted first, and if
