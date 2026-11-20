@@ -1793,6 +1793,11 @@ func (s *SQLiteStore) scanServiceProviders(rows *sql.Rows) ([]ServiceProviderRec
 // AllocateNextRelationshipIndex atomically allocates and returns the next never-reused index
 // for the namespace from the persisted high-water mark counter table. Separate namespaces
 // ("contacts", "login") ensure independent sequences.
+//
+// It reads the counter and then writes it, so it takes the write lock first
+// (takeTheWriteLock): another allocation or any other write committed between
+// the read and the write would otherwise have this one refused at once, and
+// the mint that asked for the index fail.
 func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1804,6 +1809,9 @@ func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, erro
 			tx.Rollback()
 		}
 	}()
+	if err := takeTheWriteLock(tx); err != nil {
+		return 0, err
+	}
 
 	var nextIdx int
 	err = tx.QueryRow(`SELECT next_index FROM relationship_counters WHERE namespace = ?`, namespace).Scan(&nextIdx)
