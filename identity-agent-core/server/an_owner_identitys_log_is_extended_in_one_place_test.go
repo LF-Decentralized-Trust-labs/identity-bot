@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	keri "github.com/grapeid/keri-go"
@@ -899,5 +900,86 @@ func TestADuplicitousOwnerIdentitySignsNoRequestToAMachine(t *testing.T) {
 	rec := askToSignAs(t, s, signs)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "two events at one place") {
 		t.Fatalf("a duplicitous owner identity signed a request: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// witnessesWhoseQueueFailsOnce stand in for witnesses that agree with the
+// kept log and whose queue fails the first time it is asked, then holds each
+// event it is asked for once.
+type witnessesWhoseQueueFailsOnce struct {
+	mu     sync.Mutex
+	failed bool
+	queued map[int]int
+}
+
+func (*witnessesWhoseQueueFailsOnce) continuesFromWhatTheyHold(string, *drivers.DriverKelResponse) error {
+	return nil
+}
+
+func (w *witnessesWhoseQueueFailsOnce) await(_ string, sn int) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.failed {
+		w.failed = true
+		return errors.New("the queue could not be written")
+	}
+	if w.queued == nil {
+		w.queued = map[int]int{}
+	}
+	w.queued[sn]++
+	return nil
+}
+
+func (w *witnessesWhoseQueueFailsOnce) queuedAt(sn int) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.queued[sn]
+}
+
+// An event kept and not queued for its witnesses, because the queue failed,
+// is queued when the core starts again (ADR-087 decision 12).
+func TestAnEventKeptAndNotQueuedIsQueuedWhenTheCoreStarts(t *testing.T) {
+	s := adoptingOwner(t)
+	witnesses := &witnessesWhoseQueueFailsOnce{}
+	s.ownerLog.witnesses = witnesses
+	owner := mintedOwnerOf(t, s, machineKindIndividual)
+
+	if _, err := s.anchorInOwnerLog(owner, aMachine, 0, aMachine); err == nil {
+		t.Fatal("the queue failed and the writer said nothing")
+	}
+	if kept := keptOwnerLog(t, s, owner); len(kept) != 2 || witnesses.queuedAt(1) != 0 {
+		t.Fatalf("the kept log has %d events, and the event was queued %d times", len(kept), witnesses.queuedAt(1))
+	}
+	restartedOver(t, s)
+	if witnesses.queuedAt(1) == 0 {
+		t.Fatal("the event kept was not queued when the core started again")
+	}
+
+	// A core whose witnesses cannot be asked yet starts all the same, and
+	// holds the log.
+	s.ownerLog.witnesses = nil
+	started := restartedOver(t, s)
+	if _, _, err := started.heldOwnerLog(owner); err != nil {
+		t.Fatalf("the core started without the log: %v", err)
+	}
+}
+
+// An event kept and not queued is queued when the same anchor is asked for
+// again.
+func TestAnEventKeptAndNotQueuedIsQueuedWhenItsAnchorIsAskedForAgain(t *testing.T) {
+	s := adoptingOwner(t)
+	witnesses := &witnessesWhoseQueueFailsOnce{}
+	s.ownerLog.witnesses = witnesses
+	owner := mintedOwnerOf(t, s, machineKindIndividual)
+
+	if _, err := s.anchorInOwnerLog(owner, aMachine, 0, aMachine); err == nil {
+		t.Fatal("the queue failed and the writer said nothing")
+	}
+	again, err := s.anchorInOwnerLog(owner, aMachine, 0, aMachine)
+	if err != nil || again.Written || again.SN != 1 {
+		t.Fatalf("asked again: %+v, %v", again, err)
+	}
+	if witnesses.queuedAt(1) == 0 {
+		t.Fatal("the event kept was not queued when its anchor was asked for again")
 	}
 }

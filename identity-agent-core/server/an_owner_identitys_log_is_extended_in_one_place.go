@@ -37,7 +37,10 @@ import (
 //     bytes to the store, through to disk, with the Identity Agent anchored.
 //  6. Sign the reserved bytes. The key is released for those bytes only.
 //  7. Keep the signed event and mark the reservation done, together, and
-//     only then let the engine hold it and queue it for the witnesses.
+//     only then let the engine hold it and queue it for the witnesses. An
+//     event kept and not queued, because the device stopped or the queue
+//     failed, is queued again when the core starts and when the same anchor
+//     is asked for again.
 //
 // A device that stops anywhere after step 5 finds the reservation when it
 // starts again and signs the same bytes. A device that stops before it has
@@ -123,8 +126,17 @@ type ownerLogWitnesses interface {
 	// engine holds it, is the log the owner identity's witnesses hold: the
 	// tip they answer with is its tip. With no answer from them it refuses.
 	continuesFromWhatTheyHold(owner string, kept *drivers.DriverKelResponse) error
-	// await queues an event just kept to be sent to the owner identity's
-	// witnesses, and sent again across restarts until each has receipted it.
+	// await queues an event kept in the owner identity's log to be sent to
+	// its witnesses, and sent again across restarts until each has receipted
+	// it.
+	//
+	// It is asked more than once for one event, and must queue that event
+	// once however often it is asked. The writer asks for an event only after
+	// keeping it, and a device can stop, or await can fail, between the two.
+	// So every event of a kept owner log after its founding is asked for
+	// again when the core starts (reloadOwnerLogs) and when an anchor already
+	// in the log is asked for again (anchorInOwnerLog), by
+	// queueKeptOwnerLogEvents.
 	await(owner string, sn int) error
 }
 
@@ -267,6 +279,11 @@ func (s *CoreServer) anchorInOwnerLog(owner, m string, sealedSN int, sealedSAID 
 		return nil, fmt.Errorf("%w: %s", store.ErrOwnerLogNamesAnother, other)
 	}
 	if already != nil {
+		// Kept, and perhaps never queued: queued again, which changes nothing
+		// for an event already queued.
+		if err := s.queueKeptOwnerLogEvents(owner, kel); err != nil {
+			return nil, err
+		}
 		return already, nil
 	}
 	if err := s.ownerLogWitnesses().continuesFromWhatTheyHold(owner, kel); err != nil {
@@ -379,8 +396,8 @@ func (s *CoreServer) signAndKeepReserved(eng ownerLogEngine, name string, r stor
 	}
 	s.servedOwnerLogFollowsTheKeptOne(r.OwnerAID)
 	if err := s.ownerLogWitnesses().await(r.OwnerAID, res.SN); err != nil {
-		return nil, fmt.Errorf("the event at sequence number %d of %s is kept and was not queued for its witnesses: %w",
-			res.SN, r.OwnerAID, err)
+		return nil, fmt.Errorf("the event at sequence number %d of %s is kept and was not queued for its witnesses, "+
+			"and is queued again when the core starts or the same anchor is asked for: %w", res.SN, r.OwnerAID, err)
 	}
 	return &ownerLogEvent{OwnerAID: r.OwnerAID, SN: res.SN, SAID: res.SAID, Raw: raw,
 		Signatures: res.Signatures, Written: true}, nil
@@ -510,6 +527,22 @@ func keptLogVerifiesTo(owner string, events []store.EventRecord, sn int) error {
 	return err
 }
 
+// queueKeptOwnerLogEvents asks the witnesses' queue for every event of
+// owner's log after its founding, as the engine holds it in kel: the events
+// this writer kept, here or on a device whose database was restored here.
+// Each was queued after it was kept, if it was queued at all, so this is what
+// sees that none is left unqueued (ADR-087 decision 12). An event already
+// queued is not queued twice (ownerLogWitnesses.await).
+func (s *CoreServer) queueKeptOwnerLogEvents(owner string, kel *drivers.DriverKelResponse) error {
+	for sn := 1; sn < kel.EventCount; sn++ {
+		if err := s.ownerLogWitnesses().await(owner, sn); err != nil {
+			return fmt.Errorf("the event at sequence number %d of %s is kept and could not be queued for its "+
+				"witnesses: %w", sn, owner, err)
+		}
+	}
+	return nil
+}
+
 // heldOwnerLog has the engine hold owner's key log as the store keeps it, and
 // returns the name it is held under. An owner identity minted since the core
 // started is held already, under the name it was minted with. One minted
@@ -571,8 +604,10 @@ func (s *CoreServer) heldOwnerLog(owner string) (ownerLogEngine, string, error) 
 }
 
 // reloadOwnerLogs hands the engine the key log of every owner identity this
-// device minted, at start, so each can be extended and its key found, and
-// finishes whatever was reserved and not kept when the core last stopped.
+// device minted, at start, so each can be extended and its key found,
+// finishes whatever was reserved and not kept when the core last stopped,
+// and queues again for the witnesses every event kept after a founding
+// (queueKeptOwnerLogEvents). What it cannot do it logs, and the core starts.
 func (s *CoreServer) reloadOwnerLogs() {
 	if s.KeriDriver == nil || s.DataStore == nil {
 		return
@@ -595,6 +630,15 @@ func (s *CoreServer) reloadOwnerLogs() {
 				log.Printf("[owner-log] %v", err)
 			} else if n > 0 {
 				log.Printf("[owner-log] finished %d event(s) of %s reserved before the core stopped", n, id.AID)
+			}
+		}
+		if err == nil {
+			if kel, err := s.KeriDriver.GetKel(name); err != nil {
+				log.Printf("[owner-log] the key log of %s could not be read to queue it for its witnesses: %v", id.AID, err)
+			} else if err := s.queueKeptOwnerLogEvents(id.AID, kel); err != nil {
+				// Not lost: it is asked for again at the next start, and when
+				// the same anchor is asked for.
+				log.Printf("[owner-log] %v", err)
 			}
 		}
 		lock.(*sync.Mutex).Unlock()
