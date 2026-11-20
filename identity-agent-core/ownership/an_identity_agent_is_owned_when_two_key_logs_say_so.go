@@ -23,6 +23,7 @@
 package ownership
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -209,6 +210,11 @@ func Check(machine, owner Log, opt Options) Result {
 		return end(Refused, SameIdentifier, "the Identity Agent and the owner are one identifier")
 	}
 
+	for i, ev := range m.events {
+		if ownerSealsUnreadable(ev, m.elements[i]) {
+			return end(Refused, LogInvalid, "the Identity Agent's log: the establishment event at %d carries a seal with a key written twice or with an escape, so whom it names cannot be read", ev.SN)
+		}
+	}
 	sets, err := drivers.OwnerSetsByEvent(m.fields)
 	if err != nil {
 		return end(Refused, LogInvalid, "the Identity Agent's log: %v", err)
@@ -292,7 +298,7 @@ find:
 		if ev.Ilk != "ixn" {
 			continue
 		}
-		for _, el := range elementsOf(x.fields[i]) {
+		for _, el := range x.elements[i] {
 			switch {
 			case el.unreadable:
 				return end(Refused, LogUnchecked, "the owner's interaction at %d carries something that cannot be read as a seal, before any seal of the event was found", ev.SN)
@@ -378,8 +384,7 @@ first:
 	return end(OwnedConfirmed, ReasonNone, "")
 }
 
-// element is one entry of an interaction event's `a` list, as this check
-// reads it.
+// element is one entry of an event's `a` list, as this check reads it.
 //
 // An event seal is an object with exactly the fields i, s and d, in any
 // order: i and d non-empty strings, s a sequence number in lowercase hex
@@ -387,31 +392,51 @@ first:
 // (drivers.OwnerFromSeal), so the two readers agree on what an event seal
 // is. An object that lacks one of the three fields is some other seal, and
 // is shown not to be an event seal. Everything else is unreadable: something
-// that is not an object, an object with the three fields and more, or one
-// whose i, s or d is not as an event seal writes it. An unreadable element
-// is never skipped, because skipping it is how an earlier anchor would hide.
+// that is not an object, an object with the three fields and more, one whose
+// i, s or d is not as an event seal writes it, and an object in which a key
+// is written twice or with an escape. An unreadable element is never
+// skipped, because skipping it is how an earlier anchor would hide.
 type element struct {
 	seal       keri.Seal
 	eventSeal  bool
 	unreadable bool
+	// oddKeys is an object with a key written twice or with an escape. JSON
+	// readers differ on which of two values they keep, so what such an
+	// object says depends on who reads it, and it is read by nobody here.
+	oddKeys bool
 }
 
-// elementsOf reads the `a` list of an event, element by element. An `a` that
-// is present and is not a list is one unreadable element.
-func elementsOf(fields map[string]interface{}) []element {
-	a, present := fields["a"]
-	if !present || a == nil {
-		return nil
+// elementsOf reads the `a` list of an event from its bytes, element by
+// element. An `a` that is present and is not a list is one unreadable
+// element. The elements are taken as raw bytes first, because a Go map keeps
+// the last of two values written under one key and says nothing about it.
+func elementsOf(raw []byte) ([]element, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, err
 	}
-	list, ok := a.([]interface{})
-	if !ok {
-		return []element{{unreadable: true}}
+	// The event's own keys are held to the same rule as a seal's: an `a`
+	// written with an escape is found by some readers and not by others.
+	if keysWrittenTwiceOrEscaped(raw) {
+		return []element{{unreadable: true, oddKeys: true}}, nil
+	}
+	a, present := top["a"]
+	if !present || string(a) == "null" {
+		return nil, nil
+	}
+	var list []json.RawMessage
+	if err := json.Unmarshal(a, &list); err != nil {
+		return []element{{unreadable: true}}, nil
 	}
 	out := make([]element, 0, len(list))
 	for _, entry := range list {
-		object, ok := entry.(map[string]interface{})
-		if !ok {
+		var object map[string]interface{}
+		if len(entry) == 0 || entry[0] != '{' || json.Unmarshal(entry, &object) != nil {
 			out = append(out, element{unreadable: true})
+			continue
+		}
+		if keysWrittenTwiceOrEscaped(entry) {
+			out = append(out, element{unreadable: true, oddKeys: true})
 			continue
 		}
 		iRaw, hasI := object["i"]
@@ -431,7 +456,53 @@ func elementsOf(fields map[string]interface{}) []element {
 		}
 		out = append(out, element{seal: keri.Seal{Identifier: i, SN: sn, SAID: d}, eventSeal: true})
 	}
-	return out
+	return out, nil
+}
+
+// keysWrittenTwiceOrEscaped is whether a JSON object, as written, names one
+// of its own keys twice or writes one with an escape (a backslash, as in a
+// Unicode escape standing for a letter). It looks at the object's own keys
+// and not inside its values: an event seal has no object inside it.
+// (internal/strictjson refuses a repeated key too, at any depth, but it
+// cannot see how a key was written, which this needs.)
+func keysWrittenTwiceOrEscaped(object json.RawMessage) bool {
+	dec := json.NewDecoder(bytes.NewReader(object))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return false
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		from := dec.InputOffset()
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		key, _ := tok.(string)
+		if seen[key] || bytes.IndexByte(object[from:dec.InputOffset()], '\\') >= 0 {
+			return true
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if dec.Decode(&value) != nil {
+			return false
+		}
+	}
+	return false
+}
+
+// ownerSealsUnreadable is whether an establishment event carries, in its `a`
+// list, an object with a key written twice or with an escape. Whether such
+// an object is an owner seal, and whom it names, depends on who reads it.
+func ownerSealsUnreadable(ev *keri.Event, elements []element) bool {
+	if !ev.Establishment() {
+		return false
+	}
+	for _, el := range elements {
+		if el.oddKeys {
+			return true
+		}
+	}
+	return false
 }
 
 // readLog is a log that verified, with what judging it against the verifier's
@@ -441,6 +512,8 @@ type readLog struct {
 	raws   [][]byte
 	events []*keri.Event
 	fields []map[string]interface{}
+	// elements are each event's `a` list, read element by element.
+	elements [][]element
 	// forked is proof of duplicity: another copy holds a validly signed event
 	// at a place this log holds a different one, and neither is a recovery of
 	// the other.
@@ -476,11 +549,12 @@ func read(l Log) (*readLog, Reason, error) {
 	}
 	out := &readLog{id: verified.Identifier}
 	for i, message := range l.Messages {
-		ev, fields, err := eventOf(message)
+		ev, fields, elements, err := eventOf(message)
 		if err != nil {
 			return nil, LogInvalid, fmt.Errorf("event %d: %w", i, err)
 		}
 		out.raws, out.events, out.fields = append(out.raws, ev.Raw), append(out.events, ev), append(out.fields, fields)
+		out.elements = append(out.elements, elements)
 	}
 	// keri-go also verifies an identifier that is a key (basic derivation).
 	// Such an identifier is not the digest of its inception, so no event seal
@@ -511,21 +585,26 @@ func read(l Log) (*readLog, Reason, error) {
 	return out, ReasonNone, nil
 }
 
-// eventOf is the event of a signed message, parsed, and its fields.
-func eventOf(message []byte) (*keri.Event, map[string]interface{}, error) {
+// eventOf is the event of a signed message, parsed, with its fields and the
+// elements of its `a` list.
+func eventOf(message []byte) (*keri.Event, map[string]interface{}, []element, error) {
 	raw, err := keri.EventOfMessage(message)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var fields map[string]interface{}
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return ev, fields, nil
+	elements, err := elementsOf(raw)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return ev, fields, elements, nil
 }
 
 // judgeAgainst judges this log against another verified copy of it, event by
@@ -535,7 +614,7 @@ func eventOf(message []byte) (*keri.Event, map[string]interface{}, error) {
 // (drivers.JudgeCopiesAtTakenPlace).
 func (l *readLog) judgeAgainst(mine *keri.SignedKELResult, messages [][]byte, theirs *keri.SignedKELResult, kept [][]byte) (Reason, error) {
 	for k, message := range kept {
-		ev, _, err := eventOf(message)
+		ev, _, _, err := eventOf(message)
 		if err != nil {
 			return LogUnchecked, err
 		}
@@ -563,8 +642,8 @@ func (l *readLog) judgeAgainst(mine *keri.SignedKELResult, messages [][]byte, th
 			// This log's recovery rotation replaced the other copy's events
 			// from this place on.
 			for _, later := range kept[k:] {
-				if gone, fields, err := eventOf(later); err == nil {
-					l.retired = append(l.retired, retiredEvent{sn: gone.SN, elements: elementsOf(fields)})
+				if gone, _, elements, err := eventOf(later); err == nil {
+					l.retired = append(l.retired, retiredEvent{sn: gone.SN, elements: elements})
 				}
 			}
 			return ReasonNone, nil
@@ -587,6 +666,9 @@ func (l *readLog) anchors(seal keri.Seal, owner string) (is, known bool, err err
 	}
 	if !l.events[seal.SN].Establishment() {
 		return false, true, nil
+	}
+	if ownerSealsUnreadable(l.events[seal.SN], l.elements[seal.SN]) {
+		return false, true, errors.New("a seal in it has a key written twice or with an escape")
 	}
 	owners, _, err := drivers.OwnerSetFromEvent(l.fields[seal.SN])
 	if err != nil {

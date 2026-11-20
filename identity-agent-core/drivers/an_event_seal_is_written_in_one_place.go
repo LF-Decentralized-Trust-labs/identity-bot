@@ -17,9 +17,12 @@ import (
 // which would sort them: the same seal is accepted in the specified order and
 // refused in sorted order by an independent implementation.
 //
-// This is the one writer of an event seal. A registry anchor, a delegation
-// approval and an ownership anchor are all this seal, told apart by what is
-// sealed.
+// This is the one writer of a general event seal: a registry anchor, a
+// delegation approval and an ownership anchor are all this seal, told apart by
+// what is sealed. The owner seal is the same shape and is not yet written
+// here: it still has three writers of its own (ownerEventSeal in this package,
+// keriengine.OwnerSeal and the server's ownerAnchorSeal), each with its own
+// checks, which are to be folded into one.
 func EventSeal(identifier, sn, digest string) (json.RawMessage, error) {
 	if identifier == "" || sn == "" || digest == "" {
 		return nil, fmt.Errorf("an event seal needs an identifier, a sequence number and a "+

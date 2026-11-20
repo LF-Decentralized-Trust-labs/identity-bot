@@ -373,6 +373,38 @@ func makeVectors(t *testing.T) *VectorSet {
 		handed(machine), handed(stolen),
 		at(expect(Refused, LogInvalid, machine, stolen), machine, 0, stolen, -1))
 
+	// A key written twice, or with an escape, is read differently by
+	// different JSON readers, so the object is read by nobody.
+	escape := string(rune(92)) // a backslash
+	hiding := func(seal string) *signedlog.Log {
+		return bare.Fork().Seal(json.RawMessage(seal)).Seal(m.anchors(machine, 0))
+	}
+	twoIdentifiers := hiding(`{"i":"` + second.AID + `","i":"` + machine.AID + `","s":"0","d":"` + second.AID + `"}`)
+	add("seal-with-its-identifier-written-twice",
+		"Before the anchor the owner's log holds a seal whose \"i\" is written twice: first the other Identity Agent, then this one. A reader that keeps the first value sees an anchor of the other Identity Agent, and one that keeps the last sees a seal of nothing. An object with a key written twice is not read at all.",
+		handed(machine), handed(twoIdentifiers),
+		at(expect(Refused, LogUnchecked, machine, twoIdentifiers), machine, 0, twoIdentifiers, -1),
+		handed(second))
+	twoDigests := hiding(`{"i":"` + second.AID + `","s":"0","d":"` + machine.AID + `","d":"` + second.AID + `"}`)
+	add("seal-with-its-digest-written-twice",
+		"The same, with \"d\" written twice. Kept last it is an anchor of the other Identity Agent, kept first it is a seal of nothing.",
+		handed(machine), handed(twoDigests),
+		at(expect(Refused, LogUnchecked, machine, twoDigests), machine, 0, twoDigests, -1),
+		handed(second))
+	escapedKey := hiding(`{"` + escape + `u0069":"` + second.AID + `","s":"0","d":"` + second.AID + `"}`)
+	add("seal-with-a-key-written-with-an-escape",
+		"Before the anchor the owner's log holds an anchor of another Identity Agent whose \"i\" key is written as a Unicode escape. A reader that compares the key as written does not see an event seal. An object with a key written with an escape is not read at all.",
+		handed(machine), handed(escapedKey),
+		at(expect(Refused, LogUnchecked, machine, escapedKey), machine, 0, escapedKey, -1),
+		handed(second))
+	doubled := signedlog.InceptWith(t, m.keys("machine-with-a-doubled-owner-seal", 2), witnessedBy(wm,
+		json.RawMessage(`{"i":"`+another.AID+`","i":"`+bare.AID+`","s":"0","d":"`+bare.AID+`"}`)))
+	anchorsDoubled := bare.Fork().Seal(m.anchors(doubled, 0))
+	add("owner-seal-with-its-identifier-written-twice",
+		"The Identity Agent's inception carries a seal whose \"i\" is written twice. Kept last it is an owner seal naming this owner, kept first it is no owner seal. Whom the log names cannot be read, so the log is refused.",
+		handed(doubled), handed(anchorsDoubled),
+		expect(Refused, LogInvalid, doubled, anchorsDoubled))
+
 	set.Seeds, set.Witnesses = m.seeds, m.witnesses
 	return set
 }

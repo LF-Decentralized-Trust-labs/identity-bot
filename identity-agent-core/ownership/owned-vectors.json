@@ -17,6 +17,8 @@
     "machine-of-a-basic-owner/1": "98cd5a3cc97a4abf963937d612b5e19d9e09305c5f959dc143d98f9848a0beab",
     "machine-of-that-owner/0": "1b8711056fdcb22979fd63b701604910f0fc96bb8fa1a7da4bfc08d7c18df65f",
     "machine-of-that-owner/1": "3b7539e3d8073f56deb7ae34fcd0da31faf15b060c725e77f4bdba0ce210f037",
+    "machine-with-a-doubled-owner-seal/0": "8c86140a2906527c897eecf1ba4528764bb6839f02504a614b4af63c0199e332",
+    "machine-with-a-doubled-owner-seal/1": "45c742a47922ca020ec248f31f6aed32ba92161705f4ee7eed63d9ec18b8f05c",
     "machine/0": "12fffa754bbf85d8c3b3d6e9c8031e86e370acbcb9dd967445bc7202f2f9d70e",
     "machine/1": "58037771fe2c77ad28797e453d9d7d7184e7d31b4833b7b53df759df53c1c900",
     "machine/2": "5ca6367b06fa0d2bf2c74275be036128a254ea8fecbed5b9125926749a0975a8",
@@ -969,6 +971,131 @@
         "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
         "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
         "event_sn": 0
+      }
+    },
+    {
+      "label": "seal-with-its-identifier-written-twice",
+      "why": "Before the anchor the owner's log holds a seal whose \"i\" is written twice: first the other Identity Agent, then this one. A reader that keeps the first value sees an anchor of the other Identity Agent, and one that keeps the last sees a seal of nothing. An object with a key written twice is not read at all.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00016d_\",\"t\":\"ixn\",\"d\":\"ECBfD_EhM1ZZliTRAy_aurpHePgZu-giRbtbJ-1xQoVi\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\"}]}-AABAAAyPK-8WTb9eoHoZN-OzqZV06TiXfudRQwprA2D4DSflQLmmT-e8xXrfw6Uoajy7B-9e46Z6qJqI5qtcHSSOCEO",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EFj117oLmtzSzBIOg0hzVodWwJkHqg_zpGCWkw3AbjWl\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"ECBfD_EhM1ZZliTRAy_aurpHePgZu-giRbtbJ-1xQoVi\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAADbZhuEkc53VN5FM24eOatH3aYeqtt3OI4GCMr3OG743U3Aj7R0MXC3GmPY304TeH5gRQ4SDsog-Z8ZXHDIXxQC"
+        ],
+        "source": "checked_party"
+      },
+      "other_logs": [
+        {
+          "messages": [
+            "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DDoNGwfwyrTL4B_AE20DhXRAVmZBn7VXxCF9Jd90ebxi\"],\"nt\":\"1\",\"n\":[\"EGJkQ82XtBarvSz2Go1unj-h_Q1CLfDqYZYa_qqx6dVS\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACOwMOd9W1EDjPfrXtLQQjcqNj3eEsiAjHAKSIJrUdfrv2z2RDLpC8Qqr-6xhY3t5TMXMldrtnIeGeUuNwZwOIO"
+          ],
+          "source": "checked_party"
+        }
+      ],
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "seal-with-its-digest-written-twice",
+      "why": "The same, with \"d\" written twice. Kept last it is an anchor of the other Identity Agent, kept first it is a seal of nothing.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00016d_\",\"t\":\"ixn\",\"d\":\"EFt37qpz68KUfuR4MQlcjYWJwNHRFUrWPVMAkYkM7zyU\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\"}]}-AABAABITOlGY3YD9d97LOczom003BGA9pIkk-pKiUx0kUPPctgDS0f5F8k7LQlzn8RacwTGPCyVYEslpaW9HJGt9rQD",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EDHUdjqCRoAl3LIVrlhCqdwG8O0Fue4JfKa8Jg3zs-M4\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"EFt37qpz68KUfuR4MQlcjYWJwNHRFUrWPVMAkYkM7zyU\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAADcH6DpuegxQ8UeMcY3gy1UgJvC-xDU5Mg874dK0dtUU_IZ_VuxOvlabMW4Lwkf7CqcDDUxiXWCqO5Lu13h0uYC"
+        ],
+        "source": "checked_party"
+      },
+      "other_logs": [
+        {
+          "messages": [
+            "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DDoNGwfwyrTL4B_AE20DhXRAVmZBn7VXxCF9Jd90ebxi\"],\"nt\":\"1\",\"n\":[\"EGJkQ82XtBarvSz2Go1unj-h_Q1CLfDqYZYa_qqx6dVS\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACOwMOd9W1EDjPfrXtLQQjcqNj3eEsiAjHAKSIJrUdfrv2z2RDLpC8Qqr-6xhY3t5TMXMldrtnIeGeUuNwZwOIO"
+          ],
+          "source": "checked_party"
+        }
+      ],
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "seal-with-a-key-written-with-an-escape",
+      "why": "Before the anchor the owner's log holds an anchor of another Identity Agent whose \"i\" key is written as a Unicode escape. A reader that compares the key as written does not see an event seal. An object with a key written with an escape is not read at all.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013f_\",\"t\":\"ixn\",\"d\":\"EHvX7Zb4QlOkJnfEZyUVRXe2gFeXQ8ACWWo4YRd0sjdE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"\\u0069\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\"}]}-AABAACUkOdq0x5DyYJlCvLUZGp2ir1rDFhnFAFm7wxxxjSc-C9JXEs2CSKSxCGU28odhxWLpQ-nKQd957VrH7OZbksA",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EB_iow9nuLCJA_4e3UleXp2eiYrX40zS0itn0cYUCmXw\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"EHvX7Zb4QlOkJnfEZyUVRXe2gFeXQ8ACWWo4YRd0sjdE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAADhnezUe-NT-u3SSNJX_lLeb9LSUWXpKp9QLVsRcXk3VLAseGvVcWWz0sy7Sh-LkHALIi5PjbAh9L72IZIbT-gN"
+        ],
+        "source": "checked_party"
+      },
+      "other_logs": [
+        {
+          "messages": [
+            "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DDoNGwfwyrTL4B_AE20DhXRAVmZBn7VXxCF9Jd90ebxi\"],\"nt\":\"1\",\"n\":[\"EGJkQ82XtBarvSz2Go1unj-h_Q1CLfDqYZYa_qqx6dVS\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACOwMOd9W1EDjPfrXtLQQjcqNj3eEsiAjHAKSIJrUdfrv2z2RDLpC8Qqr-6xhY3t5TMXMldrtnIeGeUuNwZwOIO"
+          ],
+          "source": "checked_party"
+        }
+      ],
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "owner-seal-with-its-identifier-written-twice",
+      "why": "The Identity Agent's inception carries a seal whose \"i\" is written twice. Kept last it is an owner seal naming this owner, kept first it is no owner seal. Whom the log names cannot be read, so the log is refused.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001fb_\",\"t\":\"icp\",\"d\":\"EKreSLSj1zHGEEdapIAPrNAyRwbOvpOg5kCK8JV198Hx\",\"i\":\"EKreSLSj1zHGEEdapIAPrNAyRwbOvpOg5kCK8JV198Hx\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DL9b5saCLYOF-8IRAVCozcJ01m7sAwUdqfU4NfS4egbW\"],\"nt\":\"1\",\"n\":[\"ELUDoFMPYwaD7p6myBKe3QGlMY83OFdEbJU871ngPNM7\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EO0reg2A26iwLf0b2mj8u7fSbCtzAoKnsdRFFrR-v_6D\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACNHsDdeyZuKzL9KFuwNb73k3Xxvz00q60A1hEMj6Fin4mntMeGSwaIFLmj_vzrGQkDmnA_o5PKIf2_SlGbq1QM"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EG3SkJX6bUE2ppKkej_oIiDkZqv_RZmcdKmaPOYaLVAU\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EKreSLSj1zHGEEdapIAPrNAyRwbOvpOg5kCK8JV198Hx\",\"s\":\"0\",\"d\":\"EKreSLSj1zHGEEdapIAPrNAyRwbOvpOg5kCK8JV198Hx\"}]}-AABAABCd9ALGgUHXHchGsQkjdFI24YSFvmGbtZiiKiz2GN8TzORa1d77SwvAB0O9TDON9OnTZhInBNNAADzKkEoa_8N"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "log_invalid",
+        "machine": "EKreSLSj1zHGEEdapIAPrNAyRwbOvpOg5kCK8JV198Hx",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE"
       }
     }
   ]

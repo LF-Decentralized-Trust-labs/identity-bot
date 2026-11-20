@@ -70,18 +70,98 @@ def split(message):
 
 def said_of(raw, ev):
     """The digest an event must carry: Blake3-256 of its bytes with the digest,
-    and for an inception the identifier too, replaced by 44 '#' characters."""
-    dummy = "#" * 44
-    text = raw.replace('"d":"%s"' % ev["d"], '"d":"%s"' % dummy, 1)
-    if ev["t"] in ("icp", "dip"):
-        text = text.replace('"i":"%s"' % ev["i"], '"i":"%s"' % dummy, 1)
-    return base.digest(text.encode())
+    and for an inception the identifier (a copy of it) too, replaced by 44 '#'
+    characters. `d` is the first place the digest is written and `i` the
+    second, whatever the spacing."""
+    if not isinstance(ev["d"], str) or len(ev["d"]) != 44:
+        raise Invalid("an event's digest is not 44 characters")
+    return base.digest(raw.replace(ev["d"], "#" * 44, 2 if ev["t"] in ("icp", "dip") else 1).encode())
 
 
 def number(s):
     if not isinstance(s, str) or not HEX.match(s):
         raise Invalid("a sequence number or threshold is not lowercase hex")
     return int(s, 16)
+
+
+# ── reading JSON as it was written ───────────────────────────────────────
+#
+# json.loads keeps the last of two values written under one key and says
+# nothing, and it cannot say how a key was written. The check has to know
+# both, so objects and lists are also walked as text.
+
+DECODER = json.JSONDecoder()
+
+
+def _skip(text, pos):
+    while pos < len(text) and text[pos] in " \t\n\r":
+        pos += 1
+    return pos
+
+
+def members(text):
+    """The own members of an object, as written: (key text, key, value text)."""
+    pos = _skip(text, 0)
+    if text[pos:pos + 1] != "{":
+        raise ValueError("not an object")
+    pos = _skip(text, pos + 1)
+    out = []
+    if text[pos:pos + 1] == "}":
+        return out
+    while True:
+        key, end = DECODER.raw_decode(text, pos)
+        if not isinstance(key, str):
+            raise ValueError("a key is not a string")
+        written, pos = text[pos:end], _skip(text, end)
+        if text[pos:pos + 1] != ":":
+            raise ValueError("no value")
+        pos = _skip(text, pos + 1)
+        _, end = DECODER.raw_decode(text, pos)
+        out.append((written, key, text[pos:end]))
+        pos = _skip(text, end)
+        if text[pos:pos + 1] == "}":
+            return out
+        if text[pos:pos + 1] != ",":
+            raise ValueError("not an object")
+        pos = _skip(text, pos + 1)
+
+
+def entries(text):
+    """The elements of a list, as written."""
+    pos = _skip(text, 0)
+    if text[pos:pos + 1] != "[":
+        raise ValueError("not a list")
+    pos = _skip(text, pos + 1)
+    out = []
+    if text[pos:pos + 1] == "]":
+        return out
+    while True:
+        _, end = DECODER.raw_decode(text, pos)
+        out.append(text[pos:end])
+        pos = _skip(text, end)
+        if text[pos:pos + 1] == "]":
+            return out
+        if text[pos:pos + 1] != ",":
+            raise ValueError("not a list")
+        pos = _skip(text, pos + 1)
+
+
+def odd_keys(text):
+    """Whether an object names one of its own keys twice, or writes one with
+    an escape (owned.md, 'Reading an `a` list')."""
+    own = members(text)
+    keys = [key for _, key, _ in own]
+    return len(set(keys)) != len(keys) or any("\\" in written for written, _, _ in own)
+
+
+# The fields of each kind of event, in the order KERI writes them.
+FIELDS = {
+    "icp": ["v", "t", "d", "i", "s", "kt", "k", "nt", "n", "bt", "b", "c", "a"],
+    "dip": ["v", "t", "d", "i", "s", "kt", "k", "nt", "n", "bt", "b", "c", "a", "di"],
+    "rot": ["v", "t", "d", "i", "s", "p", "kt", "k", "nt", "n", "bt", "br", "ba", "a"],
+    "drt": ["v", "t", "d", "i", "s", "p", "kt", "k", "nt", "n", "bt", "br", "ba", "a"],
+    "ixn": ["v", "t", "d", "i", "s", "p", "a"],
+}
 
 
 class Log:
@@ -99,7 +179,7 @@ class Log:
             try:
                 raw, sig, ev, key, commitment, witnesses, threshold = self.one(
                     place, message, key, commitment, witnesses, threshold)
-            except (KeyError, TypeError, AttributeError, IndexError):
+            except (KeyError, TypeError, AttributeError, IndexError, ValueError):
                 raise Invalid("event %d lacks a field, or holds one of the wrong kind" % place)
             self.raws.append(raw)
             self.events.append(ev)
@@ -117,11 +197,14 @@ class Log:
             raise Invalid("an event is not JSON")
         if not isinstance(ev, dict):
             raise Invalid("an event is not a JSON object")
-        if json.dumps(ev, separators=(",", ":"), ensure_ascii=False) != raw:
-            raise Invalid("an event is not in its one compact spelling")
         t = ev.get("t")
         if t not in ESTABLISHMENT + ("ixn",):
             raise Invalid("an event of an unknown kind")
+        # An event has exactly its kind's fields, each once, in order. (Spacing
+        # and escapes inside it are the writer's business: KERI signs the
+        # bytes whatever they are.)
+        if [key for _, key, _ in members(raw)] != FIELDS[t]:
+            raise Invalid("event %d does not have its kind's fields, each once and in order" % place)
         if said_of(raw, ev) != ev["d"]:
             raise Invalid("event %d does not carry its own digest" % place)
         if number(ev["s"]) != place:
@@ -174,7 +257,7 @@ class Log:
                 continue
             only_interactions = lambda evs: all(e["t"] == "ixn" for e in evs[p:])
             if mine[p]["t"] == "rot" and only_interactions(theirs):
-                self.retired.extend(theirs[p:])
+                self.retired.extend(other.raws[p:])
                 return None
             if theirs[p]["t"] == "rot" and only_interactions(mine):
                 return "stale_copy"
@@ -262,22 +345,34 @@ def owner_sets(log):
 
 
 UNREADABLE = object()
+ODD = object()  # unreadable because a key is written twice or with an escape
 OTHER = object()
 
 
-def elements(ev):
-    """The `a` list of an event, element by element: an event seal as
-    (identifier, place, digest), OTHER for a seal shown not to be an event
-    seal, UNREADABLE for anything else (owned.md, 'The two seals')."""
-    if "a" not in ev or ev["a"] is None:
+def elements(raw):
+    """The `a` list of an event, read from its text element by element: an
+    event seal as (identifier, place, digest), OTHER for a seal shown not to
+    be an event seal, ODD or UNREADABLE for anything else (owned.md, 'Reading
+    an `a` list')."""
+    if odd_keys(raw):
+        return [ODD]
+    top = {key: value for _, key, value in members(raw)}
+    if "a" not in top or top["a"] == "null":
         return []
-    if not isinstance(ev["a"], list):
+    try:
+        listed = entries(top["a"])
+    except ValueError:
         return [UNREADABLE]
     out = []
-    for el in ev["a"]:
-        if not isinstance(el, dict):
+    for text in listed:
+        if not text.startswith("{"):
             out.append(UNREADABLE)
-        elif not {"i", "s", "d"} <= set(el):
+            continue
+        if odd_keys(text):
+            out.append(ODD)
+            continue
+        el = json.loads(text)
+        if not {"i", "s", "d"} <= set(el):
             out.append(OTHER)
         elif (len(el) == 3 and all(isinstance(el[k], str) for k in ("i", "s", "d"))
               and el["i"] and el["d"] and HEX.match(el["s"]) and len(el["s"]) <= 16):
@@ -285,6 +380,12 @@ def elements(ev):
         else:
             out.append(UNREADABLE)
     return out
+
+
+def owner_seals_unreadable(log, place):
+    """Whether an establishment event carries a seal with a key written twice
+    or with an escape, so whom it names depends on who reads it."""
+    return log.establishment(place) and ODD in elements(log.raws[place])
 
 
 def is_anchor(log, seal, owner):
@@ -295,6 +396,8 @@ def is_anchor(log, seal, owner):
         return False, False
     if not log.establishment(place):
         return False, True
+    if owner_seals_unreadable(log, place):
+        raise Invalid("a seal in the sealed event has a key written twice or with an escape")
     return owner in (owners_named(log.events[place]) or []), True
 
 
@@ -324,6 +427,8 @@ def check(case):
     r["owner"] = owner
     if owner == m.id:
         return end("refused", "same_identifier")
+    if any(owner_seals_unreadable(m, i) for i in range(len(m.events))):
+        return end("refused", "log_invalid")
     try:
         sets = owner_sets(m)
     except Invalid:
@@ -360,8 +465,8 @@ def check(case):
     for i, ev in enumerate(x.events):
         if ev["t"] != "ixn" or anchor is not None:
             continue
-        for el in elements(ev):
-            if el is UNREADABLE:
+        for el in elements(x.raws[i]):
+            if el is UNREADABLE or el is ODD:
                 return end("refused", "log_unchecked")
             if el is OTHER:
                 continue
@@ -370,7 +475,7 @@ def check(case):
                 break
             before.append(el)
     if anchor is None:
-        removed = any(el == exact for ev in x.retired for el in elements(ev))
+        removed = any(el == exact for gone in x.retired for el in elements(gone))
         return end("named_not_owned", "anchor_removed" if removed else "named_not_anchored")
 
     # Step 6 of the record: the first anchor in X's log names M.
@@ -446,8 +551,12 @@ def main(path):
         for v in logs:
             for copy in [v["messages"]] + (v.get("kept") or []):
                 for message in copy:
-                    ev = json.loads(split(message)[0])
-                    for key in ev.get("k", []):
+                    try:
+                        keys = DECODER.raw_decode(message)[0].get("k", [])
+                    except (ValueError, AttributeError):
+                        base.fail("%s: a message does not begin with an event, so its keys cannot be traced to a seed" % label)
+                        continue
+                    for key in keys if isinstance(keys, list) else []:
                         if key not in made:
                             base.fail("%s: the key %s comes from no published seed" % (label, key))
         try:

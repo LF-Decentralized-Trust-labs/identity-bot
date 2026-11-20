@@ -38,24 +38,51 @@ numbers.
   whose `d` is not its `i`. One with exactly the three fields and an `i` or `d`
   that is empty or not a string cannot be read: in M's log it makes the log
   `log_invalid`, and in a log looked up in step 7 it makes the answer
-  `log_unchecked`.
+  `log_unchecked`. So does a seal there with a key written twice or with an
+  escape (below).
 - **The anchor** is an event seal in the `a` field of an **interaction event**
   of X that names an establishment event **E** of M: `{"i": M, "s": E's
   sequence number, "d": E's SAID}`. For the owner named at founding E is M's
   inception and the seal is `{"i": M, "s": "0", "d": M}`. An event seal in an
   establishment event of X is never an anchor: it is X's own owner seal.
 
-**Reading an interaction's `a`.** It is read element by element, and one
-element never changes how another is read. Each element is one of three things:
+**Reading an `a` list.** It is read from the event's bytes, element by
+element, and one element never changes how another is read. Each element is one
+of three things:
 
 - an **event seal**, as above;
 - **another seal**: an object that lacks at least one of `i`, `s` and `d` (a
   digest seal `{"d": …}`, for example). It is shown not to be an event seal and
   is passed over;
 - **unreadable**: anything that is not an object (a string, a number, a list,
-  `null`), an object that has `i`, `s` and `d` and a further field, or one
-  whose `i`, `s` or `d` is not as an event seal writes it. An `a` that is
-  present and is not a list is one unreadable element.
+  `null`), an object that has `i`, `s` and `d` and a further field, one whose
+  `i`, `s` or `d` is not as an event seal writes it, and **an object in which a
+  key is written twice or with an escape**. An `a` that is present and is not a
+  list is one unreadable element.
+
+**A key written twice, or with an escape, is read by nobody.** JSON readers
+differ on which of two values under one key they keep, and on whether
+`"\u0069"` is the key `"i"`. So `{"i": A, "i": B, "s": "0", "d": A}` is an anchor
+of A to one reader and a seal of nothing to another. The rule looks at how the
+object's own keys are written in the bytes, and it has three parts:
+
+- An object in an `a` list with one of its own keys written twice, or any of
+  them written with a backslash escape, is unreadable, whatever its keys are.
+  Keys inside its values are not looked at: an event seal has no object inside.
+- The same holds for the event's own keys: an event whose `a` key (or any
+  other of its own keys) is written with an escape has an unreadable `a`.
+- A value may be written with an escape. Every reader decodes
+  `"\u0030"` to `"0"`, and values are compared after decoding.
+
+This is a rule of this check and not of KERI. A KERI verifier signs and checks
+the bytes whatever their spelling, and the one this check uses accepts such an
+event as validly signed (tested). So the answer is never that the log is
+invalid on this account alone. In an interaction of X read by step 6 it is
+`log_unchecked`, as for any unreadable element. In an **establishment event**
+it is the owner seals that cannot be read: in M's log that is `log_invalid`,
+the same answer as an owner seal with nothing in it, and in a log looked up in
+step 7 it is `log_unchecked`. Spacing between the parts of an event is the
+writer's business and changes nothing.
 
 An unreadable element is never passed over where step 6 reads: it may be an
 earlier anchor.
@@ -84,13 +111,22 @@ A log of more than 2048 events is not judged: the answer is `log_unchecked`,
 for either log, for another copy the verifier holds and for a log of another
 identifier.
 
-**What an owner identity's log may hold.** The check depends on this rule: an
-owner identity's log carries no event seal other than anchors before its first
-anchor, and nothing unreadable. Every event seal before the anchor has to be
-looked up in the log it names (step 7). A seal there that names something with
-no key log, such as a registry or a credential event, can never be looked up,
-and leaves the answer `log_unchecked` for good. An owner identity is minted to
-own one Identity Agent and is used for nothing else.
+**What an owner identity's log may hold before its anchor.** The check reads
+every element of X's interactions up to the anchor, and does one of four things
+with each:
+
+| Met before the anchor | The check |
+|---|---|
+| an unreadable element | stops: `log_unchecked` |
+| another kind of seal (not an event seal) | passes it over |
+| an event seal of an event of M, of X itself, or of an identifier whose log was supplied and holds that event | looks the event up (step 7): an anchor of another Identity Agent is `second_machine`; anything else, such as a delegation approval or a seal of one of X's own events, is passed over |
+| an event seal of an identifier whose log was not supplied, or does not hold that event | stops: `log_unchecked`, naming the identifier in `needs` |
+
+The last row has no way out when the seal names something that has no key log,
+such as a registry or a credential event: that owner identity's Identity Agent
+stays `log_unchecked` for good. So an owner identity is minted to own one
+Identity Agent, and seals nothing before its anchor that a verifier could not
+look up.
 
 ## Two copies of one log
 
@@ -109,8 +145,16 @@ different events at one place:
 
 Where they never differ and the other copy is longer, the copy being checked
 is stale (`stale_copy`). Where it is the shorter or the same, nothing is wrong.
-A copy held by the verifier that does not verify, or is another identifier's
-log, cannot be judged against (`log_unchecked`).
+Three outcomes are `log_unchecked`, because the copy being checked cannot be
+judged against the other one:
+
+- the other copy does not verify, or is another identifier's log;
+- an event of the other copy, at a place the copy being checked holds a
+  different event, does not verify against the state before that place, or is
+  a delegated rotation (whether it may replace an event turns on its
+  delegator's log);
+- a recovery rotation and the event it would replace that fit neither rule
+  above, so the pair is shown to be neither a repair nor duplicity.
 
 ## The steps
 
@@ -176,7 +220,8 @@ The first that fails is the answer.
      is proven duplicitous, or does not hold the sealed event: `log_unchecked`,
      and the result names that identifier in `needs`.
    - Its sealed event is an establishment event whose owner seals cannot be
-     read: `log_unchecked`, in whichever log.
+     read (one with nothing in it, or a seal with a key written twice or with
+     an escape): `log_unchecked`, in whichever log.
    - It names another identifier and is an anchor: `second_machine`.
    - It names another identifier and is not an anchor (a delegation approval,
      for example): passed over.

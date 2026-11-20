@@ -1,11 +1,15 @@
 package ownership
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
+	stdstrings "strings"
 	"testing"
 
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/signedlog"
 )
 
@@ -141,11 +145,10 @@ func TestTheAnchorSealIsKERIsEventSealWithALowercaseHexSequenceNumber(t *testing
 		t.Fatalf("got %s, want %s", seal, want)
 	}
 	// It is read back as the event seal it is.
-	var fields map[string]interface{}
-	if err := json.Unmarshal(p.anchored.Raws[1], &fields); err != nil {
+	read, err := elementsOf(p.anchored.Raws[1])
+	if err != nil {
 		t.Fatal(err)
 	}
-	read := elementsOf(fields)
 	if len(read) != 1 || !read[0].eventSeal || read[0].seal != (keri.Seal{Identifier: p.machine.AID, SN: 0, SAID: p.machine.AID}) {
 		t.Fatalf("read back %+v", read)
 	}
@@ -359,6 +362,11 @@ func TestAnElementThatCannotBeReadAtOrBeforeTheAnchorStopsTheCheck(t *testing.T)
 		"a seal with s in capitals":     sealOf(`"0A"`),
 		"a seal with an empty s":        sealOf(`""`),
 		"a seal that names no identity": `{"i":"","s":"0","d":"` + p.machine.AID + `"}`,
+		"a seal with i written twice":   `{"i":"` + second.AID + `","i":"` + p.machine.AID + `","s":"0","d":"` + second.AID + `"}`,
+		"the same, the other way round": `{"i":"` + p.machine.AID + `","i":"` + second.AID + `","s":"0","d":"` + second.AID + `"}`,
+		"a seal with d written twice":   `{"i":"` + second.AID + `","s":"0","d":"` + p.machine.AID + `","d":"` + second.AID + `"}`,
+		"a seal with an escaped key":    `{"` + string(rune(92)) + `u0069":"` + second.AID + `","s":"0","d":"` + second.AID + `"}`,
+		"another seal with a key twice": `{"d":"EOne","d":"ETwo"}`,
 	} {
 		beside := p.bare.Fork().Seal(p.m.anchors(second, 0), json.RawMessage(junk)).Seal(p.m.anchors(p.machine, 0))
 		got := check(handed(p.machine), handed(beside), handed(second))
@@ -439,4 +447,92 @@ func TestAnIdentifierThatIsNotTheDigestOfItsInceptionIsRefused(t *testing.T) {
 	want(t, check(handed(named), handed(basic)), Refused, LogInvalid)
 	// And as the Identity Agent.
 	want(t, check(handed(basic), handed(p.anchored)), Refused, LogInvalid)
+}
+
+// A Go map keeps the last of two values written under one key, and other
+// readers keep the first. Neither reading is taken.
+func TestAKeyWrittenTwiceOrWithAnEscapeIsNotRead(t *testing.T) {
+	escape := string(rune(92))
+	for text, want := range map[string]bool{
+		`{"i":"a","s":"0","d":"b"}`:                    false,
+		`{"i":"a","i":"b","s":"0","d":"b"}`:            true,
+		`{"i":"a","s":"0","d":"b","d":"b"}`:            true,
+		`{"` + escape + `u0069":"a","s":"0","d":"b"}`:  true,
+		`{"i":"a", "` + escape + `u0073":"0","d":"b"}`: true,
+		// an escape in a value is read by every reader as the same string
+		`{"i":"a","s":"` + escape + `u0030","d":"b"}`: false,
+		// only the object's own keys are looked at
+		`{"x":{"k":1,"k":2}}`: false,
+	} {
+		if got := keysWrittenTwiceOrEscaped([]byte(text)); got != want {
+			t.Errorf("%s: got %v, want %v", text, got, want)
+		}
+	}
+
+	// In an establishment event of the Identity Agent it is the owner seals
+	// that cannot be read, and the log is refused.
+	p := newPair(t)
+	another := signedlog.Incept(t, p.m.keys("another-owner", 2))
+	doubled := signedlog.InceptWith(t, p.m.keys("machine-with-a-doubled-owner-seal", 2), witnessedBy(p.wm,
+		json.RawMessage(`{"i":"`+another.AID+`","i":"`+p.bare.AID+`","s":"0","d":"`+p.bare.AID+`"}`)))
+	want(t, check(handed(doubled), handed(p.bare.Fork().Seal(p.m.anchors(doubled, 0)))), Refused, LogInvalid)
+	// And where such an event is looked up as an earlier sealed event, the
+	// answer is that the log could not be checked.
+	sealsIt := p.bare.Fork().Seal(p.m.seal(doubled.AID, 0, doubled.AID)).Seal(p.m.anchors(p.machine, 0))
+	want(t, check(handed(p.machine), handed(sealsIt), handed(doubled)), Refused, LogUnchecked)
+}
+
+// respelt is l with the text of its last event changed by edit, then given
+// its new length and digest and signed again by the key made from seed: an
+// event a controller could sign, in a spelling no ordinary writer produces.
+func respelt(t *testing.T, l *signedlog.Log, seed []byte, edit func(string) string) VectorLog {
+	t.Helper()
+	last := l.Len() - 1
+	was := l.SAID(last)
+	text := edit(string(l.Raws[last]))
+	text = text[:16] + fmt.Sprintf("%06x", len(text)) + text[22:]
+	said, err := keri.ComputeSAID([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = stdstrings.Replace(text, was, said, 1)
+	sig, err := keri.MatterQB64(keri.CodeEd25519Sig, ed25519.Sign(ed25519.NewKeyFromSeed(seed), []byte(text)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := drivers.SignedMessageAsSent([]byte(text), []string{sig})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := handed(l)
+	v.Messages[last] = string(message)
+	if _, err := keri.ValidateSignedKEL(texts(v.Messages)); err != nil {
+		t.Fatalf("control: the respelt log does not verify, so the test shows nothing: %v", err)
+	}
+	return v
+}
+
+// The rule on keys is this check's and not KERI's: keri-go verifies an event
+// whose own `a` key is written with an escape, and one with spaces in it. The
+// first has no readable seals here; the second reads as it always did.
+func TestAnEventWhoseOwnKeyIsWrittenWithAnEscapeHasNoReadableSeals(t *testing.T) {
+	p := newPair(t)
+	escape := string(rune(92))
+	seed := seedOf("owner/0")
+
+	escaped := respelt(t, p.anchored, seed, func(s string) string {
+		return stdstrings.Replace(s, `"a":[`, `"`+escape+`u0061":[`, 1)
+	})
+	want(t, check(handed(p.machine), escaped), Refused, LogUnchecked)
+
+	spaced := respelt(t, p.anchored, seed, func(s string) string {
+		return stdstrings.Replace(s, `"a":[{"i":`, `"a": [ {"i": `, 1)
+	})
+	want(t, check(handed(p.machine), spaced), OwnedAnchored, NotFromWitnesses)
+
+	// A value written with an escape is the same value to every reader.
+	valued := respelt(t, p.anchored, seed, func(s string) string {
+		return stdstrings.Replace(s, `"s":"0","d":"`+p.machine.AID, `"s":"`+escape+`u0030","d":"`+p.machine.AID, 1)
+	})
+	want(t, check(handed(p.machine), valued), OwnedAnchored, NotFromWitnesses)
 }
