@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/drivers"
 )
 
 // A contact is refused on proof of duplicity, never on a count of watchers.
@@ -304,26 +306,22 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 
 	// conflict judges an event at a place cur holds something else at.
 	conflict := func(ev *keri.Event, message []byte) (*proof, bool) {
-		if ev.Ilk == "drt" {
+		// The judgement is drivers.JudgeAtTakenPlace, the one rule for two
+		// events at one place; here it is worded as a verdict on the watcher.
+		found, err := drivers.JudgeAtTakenPlace(cur, msgs, ev, message)
+		switch found {
+		case drivers.TakenDelegated:
 			p := proof{Kind: proofUnprovable, Reason: "a delegated rotation at a place already held: " +
 				"whether it may replace the held event turns on its delegator's log, which is not by itself duplicity"}
 			return &p, true
-		}
-		var before *keri.KeyState
-		if ev.SN > 0 {
-			before = cur.StateAt(ev.SN - 1)
-		}
-		if _, err := keri.VerifyEvent(before, message); err != nil {
+		case drivers.TakenUnverified:
 			return &proof{Kind: proofWatcherFaulty, Reason: "an event of its log at place " +
 				fmt.Sprint(ev.SN) + " does not verify against the state before it: " + err.Error(), Code: FaultEventDoesNotVerify}, true
-		}
-		// The rival may be what a recovery rotation the presented log holds at this
-		// place retires: a recovery rotation replaces the interactions after the last
-		// establishment event, and an interaction the retired key signed there is
-		// not a second history, whether the watcher holds it in its log or kept it
-		// as a rival (keripy does not call it duplicity either). The case where the
-		// watcher's log carries the rotation is the admission above, which supersedes.
-		if int(ev.SN) < len(msgs) && recoveryRetires(msgs[:ev.SN], message, msgs[ev.SN]) {
+		case drivers.TakenRetired:
+			// The rival is what a recovery rotation the presented log holds at this
+			// place retires, whether the watcher holds it in its log or kept it as
+			// a rival. The case where the watcher's log carries the rotation is the
+			// admission above, which supersedes.
 			return &proof{Kind: proofWatcherBehind, Reason: "the presented log holds a recovery rotation " +
 				"at place " + fmt.Sprint(ev.SN) + " that supersedes what the watcher holds"}, true
 		}
@@ -422,19 +420,8 @@ func judgeWatcherLog(aid string, presented [][]byte, theirs *WatcherLog) proof {
 		"yet its own log holds exactly the presented events"}
 }
 
-// recoveryRetires says whether recovery, applied to the log made of prefix and
-// the event retired, replaces retired: the recovery rotation sits at the same
-// place and KERI's rule lets it supersede an interaction there. Both are signed
-// messages and are verified here, so nothing is taken on the caller's word.
+// recoveryRetires is drivers.RecoveryRetires, the one reading of "a recovery
+// rotation replaces this event".
 func recoveryRetires(prefix [][]byte, retired, recovery []byte) bool {
-	if len(prefix) == 0 {
-		return false
-	}
-	branch := append(append([][]byte(nil), prefix...), retired)
-	log, err := keri.ValidateSignedKEL(branch)
-	if err != nil {
-		return false
-	}
-	adm, err := log.Admit(recovery)
-	return err == nil && adm.Supersedes > 0
+	return drivers.RecoveryRetires(prefix, retired, recovery)
 }
