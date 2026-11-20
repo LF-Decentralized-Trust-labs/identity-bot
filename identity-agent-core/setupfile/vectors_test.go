@@ -42,8 +42,8 @@ type vectorItem struct {
 type fileVector struct {
 	Name string `json:"name"`
 	// File is the file, as text; or FileHex is its bytes in hexadecimal, for a
-	// file that is not text or that holds text shaped like a key, so that the
-	// published vectors hold no such text whole.
+	// file that is not UTF-8 or that holds a string judged a secret, so that
+	// the published vectors hold no such string as text.
 	File    string `json:"file,omitempty"`
 	FileHex string `json:"file_hex,omitempty"`
 	// Knows, when given, are the only capabilities the reading Identity Agent
@@ -205,7 +205,7 @@ func (c vectorChoice) choice(r *Result, v fileVector) Choice {
 func written(t testing.TB) vectorSet {
 	t.Helper()
 	set := vectorSet{
-		Description: "Set-up files (ADR-088, docs/set-up-file.md), each with what a reader makes of it. file is the file's text (file_hex its bytes in hexadecimal, where they are not text or hold text shaped like a key, so that these vectors hold none as text). " +
+		Description: "Set-up files (ADR-088, docs/set-up-file.md), each with what a reader makes of it. file is the file's text, or file_hex its bytes in hexadecimal where they are not UTF-8 or where any string in the file, a value or a member's name, is in a spelling only a secret has (secret_shaped), so that no such string is held in these vectors as text. " +
 			"A file is refused whole for the reason in refused, or read: contents is the digest of its canonical contents (the file without its seal, in RFC 8785 canonical JSON, as Blake3-256 in CESR qb64), flags what the person is told of the file's own notes, " +
 			"and each item is ready, blocked (blocks: the reasons, each once, sorted) or not_understood, with its flags, its rest digest, the utility apps it names, those of them that are utility-app items of the file (depends_on) and the credentials it needs. " +
 			"seal is what the seal is found to be by a reader that holds, for each identity in keys, a key log of one event, at 0, whose key is in force (earlier_keys names those whose key has since been rotated away from; no_key_log is a reader that holds none); sealed_by is whose signature verified, and seal_input the bytes signed. " +
@@ -220,7 +220,7 @@ func written(t testing.TB) vectorSet {
 	}
 	add := func(name string, file []byte, more ...func(*fileVector)) {
 		v := fileVector{Name: name}
-		if utf8.Valid(file) && !holdsKeyShapedText(file) {
+		if utf8.Valid(file) && !holdsSecretShapedText(file) {
 			v.File = string(file)
 		} else {
 			v.FileHex = hex.EncodeToString(file)
@@ -637,6 +637,50 @@ func TestThePublishedVectorsAreWhatThisPackageMakes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(set, made) {
 		t.Fatal("the published vectors do not read back as they were written")
+	}
+}
+
+// What the description says of file_hex is true: no string in the published
+// vectors, nor any string in a file they hold as text, is in a spelling only
+// a secret has.
+func TestTheVectorsHoldNoStringJudgedASecret(t *testing.T) {
+	raw, err := json.Marshal(written(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all any
+	if err := json.Unmarshal(raw, &all); err != nil {
+		t.Fatal(err)
+	}
+	var walk func(v any, where string)
+	walk = func(v any, where string) {
+		switch v := v.(type) {
+		case string:
+			if where == "file" && holdsSecretShapedText([]byte(v)) || where != "file" && shapeOf(v) == secretShape {
+				t.Errorf("a string judged a secret is held as text in a vector's %s", where)
+			}
+		case []any:
+			for _, e := range v {
+				walk(e, where)
+			}
+		case map[string]any:
+			for k, e := range v {
+				if shapeOf(k) == secretShape {
+					t.Error("a member's name in the vectors is judged a secret")
+				}
+				walk(e, k)
+			}
+		}
+	}
+	walk(all, "")
+	// And the rule is not idle: some file that is UTF-8 is carried in
+	// file_hex for it.
+	found := false
+	for _, v := range written(t).Files {
+		found = found || v.FileHex != "" && utf8.Valid(v.bytes())
+	}
+	if !found {
+		t.Fatal("no file that is UTF-8 is carried in file_hex")
 	}
 }
 

@@ -3,6 +3,7 @@ package setupfile
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -11,8 +12,9 @@ import (
 // tests need text shaped like the keys of real services. Every such value is
 // made up, and each is built here, at run time, from parts split inside its
 // recognisable beginning and inside the rest, so that no source file holds one
-// whole. A published vector whose file holds one carries the file's bytes in
-// hexadecimal (file_hex), so the vectors hold none as text either.
+// whole. A published vector whose file holds any string this package judges a
+// secret carries the file's bytes in hexadecimal (file_hex), so the vectors
+// hold none as text either.
 
 // joined is the one way these values are built.
 func joined(parts ...string) string { return strings.Join(parts, "") }
@@ -86,16 +88,26 @@ func keyShaped(name string) string {
 	return v
 }
 
-// holdsKeyShapedText is whether b holds any of the values above, as it is or
-// as it is written in a JSON string.
-func holdsKeyShapedText(b []byte) bool {
-	for _, v := range shapedLikeAKey {
-		quoted, _ := json.Marshal(v)
-		if bytes.Contains(b, []byte(v)) || bytes.Contains(b, quoted[1:len(quoted)-1]) {
+// holdsSecretShapedText is whether any string in b, a value or a member's
+// name, is judged a secret by this package's own rule (shapeOf). b is read as
+// a stream of JSON values to its end; where it stops being JSON, the whole of
+// b is judged as one text too, so a file that is not JSON is never taken for
+// one that holds no secret.
+func holdsSecretShapedText(b []byte) bool {
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	for {
+		token, err := d.Token()
+		if err == io.EOF {
+			return false
+		}
+		if err != nil {
+			return shapeOf(string(b)) == secretShape
+		}
+		if s, ok := token.(string); ok && shapeOf(s) == secretShape {
 			return true
 		}
 	}
-	return false
 }
 
 func TestEveryValueShapedLikeAKeyIsJudgedAsItsShapeSays(t *testing.T) {
