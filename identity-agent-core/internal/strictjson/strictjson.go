@@ -41,6 +41,23 @@ const maxExactInt = 1<<53 - 1
 
 var wholeNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 
+// WholeNumber reads a number as a whole number written the one way every
+// reader reads alike: digits, with a minus sign before a number that is not
+// zero, no fraction and no exponent, and no larger either way than a 64-bit
+// float holds exactly. It is the rule Decode holds a whole-number field to,
+// for a caller that reads numbers it has no field for.
+func WholeNumber(n json.Number) (int64, error) {
+	s := n.String()
+	if !wholeNumber.MatchString(s) || s == "-0" {
+		return 0, fmt.Errorf("must be a whole number written plainly, not %.40s", s)
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v > maxExactInt || v < -maxExactInt {
+		return 0, fmt.Errorf("is too large to be read exactly everywhere")
+	}
+	return v, nil
+}
+
 // Decode reads data into v, which must be a pointer, by the rules above.
 func Decode(data []byte, v any) error {
 	rv := reflect.ValueOf(v)
@@ -104,13 +121,8 @@ func (w walker) value(t reflect.Type, at string, top bool, depth int) error {
 		switch t.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			s := tok.String()
-			if !wholeNumber.MatchString(s) || s == "-0" {
-				return fmt.Errorf("%s must be a whole number written plainly, not %s", at, s)
-			}
-			n, err := strconv.ParseInt(s, 10, 64)
-			if err != nil || n > maxExactInt || n < -maxExactInt {
-				return fmt.Errorf("%s is too large to be read exactly everywhere", at)
+			if _, err := WholeNumber(tok); err != nil {
+				return fmt.Errorf("%s %w", at, err)
 			}
 		}
 	}
