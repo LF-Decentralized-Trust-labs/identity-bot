@@ -4,6 +4,7 @@
 **Date:** 2026-08-12
 **Builds on:** ADR-032 (an identity can name who owns it, from its first event),
 ADR-034 (an instance is told who may claim it, before anyone can reach it)
+**Amended:** 2026-11-19 — Who owns a paired computer can be verified from the owner identity's own log, and a lost index can be found again (see ADR-087)
 
 ## Context
 
