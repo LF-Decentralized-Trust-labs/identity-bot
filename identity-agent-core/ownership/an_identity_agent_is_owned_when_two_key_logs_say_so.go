@@ -11,9 +11,12 @@
 // nothing, keeps nothing and trusts nothing it is told: the caller passes each
 // log, the receipts held for it, where the copy came from, and any other copy
 // of it the caller holds. Log verification, the reading of owner seals, the
-// judgement of two events at one place and the counting of witness receipts
-// are the ones the rest of the core uses (keri-go and package drivers); none
-// is written again here.
+// writing of an event seal, the judgement of two events at one place and the
+// counting of witness receipts are the ones the rest of the core uses (keri-go
+// and package drivers); none is written again here. What is read here, and
+// only here, is an interaction event's `a` list element by element
+// (elementsOf): keri-go's reader gives up on a whole event when one element
+// is not a seal, and this check must not pass over what it cannot read.
 //
 // The words another implementation must match are in
 // contracts/owned/owned.md, with worked examples in owned-vectors.json.
@@ -23,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -84,8 +88,12 @@ const (
 
 	// With Refused.
 
-	// LogInvalid is a log that does not verify as KERI requires.
+	// LogInvalid is a log that does not verify as KERI requires, or whose
+	// identifier is not the digest of its own inception.
 	LogInvalid Reason = "log_invalid"
+	// SameIdentifier is one identifier given as both the Identity Agent and
+	// its owner. Owned is proved from two logs, never one.
+	SameIdentifier Reason = "same_identifier"
 	// NotNamed is an owner the Identity Agent's log does not name in the owner
 	// set in force at its latest establishment event.
 	NotNamed Reason = "not_named"
@@ -94,9 +102,10 @@ const (
 	// rotation in that copy replaces some of its events.
 	StaleCopy Reason = "stale_copy"
 	// LogUnchecked is a log that could not be checked: an owner's interaction
-	// before the anchor seals an event of an identifier whose log was not
-	// supplied or does not reach that event, or another copy the verifier
-	// holds cannot be judged.
+	// at or before the anchor carries something that cannot be read as a seal,
+	// or seals an event of an identifier whose log was not supplied or does
+	// not reach that event; a log is longer than is judged; or another copy
+	// the verifier holds cannot be judged.
 	LogUnchecked Reason = "log_unchecked"
 	// Duplicity is either log proven to hold two validly signed events at one
 	// place, neither a recovery of the other. No Identity Agent is owned by
@@ -153,12 +162,16 @@ type Result struct {
 	Owner   string `json:"owner,omitempty"`
 	// Event is the SAID of the establishment event in which the owner entered
 	// the Identity Agent's owner set, and EventSN its sequence number. They
-	// are set once that event is known, whatever the grade.
-	Event   string `json:"event,omitempty"`
-	EventSN uint64 `json:"event_sn"`
+	// are set once that event is known, whatever the grade, and absent before.
+	Event   string  `json:"event,omitempty"`
+	EventSN *uint64 `json:"event_sn,omitempty"`
 	// AnchoredBy is the SAID of the owner's interaction event that seals
 	// Event, set for the two owned grades.
 	AnchoredBy string `json:"anchored_by,omitempty"`
+	// Needs is the identifier whose log the verifier must supply, or supply a
+	// longer copy of, before the answer can be given. Set with LogUnchecked
+	// when that is why.
+	Needs string `json:"needs,omitempty"`
 	// Detail is words for a log or a person debugging. Nothing branches on it.
 	Detail string `json:"-"`
 }
@@ -191,6 +204,10 @@ func Check(machine, owner Log, opt Options) Result {
 	if r.Owner == "" {
 		return end(Refused, LogInvalid, "the owner's log does not begin with a readable event")
 	}
+	// Owned is proved from two logs, never one.
+	if r.Owner == r.Machine {
+		return end(Refused, SameIdentifier, "the Identity Agent and the owner are one identifier")
+	}
 
 	sets, err := drivers.OwnerSetsByEvent(m.fields)
 	if err != nil {
@@ -206,7 +223,9 @@ func Check(machine, owner Log, opt Options) Result {
 	named := contains(sets[latest], r.Owner)
 
 	// ...and passes the test of decision 2, on the whole log and not on one
-	// event: its inception is an icp and no event names a delegator.
+	// event: its inception is an icp and no event names a delegator. (A
+	// delegated rotation in a log that began with an icp never gets here: the
+	// log does not verify.)
 	for _, ev := range m.events {
 		if delegated(ev) {
 			g := Refused
@@ -229,7 +248,7 @@ func Check(machine, owner Log, opt Options) Result {
 		e = establishment[k]
 	}
 	sealed := m.events[e]
-	r.Event, r.EventSN = sealed.SAID, sealed.SN
+	r.Event, r.EventSN = sealed.SAID, &sealed.SN
 
 	// Step 3. E is an event of the log just verified: it was read from it.
 	// A second establishment event of the Identity Agent at E's place, in any
@@ -257,31 +276,43 @@ func Check(machine, owner Log, opt Options) Result {
 	}
 
 	// Step 5. An interaction event that still stands in the owner's log seals
-	// E exactly: identifier, sequence number and digest all equal.
-	type place struct{ event, seal int }
-	var seals [][]keri.Seal
-	anchor := place{-1, -1}
+	// E exactly: identifier, sequence number and digest all equal. The owner's
+	// interactions are read in order, element by element, until that seal is
+	// found. An element met on the way that cannot be read as a seal, or
+	// cannot be shown not to be an event seal, stops the check: it may be an
+	// earlier anchor, and step 6 cannot be answered past it.
+	type placed struct {
+		seal  keri.Seal
+		event int
+	}
+	var before []placed
+	anchor := -1
+find:
 	for i, ev := range x.events {
-		in, err := SealsOfInteraction(ev)
-		if err != nil {
-			return end(Refused, LogUnchecked, "the owner's log, event %d: %v", i, err)
+		if ev.Ilk != "ixn" {
+			continue
 		}
-		seals = append(seals, in)
-		for j, s := range in {
-			if anchor.event < 0 && sealsExactly(s, sealed) {
-				anchor = place{i, j}
+		for _, el := range elementsOf(x.fields[i]) {
+			switch {
+			case el.unreadable:
+				return end(Refused, LogUnchecked, "the owner's interaction at %d carries something that cannot be read as a seal, before any seal of the event was found", ev.SN)
+			case !el.eventSeal:
+				continue
+			case sealsExactly(el.seal, sealed):
+				anchor = i
+				break find
 			}
+			before = append(before, placed{el.seal, i})
 		}
 	}
-	if anchor.event < 0 {
+	if anchor < 0 {
 		// A recovery rotation of the owner identity that removed the anchoring
 		// interaction removed the anchor. The verifier can tell that from a
 		// plain absence only when a copy it holds still has the interaction.
-		for _, ev := range x.retired {
-			in, _ := SealsOfInteraction(ev)
-			for _, s := range in {
-				if sealsExactly(s, sealed) {
-					return end(NamedNotOwned, AnchorRemoved, "a recovery rotation of the owner identity replaced the interaction at %d that sealed the event, and nothing has anchored it since", ev.SN)
+		for _, gone := range x.retired {
+			for _, el := range gone.elements {
+				if el.eventSeal && sealsExactly(el.seal, sealed) {
+					return end(NamedNotOwned, AnchorRemoved, "a recovery rotation of the owner identity replaced the interaction at %d that sealed the event, and nothing has anchored it since", gone.sn)
 				}
 			}
 		}
@@ -297,38 +328,43 @@ func Check(machine, owner Log, opt Options) Result {
 	for i := range opt.OtherLogs {
 		id := identifierOf(opt.OtherLogs[i].Messages)
 		if id == "" || id == m.id || id == x.id {
-			continue
+			continue // the two logs being checked are the copies in hand
 		}
 		if o, _, err := read(opt.OtherLogs[i]); err == nil && !o.forked {
 			others[id] = o
 		}
 	}
 first:
-	for i := 0; i <= anchor.event; i++ {
-		for j, s := range seals[i] {
-			if i == anchor.event && j == anchor.seal {
-				break first
+	for _, b := range before {
+		s, at := b.seal, x.events[b.event].SN
+		of, own := m, true
+		switch s.Identifier {
+		case m.id:
+		case x.id:
+			of = x // a seal of the owner's own event is looked up in its own log
+		default:
+			own = false
+			if of = others[s.Identifier]; of == nil {
+				r.Needs = s.Identifier
+				return end(Refused, LogUnchecked, "the owner's interaction at %d seals an event of %s, whose log was not supplied or does not verify, so which Identity Agent the owner anchored first is not known", at, s.Identifier)
 			}
-			of := m
-			if s.Identifier != m.id {
-				if of = others[s.Identifier]; of == nil {
-					return end(Refused, LogUnchecked, "the owner's interaction at %d seals an event of %s, whose log was not supplied or does not verify, so which Identity Agent the owner anchored first is not known", x.events[i].SN, s.Identifier)
-				}
-			}
-			is, known := of.anchors(s, x.id)
-			switch {
-			case !known && of != m:
-				return end(Refused, LogUnchecked, "the owner's interaction at %d seals event %d of %s, which the copy of that log supplied does not hold", x.events[i].SN, s.SN, s.Identifier)
-			case is && of == m:
-				break first // the first anchor names this Identity Agent
-			case is:
-				return end(NamedNotOwned, SecondMachine, "the owner's log first anchors %s, at %d: one owner identity owns one Identity Agent", s.Identifier, x.events[i].SN)
-			}
+		}
+		is, known, err := of.anchors(s, x.id)
+		switch {
+		case err != nil:
+			return end(Refused, LogUnchecked, "the owner's interaction at %d seals event %d of %s, whose owner seals cannot be read: %v", at, s.SN, s.Identifier, err)
+		case !known && !own:
+			r.Needs = s.Identifier
+			return end(Refused, LogUnchecked, "the owner's interaction at %d seals event %d of %s, which the copy of that log supplied does not hold", at, s.SN, s.Identifier)
+		case is && of == m:
+			break first // the first anchor names this Identity Agent
+		case is:
+			return end(NamedNotOwned, SecondMachine, "the owner's log first anchors %s, at %d: one owner identity owns one Identity Agent", s.Identifier, at)
 		}
 	}
 
 	// Steps 1 to 7 passing is anchored.
-	r.AnchoredBy = x.events[anchor.event].SAID
+	r.AnchoredBy = x.events[anchor].SAID
 
 	// Step 8. The anchoring event and E each carry valid witness receipts to
 	// the threshold their own log names. That, on logs taken from the
@@ -340,6 +376,62 @@ first:
 		return end(OwnedAnchored, ReceiptsShort, "the anchoring event or the sealed event is not receipted to the threshold its log names")
 	}
 	return end(OwnedConfirmed, ReasonNone, "")
+}
+
+// element is one entry of an interaction event's `a` list, as this check
+// reads it.
+//
+// An event seal is an object with exactly the fields i, s and d, in any
+// order: i and d non-empty strings, s a sequence number in lowercase hex
+// with no leading zero. The owner seal is read with the same exactness
+// (drivers.OwnerFromSeal), so the two readers agree on what an event seal
+// is. An object that lacks one of the three fields is some other seal, and
+// is shown not to be an event seal. Everything else is unreadable: something
+// that is not an object, an object with the three fields and more, or one
+// whose i, s or d is not as an event seal writes it. An unreadable element
+// is never skipped, because skipping it is how an earlier anchor would hide.
+type element struct {
+	seal       keri.Seal
+	eventSeal  bool
+	unreadable bool
+}
+
+// elementsOf reads the `a` list of an event, element by element. An `a` that
+// is present and is not a list is one unreadable element.
+func elementsOf(fields map[string]interface{}) []element {
+	a, present := fields["a"]
+	if !present || a == nil {
+		return nil
+	}
+	list, ok := a.([]interface{})
+	if !ok {
+		return []element{{unreadable: true}}
+	}
+	out := make([]element, 0, len(list))
+	for _, entry := range list {
+		object, ok := entry.(map[string]interface{})
+		if !ok {
+			out = append(out, element{unreadable: true})
+			continue
+		}
+		iRaw, hasI := object["i"]
+		sRaw, hasS := object["s"]
+		dRaw, hasD := object["d"]
+		if !hasI || !hasS || !hasD {
+			out = append(out, element{}) // another kind of seal
+			continue
+		}
+		i, _ := iRaw.(string)
+		s, _ := sRaw.(string)
+		d, _ := dRaw.(string)
+		sn, err := strconv.ParseUint(s, 16, 64)
+		if len(object) != 3 || i == "" || d == "" || err != nil || strconv.FormatUint(sn, 16) != s {
+			out = append(out, element{unreadable: true})
+			continue
+		}
+		out = append(out, element{seal: keri.Seal{Identifier: i, SN: sn, SAID: d}, eventSeal: true})
+	}
+	return out
 }
 
 // readLog is a log that verified, with what judging it against the verifier's
@@ -355,7 +447,13 @@ type readLog struct {
 	forked bool
 	// retired are the events of other copies that a recovery rotation of
 	// this log replaced.
-	retired []*keri.Event
+	retired []retiredEvent
+}
+
+// retiredEvent is an event of another copy that a recovery rotation replaced.
+type retiredEvent struct {
+	sn       uint64
+	elements []element
 }
 
 // read verifies a log in full with the one log verifier, and judges it
@@ -378,19 +476,18 @@ func read(l Log) (*readLog, Reason, error) {
 	}
 	out := &readLog{id: verified.Identifier}
 	for i, message := range l.Messages {
-		raw, err := keri.EventOfMessage(message)
+		ev, fields, err := eventOf(message)
 		if err != nil {
 			return nil, LogInvalid, fmt.Errorf("event %d: %w", i, err)
 		}
-		ev, err := keri.ParseEvent(raw)
-		if err != nil {
-			return nil, LogInvalid, fmt.Errorf("event %d: %w", i, err)
-		}
-		var fields map[string]interface{}
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return nil, LogInvalid, fmt.Errorf("event %d: %w", i, err)
-		}
-		out.raws, out.events, out.fields = append(out.raws, raw), append(out.events, ev), append(out.fields, fields)
+		out.raws, out.events, out.fields = append(out.raws, ev.Raw), append(out.events, ev), append(out.fields, fields)
+	}
+	// keri-go also verifies an identifier that is a key (basic derivation).
+	// Such an identifier is not the digest of its inception, so no event seal
+	// can name its inception by its identifier, and it is neither an owner nor
+	// owned here.
+	if out.events[0].Identifier != out.events[0].SAID {
+		return nil, LogInvalid, fmt.Errorf("the identifier %s is not the digest of its inception", out.id)
 	}
 
 	for n, kept := range l.Kept {
@@ -414,17 +511,31 @@ func read(l Log) (*readLog, Reason, error) {
 	return out, ReasonNone, nil
 }
 
+// eventOf is the event of a signed message, parsed, and its fields.
+func eventOf(message []byte) (*keri.Event, map[string]interface{}, error) {
+	raw, err := keri.EventOfMessage(message)
+	if err != nil {
+		return nil, nil, err
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, nil, err
+	}
+	return ev, fields, nil
+}
+
 // judgeAgainst judges this log against another verified copy of it, event by
 // event, the way ADR-075 judges a log a watcher shows: each event the log
 // does not hold is put to keri-go's Admit, and one at a place already held
-// goes to the one judgement of two events at one place.
+// goes to the judgement of two events at one place with both copies in hand
+// (drivers.JudgeCopiesAtTakenPlace).
 func (l *readLog) judgeAgainst(mine *keri.SignedKELResult, messages [][]byte, theirs *keri.SignedKELResult, kept [][]byte) (Reason, error) {
 	for k, message := range kept {
-		raw, err := keri.EventOfMessage(message)
-		if err != nil {
-			return LogUnchecked, err
-		}
-		ev, err := keri.ParseEvent(raw)
+		ev, _, err := eventOf(message)
 		if err != nil {
 			return LogUnchecked, err
 		}
@@ -444,33 +555,19 @@ func (l *readLog) judgeAgainst(mine *keri.SignedKELResult, messages [][]byte, th
 		case !errors.As(err, &refusal) || !refusal.Has(keri.FaultPlaceTaken):
 			return LogUnchecked, fmt.Errorf("its event %d cannot be judged against this copy of the log: %w", ev.SN, err)
 		}
-		switch found, err := drivers.JudgeAtTakenPlace(mine, messages, ev, message); found {
+		switch found, err := drivers.JudgeCopiesAtTakenPlace(mine, messages, theirs, kept, ev, message); found {
 		case drivers.TakenFork:
 			l.forked = true
 			return ReasonNone, nil
 		case drivers.TakenRetired:
-			// This log holds a recovery rotation at the place. It is a repair,
-			// and not a second history, only if the other copy would admit it
-			// as one: a recovery replaces interactions and never an
-			// establishment event further along the branch it retires.
-			back, err := theirs.Admit(messages[ev.SN])
-			if err == nil && back.Supersedes > 0 {
-				for _, later := range kept[k:] {
-					if raw, err := keri.EventOfMessage(later); err == nil {
-						if gone, err := keri.ParseEvent(raw); err == nil {
-							l.retired = append(l.retired, gone)
-						}
-					}
-				}
-				return ReasonNone, nil
-			}
-			if errors.As(err, &refusal) && refusal.Has(keri.FaultPlaceTaken) {
-				if found, _ := drivers.JudgeAtTakenPlace(theirs, kept, l.events[ev.SN], messages[ev.SN]); found == drivers.TakenFork {
-					l.forked = true
-					return ReasonNone, nil
+			// This log's recovery rotation replaced the other copy's events
+			// from this place on.
+			for _, later := range kept[k:] {
+				if gone, fields, err := eventOf(later); err == nil {
+					l.retired = append(l.retired, retiredEvent{sn: gone.SN, elements: elementsOf(fields)})
 				}
 			}
-			return LogUnchecked, fmt.Errorf("its event %d and this copy's recovery rotation there cannot be settled", ev.SN)
+			return ReasonNone, nil
 		default:
 			return LogUnchecked, fmt.Errorf("its event %d at a place already held cannot be judged: %v", ev.SN, err)
 		}
@@ -482,15 +579,20 @@ func (l *readLog) judgeAgainst(mine *keri.SignedKELResult, messages [][]byte, th
 // anchor of this log: it names an establishment event of it that carries an
 // owner seal naming owner. known is false when this copy of the log does not
 // hold the event the seal names, so the question cannot be answered from it.
-func (l *readLog) anchors(seal keri.Seal, owner string) (is, known bool) {
+// An error is a sealed event whose owner seals cannot be read: it may name
+// the owner, so it is not taken as "not an anchor".
+func (l *readLog) anchors(seal keri.Seal, owner string) (is, known bool, err error) {
 	if seal.SN >= uint64(len(l.events)) || l.events[seal.SN].SAID != seal.SAID {
-		return false, false
+		return false, false, nil
 	}
 	if !l.events[seal.SN].Establishment() {
-		return false, true
+		return false, true, nil
 	}
 	owners, _, err := drivers.OwnerSetFromEvent(l.fields[seal.SN])
-	return err == nil && contains(owners, owner), true
+	if err != nil {
+		return false, true, err
+	}
+	return contains(owners, owner), true, nil
 }
 
 // witnessed is whether the event carries valid receipts from the witnesses
@@ -510,8 +612,9 @@ func sealsExactly(s keri.Seal, event *keri.Event) bool {
 	return s.Identifier == event.Identifier && s.SN == event.SN && s.SAID == event.SAID
 }
 
-// identifierOf is the identifier the first event of a log states, or "" when
-// it cannot be read.
+// identifierOf is the identifier the first event of a log states, the `i` of
+// its JSON as written, or "" when there is none to read. It says only which
+// identifier a log claims: read verifies the claim.
 func identifierOf(messages [][]byte) string {
 	if len(messages) == 0 {
 		return ""
@@ -520,11 +623,13 @@ func identifierOf(messages [][]byte) string {
 	if err != nil {
 		return ""
 	}
-	ev, err := keri.ParseEvent(raw)
-	if err != nil {
+	var stated struct {
+		I string `json:"i"`
+	}
+	if json.Unmarshal(raw, &stated) != nil {
 		return ""
 	}
-	return ev.Identifier
+	return stated.I
 }
 
 func contains(set []string, id string) bool {

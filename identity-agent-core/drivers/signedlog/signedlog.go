@@ -98,10 +98,14 @@ func Incept(t testing.TB, k *Keys) *Log {
 
 // InceptWith founds an identity on key 0 as Incept does, with whatever else
 // the inception is to state taken from in: seals (Data), witnesses and their
-// threshold. Its keys, next-key digest and derivation are set here.
+// threshold, and a derivation other than self-addressing. Its keys and
+// next-key digest are set here.
 func InceptWith(t testing.TB, k *Keys, in keri.InceptionInput) *Log {
 	t.Helper()
-	in.Keys, in.NextDigests, in.Derivation = []string{k.pubs[0]}, k.digest(t, 1), "self-addressing"
+	in.Keys, in.NextDigests = []string{k.pubs[0]}, k.digest(t, 1)
+	if in.Derivation == "" {
+		in.Derivation = "self-addressing"
+	}
 	raw, err := keri.BuildInception(in)
 	if err != nil {
 		t.Fatal(err)

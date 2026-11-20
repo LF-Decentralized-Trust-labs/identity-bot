@@ -48,7 +48,7 @@ func TestAnIdentityAgentIsOwnedWhenItsOwnersLogSealsItsInception(t *testing.T) {
 	got := check(handed(p.machine), handed(p.anchored))
 	want(t, got, OwnedAnchored, NotFromWitnesses)
 	if !got.Owned() || got.Machine != p.machine.AID || got.Owner != p.bare.AID ||
-		got.Event != p.machine.AID || got.EventSN != 0 || got.AnchoredBy != p.anchored.SAID(1) {
+		got.Event != p.machine.AID || got.EventSN == nil || *got.EventSN != 0 || got.AnchoredBy != p.anchored.SAID(1) {
 		t.Fatalf("the result does not say what was sealed and where: %+v", got)
 	}
 	// Without the owner's interaction the same Identity Agent is only named.
@@ -127,22 +127,27 @@ func TestTheAnchorSealIsKERIsEventSealWithALowercaseHexSequenceNumber(t *testing
 	if want := `{"i":"` + p.machine.AID + `","s":"0","d":"` + p.machine.AID + `"}`; string(seal) != want {
 		t.Fatalf("the founding seal is %s, want %s", seal, want)
 	}
-	// Sequence number 26 is written 1a.
-	later, err := EventSeal(p.machine.AID, 26, "EEventAtPlaceTwentySix")
+	// A later event's sequence number is written in lowercase hex: the
+	// eleventh event is "a".
+	long := signedlog.Incept(t, signedlog.NewKeys(t, 7))
+	for i := 0; i < 5; i++ {
+		long.Interact("work").Rotate()
+	}
+	seal, err = AnchorSeal(long.Raws[10])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"i":"` + p.machine.AID + `","s":"1a","d":"EEventAtPlaceTwentySix"}`; string(later) != want {
-		t.Fatalf("got %s, want %s", later, want)
+	if want := `{"i":"` + long.AID + `","s":"a","d":"` + long.SAID(10) + `"}`; string(seal) != want {
+		t.Fatalf("got %s, want %s", seal, want)
 	}
-	// keri-go reads it back as the event seal it is.
-	ev, err := keri.ParseEvent(p.anchored.Raws[1])
-	if err != nil {
+	// It is read back as the event seal it is.
+	var fields map[string]interface{}
+	if err := json.Unmarshal(p.anchored.Raws[1], &fields); err != nil {
 		t.Fatal(err)
 	}
-	seals, err := SealsOfInteraction(ev)
-	if err != nil || len(seals) != 1 || seals[0] != (keri.Seal{Identifier: p.machine.AID, SN: 0, SAID: p.machine.AID}) {
-		t.Fatalf("read back %v %v", seals, err)
+	read := elementsOf(fields)
+	if len(read) != 1 || !read[0].eventSeal || read[0].seal != (keri.Seal{Identifier: p.machine.AID, SN: 0, SAID: p.machine.AID}) {
+		t.Fatalf("read back %+v", read)
 	}
 }
 
@@ -155,14 +160,14 @@ func TestAnOwnerThatLeftAndCameBackIsOwnedOnlyFromTheEventWhereItCameBack(t *tes
 	back := left.Fork().RotateSealing(p.m.names(p.bare), p.m.names(another))
 	got := check(handed(back), handed(p.anchored))
 	want(t, got, NamedNotOwned, NamedNotAnchored)
-	if got.EventSN != 2 || got.Event != back.SAID(2) {
-		t.Fatalf("the owner entered at event %d, want the rotation at 2", got.EventSN)
+	if got.EventSN == nil || *got.EventSN != 2 || got.Event != back.SAID(2) {
+		t.Fatalf("the owner entered at event %v, want the rotation at 2", got.EventSN)
 	}
 
 	got = check(handed(back), handed(p.anchored.Fork().Seal(p.m.anchors(back, 2))))
 	want(t, got, OwnedAnchored, NotFromWitnesses)
-	if got.EventSN != 2 {
-		t.Fatalf("owned from event %d, want 2", got.EventSN)
+	if *got.EventSN != 2 {
+		t.Fatalf("owned from event %d, want 2", *got.EventSN)
 	}
 }
 
@@ -173,8 +178,8 @@ func TestARotationThatNamesNoOwnersLeavesTheOwnerSetAsItWas(t *testing.T) {
 	rotated := p.machine.Fork().Rotate().Interact("work").Rotate()
 	got := check(handed(rotated), handed(p.anchored))
 	want(t, got, OwnedAnchored, NotFromWitnesses)
-	if got.EventSN != 0 {
-		t.Fatalf("the owner entered at event %d, want the inception", got.EventSN)
+	if *got.EventSN != 0 {
+		t.Fatalf("the owner entered at event %d, want the inception", *got.EventSN)
 	}
 }
 
@@ -333,4 +338,105 @@ func TestALogThatDoesNotVerifyIsRefused(t *testing.T) {
 	// An owner the Identity Agent's log does not name at all.
 	stranger := signedlog.Incept(t, p.m.keys("another-owner", 2)).Seal(p.m.anchors(p.machine, 0))
 	want(t, check(handed(p.machine), handed(stranger)), Refused, NotNamed)
+}
+
+// One unreadable element must not make the reader drop the seals beside it,
+// and is never skipped: it may be an earlier anchor.
+func TestAnElementThatCannotBeReadAtOrBeforeTheAnchorStopsTheCheck(t *testing.T) {
+	p := newPair(t)
+	second := signedlog.InceptWith(t, p.m.keys("second-machine", 2), witnessedBy(p.wm, p.m.names(p.bare)))
+	sealOf := func(s string) string {
+		return `{"i":"` + p.machine.AID + `","s":` + s + `,"d":"` + p.machine.AID + `"}`
+	}
+	for name, junk := range map[string]string{
+		"a string":                      `"junk"`,
+		"a number":                      `7`,
+		"a list":                        `[]`,
+		"a seal whose s is a number":    sealOf(`0`),
+		"a seal with a fourth field":    `{"i":"` + p.machine.AID + `","s":"0","d":"` + p.machine.AID + `","x":"y"}`,
+		"a seal with s 00":              sealOf(`"00"`),
+		"a seal with s 0x0":             sealOf(`"0x0"`),
+		"a seal with s in capitals":     sealOf(`"0A"`),
+		"a seal with an empty s":        sealOf(`""`),
+		"a seal that names no identity": `{"i":"","s":"0","d":"` + p.machine.AID + `"}`,
+	} {
+		beside := p.bare.Fork().Seal(p.m.anchors(second, 0), json.RawMessage(junk)).Seal(p.m.anchors(p.machine, 0))
+		got := check(handed(p.machine), handed(beside), handed(second))
+		if got.Grade != Refused || got.Reason != LogUnchecked {
+			t.Errorf("%s beside an earlier anchor: got %s (%s)", name, got.Grade, got.Reason)
+		}
+		alone := p.bare.Fork().Seal(json.RawMessage(junk))
+		got = check(handed(p.machine), handed(alone))
+		if got.Grade != Refused || got.Reason != LogUnchecked {
+			t.Errorf("%s with no anchor after it: got %s (%s)", name, got.Grade, got.Reason)
+		}
+		// After the anchor it is not read, and changes nothing.
+		after := p.anchored.Fork().Seal(json.RawMessage(junk))
+		got = check(handed(p.machine), handed(after))
+		if got.Grade != OwnedAnchored {
+			t.Errorf("%s after the anchor: got %s (%s)", name, got.Grade, got.Reason)
+		}
+	}
+	// A seal of another kind is shown not to be an event seal, and is passed.
+	digest := p.bare.Fork().Interact("a digest seal").Seal(p.m.anchors(p.machine, 0))
+	want(t, check(handed(p.machine), handed(digest)), OwnedAnchored, NotFromWitnesses)
+	// An event seal is read whatever order its three fields are written in.
+	reordered := p.bare.Fork().Seal(json.RawMessage(`{"d":"` + p.machine.AID + `","s":"0","i":"` + p.machine.AID + `"}`))
+	want(t, check(handed(p.machine), handed(reordered)), OwnedAnchored, NotFromWitnesses)
+}
+
+func TestASealedEventWhoseOwnerSealCannotBeReadIsNotPassedOver(t *testing.T) {
+	p := newPair(t)
+	broken := signedlog.InceptWith(t, p.m.keys("broken-owner-seal", 2), keri.InceptionInput{
+		Data: []json.RawMessage{json.RawMessage(`{"i":"","s":"0","d":"` + p.bare.AID + `"}`)}})
+	sealing := p.bare.Fork().Seal(p.m.seal(broken.AID, 0, broken.AID)).Seal(p.m.anchors(p.machine, 0))
+	want(t, check(handed(p.machine), handed(sealing), handed(broken)), Refused, LogUnchecked)
+}
+
+func TestASealOfTheOwnersOwnEventNeedsNoOtherLog(t *testing.T) {
+	p := newPair(t)
+	own := p.bare.Fork().Seal(p.m.seal(p.bare.AID, 0, p.bare.AID)).Seal(p.m.anchors(p.machine, 0))
+	got := check(handed(p.machine), handed(own))
+	want(t, got, OwnedAnchored, NotFromWitnesses)
+	if got.Needs != "" {
+		t.Fatalf("a log was asked for: %s", got.Needs)
+	}
+}
+
+func TestTheIdentifierWhoseLogIsNeededIsNamed(t *testing.T) {
+	p := newPair(t)
+	second := signedlog.InceptWith(t, p.m.keys("second-machine", 2), witnessedBy(p.wm, p.m.names(p.bare)))
+	both := p.anchored.Fork().Seal(p.m.anchors(second, 0))
+	got := check(handed(second), handed(both))
+	want(t, got, Refused, LogUnchecked)
+	if got.Needs != p.machine.AID {
+		t.Fatalf("the result asks for the log of %q, want %s", got.Needs, p.machine.AID)
+	}
+	// The two logs being checked are the copies in hand: another copy of
+	// either among the other logs is not read in their place.
+	want(t, check(handed(p.machine), handed(p.anchored), handed(p.bare), handed(p.machine.Fork().Rotate())), OwnedAnchored, NotFromWitnesses)
+}
+
+func TestOneIdentifierIsNeverItsOwnOwner(t *testing.T) {
+	m := newMaker(t)
+	// An identity that names itself, and seals its own inception.
+	self := signedlog.Incept(t, m.keys("owner", 2))
+	got := check(handed(self), handed(self))
+	want(t, got, Refused, SameIdentifier)
+	if got.EventSN != nil || got.Event != "" {
+		t.Fatalf("an event is reported before one is known: %+v", got)
+	}
+}
+
+func TestAnIdentifierThatIsNotTheDigestOfItsInceptionIsRefused(t *testing.T) {
+	p := newPair(t)
+	basic := signedlog.InceptWith(t, p.m.keys("basic-owner", 2), keri.InceptionInput{Derivation: "basic"})
+	if basic.AID == basic.SAID(0) {
+		t.Fatal("control: the identifier is the digest of its inception")
+	}
+	named := signedlog.InceptWith(t, p.m.keys("machine-of-a-basic-owner", 2), witnessedBy(p.wm, p.m.names(basic)))
+	basic.Seal(p.m.anchors(named, 0))
+	want(t, check(handed(named), handed(basic)), Refused, LogInvalid)
+	// And as the Identity Agent.
+	want(t, check(handed(basic), handed(p.anchored)), Refused, LogInvalid)
 }

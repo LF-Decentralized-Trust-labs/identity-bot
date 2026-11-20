@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/drivers"
 )
 
 // The anchor: how an owner identity says, in its own key log, that it agreed
@@ -22,8 +24,9 @@ import (
 // bytes. For the owner named at founding the event is the inception, and the
 // seal is {"i": M, "s": "0", "d": M}.
 //
-// It is returned as ordered JSON, because a seal's field order is part of the
-// event that carries it. An interaction event, or an event of a delegated
+// It is written by drivers.EventSeal, the one writer of an event seal, as
+// ordered JSON, because a seal's field order is part of the event that carries
+// it. An interaction event, or an event of a delegated
 // identity, is refused: neither can be owned in this sense. Whether the event
 // names the owner that is about to anchor it is the caller's check to make
 // before it signs.
@@ -38,29 +41,7 @@ func AnchorSeal(event []byte) (json.RawMessage, error) {
 	if delegated(ev) {
 		return nil, fmt.Errorf("a %s event belongs to a delegated identity, which is never owned", ev.Ilk)
 	}
-	return EventSeal(ev.Identifier, ev.SN, ev.SAID)
-}
-
-// EventSeal is KERI's event seal for the event of identifier at sequence
-// number sn whose SAID is said, with the sequence number in lowercase hex and
-// the fields in the order the specification lists.
-func EventSeal(identifier string, sn uint64, said string) (json.RawMessage, error) {
-	if identifier == "" || said == "" {
-		return nil, fmt.Errorf("an event seal names an identifier and an event")
-	}
-	return json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"%x","d":%q}`, identifier, sn, said)), nil
-}
-
-// SealsOfInteraction is the event seals an interaction event carries, in
-// order, read as keri-go reads any event's seals. It is empty for every other
-// kind of event: an anchor is read only from an interaction event, because an
-// event seal in an establishment event is already read as that identity's own
-// owner seal (ADR-032), the other way round.
-func SealsOfInteraction(ev *keri.Event) ([]keri.Seal, error) {
-	if ev.Ilk != "ixn" {
-		return nil, nil
-	}
-	return ev.Seals()
+	return drivers.EventSeal(ev.Identifier, fmt.Sprintf("%x", ev.SN), ev.SAID)
 }
 
 // delegated is whether an event is one only a delegated identity has.

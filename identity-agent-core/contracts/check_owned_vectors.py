@@ -34,6 +34,7 @@ spec.loader.exec_module(base)
 HEX = re.compile(r"^(0|[1-9a-f][0-9a-f]*)$")
 VERSION = re.compile(r'^\{"v":"KERI10JSON([0-9a-f]{6})_"')
 ESTABLISHMENT = ("icp", "rot", "dip", "drt")
+MAX_EVENTS = 2048  # a longer log is not judged
 
 
 class Unreadable(Exception):
@@ -55,7 +56,11 @@ def split(message):
     size = int(m.group(1), 16)
     raw, attached = message[:size], message[size:]
     if not (attached.startswith("-AAB") and len(attached) == 4 + 88):
-        raise Unreadable("this script reads one attached signature per event")
+        # Several well-formed signatures are a log this script does not read.
+        # Anything else attached is not a signature group at all.
+        if re.match(r"^-AA[C-Z]([A-Za-z0-9_-]{88}){2,}$", attached):
+            raise Unreadable("this script reads one attached signature per event")
+        raise Invalid("what is attached to an event is not its one signature")
     try:
         sig = base.qb64_raw("AA", attached[4:], 64)  # code A, index 0
     except ValueError:
@@ -91,51 +96,67 @@ class Log:
         key = commitment = None
         witnesses, threshold = [], 0
         for place, message in enumerate(messages):
-            raw, sig = split(message)
             try:
-                ev = json.loads(raw)
-            except ValueError:
-                raise Invalid("an event is not JSON")
-            if json.dumps(ev, separators=(",", ":"), ensure_ascii=False) != raw:
-                raise Invalid("an event is not in its one compact spelling")
-            t = ev.get("t")
-            if t not in ESTABLISHMENT + ("ixn",):
-                raise Invalid("an event of an unknown kind")
-            if said_of(raw, ev) != ev["d"]:
-                raise Invalid("event %d does not carry its own digest" % place)
-            if number(ev["s"]) != place:
-                raise Invalid("event %d is out of sequence" % place)
-            if place == 0:
-                if t not in ("icp", "dip") or ev["i"] != ev["d"]:
-                    raise Invalid("the log does not begin with an inception that derives its identifier")
-                self.id = ev["i"]
-            else:
-                if t in ("icp", "dip") or ev["i"] != self.id or ev["p"] != self.events[-1]["d"]:
-                    raise Invalid("event %d does not follow the one before" % place)
-            if t in ESTABLISHMENT:
-                if len(ev["k"]) != 1 or ev["kt"] != "1" or len(ev["n"]) > 1:
-                    raise Unreadable("this script reads logs with one signing key")
-                if place > 0 and base.digest(ev["k"][0].encode()) != commitment:
-                    raise Invalid("the rotation at %d does not open the commitment before it" % place)
-                key = ev["k"][0]
-                commitment = ev["n"][0] if ev["n"] else None
-                if t in ("icp", "dip"):
-                    witnesses = list(ev["b"])
-                else:
-                    witnesses = [w for w in witnesses if w not in ev["br"]] + list(ev["ba"])
-                threshold = number(ev["bt"])
-            try:
-                pub = base.qb64_raw("D", key, 32)
-            except ValueError:
-                raise Invalid("a signing key is not a qb64 Ed25519 key")
-            if not base.ed25519_verify(pub, sig, raw.encode()):
-                raise Invalid("event %d is not signed by the key in force" % place)
+                raw, sig, ev, key, commitment, witnesses, threshold = self.one(
+                    place, message, key, commitment, witnesses, threshold)
+            except (KeyError, TypeError, AttributeError, IndexError):
+                raise Invalid("event %d lacks a field, or holds one of the wrong kind" % place)
             self.raws.append(raw)
             self.events.append(ev)
             self.witnesses.append(list(witnesses))
             self.thresholds.append(threshold)
         self.forked = False
         self.retired = []
+
+    def one(self, place, message, key, commitment, witnesses, threshold):
+        """Verify the event at place against the state before it."""
+        raw, sig = split(message)
+        try:
+            ev = json.loads(raw)
+        except ValueError:
+            raise Invalid("an event is not JSON")
+        if not isinstance(ev, dict):
+            raise Invalid("an event is not a JSON object")
+        if json.dumps(ev, separators=(",", ":"), ensure_ascii=False) != raw:
+            raise Invalid("an event is not in its one compact spelling")
+        t = ev.get("t")
+        if t not in ESTABLISHMENT + ("ixn",):
+            raise Invalid("an event of an unknown kind")
+        if said_of(raw, ev) != ev["d"]:
+            raise Invalid("event %d does not carry its own digest" % place)
+        if number(ev["s"]) != place:
+            raise Invalid("event %d is out of sequence" % place)
+        if place == 0:
+            if t not in ("icp", "dip") or ev["i"] != ev["d"]:
+                raise Invalid("the log does not begin with an inception that derives its identifier")
+            self.id = ev["i"]
+        else:
+            if t in ("icp", "dip") or ev["i"] != self.id or ev["p"] != self.events[-1]["d"]:
+                raise Invalid("event %d does not follow the one before" % place)
+            # A log rotates the way it was founded: a delegated rotation in a
+            # log that began with an icp, or a plain one in a log that began
+            # with a dip, does not verify.
+            if (t == "drt") != (self.events[0]["t"] == "dip") and t in ("rot", "drt"):
+                raise Invalid("event %d is a %s in a log founded by %s" % (place, t, self.events[0]["t"]))
+        if t in ESTABLISHMENT:
+            if len(ev["k"]) != 1 or ev["kt"] != "1" or len(ev["n"]) > 1:
+                raise Unreadable("this script reads logs with one signing key")
+            if place > 0 and base.digest(ev["k"][0].encode()) != commitment:
+                raise Invalid("the rotation at %d does not open the commitment before it" % place)
+            key = ev["k"][0]
+            commitment = ev["n"][0] if ev["n"] else None
+            if t in ("icp", "dip"):
+                witnesses = list(ev["b"])
+            else:
+                witnesses = [w for w in witnesses if w not in ev["br"]] + list(ev["ba"])
+            threshold = number(ev["bt"])
+        try:
+            pub = base.qb64_raw("D", key, 32)
+        except ValueError:
+            raise Invalid("a signing key is not a qb64 Ed25519 key")
+        if not base.ed25519_verify(pub, sig, raw.encode()):
+            raise Invalid("event %d is not signed by the key in force" % place)
+        return raw, sig, ev, key, commitment, witnesses, threshold
 
     def establishment(self, place):
         return self.events[place]["t"] in ESTABLISHMENT
@@ -187,11 +208,17 @@ class Log:
 def read(v):
     """A log of the file, verified and judged against the copies kept.
     Returns (log, reason)."""
+    if len(v["messages"]) > MAX_EVENTS:
+        return None, "log_unchecked"
     try:
         log = Log(v["messages"])
     except Invalid:
         return None, "log_invalid"
     for kept in v.get("kept") or []:
+        if not kept:
+            continue
+        if len(kept) > MAX_EVENTS:
+            return None, "log_unchecked"
         try:
             other = Log(kept)
         except Invalid:
@@ -210,13 +237,15 @@ def owners_named(ev):
     if ev["t"] not in ESTABLISHMENT:
         return None
     named = []
-    for seal in ev.get("a") or []:
+    a = ev.get("a")
+    for seal in a if isinstance(a, list) else []:
         if not isinstance(seal, dict) or set(seal) != {"i", "s", "d"}:
             continue
-        if not seal["i"] or not seal["d"]:
+        i, s, d = (seal[k] if isinstance(seal[k], str) else "" for k in ("i", "s", "d"))
+        if not i or not d:
             raise Invalid("an owner seal with nothing in it")
-        if seal["s"] == "0" and seal["d"] == seal["i"] and seal["i"] not in named:
-            named.append(seal["i"])
+        if s == "0" and d == i and i not in named:
+            named.append(i)
     return named or None
 
 
@@ -232,19 +261,35 @@ def owner_sets(log):
     return sets
 
 
-def event_seals(ev):
-    """The event seals of an interaction event, as (identifier, place, digest)."""
-    if ev["t"] != "ixn":
+UNREADABLE = object()
+OTHER = object()
+
+
+def elements(ev):
+    """The `a` list of an event, element by element: an event seal as
+    (identifier, place, digest), OTHER for a seal shown not to be an event
+    seal, UNREADABLE for anything else (owned.md, 'The two seals')."""
+    if "a" not in ev or ev["a"] is None:
         return []
+    if not isinstance(ev["a"], list):
+        return [UNREADABLE]
     out = []
-    for seal in ev.get("a") or []:
-        if isinstance(seal, dict) and seal.get("i") and seal.get("d"):
-            out.append((seal["i"], number(seal.get("s")), seal["d"]))
+    for el in ev["a"]:
+        if not isinstance(el, dict):
+            out.append(UNREADABLE)
+        elif not {"i", "s", "d"} <= set(el):
+            out.append(OTHER)
+        elif (len(el) == 3 and all(isinstance(el[k], str) for k in ("i", "s", "d"))
+              and el["i"] and el["d"] and HEX.match(el["s"]) and len(el["s"]) <= 16):
+            out.append((el["i"], int(el["s"], 16), el["d"]))
+        else:
+            out.append(UNREADABLE)
     return out
 
 
 def is_anchor(log, seal, owner):
-    """Whether a seal is an anchor of this log for owner: (is, known)."""
+    """Whether a seal is an anchor of this log for owner: (is, known).
+    Raises Invalid when the sealed event's owner seals cannot be read."""
     _, place, said = seal
     if place >= len(log.events) or log.events[place]["d"] != said:
         return False, False
@@ -257,7 +302,7 @@ def is_anchor(log, seal, owner):
 
 
 def check(case):
-    r = {"grade": "refused", "reason": "", "event_sn": 0}
+    r = {"grade": "refused", "reason": ""}
 
     def end(grade, reason):
         r["grade"], r["reason"] = grade, reason
@@ -268,11 +313,17 @@ def check(case):
     if why:
         return end("refused", why)
     r["machine"] = m.id
+    # Who the owner is claimed to be is the `i` of the first event of its log,
+    # as written. Nothing rests on it until step 4 has verified that log.
     try:
-        owner = json.loads(split(case["owner"]["messages"][0])[0])["i"]
-    except (Invalid, Unreadable, IndexError, ValueError, KeyError):
+        owner = json.JSONDecoder().raw_decode(case["owner"]["messages"][0])[0]["i"]
+    except (IndexError, ValueError, KeyError, TypeError):
+        return end("refused", "log_invalid")
+    if not isinstance(owner, str) or not owner:
         return end("refused", "log_invalid")
     r["owner"] = owner
+    if owner == m.id:
+        return end("refused", "same_identifier")
     try:
         sets = owner_sets(m)
     except Invalid:
@@ -302,12 +353,24 @@ def check(case):
     if m.forked or x.forked:
         return end("refused", "duplicity")
 
-    # Step 5 of the record: an interaction of X seals E exactly.
+    # Step 5 of the record: an interaction of X seals E exactly. X's
+    # interactions are read in order until that seal is found.
     exact = (m.id, e, sealed["d"])
-    seals = [event_seals(ev) for ev in x.events]
-    anchor = next(((i, j) for i, in_event in enumerate(seals) for j, s in enumerate(in_event) if s == exact), None)
+    before, anchor = [], None
+    for i, ev in enumerate(x.events):
+        if ev["t"] != "ixn" or anchor is not None:
+            continue
+        for el in elements(ev):
+            if el is UNREADABLE:
+                return end("refused", "log_unchecked")
+            if el is OTHER:
+                continue
+            if el == exact:
+                anchor = i
+                break
+            before.append(el)
     if anchor is None:
-        removed = any(s == exact for ev in x.retired for s in event_seals(ev))
+        removed = any(el == exact for ev in x.retired for el in elements(ev))
         return end("named_not_owned", "anchor_removed" if removed else "named_not_anchored")
 
     # Step 6 of the record: the first anchor in X's log names M.
@@ -316,20 +379,25 @@ def check(case):
         o, why = read(v)
         if o is not None and not o.forked and o.id not in (m.id, x.id):
             others[o.id] = o
-    before = [s for i, in_event in enumerate(seals) for j, s in enumerate(in_event) if (i, j) < anchor]
     for s in before:
-        of = m if s[0] == m.id else others.get(s[0])
+        own = s[0] in (m.id, x.id)
+        of = m if s[0] == m.id else x if s[0] == x.id else others.get(s[0])
         if of is None:
+            r["needs"] = s[0]
             return end("refused", "log_unchecked")
-        is_one, known = is_anchor(of, s, x.id)
-        if not known and of is not m:
+        try:
+            is_one, known = is_anchor(of, s, x.id)
+        except Invalid:
+            return end("refused", "log_unchecked")
+        if not known and not own:
+            r["needs"] = s[0]
             return end("refused", "log_unchecked")
         if is_one and of is m:
             break
         if is_one:
             return end("named_not_owned", "second_machine")
 
-    r["anchored_by"] = x.events[anchor[0]]["d"]
+    r["anchored_by"] = x.events[anchor]["d"]
 
     # 8. Confirmed needs both copies from their witnesses, and the receipts.
     if case["machine"]["source"] != "its_witnesses" or case["owner"]["source"] != "its_witnesses":
@@ -384,13 +452,17 @@ def main(path):
                             base.fail("%s: the key %s comes from no published seed" % (label, key))
         try:
             got = check(case)
-        except Unreadable as exc:
-            base.fail("%s: %s" % (label, exc))
+        except Invalid:
+            got = {"grade": "refused", "reason": "log_invalid"}
+        except Exception as exc:  # noqa: BLE001 - report the case, never a traceback
+            base.fail("%s: this script could not judge it: %s: %s" % (label, type(exc).__name__, exc))
             continue
         want = dict(case["expect"])
-        for field in ("machine", "owner", "event", "anchored_by"):
+        for field in ("machine", "owner", "event", "anchored_by", "needs"):
             got.setdefault(field, "")
             want.setdefault(field, "")
+        got.setdefault("event_sn", None)
+        want.setdefault("event_sn", None)
         base.same(label, got, want)
 
     if not vectors["cases"]:

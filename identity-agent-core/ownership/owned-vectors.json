@@ -3,21 +3,33 @@
   "seeds": {
     "another-owner/0": "8d2286f64014658a6b15b3820384072a6964c44614c71ba94af54367bf5cbaaa",
     "another-owner/1": "b5744ec958f53b5c130f170f0960ca6434948d148f6e21109c8059eed81536f6",
+    "basic-owner/0": "ca5a9fd6ff44b964998bbfb8d8a9392f6be60a2c6716a2ae5b66524a8fad5bd6",
+    "basic-owner/1": "7fc6cabfe04da1da2f30a9acf502a56e63effc57d9ede81f050c8d46f2d23934",
+    "broken-owner-seal/0": "45786fb09be559598175569a4da4f5fc59bc0a796247a0bc1d11ab8edf33867c",
+    "broken-owner-seal/1": "ed0c5e0bb88df4be86756adb17db41f9bbd73dc0e706af6937329c31e96da510",
     "delegate-naming/0": "80768732a569597fff39a25d8ab5c48b241991407b829ea6960b1b584ddf82d5",
     "delegate-naming/1": "59ecd897fffd620f0c1b576bef6d9d55688ec2d3570d543adbddafc26234b88e",
     "delegate/0": "f84040bd154daf5ffe35365c37f2dd1b214297ac1f26ccc6d82f7b33ae3450b8",
     "delegate/1": "376dc86a7dd7a114eee5cda2fed86664ade9dc3aec1b82a4ef574634e20ae446",
     "look-alike/0": "8c146d5cc898cc1e1edeb4cf00227ac7e2543c3467f82779b4a295bf990d1dc5",
     "look-alike/1": "29fc7111715634981004f4b01274e9ada05e1cd6b6f2698e3eba0a1dc94feec0",
+    "machine-of-a-basic-owner/0": "f11adb6f5e949d87cd1626ba2b1051f40e6baab32dd5b03e33a3eb94a9aad778",
+    "machine-of-a-basic-owner/1": "98cd5a3cc97a4abf963937d612b5e19d9e09305c5f959dc143d98f9848a0beab",
+    "machine-of-that-owner/0": "1b8711056fdcb22979fd63b701604910f0fc96bb8fa1a7da4bfc08d7c18df65f",
+    "machine-of-that-owner/1": "3b7539e3d8073f56deb7ae34fcd0da31faf15b060c725e77f4bdba0ce210f037",
     "machine/0": "12fffa754bbf85d8c3b3d6e9c8031e86e370acbcb9dd967445bc7202f2f9d70e",
     "machine/1": "58037771fe2c77ad28797e453d9d7d7184e7d31b4833b7b53df759df53c1c900",
     "machine/2": "5ca6367b06fa0d2bf2c74275be036128a254ea8fecbed5b9125926749a0975a8",
     "machine/3": "a89d587c4ac04246afdf9da9377708725a2e49083fe14c92e00fe9daa13784e6",
+    "owner-with-two-witnesses/0": "e33ae8843d89858463f1683502c2139d511336d7a064d6cabee1975b1480f5f0",
+    "owner-with-two-witnesses/1": "6bcd1917d95a4f1e32ac0fb86b778a710d8caab8703a5820d659f67f89ae9e97",
     "owner/0": "187b5d0b0d94b3904f6cd5d4ab1781990ac841eb2c92d695410d854ec200ad35",
     "owner/1": "d5036839c8110ac31e9d3f1a59792124e03b30c316f48744b8459dd2fabf7a2b",
     "owner/2": "d59358059c3a788cc010b97862fbbe07c45616957650f3fed0c7e747754ee28a",
     "second-machine/0": "18ae7662ccda5fa69fdd9b5a88fadfbf5220676df3353d5ebf6db7c864862b49",
-    "second-machine/1": "f7ff86843bec10f001d39a3967e238e51c5a6b3a9c7ba43835b2a9d16b0d3a1e"
+    "second-machine/1": "f7ff86843bec10f001d39a3967e238e51c5a6b3a9c7ba43835b2a9d16b0d3a1e",
+    "uncommitted/0": "c6f7fa78aab0fb044f5eaa4417e88a3cdac89b2df4db527e4bcaf5698ae13f41",
+    "uncommitted/1": "88514c7e5723f81e0a1711e1a521ffbde68477f46736e1b6a96a0fd5dfb6bf18"
   },
   "witnesses": {
     "of-the-machine": {
@@ -27,6 +39,10 @@
     "of-the-owner": {
       "seed": "ec1a04799edcd6052afc95a25886841daf9fa129f7416302643bd65216357274",
       "identifier": "BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt"
+    },
+    "of-the-owner-too": {
+      "seed": "99a605471dd7da7e0dea4393ea80395f67019e16b2e4fdbaf46c349d7fd3e018",
+      "identifier": "BLkvmFvhd_CJ3eCFZtkROFOo0_41kSwuul3PKp9IVPYi"
     }
   },
   "cases": [
@@ -219,8 +235,7 @@
         "grade": "refused",
         "reason": "delegated",
         "machine": "EIatIqUKSm2xEXrgKS9-O13CJefEtAOtH-ovljzz1qJo",
-        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
-        "event_sn": 0
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE"
       }
     },
     {
@@ -243,8 +258,7 @@
         "grade": "named_not_owned",
         "reason": "delegated",
         "machine": "ENt_ptnBiMV4Y058Uxd41-TL9QuDd0hbwPRbnXBqN7IQ",
-        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
-        "event_sn": 0
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE"
       }
     },
     {
@@ -470,8 +484,7 @@
         "grade": "refused",
         "reason": "not_named",
         "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
-        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
-        "event_sn": 0
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE"
       }
     },
     {
@@ -558,7 +571,8 @@
         "machine": "ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg",
         "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
         "event": "ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg",
-        "event_sn": 0
+        "event_sn": 0,
+        "needs": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO"
       }
     },
     {
@@ -586,6 +600,371 @@
       "expect": {
         "grade": "refused",
         "reason": "duplicity",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "unreadable-element-before-the-anchor",
+      "why": "An interaction of the owner before the anchor carries an anchor of another Identity Agent and, beside it, an element that is not a seal. One unreadable element must not make a reader drop the whole event: what cannot be read may hide an earlier anchor, so the log could not be checked.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON000147_\",\"t\":\"ixn\",\"d\":\"EF5K0jh7le74sIlWIqgsVfCboDAnXQxYAVvG1XwASTaR\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\"},\"not a seal\"]}-AABAACmk4n6L2vEwqfFn595u75dEIuYgT-NG1By2i_dvBJb8QlCtsywjdnsNczHI1bAJO_WE6I1FWSvmmJIqvbJZO8A",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EIbnP9VCHRz-4OK1GiyjNDj1n23BL0rWeaiVleZVfyHI\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"EF5K0jh7le74sIlWIqgsVfCboDAnXQxYAVvG1XwASTaR\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAADX0F4CQg_rksenEYu1hpbbz-pryGD-g-wLY6U-7ffxxfX_wOp01_uQxgVUnkQgDtBu4OAH5CLRXGWwzyDpuegH"
+        ],
+        "source": "checked_party"
+      },
+      "other_logs": [
+        {
+          "messages": [
+            "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"i\":\"ENiWA7J3oDo-v0o-avUvBACIxfRQNqWuQTJA9-ONyVHg\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DDoNGwfwyrTL4B_AE20DhXRAVmZBn7VXxCF9Jd90ebxi\"],\"nt\":\"1\",\"n\":[\"EGJkQ82XtBarvSz2Go1unj-h_Q1CLfDqYZYa_qqx6dVS\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACOwMOd9W1EDjPfrXtLQQjcqNj3eEsiAjHAKSIJrUdfrv2z2RDLpC8Qqr-6xhY3t5TMXMldrtnIeGeUuNwZwOIO"
+          ],
+          "source": "checked_party"
+        }
+      ],
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "anchor-with-an-extra-field",
+      "why": "The only seal of the inception carries a fourth field. An event seal has exactly three, so this is not one, and it cannot be shown to be some other seal either.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON000142_\",\"t\":\"ixn\",\"d\":\"ENiYMY09LyM4s-TDAlOGNGPnazBHd3kYlKdHBngMANTh\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"x\":\"y\"}]}-AABAACbUAZwRwpCpBsBUfJLjsooQgqU8h5yNGyuW4bLwQkkxMvinpSQEvNGUTUO53l04YhC8gYG4lRatpMivBvTT7gK"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "seal-with-a-sequence-number-out-of-its-one-spelling",
+      "why": "The seal writes sequence number zero as \"00\". A sequence number has one spelling, lowercase hex with no leading zero, and a seal out of it is not read as naming event 0.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013b_\",\"t\":\"ixn\",\"d\":\"ECnFnprKIupMETZFgxEE-03x1M0XLMMMZU0MrzdBXF2J\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"00\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAAAozWeHJL9FeYEMNc16E2fxl64bIn7cyxgKt6kvRSf9mW6gEqQaYVTbmfUeRniB076UYhdqpZbw8IfUyekjVwsM"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "owner-seals-one-of-its-own-events-before-the-anchor",
+      "why": "Before the anchor the owner's log seals its own inception. That event is in the log in hand, it is not an anchor, and no other log is needed.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EOiLo9TrVUBysg0XX9Ue3YWwEehcx3xVjFD6es-btzyR\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAADuvd257CHLidr4xrc3LaNiwfmj8ZQR95j5JxdFPaBi2RbYFGpmwgQNjb8pkwwHzKm4NFD6bPu4TyNSIZ4dfvQD",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKfD3L4SbRKha0MpBkJ662lkSn3-015soHLabmN3uPJ4\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"EOiLo9TrVUBysg0XX9Ue3YWwEehcx3xVjFD6es-btzyR\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAAATaRVOWdF6jfK_dJKFyEF3L4-TuHj02vQuNqKwv74ZsUyjJpsIwNgPIbDTPrD4iT3zPCDoSxJhFiCwedMefzIA"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "owned_anchored",
+        "reason": "not_from_witnesses",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0,
+        "anchored_by": "EKfD3L4SbRKha0MpBkJ662lkSn3-015soHLabmN3uPJ4"
+      }
+    },
+    {
+      "label": "earlier-sealed-event-has-an-owner-seal-that-cannot-be-read",
+      "why": "Before the anchor the owner's log seals the inception of another identifier, whose owner seal has the shape of one and names nobody. Whether that event names this owner cannot be told, so it is not passed over as \"not an anchor\".",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EAB_xGWjqImPDkxjAaogPPJoqL9uqJ7XEciyQgEbYEL3\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAPqHC9FNpfaSf6t7VIkZQT5b187E63zCik-NF2t9xPJ\",\"s\":\"0\",\"d\":\"EAPqHC9FNpfaSf6t7VIkZQT5b187E63zCik-NF2t9xPJ\"}]}-AABAACpDqQH57td-8BqvAfj66B85SSK69dP6BV5ZOtINqMzaNHqSFk3VJSNDmCDz3OZ7JBs9ZlAABvAHUOtNFUSCRIB",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"ENoSBsNx4moTn4-lTO46c_Y3ZRzcseOufHv0r4yJPr-M\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"EAB_xGWjqImPDkxjAaogPPJoqL9uqJ7XEciyQgEbYEL3\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAACgaCAR7FVJ6lPXTxKIp-OTGFOBPWxxEbb7pEnprHRlSGauD3suXn9CRX7qHw0F7ewV7ISm8rZBpONrnFlGyf4G"
+        ],
+        "source": "checked_party"
+      },
+      "other_logs": [
+        {
+          "messages": [
+            "{\"v\":\"KERI10JSON00016e_\",\"t\":\"icp\",\"d\":\"EAPqHC9FNpfaSf6t7VIkZQT5b187E63zCik-NF2t9xPJ\",\"i\":\"EAPqHC9FNpfaSf6t7VIkZQT5b187E63zCik-NF2t9xPJ\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DKpJXHcdHmHtTTMkEJBbJhgyO_JHhBi6Cz9r6bdXnJNV\"],\"nt\":\"1\",\"n\":[\"EOo16uh9YQG5C8ZnSL8j7UduHHUTTPISAwm71ztBEjLj\"],\"bt\":\"0\",\"b\":[],\"c\":[],\"a\":[{\"i\":\"\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACtf0kiIpXl2OGkZNTny24FcvNX8Wljui_uttwu4lAGKTy0gZYzu4S5Qobfp2a1UOlvqT3JKHP-gS0o5kse7tEG"
+          ],
+          "source": "checked_party"
+        }
+      ],
+      "expect": {
+        "grade": "refused",
+        "reason": "log_unchecked",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "duplicitous-machine-log",
+      "why": "The verifier holds a second, validly signed rotation of the Identity Agent at the place of the first. Two establishment events at one place are duplicity, and no recovery replaces one.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK",
+          "{\"v\":\"KERI10JSON000160_\",\"t\":\"rot\",\"d\":\"ED6QfsHfnU8mRxrEhO4lUxoTo39zzqnsaZ3eUdKiQH7d\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"1\",\"p\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"kt\":\"1\",\"k\":[\"DJt_7cftjWaGbLk06u29_6UpUG9tOf9qR6SHGnKajS1F\"],\"nt\":\"1\",\"n\":[\"ENUDVUZh4MfTR1SfhEjervprVq5nAqaUF7kgI_YGQ7LJ\"],\"bt\":\"1\",\"br\":[],\"ba\":[],\"a\":[]}-AABAAA2VlIn7gHPq1GP43PpzZsIVKL-X2srEiY1-eq9cEMS7kjX7HGoPNDLvWSMVb36e2s3g5Oq1ToAUt2GO3OGAqUL"
+        ],
+        "source": "checked_party",
+        "kept": [
+          [
+            "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK",
+            "{\"v\":\"KERI10JSON00023f_\",\"t\":\"rot\",\"d\":\"ELeUMI0lNG3sum9g1yiblR_8P3baoALHKf16TMA3BFNo\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"1\",\"p\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"kt\":\"1\",\"k\":[\"DJt_7cftjWaGbLk06u29_6UpUG9tOf9qR6SHGnKajS1F\"],\"nt\":\"1\",\"n\":[\"ENUDVUZh4MfTR1SfhEjervprVq5nAqaUF7kgI_YGQ7LJ\"],\"bt\":\"1\",\"br\":[],\"ba\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"},{\"i\":\"EO0reg2A26iwLf0b2mj8u7fSbCtzAoKnsdRFFrR-v_6D\",\"s\":\"0\",\"d\":\"EO0reg2A26iwLf0b2mj8u7fSbCtzAoKnsdRFFrR-v_6D\"}]}-AABAABUCRjZJetMjzYtAbsZVB5EDwFRXgrlOoRhXhWY805KhwBQWbdcucgUKwAOQdAfj1ufwr0Uk-fJm1wLX4CMpK0L"
+          ]
+        ]
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAABzrm60p3ryWbXKUixX5_N8sYAzO4IebySlQED-zpGqPX_fg09dVbSpVH6czb1oaWB2mvZh-rG3gpz-SqfTGK8F"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "duplicity",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "receipt-by-a-key-that-is-not-the-events-witness",
+      "why": "Both logs came from their witnesses. The anchoring interaction carries a receipt that verifies, signed by the Identity Agent's witness, which the owner's log does not name. It counts for nothing.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "receipts": {
+          "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO": [
+            {
+              "witness": "BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0",
+              "signature": "AADvmQStgygVjlmeD5SlZZAT6jzhTloMBizsNUZMTeY1TNejrkfFEqjpoI3MAtFOa67bHpt9JKsCTfO9U-cr1kYD"
+            }
+          ]
+        },
+        "source": "its_witnesses"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAABzrm60p3ryWbXKUixX5_N8sYAzO4IebySlQED-zpGqPX_fg09dVbSpVH6czb1oaWB2mvZh-rG3gpz-SqfTGK8F"
+        ],
+        "receipts": {
+          "EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF": [
+            {
+              "witness": "BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0",
+              "signature": "AAAzUkaUVtfinMLKfM1O6bVh830CAqmEV26SVF3cT3bhvlpKQ5Fh-NDp5ksTH4yy_goffhdgFFGf5mEYsCJWgDoH"
+            }
+          ]
+        },
+        "source": "its_witnesses"
+      },
+      "expect": {
+        "grade": "owned_anchored",
+        "reason": "receipts_short",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0,
+        "anchored_by": "EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF"
+      }
+    },
+    {
+      "label": "duplicate-receipt-by-one-witness",
+      "why": "The owner's log names two witnesses and a threshold of two. The anchoring interaction carries the same witness's receipt twice. A witness counts once, so the threshold is not met.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59\",\"i\":\"EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DO4ZPZ6jrvfLEa6KP0b_m3lKsvuNfxCbh670FtPrGdUw\"],\"nt\":\"1\",\"n\":[\"EBzd_O0ofJxLdYximp2lsxHCjJINNbi-zibzRvTV2Bes\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K\",\"s\":\"0\",\"d\":\"EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K\"}]}-AABAADzVfkLkbra_csBWXtTyFK4KRFjQZAfLeqf7OuFh-jzl2qsgnw0rwKFu7nDiEXbQjNFrJtiCdc_P4WVDPnik9oE"
+        ],
+        "receipts": {
+          "EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59": [
+            {
+              "witness": "BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0",
+              "signature": "AAAHLBdTGzMRwdGu9iRc_jqrzyZAwoVZ-ETrFztWyG678KCwz_Khx2Gcd2W4uYMVfBe4VOIgA0W_RIlOG_4TCWEP"
+            }
+          ]
+        },
+        "source": "its_witnesses"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000188_\",\"t\":\"icp\",\"d\":\"EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K\",\"i\":\"EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DIf4icqSbRVCcW9TiY9fJJeL5xoPqsisVdJjGtRqfoIA\"],\"nt\":\"1\",\"n\":[\"EBUgGsXbkD0677RZqVMvYg81DKQaFRqFjjufoP_YDWSG\"],\"bt\":\"2\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\",\"BLkvmFvhd_CJ3eCFZtkROFOo0_41kSwuul3PKp9IVPYi\"],\"c\":[],\"a\":[]}-AABAABYbxK1M0uQzah2oRGQHSgmaLMG6sgAaNumU8ZmrYgoZgVBHDPlxyBzV-fkKl7yhzoTZADWDsv2fW_Y-NLex_oF",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"ENPjD2t1Ncmlr4WrhVE3oc12qu3Jwhk4JMi_O14qds8Q\",\"i\":\"EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K\",\"s\":\"1\",\"p\":\"EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K\",\"a\":[{\"i\":\"EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59\",\"s\":\"0\",\"d\":\"EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59\"}]}-AABAAB37W2seY3Pn0cbEU9s40GSWEjeezc_tgS7sV2yWvfAJaZ0q_XeVvrAtAVshww0de2GAVifYYwWVqUibruEirkH"
+        ],
+        "receipts": {
+          "ENPjD2t1Ncmlr4WrhVE3oc12qu3Jwhk4JMi_O14qds8Q": [
+            {
+              "witness": "BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt",
+              "signature": "AAAb9Ins7MIMzqlp-IaVeaiuisYw_1E4ArB0R6TXSJTU0w8Mf-tJL5iyorvQ23cgCN98rBtPGb2l6CrbyWtIll8N"
+            },
+            {
+              "witness": "BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt",
+              "signature": "AAAb9Ins7MIMzqlp-IaVeaiuisYw_1E4ArB0R6TXSJTU0w8Mf-tJL5iyorvQ23cgCN98rBtPGb2l6CrbyWtIll8N"
+            }
+          ]
+        },
+        "source": "its_witnesses"
+      },
+      "expect": {
+        "grade": "owned_anchored",
+        "reason": "receipts_short",
+        "machine": "EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59",
+        "owner": "EL4nBsGlYVEqNqYWGHZu2qs5C2P31qXHPaA7xlEnKl4K",
+        "event": "EEpEFFw5FoP2D3aZrsV3uqYtvXVMjaczevuv8tP6tg59",
+        "event_sn": 0,
+        "anchored_by": "ENPjD2t1Ncmlr4WrhVE3oc12qu3Jwhk4JMi_O14qds8Q"
+      }
+    },
+    {
+      "label": "machine-and-owner-are-one-identifier",
+      "why": "One log is given as both the Identity Agent's and the owner's. Owned is proved from two logs, never one.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAABzrm60p3ryWbXKUixX5_N8sYAzO4IebySlQED-zpGqPX_fg09dVbSpVH6czb1oaWB2mvZh-rG3gpz-SqfTGK8F"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAABzrm60p3ryWbXKUixX5_N8sYAzO4IebySlQED-zpGqPX_fg09dVbSpVH6czb1oaWB2mvZh-rG3gpz-SqfTGK8F"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "same_identifier",
+        "machine": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE"
+      }
+    },
+    {
+      "label": "owner-identifier-is-not-the-digest-of-its-inception",
+      "why": "The owner's identifier is its first key and not the digest of its inception. Its log is correctly signed, but an owner seal names an inception by its identifier, which this identifier is not.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAns_GY3Mw4RPvnc5zfWLH99B3yl7Y8-NOlGnqiQisc0\",\"i\":\"EAns_GY3Mw4RPvnc5zfWLH99B3yl7Y8-NOlGnqiQisc0\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB1kF9ZPF1-n5SyMmeec4MV47fNzc2UmHxirNA1dAMzO\"],\"nt\":\"1\",\"n\":[\"EO4ACTNWpbWzTn16twGkY40c9rTnQerZ4CF_U6EDHTVw\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"DIWaI0F0BlZv28Z2bVivr0aN17v78cX3sL4jU_FiyrVw\",\"s\":\"0\",\"d\":\"DIWaI0F0BlZv28Z2bVivr0aN17v78cX3sL4jU_FiyrVw\"}]}-AABAADzGw73Cxpl2GWh5OQ1KBri6ZiS5ePv_HT5cdEClXgvTD8cEyXtZiOIvy05PdhrnfAKYPGy7PFFYC06cuNyIFUH"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON00012b_\",\"t\":\"icp\",\"d\":\"EChKQslRw5u2LiVUutYxi8wS5ZHN2MoVHSC32eypZJza\",\"i\":\"DIWaI0F0BlZv28Z2bVivr0aN17v78cX3sL4jU_FiyrVw\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DIWaI0F0BlZv28Z2bVivr0aN17v78cX3sL4jU_FiyrVw\"],\"nt\":\"1\",\"n\":[\"EOL1TBveBfCLMS9erRO9CZVp01sxnagFOGI0FUILo16Z\"],\"bt\":\"0\",\"b\":[],\"c\":[],\"a\":[]}-AABAADVnZJCHocMWVyxE05ke42E3fVDAHqx-Lx_TfJxUOYaxT1pAxyIrCeSn6St7o50lfRixSsZR4bRpuAlX4y8PioC",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EN2hTpKSQNSU5J8cqcbAQ-WGwHMaqepaVQKYe-7bgIFh\",\"i\":\"DIWaI0F0BlZv28Z2bVivr0aN17v78cX3sL4jU_FiyrVw\",\"s\":\"1\",\"p\":\"EChKQslRw5u2LiVUutYxi8wS5ZHN2MoVHSC32eypZJza\",\"a\":[{\"i\":\"EAns_GY3Mw4RPvnc5zfWLH99B3yl7Y8-NOlGnqiQisc0\",\"s\":\"0\",\"d\":\"EAns_GY3Mw4RPvnc5zfWLH99B3yl7Y8-NOlGnqiQisc0\"}]}-AABAAArg72YhZ0xYG5F7Xf1uLnvrr51Adg45RGgJx4_7yEmu0xjxP2AaDrHspHw6RoaBMRD0MEeSeYnGyVJUe5bQTAO"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "log_invalid",
+        "machine": "EAns_GY3Mw4RPvnc5zfWLH99B3yl7Y8-NOlGnqiQisc0",
+        "owner": "DIWaI0F0BlZv28Z2bVivr0aN17v78cX3sL4jU_FiyrVw",
+        "event": "EAns_GY3Mw4RPvnc5zfWLH99B3yl7Y8-NOlGnqiQisc0",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "owner-log-with-a-signature-changed",
+      "why": "One character of the signature on the anchoring interaction is changed. The log does not verify, so nothing in it is read.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAABzrm60p3ryWbXKUixX5_N8sYAzO4IebySlQED-zpGqPX_fg09dVbSpVH6czb1oaWB2mvZh-rG3gpz-SqfAGK8F"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "log_invalid",
+        "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
+        "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
+        "event_sn": 0
+      }
+    },
+    {
+      "label": "owner-log-rotated-to-keys-it-never-committed-to",
+      "why": "The owner's log ends in a rotation, correctly formed and signed by its new key, to a key the previous establishment event did not commit to.",
+      "machine": {
+        "messages": [
+          "{\"v\":\"KERI10JSON0001c8_\",\"t\":\"icp\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DEZk6RF348PpVfz52TbpQYGok4JiuYEv2SAXR97V7YAl\"],\"nt\":\"1\",\"n\":[\"EBINsEIDonRfz5McGzD3BIC5wdVR3vliybyLXexVOf_X\"],\"bt\":\"1\",\"b\":[\"BJ_cRDgMIToLsHTkiJOLXJQvEDC51ld6ypKeUYp8FPq0\"],\"c\":[],\"a\":[{\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\"}]}-AABAACosXnNjbu_nNAoTBOzjonQxOgMWpoyR4pq_QUUxqgh-BKMu1DxRVh-A3Dy8K7MhfuvYETnuEoNhQvcz9zycckK"
+        ],
+        "source": "checked_party"
+      },
+      "owner": {
+        "messages": [
+          "{\"v\":\"KERI10JSON000159_\",\"t\":\"icp\",\"d\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"0\",\"kt\":\"1\",\"k\":[\"DB-Zz84wKLq0jRqCWRU67SMr94RNTut_EiuHFP9PS7a-\"],\"nt\":\"1\",\"n\":[\"EL7Z5yYKd_83DOiE5MNftKPFwx1IUzqp6lCul5dnT_UM\"],\"bt\":\"1\",\"b\":[\"BMmTPKfohw8eqKBkpKqR63gqlACtac3s3XeSdugEJUyt\"],\"c\":[],\"a\":[]}-AABAAArwE200fGaYz4AgVPAiVwNMavdFBpfty08QCioSSMDwuUIEccR53Uwd87or7EMEousptmM06eo4Hnam1Ay2b4M",
+          "{\"v\":\"KERI10JSON00013a_\",\"t\":\"ixn\",\"d\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"1\",\"p\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"a\":[{\"i\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\",\"s\":\"0\",\"d\":\"EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO\"}]}-AABAABzrm60p3ryWbXKUixX5_N8sYAzO4IebySlQED-zpGqPX_fg09dVbSpVH6czb1oaWB2mvZh-rG3gpz-SqfTGK8F",
+          "{\"v\":\"KERI10JSON000160_\",\"t\":\"rot\",\"d\":\"ELDcwgfIXUDEMjTYRavX-BIuxbXV-w9ucDerfb6QzJbV\",\"i\":\"EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE\",\"s\":\"2\",\"p\":\"EKrvD62xS8N9d1_DswLuu4xcNnwIql9NsJoDHpSQTBaF\",\"kt\":\"1\",\"k\":[\"DNMH0peZnxT2eq1CphdHu51bOcZ6ap59htYO9zaGg_TA\"],\"nt\":\"1\",\"n\":[\"EPfgeje3zWkLCJgfVvmMgduxk8yqMiOSulsNtftTPRcC\"],\"bt\":\"0\",\"br\":[],\"ba\":[],\"a\":[]}-AABAADZJ1ISGHvBVdsB_ULLlE2VFubE-Fvw8On_tIl_n5tOtCwrowQ3SIcY4XaPc--YFN-IS7_WROhyAk_NrLZEyF0A"
+        ],
+        "source": "checked_party"
+      },
+      "expect": {
+        "grade": "refused",
+        "reason": "log_invalid",
         "machine": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
         "owner": "EOd_FiJBXvmPxwGFYny9mtYkPA6ZedowQ8y9XYXEiBLE",
         "event": "EAR4YMN3Bh4pC9svvgXrVxF8AiZlyBsE47NJ9WuMa_UO",
