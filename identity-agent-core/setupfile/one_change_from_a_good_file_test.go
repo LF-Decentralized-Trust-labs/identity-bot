@@ -33,7 +33,7 @@ func probes() []any {
 		keyShaped("sk- and 32 letters and digits"), "sk-this-is-a-long-hyphenated-slug", keyShaped("a live key"), keyShaped("a GitHub token"),
 		keyShaped("a GitLab token"), keyShaped("an npm token"), keyShaped("an age key"),
 		keyShaped("a JSON Web Token"), "postgres://reader:hunter2@db.example/handbook", "https://reader@docs.example/handbook",
-		"-----BEGIN PRIVATE KEY-----", keyShaped("an access key"), "Quarterly-Report-2026-Final-Version-For-The-Board",
+		joined("-----BEGIN PRIV", "ATE KEY-----"), keyShaped("an access key"), "Quarterly-Report-2026-Final-Version-For-The-Board",
 		"Employee_Handbook_2026_Final_Reviewed_Version.pdf", "https://news.example/2026/11/20/how-we-rebuilt-the-handbook-for-everyone-in-2026-11-20",
 		"https://docs.google.com/document/d/1x7Zr2Lm9Xc4Vb1Nn8Kp3Jh6Gf5Ds0Aa7Qw2Er9Ty4U/edit", "Build-2026-11-20-Release-Candidate-For-The-Handbook-Site",
 		// Times, origins and the words fields take.

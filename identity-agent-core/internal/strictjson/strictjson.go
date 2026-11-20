@@ -49,7 +49,7 @@ var wholeNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 func WholeNumber(n json.Number) (int64, error) {
 	s := n.String()
 	if !wholeNumber.MatchString(s) || s == "-0" {
-		return 0, fmt.Errorf("must be a whole number written plainly, not %.40s", s)
+		return 0, fmt.Errorf("must be a whole number written plainly, not %s", s)
 	}
 	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || v > maxExactInt || v < -maxExactInt {
