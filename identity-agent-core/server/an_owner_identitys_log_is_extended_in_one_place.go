@@ -368,10 +368,9 @@ func (s *CoreServer) signAndKeepReserved(eng ownerLogEngine, name string, r stor
 	// found from its stored index, and found only for reserved bytes. Every
 	// caller of this holds the writer's lock and has had the witness check
 	// pass, so this is where the one signing is allowed, for these bytes at
-	// this place, and taken back whether or not it was used.
-	s.ownerLog.permits.Store(r.OwnerAID, ownerLogPermit{sn: r.SN, digest: r.Digest})
-	sig, err := s.signEventFor(r.OwnerAID, "", raw)
-	s.ownerLog.permits.Delete(r.OwnerAID)
+	// this place, and taken back whether or not it was used, a panic inside
+	// the signer included.
+	sig, err := s.signWithPermit(r, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +400,14 @@ func (s *CoreServer) signAndKeepReserved(eng ownerLogEngine, name string, r stor
 	}
 	return &ownerLogEvent{OwnerAID: r.OwnerAID, SN: res.SN, SAID: res.SAID, Raw: raw,
 		Signatures: res.Signatures, Written: true}, nil
+}
+
+// signWithPermit has the engine's signer sign a reservation's bytes with the
+// one permit for them, and takes the permit back however the signer returns.
+func (s *CoreServer) signWithPermit(r store.OwnerLogReservation, raw []byte) (string, error) {
+	s.ownerLog.permits.Store(r.OwnerAID, ownerLogPermit{sn: r.SN, digest: r.Digest})
+	defer s.ownerLog.permits.Delete(r.OwnerAID)
+	return s.signEventFor(r.OwnerAID, "", raw)
 }
 
 // signReservedOwnerLogEvent signs raw as owner only where all of these hold:

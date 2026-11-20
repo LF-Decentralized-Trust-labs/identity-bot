@@ -983,3 +983,49 @@ func TestAnEventKeptAndNotQueuedIsQueuedWhenItsAnchorIsAskedForAgain(t *testing.
 		t.Fatal("the event kept was not queued when its anchor was asked for again")
 	}
 }
+
+// aStoreThatPanicsWhenAskedForTheIdentity stands in for a store, so that the
+// engine's signer, which asks it first, panics.
+type aStoreThatPanicsWhenAskedForTheIdentity struct{ store.Store }
+
+func (aStoreThatPanicsWhenAskedForTheIdentity) GetIdentity() (*store.IdentityState, error) {
+	panic("the signer stopped")
+}
+
+// A signer that panics leaves no permit behind: nothing that runs after the
+// panic, which the HTTP server recovers from, can sign as the owner
+// identity with it.
+func TestASignerThatPanicsLeavesNoPermitBehind(t *testing.T) {
+	s := withWitnessesStandingIn(adoptingOwner(t))
+	owner := mintedOwnerOf(t, s, machineKindIndividual)
+	s.ownerLog.stopAt = func(at ownerLogStep) error {
+		if at == ownerLogReserved {
+			return errTheDeviceStopped
+		}
+		return nil
+	}
+	if _, err := s.anchorInOwnerLog(owner, aMachine, 0, aMachine); !errors.Is(err, errTheDeviceStopped) {
+		t.Fatal(err)
+	}
+	reserved, err := s.DataStore.OwnerLogReservations(owner)
+	if err != nil || len(reserved) != 1 {
+		t.Fatalf("the reservations are %+v, %v", reserved, err)
+	}
+	eng, name, err := s.heldOwnerLog(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.DataStore = aStoreThatPanicsWhenAskedForTheIdentity{s.DataStore}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the signer did not panic")
+			}
+		}()
+		s.signAndKeepReserved(eng, name, reserved[0])
+	}()
+	if _, held := s.ownerLog.permits.Load(owner); held {
+		t.Fatal("a permit to sign as the owner identity was left behind by a signer that panicked")
+	}
+}
