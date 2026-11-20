@@ -83,8 +83,10 @@ func mixed(run string) bool {
 // ShapeOf says what text is shaped like, by the published rules. A run is the
 // longest stretch of ASCII letters, digits, "-" and "_", so a web address or
 // a sentence is read word by word. Text is judged as a reader sees it, with
-// joiners, non-joiners, variation selectors and soft hyphens taken out
-// (withoutUnseen).
+// every character that is not seen as itself taken out but those that end a
+// word (withoutUnseen). It is judged a secret also when its compatibility
+// form (Normalization Form KC, with the same characters taken out) is one, so
+// that a key spelt in fullwidth or mathematical letters is still a key.
 //
 //   - secret: a spelling only a secret has. A private key block; a token of a
 //     known beginning; a web address carrying a user and a password that is
@@ -101,7 +103,8 @@ func mixed(run string) bool {
 //     digit.
 //
 // This is a floor and not a guarantee: a secret in a spelling nobody listed
-// passes. What keeps secrets out of a file is that an exporter never reads one
+// passes, and so does one with a letter of another script that looks like a
+// Latin one. What keeps secrets out of a file is that an exporter never reads one
 // into it.
 func ShapeOf(text string) (secret, likelySecret, identifier bool) {
 	s := shapeOf(text)
@@ -109,7 +112,15 @@ func ShapeOf(text string) (secret, likelySecret, identifier bool) {
 }
 
 func shapeOf(text string) shape {
-	text = withoutUnseen(text)
+	found := shapeSeen(withoutUnseen(text))
+	if found != secretShape && shapeSeen(withoutUnseen(nfkc(text))) == secretShape {
+		return secretShape
+	}
+	return found
+}
+
+// shapeSeen is the shape of text a reader sees all of.
+func shapeSeen(text string) shape {
 	if knownSecrets.MatchString(text) {
 		return secretShape
 	}

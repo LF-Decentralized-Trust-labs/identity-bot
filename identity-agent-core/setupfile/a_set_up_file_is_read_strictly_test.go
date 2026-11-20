@@ -102,9 +102,14 @@ func TestAFileHoldingSomethingShapedLikeAKeyIsRefused(t *testing.T) {
 		"a web token":           keyShaped("a JSON Web Token"),
 		"a password in a link":  "postgres://reader:hunter2@db.example/handbook",
 		// Each is the key with a character in it that is not seen.
-		"a key split by a joiner":      keyShaped("an access key split by a joiner"),
-		"a token split by a joiner":    keyShaped("sk- with a project, split by a joiner"),
-		"a key split by a soft hyphen": keyShaped("an access key split by a soft hyphen"),
+		"a key split by a joiner":           keyShaped("an access key split by a joiner"),
+		"a token split by a joiner":         keyShaped("sk- with a project, split by a joiner"),
+		"a key split by a soft hyphen":      keyShaped("an access key split by a soft hyphen"),
+		"a key split by a zero-width space": keyShaped("an access key split by a zero-width space"),
+		"a key split by a word joiner":      keyShaped("an access key split by a word joiner"),
+		"a key split by a byte order mark":  keyShaped("an access key split by a byte order mark"),
+		"a key split by a tag character":    keyShaped("an access key split by a tag character"),
+		"a key in fullwidth letters":        keyShaped("an access key in fullwidth letters"),
 	} {
 		for _, place := range []func(object, string){
 			func(f object, s string) { f["about"] = "Kept here for now: " + s },
@@ -587,6 +592,21 @@ func TestTextIsJudgedByItsShapeWordByWord(t *testing.T) {
 		keyShaped("an access key split by a soft hyphen"):  secretShape,
 		keyShaped("an access key split by two unseen"):     secretShape,
 		"co\u00adoperate": plainShape,
+		keyShaped("an access key split by a zero-width space"):  secretShape,
+		keyShaped("an access key split by a word joiner"):       secretShape,
+		keyShaped("an access key split by a byte order mark"):   secretShape,
+		keyShaped("an access key split by a tag character"):     secretShape,
+		keyShaped("an access key in fullwidth letters"):         secretShape,
+		keyShaped("an access key in mathematical bold letters"): secretShape,
+		// What ends a word still ends one: the two halves of a key, a word
+		// apart, are two words and not a key.
+		joined("AK", "IA") + " ABCDEFGHIJKLMNOP":      plainShape,
+		joined("AK", "IA") + "\tABCDEFGHIJKLMNOP":     plainShape,
+		joined("AK", "IA") + "\nABCDEFGHIJKLMNOP":     plainShape,
+		joined("AK", "IA") + "\r\nABCDEFGHIJKLMNOP":   plainShape,
+		joined("AK", "IA") + "\u00a0ABCDEFGHIJKLMNOP": plainShape,
+		joined("AK", "IA") + "\u202fABCDEFGHIJKLMNOP": plainShape,
+		"Ask the desk for\nkey 1234 of floor\u00a02.": plainShape,
 	} {
 		if got := shapeOf(text); got != want {
 			t.Errorf("%q is shaped %d, wanted %d", text, got, want)

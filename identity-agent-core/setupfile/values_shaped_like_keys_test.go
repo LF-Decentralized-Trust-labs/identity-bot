@@ -42,6 +42,39 @@ var shapedLikeAKey = map[string]string{
 	"an access key split by a soft hyphen":  joined("AK", "IAIOSF­", "ODNN7EXAMPLE"),
 	"an access key split by two unseen":     joined("AK", "IAIOSF‌", "ODNN7️EXAMPLE"),
 	"sk- with a project, split by a joiner": joined("sk-pr", "oj-abcdefghij1‍", "2klmnopqrstuvwxyz"),
+	// Every other character a reader cannot see is taken out too.
+	"an access key split by a zero-width space": joined("AK", "IA1234\u200b", "567890ABCDEF"),
+	"an access key split by a word joiner":      joined("AK", "IA1234\u2060", "567890ABCDEF"),
+	"an access key split by a byte order mark":  joined("AK", "IA1234\ufeff", "567890ABCDEF"),
+	"an access key split by a tag character":    joined("AK", "IA1234\U000E0041", "567890ABCDEF"),
+	// A key spelt in letters that read the same on a screen is a key.
+	"an access key in fullwidth letters":         fullwidth(joined("AK", "IA", "ABCDEFGH", "IJKLMNOP")),
+	"an access key in mathematical bold letters": mathematicalBold(joined("AK", "IA", "ABCDEFGH", "12345678")),
+}
+
+// fullwidth is text with each printable ASCII character but the space in its
+// fullwidth form.
+func fullwidth(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r > ' ' && r < 0x7F {
+			return r - '!' + 0xFF01
+		}
+		return r
+	}, s)
+}
+
+// mathematicalBold is text with each ASCII capital letter and digit in its
+// mathematical bold form.
+func mathematicalBold(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			return r - 'A' + 0x1D400
+		case r >= '0' && r <= '9':
+			return r - '0' + 0x1D7CE
+		}
+		return r
+	}, s)
 }
 
 // keyShaped is the value the table holds under name.

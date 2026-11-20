@@ -210,16 +210,28 @@ func drawnOnly(r rune) bool {
 	return r == textSelector || r == emojiSelector || r == zwj || r == zwnj
 }
 
-// withoutUnseen is text as a reader sees it: without the characters drawnOnly
-// says, and without a soft hyphen, which is drawn only where a line breaks.
-// Text is judged by its shape in this form, so that none of them can split a
-// key that looks whole on a screen.
+// endsAWord is whether a character is one of the few not seen as themselves
+// that stand between words or lines, and so end a token where they stand: a
+// tab, a line feed, a carriage return, a no-break space and a narrow no-break
+// space. (A space is seen.)
+func endsAWord(r rune) bool {
+	return r == '\t' || r == '\n' || r == '\r' || r == noBreakSpace || r == narrowNoBreakSpace
+}
+
+// withoutUnseen is text as a reader sees it: without every character that is
+// not seen as itself (seen), but those that end a word (endsAWord). That
+// takes out the joiners, the variation selectors and the soft hyphen, which
+// are drawn at most into the characters beside them, and every other
+// character a reader cannot see: zero-width spaces, word joiners, byte order
+// marks, marks of direction, fillers, tags. Text is judged by its shape in
+// this form, so that none of them can split a key that looks whole on a
+// screen.
 func withoutUnseen(text string) string {
 	return strings.Map(func(r rune) rune {
-		if drawnOnly(r) || r == softHyphen {
-			return -1
+		if seen(r) || endsAWord(r) {
+			return r
 		}
-		return r
+		return -1
 	}, text)
 }
 

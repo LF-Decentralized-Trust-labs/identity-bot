@@ -55,7 +55,6 @@ class Num:
 # -- The Unicode facts, pinned ------------------------------------------------
 
 ZWNJ, ZWJ, VS15, VS16 = 0x200C, 0x200D, 0xFE0E, 0xFE0F
-SOFT_HYPHEN = 0x00AD
 # What changes at most how the characters beside it are drawn.
 DRAWN_ONLY = (VS15, VS16, ZWJ, ZWNJ)
 HANGUL_S, HANGUL_L, HANGUL_V, HANGUL_T = 0xAC00, 0x1100, 0x1161, 0x11A7
@@ -422,17 +421,31 @@ def mixed(run):
     return bool(re.search("[A-Z]", run) and re.search("[a-z]", run) and re.search("[0-9]", run))
 
 
+# Characters not seen as themselves that stand between words or lines, and so
+# end a token: a tab, a line feed, a carriage return, a no-break space and a
+# narrow no-break space. (A space is seen.)
+ENDS_A_WORD = (0x09, 0x0A, 0x0D, 0xA0, 0x202F)
+
+
 def without_unseen(s):
-    """Text as a reader sees it: no variation selector, joiner, non-joiner or
-    soft hyphen."""
-    return "".join(c for c in s if ord(c) not in DRAWN_ONLY and ord(c) != SOFT_HYPHEN)
+    """Text as a reader sees it: without every character that is not seen as
+    itself, but those that end a word."""
+    return "".join(c for c in s if ord(c) in U.seen or ord(c) in ENDS_A_WORD)
 
 
 def shape(s):
     """'secret', 'likely' (what may be a secret), 'identifier' or '': the
     greatest found (the section "Text shaped like a secret or an identifier"),
-    judged as a reader sees the text."""
-    s = without_unseen(s)
+    judged as a reader sees the text. It is a secret also when its
+    compatibility form (NFKC) is one."""
+    found = shape_seen(without_unseen(s))
+    if found != "secret" and shape_seen(without_unseen(U.nfkc(s))) == "secret":
+        return "secret"
+    return found
+
+
+def shape_seen(s):
+    """The shape of text a reader sees all of."""
     if KNOWN_SECRETS.search(s):
         return "secret"
     for token in SK_TOKEN.findall(s):

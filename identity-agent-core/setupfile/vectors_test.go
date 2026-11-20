@@ -328,6 +328,8 @@ func written(t testing.TB) vectorSet {
 		aWorker("A link with a placeholder for its password", object{"note": "postgres://USER:PASSWORD@HOST/handbook and https://user:pass@docs.example"}),
 		aWorker("A link with a password in brackets", object{"note": "https://user:<password>@docs.example/handbook"}),
 		aWorker("A mail address after a colon", object{"note": "mailto:someone:else@docs.example"}),
+		aWorker("Two words a line apart", object{"note": joined("AK", "IA") + "\nABCDEFGHIJKLMNOP"}),
+		aWorker("Two words a no-break space apart", object{"note": joined("AK", "IA") + "\u00a0ABCDEFGHIJKLMNOP"}),
 		aWorker("A slug that begins like a token and ends in a word", object{"note": "sk-Report-2026-final-version-x"}),
 		aWorker("A slug that begins like a token and ends in a long word", object{"note": "sk-notes-internationalisationguide"}),
 		aWorker("Links with a placeholder in closed brackets, as a variable, or as words", object{"note": "https://user:${DB_PASSWORD}@docs.example https://user:{{password}}@docs.example https://user:[password]@docs.example https://user:%s@docs.example https://user:your-password@docs.example https://user:YOUR_PASSWORD@docs.example"}),
@@ -446,6 +448,11 @@ func written(t testing.TB) vectorSet {
 		"a key split by a joiner":                           keyShaped("an access key split by a joiner"),
 		"a token that begins sk- split by a joiner":         keyShaped("sk- with a project, split by a joiner"),
 		"a key split by a soft hyphen":                      keyShaped("an access key split by a soft hyphen"),
+		"a key split by a zero-width space":                 keyShaped("an access key split by a zero-width space"),
+		"a key split by a word joiner":                      keyShaped("an access key split by a word joiner"),
+		"a key split by a byte order mark":                  keyShaped("an access key split by a byte order mark"),
+		"a key split by a tag character":                    keyShaped("an access key split by a tag character"),
+		"a key in fullwidth letters":                        keyShaped("an access key in fullwidth letters"),
 	}
 	for _, name := range sorted(secrets) {
 		s := secrets[name]
@@ -453,6 +460,9 @@ func written(t testing.TB) vectorSet {
 	}
 	add("refused: a token in an item of a kind the reader does not know", with(twoWebsites(), func(f object) {
 		f["items"] = append(f["items"].([]any), object{"kind": "example.unknown", "name": "X", "deep": []any{object{"k": secrets["a GitHub token"]}}})
+	}))
+	add("refused: a key split by a zero-width space in an item of a kind the reader does not know", with(twoWebsites(), func(f object) {
+		f["items"] = append(f["items"].([]any), object{"kind": "example.unknown", "name": "X", "deep": []any{object{"k": secrets["a key split by a zero-width space"]}}})
 	}))
 	add("refused: a token as a limit's value", with(aFullFile(), func(f object) {
 		item(f, 1)["limits"].(object)["code.repository.read"].(object)["repository"] = []any{secrets["a GitHub token"]}

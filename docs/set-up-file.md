@@ -215,16 +215,21 @@ to hold one (below, a website's `required_cred_schema` and `required_cred_issuer
 
 **What keeps a secret out of a file is the exporter.** An exporter writes names and settings and never reads a secret
 into a file. The check below is a floor under that, for a secret a person typed into a note or an instruction. It is
-not a guarantee: a secret in a spelling nobody listed passes.
+not a guarantee: a secret in a spelling nobody listed passes, and so does one spelt with a letter of another script
+that looks like a Latin one.
 
 ### Text shaped like a secret or an identifier
 
 Text is judged by its shape, whatever it claims to be. A **run** is the longest stretch of ASCII letters, digits, `-`
 and `_`, so a sentence or a web address is judged word by word. A run is *mixed* when it holds an upper-case letter, a
 lower-case letter and a digit. Text has the gravest shape found in it. A *token character* is a letter, a digit, `-`
-or `_`; letters and digits are ASCII. Text is judged as a reader sees it: with every zero-width joiner (U+200D),
-zero-width non-joiner (U+200C), soft hyphen (U+00AD) and variation selector 15 or 16 taken out first, so that none of
-them can split a key that looks whole on a screen.
+or `_`; letters and digits are ASCII. Text is judged as a reader sees it: with every character that is not seen as
+itself (the `seen` list of the pinned facts) taken out first, but a tab, a line feed, a carriage return, a no-break
+space (U+00A0) and a narrow no-break space (U+202F), which end a word where they stand. That takes out the joiners,
+the variation selectors and the soft hyphen, and also zero-width spaces, word joiners, byte order marks, marks of
+direction, fillers and tag characters, so that none of them can split a key that looks whole on a screen. Text is a
+secret also when its Normalization Form KC, with the same characters taken out, is one, so that a key spelt in
+fullwidth or mathematical letters is still a key.
 
 **A spelling only a secret has refuses the file.** These, and no others, so that a file one exporter writes is never
 refused by another's importer for a reason its exporter could not have known:
@@ -625,7 +630,8 @@ needed credentials; 300 bytes an origin; nesting 64 deep.
 
 **Secrets and identifiers.**
 - The list of spellings that refuse a file, and that it is a closed list.
-- That text is judged with joiners, non-joiners, soft hyphens and variation selectors taken out.
+- That text is judged with every character that is not seen taken out, but a tab, a line feed, a carriage return, a
+  no-break space and a narrow no-break space; and is a secret also when its Normalization Form KC is one.
 - The `sk-` rule; which passwords in an address are placeholders, and that a placeholder is a closed form; what a
   salt is.
 - The two rules of thumb that block an item, and their thresholds (64 hexadecimal characters; 40 characters with
