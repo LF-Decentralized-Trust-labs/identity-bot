@@ -87,22 +87,48 @@ type Log struct {
 	Sigs  []string
 	saids []string
 	by    []int // which key signed each event
+	wits  []string
 }
 
 // Incept founds an identity on key 0.
 func Incept(t testing.TB, k *Keys) *Log {
 	t.Helper()
-	raw, err := keri.BuildInception(keri.InceptionInput{
-		Keys: []string{k.pubs[0]}, NextDigests: k.digest(t, 1), Derivation: "self-addressing",
+	return InceptWith(t, k, keri.InceptionInput{})
+}
+
+// InceptWith founds an identity on key 0 as Incept does, with whatever else
+// the inception is to state taken from in: seals (Data), witnesses and their
+// threshold. Its keys, next-key digest and derivation are set here.
+func InceptWith(t testing.TB, k *Keys, in keri.InceptionInput) *Log {
+	t.Helper()
+	in.Keys, in.NextDigests, in.Derivation = []string{k.pubs[0]}, k.digest(t, 1), "self-addressing"
+	raw, err := keri.BuildInception(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return founded(t, k, raw, in.Witnesses)
+}
+
+// InceptDelegated founds a delegated identity on key 0, naming delegator, with
+// seals in its inception. The delegator's approval is not part of this log.
+func InceptDelegated(t testing.TB, k *Keys, delegator string, seals ...json.RawMessage) *Log {
+	t.Helper()
+	raw, err := keri.BuildDelegatedInception(keri.DelegationInput{
+		Delegator: delegator, Keys: []string{k.pubs[0]}, NextDigests: k.digest(t, 1), Data: seals,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return founded(t, k, raw, nil)
+}
+
+func founded(t testing.TB, k *Keys, raw []byte, witnesses []string) *Log {
+	t.Helper()
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l := &Log{t: t, keys: k, AID: ev.Identifier}
+	l := &Log{t: t, keys: k, AID: ev.Identifier, wits: witnesses}
 	l.add(raw, ev.SAID, 0)
 	return l
 }
@@ -127,10 +153,17 @@ func (l *Log) add(raw []byte, said string, signer int) {
 // Rotate moves the log to the next key, signed by that key.
 func (l *Log) Rotate() *Log {
 	l.t.Helper()
+	return l.RotateSealing()
+}
+
+// RotateSealing is Rotate with seals in the rotation.
+func (l *Log) RotateSealing(seals ...json.RawMessage) *Log {
+	l.t.Helper()
 	next := l.cur + 1
 	raw, err := keri.BuildRotation(keri.RotationInput{
 		Prefix: l.AID, Keys: []string{l.keys.pubs[next]}, PriorSAID: l.saids[len(l.saids)-1],
 		SN: len(l.Raws), NextDigests: l.keys.digest(l.t, next+1),
+		PriorWitnesses: l.wits, Data: seals,
 	})
 	if err != nil {
 		l.t.Fatal(err)
@@ -179,9 +212,16 @@ func (l *Log) RotateTo(other *Keys) *Log {
 func (l *Log) Interact(label string) *Log {
 	l.t.Helper()
 	seal, _ := json.Marshal(map[string]string{"d": label})
+	return l.Seal(seal)
+}
+
+// Seal appends an interaction event carrying seals, signed by the key now in
+// force.
+func (l *Log) Seal(seals ...json.RawMessage) *Log {
+	l.t.Helper()
 	raw, err := keri.BuildInteraction(keri.InteractionInput{
 		Prefix: l.AID, PriorSAID: l.saids[len(l.saids)-1], SN: len(l.Raws),
-		Data: []json.RawMessage{seal},
+		Data: seals,
 	})
 	if err != nil {
 		l.t.Fatal(err)
@@ -211,6 +251,24 @@ func (l *Log) Cut(n int) *Log {
 	c.Raws, c.Sigs, c.saids, c.by = c.Raws[:n], c.Sigs[:n], c.saids[:n], c.by[:n]
 	c.cur = c.by[n-1]
 	return c
+}
+
+// SAID is the identifier of event i.
+func (l *Log) SAID(i int) string { return l.saids[i] }
+
+// Messages is the log as keri-go verifies it: each event with its controller
+// signature attached.
+func (l *Log) Messages() [][]byte {
+	l.t.Helper()
+	out := make([][]byte, 0, len(l.Raws))
+	for i, raw := range l.Raws {
+		m, err := drivers.SignedMessageAsSent(raw, []string{l.Sigs[i]})
+		if err != nil {
+			l.t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // Len is the number of events.
