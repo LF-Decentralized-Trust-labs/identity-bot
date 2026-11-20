@@ -71,7 +71,7 @@ func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err 
 	// Remembered here rather than handed out and taken back. Adoption looks it
 	// up; an index that travelled through a caller would have to be trusted or
 	// verified, and neither is needed when this side minted it.
-	if err := s.DataStore.RememberMachineOwnerIdentity(aid, idx); err != nil {
+	if err := s.DataStore.RememberMachineOwnerIdentity(aid, idx, ""); err != nil {
 		return "", "", fmt.Errorf("could not record the identity for this machine: %w", err)
 	}
 	// Its key log is written down too, not only held in memory.

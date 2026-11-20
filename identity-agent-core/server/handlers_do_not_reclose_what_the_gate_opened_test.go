@@ -138,7 +138,7 @@ func TestAControllerCannotSendAsTheOwnerByDIDComm(t *testing.T) {
 	if err := ds.SaveIdentity(store.IdentityState{AID: "Etheidentity", PublicKey: "Dkey"}); err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	if err := ds.RememberMachineOwnerIdentity("Eowner-of-a-machine", 3); err != nil {
+	if err := ds.RememberMachineOwnerIdentity("Eowner-of-a-machine", 3, ""); err != nil {
 		t.Fatalf("machine owner: %v", err)
 	}
 	asController := func(body string) *httptest.ResponseRecorder {

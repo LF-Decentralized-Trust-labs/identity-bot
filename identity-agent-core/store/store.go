@@ -777,8 +777,18 @@ type Store interface {
 	// An identity minted for a machine that does not exist yet. See
 	// machine_owner_identities.go for why the index is kept rather than handed
 	// out and taken back.
-	RememberMachineOwnerIdentity(aid string, keyIndex int) error
+	RememberMachineOwnerIdentity(aid string, keyIndex int, kind string) error
 	MachineOwnerIndex(aid string) (int, bool, error)
+	// What is kept about an owner identity beside its index, and the one way
+	// its key log is extended: at a place reserved before anything is signed.
+	// See an_owner_log_is_extended_only_at_a_reserved_place.go.
+	MachineOwnerIdentity(aid string) (MachineOwnerIdentity, bool, error)
+	MachineOwnerIdentities() ([]MachineOwnerIdentity, error)
+	GiveUpMachineOwnerIdentity(aid, m string) error
+	MarkMachineOwnerIdentityDuplicitous(aid string, sn int) error
+	ReserveOwnerLogPlace(r OwnerLogReservation, m string) (OwnerLogReservation, error)
+	OwnerLogReservations(ownerAID string) ([]OwnerLogReservation, error)
+	KeepOwnerLogEvent(ev EventRecord) error
 	MarkAdoptedAgentSeen(aid string) error
 	ForgetAdoptedAgent(aid string) error
 	GetIdentity() (*IdentityState, error)
