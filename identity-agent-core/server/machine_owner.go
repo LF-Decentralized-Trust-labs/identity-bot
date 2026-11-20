@@ -48,7 +48,8 @@ type mintMachineOwnerRequest struct {
 	// own machine, "organisation" for an organisation's Identity Agent. No key
 	// log carries it, so it is kept with the identity from the moment it is
 	// minted (ADR-087 decision 13). Left out, nothing is recorded: a guess
-	// written down would read later as a fact.
+	// written down would read later as a fact. (An owner identity minted
+	// while adopting a machine takes the kind of that claim instead.)
 	Kind string `json:"kind"`
 }
 

@@ -1029,3 +1029,25 @@ func TestASignerThatPanicsLeavesNoPermitBehind(t *testing.T) {
 		t.Fatal("a permit to sign as the owner identity was left behind by a signer that panicked")
 	}
 }
+
+// The copy of an owner log that is served is brought up to the kept log when
+// the core starts, as it must be after a restore replaced the kept log, and
+// what the core reads from its file afterwards is the kept log too.
+func TestTheServedOwnerLogFollowsTheKeptOneWhenTheCoreStarts(t *testing.T) {
+	s := withWitnessesStandingIn(adoptingOwner(t))
+	owner := mintedOwnerOf(t, s, machineKindIndividual)
+	founding, _ := s.getPairwiseKEL(owner)
+	if _, err := s.anchorInOwnerLog(owner, aMachine, 0, aMachine); err != nil {
+		t.Fatal(err)
+	}
+	// The served copy as a restore leaves it: the one from before the anchor.
+	key, _ := s.getPairwiseKey(owner)
+	s.rememberMintedPairwise(owner, key, founding[:1])
+
+	started := restartedOver(t, s)
+	// In the order Start runs them: the key logs, then the file.
+	started.restoreMintedPairwise()
+	if served, _ := started.getPairwiseKEL(owner); len(served) != 2 {
+		t.Fatalf("the served copy has %d events and the kept log 2", len(served))
+	}
+}

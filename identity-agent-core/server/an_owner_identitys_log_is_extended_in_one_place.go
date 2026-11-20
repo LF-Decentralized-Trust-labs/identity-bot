@@ -613,7 +613,9 @@ func (s *CoreServer) heldOwnerLog(owner string) (ownerLogEngine, string, error) 
 // reloadOwnerLogs hands the engine the key log of every owner identity this
 // device minted, at start, so each can be extended and its key found,
 // finishes whatever was reserved and not kept when the core last stopped,
-// and queues again for the witnesses every event kept after a founding
+// brings the copy of each log that is served up to the kept one, which a
+// restore can have replaced (servedOwnerLogFollowsTheKeptOne), and queues
+// again for the witnesses every event kept after a founding
 // (queueKeptOwnerLogEvents). What it cannot do it logs, and the core starts.
 func (s *CoreServer) reloadOwnerLogs() {
 	if s.KeriDriver == nil || s.DataStore == nil {
@@ -640,6 +642,7 @@ func (s *CoreServer) reloadOwnerLogs() {
 			}
 		}
 		if err == nil {
+			s.servedOwnerLogFollowsTheKeptOne(id.AID)
 			if kel, err := s.KeriDriver.GetKel(name); err != nil {
 				log.Printf("[owner-log] the key log of %s could not be read to queue it for its witnesses: %v", id.AID, err)
 			} else if err := s.queueKeptOwnerLogEvents(id.AID, kel); err != nil {
@@ -697,20 +700,56 @@ func anchorsIn(kel *drivers.DriverKelResponse, m string, seal json.RawMessage) (
 // that is served to whoever resolves it up to the kept log.
 //
 // That copy was taken once, when the identity was minted (rememberMinted-
-// Pairwise), and the kept log has grown since. The kept log is the one this
-// device extends and proves itself with. The served copy is a second one, and
-// is refreshed here so the two never say different things.
+// Pairwise), and kept in a file beside the database. The kept log has grown
+// since, or been replaced by a restore. The kept log is the one this device
+// extends and proves itself with. The served copy is a second one, and is
+// refreshed here, after an event is kept and when the core starts, so the two
+// never say different things. A copy that already holds the kept events is
+// left as it is.
+//
+// At start the file has not yet been read into memory (restoreMintedPairwise
+// runs after the key logs are loaded), so the key is looked for there too,
+// and the file is written: what is read from it later is then the kept log.
 func (s *CoreServer) servedOwnerLogFollowsTheKeptOne(owner string) {
 	events, err := s.DataStore.GetEvents(owner)
 	if err != nil || len(events) == 0 {
 		return
 	}
 	kel, _, _, _ := kelFromEvents(events)
-	if key, ok := s.getPairwiseKey(owner); ok {
+	key, known := s.getPairwiseKey(owner)
+	served, _ := s.getPairwiseKEL(owner)
+	if !known && s.DataDir != "" {
+		s.pairwiseFileMu.Lock()
+		all, _ := s.readMintedPairwise()
+		s.pairwiseFileMu.Unlock()
+		if m, ok := all[owner]; ok {
+			key, known, served = m.PublicKey, true, m.KEL
+		}
+	}
+	if sameEvents(served, kel) {
+		return
+	}
+	if known {
 		s.rememberMintedPairwise(owner, key, kel)
 		return
 	}
 	s.registerPairwiseKEL(owner, kel)
+}
+
+// sameEvents says whether two copies of a key log hold the same events, by
+// their digests.
+func sameEvents(a, b []map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		da, _ := a[i]["d"].(string)
+		db, _ := b[i]["d"].(string)
+		if da == "" || da != db {
+			return false
+		}
+	}
+	return true
 }
 
 // isASelfAddressingIdentifier says whether v has the shape of a digest KERI

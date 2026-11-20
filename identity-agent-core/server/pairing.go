@@ -905,9 +905,11 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// index: a pool that borrowed another's range would hand the same key to
 	// two unrelated relationships, which is the correlation a pairwise
 	// identifier exists to prevent.
-	// Refused rather than defaulted, because a wrong label here is silent: it
-	// puts an organisation in somebody's list of computers, or the reverse, and
-	// nothing later disagrees with it.
+	// A kind this does not know is refused rather than defaulted, because a
+	// wrong label here is silent: it puts an organisation in somebody's list
+	// of computers, or the reverse, and nothing later disagrees with it. A
+	// claim that names no kind is a computer of the person's own, as it has
+	// always been read.
 	kind := req.Kind
 	if kind == "" {
 		kind = machineKindIndividual
@@ -941,7 +943,9 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		// Nothing was reserved in advance, so mint one now. This is the path a
 		// machine obtained without a provisioning step takes. Minted as every
 		// owner identity is, so its index and kind are recorded: one that was
-		// not could never be signed as afterwards.
+		// not could never be signed as afterwards. Its kind is the claim's,
+		// "individual" where the claim names none, so the owner identity and
+		// the machine it was minted for are recorded as the same kind.
 		var mErr error
 		ownerAID, _, ownerIdx, mErr = s.mintAMachineOwnerIdentity("machine-"+shortAID(offer.PairwiseAID), kind)
 		if mErr != nil {
