@@ -1,6 +1,10 @@
 package authorisation
 
-import "fmt"
+import (
+	"fmt"
+
+	"identity-agent-core/drivers"
+)
 
 // Who owns an identity is read from its own inception event.
 //
@@ -12,7 +16,7 @@ import "fmt"
 // where the seal is written (ownerAnchorSeal, in the server).
 
 // OwnerSealSN is the position an owner seal names: the owner's inception.
-const OwnerSealSN = "0"
+const OwnerSealSN = drivers.OwnerSealSN
 
 // OwnerFromKEL returns the owner named in an identity's inception event.
 //
@@ -56,47 +60,9 @@ func OwnerFromKEL(kel []map[string]interface{}) (string, error) {
 	return "", nil
 }
 
-// OwnerFromSeal returns the owner an anchored seal names, if it is one.
-//
-// Three outcomes, not two. A seal can name an owner, be something else
-// entirely, or be an owner seal that is broken — and the third must not
-// collapse into the second. An identity whose ownership record is corrupt and
-// one that was never owned need different answers: the first is a fault to
-// report, the second is the ordinary state of a person's own Identity Agent.
+// OwnerFromSeal returns the owner an anchored seal names, if it is one. The
+// reading is drivers.OwnerFromSeal, so a seal is read one way wherever it is
+// read.
 func OwnerFromSeal(seal map[string]interface{}) (owner string, isOwner bool, err error) {
-	// An owner seal is a KERI event seal: exactly these three fields, naming the
-	// owner's inception. Anything else — a digest seal from break-glass
-	// recovery, a seal with extra fields — is not this function's business.
-	if len(seal) != 3 {
-		return "", false, nil
-	}
-	iRaw, hasI := seal["i"]
-	sRaw, hasS := seal["s"]
-	dRaw, hasD := seal["d"]
-	if !hasI || !hasS || !hasD {
-		return "", false, nil
-	}
-	aid, _ := iRaw.(string)
-	sn, _ := sRaw.(string)
-	d, _ := dRaw.(string)
-
-	if aid == "" || d == "" {
-		// The shape of an owner seal with nothing in it. Reported rather than
-		// skipped: silently ignoring it would let a broken identity look like
-		// an unowned one.
-		return "", false, fmt.Errorf("an event seal names no identity or no event, so the " +
-			"ownership record is malformed rather than absent")
-	}
-	if sn != OwnerSealSN {
-		// A seal naming a later event of some identity. Real, and not a
-		// statement about ownership.
-		return "", false, nil
-	}
-	// The seal names the owner's inception, whose digest IS its identifier
-	// because every identity here is self-addressing. Where the two disagree the
-	// seal refers to some other identity's event and is not an ownership claim.
-	if d != aid {
-		return "", false, nil
-	}
-	return aid, true, nil
+	return drivers.OwnerFromSeal(seal)
 }

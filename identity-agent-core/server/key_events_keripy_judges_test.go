@@ -11,6 +11,7 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keymath"
+	"identity-agent-core/ownership"
 	"identity-agent-core/recovery"
 
 	keri "github.com/grapeid/keri-go"
@@ -235,6 +236,32 @@ func TestKeripyJudges(t *testing.T) {
 			receipts = append(receipts, stream)
 		}
 		record(t, "core/witnessed-founding", "a founding naming two witnesses with a threshold of two, receipted by both", m, last, receipts...)
+	})
+
+	// The owner's side of ADR-087: an owner identity seals, in an interaction
+	// event of its own log, the inception of the Identity Agent that names it.
+	// The two logs the core produced are what the ownership check calls owned,
+	// and the owner's log is what keripy is given.
+	t.Run("an owner log anchoring the Identity Agent it owns", func(t *testing.T) {
+		ownerCore, machineCore := appHeldCore(t), appHeldCore(t)
+		owner, after := founding(t, ownerCore, k[0], k[1], nil)
+		machine, _ := founding(t, machineCore, k[2], k[3], map[string]any{"owner_aid": owner})
+		machineLog, _ := storedLog(t, machineCore, machine)
+		inception, err := keri.EventOfMessage(machineLog[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		seal, err := ownership.AnchorSeal(inception)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepareAndCommit(t, ownerCore, map[string]any{"aid": owner, "t": "ixn", "a": []any{seal}, "after": after}, k[0], false)
+		ownerLog, last := storedLog(t, ownerCore, owner)
+		got := ownership.Check(ownership.Log{Messages: machineLog}, ownership.Log{Messages: ownerLog}, ownership.Options{})
+		if got.Grade != ownership.OwnedAnchored || got.Machine != machine || got.Owner != owner {
+			t.Fatalf("the two logs the core produced are not owned and anchored: %+v (%s)", got, got.Detail)
+		}
+		record(t, "core/owner-log-anchoring", "an owner identity's founding, then its interaction sealing the inception of the Identity Agent that names it as owner", ownerLog, last)
 	})
 
 	t.Run("break-glass", func(t *testing.T) {

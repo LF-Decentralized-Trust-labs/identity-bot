@@ -90,21 +90,6 @@ func ownerAnchorSeal(ownerAID string) (json.RawMessage, error) {
 		ownerAID, ownerSealSN, ownerAID)), nil
 }
 
-// ownerFromSeal returns the owner an anchored seal names, if it is one
-// (authorisation.OwnerFromSeal).
-func ownerFromSeal(seal map[string]interface{}) (owner string, isOwner bool, err error) {
-	return authorisation.OwnerFromSeal(seal)
-}
-
-// establishment reports whether an event can carry an owner seal.
-func establishment(event map[string]interface{}) bool {
-	switch t, _ := event["t"].(string); t {
-	case "icp", "dip", "rot", "drt":
-		return true
-	}
-	return false
-}
-
 // ownerFromOwnIdentity reads the owner this agent's own identity names.
 func (s *CoreServer) ownerFromOwnIdentity(aid string) (string, error) {
 	if s.KeriDriver == nil {

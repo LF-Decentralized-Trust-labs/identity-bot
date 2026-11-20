@@ -1,6 +1,6 @@
 # ADR-087: An Owner's Key Log Anchors the Identity Agent It Founds
 
-**Status:** Proposed (2026-11-19)
+**Status:** Accepted (2026-11-20)
 **Date:** 2026-11-19
 **Deciders:** Rob Andersen
 **Amends:** ADR-032 (an identity can name who owns it, from its first event): what "owned" means to a verifier; ADR-036 (a computer you pair with does not publish who you are): one sentence of "What this costs" and one of decision 4; ADR-038 (who claims a machine is not who owns what it founds): which identity anchors, and that the owner's proof is kept. Each is named in "What this amends".

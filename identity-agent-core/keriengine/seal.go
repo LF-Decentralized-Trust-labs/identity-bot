@@ -3,6 +3,8 @@ package keriengine
 import (
 	"encoding/json"
 	"fmt"
+
+	"identity-agent-core/drivers"
 )
 
 // Seals, and why they cannot be built from a Go map.
@@ -25,19 +27,11 @@ import (
 //
 // So seals are built here, in order, and never from a map.
 
-// eventSeal refers to one event in an identity's log: which identity, where in
-// the log, and which event exactly.
-//
-// All three are needed. A seal naming only the identity would approve anything
-// that identity ever published, and one naming only the position would be
-// satisfied by whatever event later occupied it.
+// eventSeal refers to one event in an identity's log. The seal is written by
+// drivers.EventSeal, the one writer of an event seal, so every event seal in
+// the core has the same bytes whoever asks for it.
 func eventSeal(identifier, sn, digest string) (json.RawMessage, error) {
-	if identifier == "" || sn == "" || digest == "" {
-		return nil, fmt.Errorf("an event seal needs an identifier, a sequence number and a "+
-			"digest; got %q, %q, %q", identifier, sn, digest)
-	}
-	return json.RawMessage(fmt.Sprintf(`{"i":%s,"s":%s,"d":%s}`,
-		quote(identifier), quote(sn), quote(digest))), nil
+	return drivers.EventSeal(identifier, sn, digest)
 }
 
 // digestSeal refers to something by content alone — a credential, a document,
