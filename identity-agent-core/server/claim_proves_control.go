@@ -56,7 +56,8 @@ func newPairingChallenge() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// claimSigningInput is the exact bytes a claimant signs.
+// claimSigningInput is the exact bytes a claimant signs when it names no
+// separate owner.
 //
 // Every field that decides the outcome is in here. Leaving any of them out
 // would let that field be swapped after the fact by anything sitting between
@@ -66,6 +67,10 @@ func newPairingChallenge() (string, error) {
 //
 // Serialised through encoding/json with sorted keys rather than assembled by
 // hand, so the two sides cannot drift apart over a separator.
+//
+// These bytes are fixed. A claim that names a separate owner signs the two
+// inputs below instead, and neither of them can ever equal this one: each
+// carries a field this one lacks.
 func claimSigningInput(challenge, token, ownerAID, offeredPublicKey string) []byte {
 	b, _ := json.Marshal(map[string]string{
 		"challenge":          challenge,
@@ -76,25 +81,49 @@ func claimSigningInput(challenge, token, ownerAID, offeredPublicKey string) []by
 	return b
 }
 
-// verifyClaimantControlsTheIdentity is the gate this file exists for.
+// claimNamingAnOwnerSigningInput is what a claimant signs when its claim names
+// a separate owner for what the machine founds (ADR-038, Amendment 1).
 //
-// It answers one question — does whoever sent this claim hold the key of the
-// identifier they are claiming as? — and it answers it from the claimant's own
-// key log rather than from anything they simply asserted.
+// The claim's own fields, and the owner's identifier beside them. The owner
+// decides the outcome as much as the offered key does, so it is signed for the
+// same reason: without it, anything between the two parties could replace the
+// owner with an identity of its own, or remove it so that the claiming identity
+// is sealed as owner after all, and the claim would still verify.
+func claimNamingAnOwnerSigningInput(challenge, token, claimerAID, offeredPublicKey, foundedOwnerAID string) []byte {
+	b, _ := json.Marshal(map[string]string{
+		"challenge":          challenge,
+		"claim_token":        token,
+		"founded_owner_aid":  foundedOwnerAID,
+		"machine_public_key": offeredPublicKey,
+		"owner_aid":          claimerAID,
+	})
+	return b
+}
+
+// foundedOwnerRole is the role a separately named owner signs under. It is in
+// what the owner signs so that a signature made as an owner can never be
+// offered as a claim, nor a claim's as an owner's.
+const foundedOwnerRole = "founded_owner"
+
+// foundedOwnerSigningInput is what a separately named owner signs (ADR-038,
+// Amendment 1).
 //
-// The log is not fetched. A key log is self-verifying: each event's identifier
-// is derived from its own content, each names the one before it, and the
-// signatures are checked against the key the log itself puts in force at that
-// point. So a machine with no route to the internet can still establish this,
-// which matters because a computer being set up is exactly the machine most
-// likely to have no working network yet.
-//
-// The limit of not fetching is real and worth naming: a presented log cannot
-// reveal an event that was WITHHELD from it. Somebody who held a key, rotated
-// away from it, and kept the rotation to themselves could present the earlier
-// log and sign with the old key. Only witnesses close that, and a machine being
-// paired has no relationship with any yet. It is the same exposure as any
-// first contact, and it is bounded by the claim window.
+// The same exchange the claim signs, with two things said outright: that this
+// identity is signing as the owner of what is founded, and which identity is
+// making the claim it agrees to be named in. An owner that signed only the
+// exchange would have agreed to be named by whoever presented its signature.
+func foundedOwnerSigningInput(challenge, token, claimerAID, offeredPublicKey, foundedOwnerAID string) []byte {
+	b, _ := json.Marshal(map[string]string{
+		"challenge":          challenge,
+		"claim_token":        token,
+		"claimer_aid":        claimerAID,
+		"founded_owner_aid":  foundedOwnerAID,
+		"machine_public_key": offeredPublicKey,
+		"role":               foundedOwnerRole,
+	})
+	return b
+}
+
 // kelToPresent finds the key log for one of this device's own pairwise
 // identities.
 //
@@ -117,6 +146,27 @@ func (s *CoreServer) kelToPresent(aid string) []map[string]interface{} {
 	return nil
 }
 
+// verifyClaimantControlsTheIdentity is the gate this file exists for.
+//
+// It answers one question — does whoever sent this claim hold the key of the
+// identifier they are claiming as? — and it answers it from the claimant's own
+// key log rather than from anything they simply asserted.
+//
+// The log is not fetched. A key log is self-verifying: each event's identifier
+// is derived from its own content, each names the one before it, and the
+// signatures are checked against the key the log itself puts in force at that
+// point. So a machine with no route to the internet can still establish this,
+// which matters because a computer being set up is exactly the machine most
+// likely to have no working network yet.
+//
+// The limit of not fetching is real and worth naming: a presented log cannot
+// reveal an event that was WITHHELD from it. Somebody who held a key, rotated
+// away from it, and kept the rotation to themselves could present the earlier
+// log and sign with the old key. Only witnesses close that, so the log is then
+// put to the witnesses it designates (theWitnessesDoNotRefuse). What remains is
+// a computer offered from its own screen that can reach no witness, and an
+// identity that named none: there an unconfirmed history is accepted and
+// recorded, and the exposure is bounded by the claim window.
 func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteRequest, challenge, offeredPublicKey string) error {
 	if req.OwnerAID == "" {
 		return fmt.Errorf("a claim has to say which identity is making it")
@@ -129,6 +179,32 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 		return fmt.Errorf("this claim carries no key log for %s, so there is nothing to "+
 			"check the signature against", req.OwnerAID)
 	}
+	// A claim that names a separate owner signs for that owner too, so the
+	// owner in the request is the one the claimant chose.
+	signed := claimSigningInput(challenge, req.AdoptionCode, req.OwnerAID, offeredPublicKey)
+	if req.FoundedOwner != nil {
+		signed = claimNamingAnOwnerSigningInput(challenge, req.AdoptionCode, req.OwnerAID,
+			offeredPublicKey, req.FoundedOwner.AID)
+	}
+	if err := s.aKeyLogAndSignatureProveControl(req.OwnerAID, req.OwnerPublicKey, req.OwnerKEL,
+		req.OwnerSignature, signed); err != nil {
+		return err
+	}
+	// Authorship is established. Completeness is a different question, and this
+	// is where it is asked — see corroborate_the_claim.go.
+	return s.theWitnessesDoNotRefuse(req.OwnerAID, req.OwnerKEL)
+}
+
+// aKeyLogAndSignatureProveControl checks that a presented key log proves its
+// own authorship and that a signature over this exchange was made by the key
+// that log puts in force.
+//
+// One check for every identity a claim names, the claimant and a separately
+// named owner alike, so that the two cannot come to be held to different
+// standards.
+func (s *CoreServer) aKeyLogAndSignatureProveControl(
+	aid, offeredKey string, kel []map[string]interface{}, signature string, signed []byte,
+) error {
 	if s.KeriDriver == nil {
 		// Refuse rather than skip. A machine that cannot check the proof must
 		// not seal an owner in on the strength of an unchecked one.
@@ -136,48 +212,58 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 			"an owner in without verifying one is how a machine ends up answering to whoever asked first")
 	}
 
-	result, err := s.KeriDriver.ValidateKEL(req.OwnerAID, req.OwnerKEL)
+	result, err := s.KeriDriver.ValidateKEL(aid, kel)
 	if err != nil {
-		return fmt.Errorf("could not check the key log for %s: %w", req.OwnerAID, err)
+		return fmt.Errorf("could not check the key log for %s: %w", aid, err)
 	}
 	// KelVerified is the strict question — every event signed, and signed by
 	// the key the log itself puts in force. LogSound only says it parses and
 	// chains, which a log somebody wrote themselves also does.
 	if !result.KelVerified {
 		return fmt.Errorf("the key log for %s does not prove its own authorship (%v), so it "+
-			"establishes nothing about who controls that identity", req.OwnerAID, result.ValidationErrors)
+			"establishes nothing about who controls that identity", aid, result.ValidationErrors)
 	}
 	if result.CurrentPublicKey == "" {
-		return fmt.Errorf("the key log for %s names no key currently in force", req.OwnerAID)
+		return fmt.Errorf("the key log for %s names no key currently in force", aid)
 	}
 
-	// THE KEY IS TAKEN FROM THE LOG, NOT FROM THE CLAIM. This is what stops a
-	// claimant sealing in a key of their own choosing: the value they sent is
-	// checked against what their log actually puts in force, and disagreement
-	// is refused rather than resolved in their favour.
-	if req.OwnerPublicKey != "" && req.OwnerPublicKey != result.CurrentPublicKey {
-		return fmt.Errorf("the claim asks to seal in a key that %s's own log does not put in "+
-			"force; the log says %s", req.OwnerAID, result.CurrentPublicKey)
+	// THE KEY IS TAKEN FROM THE LOG, NOT FROM THE REQUEST. This is what stops
+	// a claimant sealing in a key of their own choosing: the value they sent is
+	// checked against what the log actually puts in force, and disagreement is
+	// refused rather than resolved in their favour.
+	if offeredKey != "" && offeredKey != result.CurrentPublicKey {
+		return fmt.Errorf("the key offered for %s is not the one its own log puts in "+
+			"force; the log says %s", aid, result.CurrentPublicKey)
 	}
 
 	pub, err := login.DecodeVerkey(result.CurrentPublicKey)
 	if err != nil {
-		return fmt.Errorf("the key %s's log puts in force cannot be read: %w", req.OwnerAID, err)
+		return fmt.Errorf("the key %s's log puts in force cannot be read: %w", aid, err)
 	}
-	ok, err := login.VerifyString(
-		string(claimSigningInput(challenge, req.AdoptionCode, req.OwnerAID, offeredPublicKey)),
-		req.OwnerSignature, pub)
+	ok, err := login.VerifyString(string(signed), signature, pub)
 	if err != nil {
-		return fmt.Errorf("the signature on this claim could not be checked: %w", err)
+		return fmt.Errorf("the signature offered for %s could not be checked: %w", aid, err)
 	}
 	if !ok {
-		return fmt.Errorf("the signature on this claim was not made by the key %s's log puts "+
-			"in force, so whoever sent it does not hold that identity", req.OwnerAID)
+		return fmt.Errorf("the signature offered for %s was not made over this exchange by the "+
+			"key its log puts in force, so whoever sent it does not hold that identity", aid)
 	}
+	return nil
+}
 
-	// Authorship is established. Completeness is a different question, and this
-	// is where it is asked — see corroborate_the_claim.go.
-	c := s.askTheWitnesses(req.OwnerAID, req.OwnerKEL)
+// theWitnessesDoNotRefuse asks somebody other than the presenter whether a key
+// log is the whole history of its identity.
+//
+// A presented log cannot reveal an event that was withheld from it: somebody
+// who held a key, and kept back the rotation that retired it, can present the
+// earlier log and sign with the old key. So every identity a claim names is put
+// to the witnesses its own log designates, the claimant and a separately named
+// owner alike. A history a witness contradicts, or one that cannot be checked,
+// is refused on every machine. One that nobody could confirm is refused where
+// this machine can always reach a witness (see mustBeCorroborated) and recorded
+// where it cannot.
+func (s *CoreServer) theWitnessesDoNotRefuse(aid string, kel []map[string]interface{}) error {
+	c := s.askTheWitnesses(aid, kel)
 	if c.Unverified != "" {
 		return fmt.Errorf("this history cannot be corroborated: %s", c.Unverified)
 	}
@@ -185,20 +271,20 @@ func (s *CoreServer) verifyClaimantControlsTheIdentity(req pairingCompleteReques
 		return fmt.Errorf("this history is not the whole history: %s", c.Why)
 	}
 	if !c.Corroborated() && s.mustBeCorroborated() {
-		return fmt.Errorf("nobody other than the claimant could confirm %s's history "+
+		return fmt.Errorf("nobody other than whoever presented it could confirm %s's history "+
 			"(%d witnesses named, %d answered signed, %d held the events and %d are needed, %d were empty, %d behind, %d failed; receipts to the threshold at every establishment event: %v). A machine that somebody else set up can "+
 			"always reach a witness, so being unable to is a reason to refuse rather than "+
-			"to proceed", req.OwnerAID, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
+			"to proceed", aid, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
 	}
 	if !c.Corroborated() {
 		// Recorded, not refused. This is a computer somebody is sitting at: it
 		// may have no working network at all, which is the case the presented
 		// log exists for. Refusing would make a machine unable to be set up in
 		// exactly the situation setting it up is most normal.
-		log.Printf("[pairing] claimed by %s on an UNCORROBORATED history (%d witnesses named, "+
+		log.Printf("[pairing] %s accepted on an UNCORROBORATED history (%d witnesses named, "+
 			"%d answered signed, %d held the events of %d needed, %d empty, %d behind, %d failed, receipts met: %v) — accepted because this machine was offered from its own screen, "+
 			"where the person is present; a hosted machine would refuse",
-			req.OwnerAID, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
+			aid, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
 	}
 	return nil
 }
@@ -234,18 +320,14 @@ func (s *CoreServer) mustBeCorroborated() bool {
 //
 // An owner sealed on an unproved assertion could be an identity that never
 // agreed to anything — and an owner named at inception can never be replaced.
-// So the evidence demanded here is the same in kind as the claim: the key log,
-// checked for its own authorship, and a fresh signature over this exchange by
-// the key that log puts in force.
-//
-// WHAT IS NOT REPEATED, and why. The claim above is corroborated by witnesses
-// where this machine requires it. That is not asked a second time here. The
-// party presenting this identity has already been corroborated in this same
-// exchange, and is presenting a second identity of their own; a second
-// corroboration adds no independent evidence and adds a way to fail that nobody
-// on either side could act on.
+// So it is held to the standard the claim is, by the same two checks: its key
+// log proves its own authorship and its signature was made by the key that log
+// puts in force, and the witnesses its log designates are asked whether that
+// log is the whole history. What it signs names its role and the identity
+// making the claim (see foundedOwnerSigningInput), so its agreement is to this
+// claim and no other.
 func (s *CoreServer) verifyTheOwnerBeingSealed(
-	owner *foundedOwner, challenge, adoptionCode, offeredPublicKey string,
+	owner *foundedOwner, claimerAID, challenge, adoptionCode, offeredPublicKey string,
 ) error {
 	if owner.AID == "" {
 		return fmt.Errorf("an owner has to say which identity it is")
@@ -258,43 +340,9 @@ func (s *CoreServer) verifyTheOwnerBeingSealed(
 		return fmt.Errorf("no key log was offered for %s, so there is nothing to check "+
 			"its signature against", owner.AID)
 	}
-	if s.KeriDriver == nil {
-		return fmt.Errorf("this instance cannot verify a key log right now, and sealing " +
-			"an owner it could not check is not a lesser version of checking it")
+	if err := s.aKeyLogAndSignatureProveControl(owner.AID, owner.PublicKey, owner.KEL, owner.Signature,
+		foundedOwnerSigningInput(challenge, adoptionCode, claimerAID, offeredPublicKey, owner.AID)); err != nil {
+		return err
 	}
-
-	result, err := s.KeriDriver.ValidateKEL(owner.AID, owner.KEL)
-	if err != nil {
-		return fmt.Errorf("could not check the key log for %s: %w", owner.AID, err)
-	}
-	if !result.KelVerified {
-		return fmt.Errorf("the key log for %s does not prove its own authorship (%v)",
-			owner.AID, result.ValidationErrors)
-	}
-	if result.CurrentPublicKey == "" {
-		return fmt.Errorf("the key log for %s names no key currently in force", owner.AID)
-	}
-	if owner.PublicKey != "" && owner.PublicKey != result.CurrentPublicKey {
-		return fmt.Errorf("the key offered for %s is not the one its own log puts in "+
-			"force; the log says %s", owner.AID, result.CurrentPublicKey)
-	}
-
-	pub, err := login.DecodeVerkey(result.CurrentPublicKey)
-	if err != nil {
-		return fmt.Errorf("the key %s's log puts in force cannot be read: %w", owner.AID, err)
-	}
-	// Over the same exchange the claim signed. A signature over anything else
-	// could have been made at another time, for another machine, and replayed
-	// here by whoever collected it.
-	ok, err := login.VerifyString(
-		string(claimSigningInput(challenge, adoptionCode, owner.AID, offeredPublicKey)),
-		owner.Signature, pub)
-	if err != nil {
-		return fmt.Errorf("the signature offered for %s could not be checked: %w", owner.AID, err)
-	}
-	if !ok {
-		return fmt.Errorf("the signature offered for %s was not made by the key its log puts "+
-			"in force, so whoever sent it does not hold that identity", owner.AID)
-	}
-	return nil
+	return s.theWitnessesDoNotRefuse(owner.AID, owner.KEL)
 }
