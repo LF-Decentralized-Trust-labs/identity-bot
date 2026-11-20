@@ -147,6 +147,13 @@ func TestAnOwnerLogEventIsKeptOnlyWhereItWasReserved(t *testing.T) {
 	if err := s.KeepOwnerLogEvent(unsigned); err == nil {
 		t.Fatal("an unsigned event was kept")
 	}
+	// A different event, validly signed, at the place reserved for this one.
+	if err := s.KeepOwnerLogEvent(ownerLogEvents(founded.Fork().Interact("another"))[1]); err == nil {
+		t.Fatal("a different event was kept at the place reserved for another")
+	}
+	if got := digestsOf(t, s, founded.AID); len(got) != 1 {
+		t.Fatalf("the log holds %v", got)
+	}
 	if err := s.KeepOwnerLogEvent(ev); err != nil {
 		t.Fatal(err)
 	}
