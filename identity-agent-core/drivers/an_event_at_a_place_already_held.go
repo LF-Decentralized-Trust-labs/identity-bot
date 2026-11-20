@@ -1,17 +1,33 @@
 package drivers
 
 import (
+	"errors"
+	"fmt"
+
 	keri "github.com/grapeid/keri-go"
 )
 
 // What an event is to a verified log that holds a different event at its
-// place: the one judgement of "two events at one place" (ADR-075).
+// place: the judgement of "two events at one place" (ADR-075).
 //
 // It lives here, beside the one log validator, because it is arithmetic over
-// signed bytes already in hand, and more than one reader needs it: a watcher's
-// answer is judged by it, and so is any other pair of copies of one log. A
-// second copy of this rule could only disagree with the first about whether an
-// identity signed two histories.
+// signed bytes already in hand, and more than one reader needs it.
+//
+// What is shared today, and what is not yet:
+//
+//   - JudgeAtTakenPlace judges the event against the one log it arrived for.
+//     A watcher's answer is judged by it (watcher.judgeWatcherLog), and so is
+//     everything below.
+//   - JudgeCopiesAtTakenPlace judges the same event with the other copy in
+//     hand as well, and adds one check: a recovery rotation counts as a repair
+//     only if the copy it retires would itself admit it. A branch that goes on
+//     to an establishment event cannot be retired, so that pair is a fork.
+//     The two-log ownership check uses it.
+//   - The watcher does not make that second check. Shown [icp, rot] against a
+//     watcher holding [icp, ixn, rot], it calls the watcher behind; shown the
+//     two the other way round, it finds the fork. Bringing the watcher to
+//     JudgeCopiesAtTakenPlace changes what a running Identity Agent decides
+//     about a contact, so it is left for a change of its own.
 
 // TakenPlace is what JudgeAtTakenPlace found.
 type TakenPlace int
@@ -31,6 +47,9 @@ const (
 	// TakenFork is two validly signed events at one place, neither a recovery
 	// of the other: duplicity, proven by the two events.
 	TakenFork
+	// TakenUnsettled is a pair JudgeCopiesAtTakenPlace could call neither a
+	// repair nor a fork. JudgeAtTakenPlace never returns it.
+	TakenUnsettled
 )
 
 // JudgeAtTakenPlace judges message, an event of the identity whose verified log
@@ -57,6 +76,41 @@ func JudgeAtTakenPlace(log *keri.SignedKELResult, messages [][]byte, ev *keri.Ev
 		return TakenRetired, nil
 	}
 	return TakenFork, nil
+}
+
+// JudgeCopiesAtTakenPlace is JudgeAtTakenPlace where the event comes from
+// another verified copy of the same log, other, whose signed messages by place
+// are otherMessages. It differs in one case. Where log holds a recovery
+// rotation at the place, the event is TakenRetired only if other would admit
+// that rotation as a recovery: it replaces interactions, and never an
+// establishment event further along the branch it retires. Where other refuses
+// it as a second event at a taken place, the controller signed both branches
+// and the pair is TakenFork. Anything else is TakenUnsettled, with the reason.
+func JudgeCopiesAtTakenPlace(log *keri.SignedKELResult, messages [][]byte, other *keri.SignedKELResult, otherMessages [][]byte, ev *keri.Event, message []byte) (TakenPlace, error) {
+	found, err := JudgeAtTakenPlace(log, messages, ev, message)
+	if found != TakenRetired {
+		return found, err
+	}
+	recovery := messages[ev.SN]
+	back, err := other.Admit(recovery)
+	if err == nil && back.Supersedes > 0 {
+		return TakenRetired, nil
+	}
+	var refusal *keri.ValidationError
+	if errors.As(err, &refusal) && refusal.Has(keri.FaultPlaceTaken) {
+		raw, perr := keri.EventOfMessage(recovery)
+		if perr != nil {
+			return TakenUnsettled, perr
+		}
+		held, perr := keri.ParseEvent(raw)
+		if perr != nil {
+			return TakenUnsettled, perr
+		}
+		if found, _ := JudgeAtTakenPlace(other, otherMessages, held, recovery); found == TakenFork {
+			return TakenFork, nil
+		}
+	}
+	return TakenUnsettled, fmt.Errorf("the recovery rotation at place %d and the event the other copy holds there cannot be settled", ev.SN)
 }
 
 // RecoveryRetires says whether recovery, applied to the log made of prefix and
