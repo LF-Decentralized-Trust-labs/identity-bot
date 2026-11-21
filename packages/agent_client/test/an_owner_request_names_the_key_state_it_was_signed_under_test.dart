@@ -133,7 +133,8 @@ void main() {
         km,
         KnownWitnesses({
           for (final w in [w1, w2, w3]) w.aid: w.base
-        }));
+        }),
+        timeout: aWitnessAnswersWithin);
   });
 
   tearDownAll(() async {

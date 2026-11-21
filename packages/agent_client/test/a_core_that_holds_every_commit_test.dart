@@ -69,7 +69,8 @@ void main() {
       'an event the core holds for more signers goes to the witnesses and is '
       'the core\'s to account for, and committing it again adds it', () async {
     final witnesses = TheWitnessesOfThisDevicesEvents(
-        http.Client(), km, KnownWitnesses({w1.aid: w1.base, w2.aid: w2.base}));
+        http.Client(), km, KnownWitnesses({w1.aid: w1.base, w2.aid: w2.base}),
+        timeout: aWitnessAnswersWithin);
     final makes = core.makes(witnesses);
     final set = WitnessSet([w1.aid, w2.aid], 2);
     final founded = await makes.found(seed, witnesses: set.witnesses, toad: 2);
