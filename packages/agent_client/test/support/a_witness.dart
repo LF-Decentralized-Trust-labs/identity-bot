@@ -6,6 +6,18 @@ import 'dart:typed_data';
 import 'package:agent_client/services/key_math.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 
+/// How long a test waits for a test witness to answer. A device gives a
+/// witness 5 s (`TheWitnessesOfThisDevicesEvents.timeout`), and a witness that
+/// does not answer within it is counted as unreached. A test witness runs in
+/// the test's own process and judges each event with the core's key
+/// arithmetic, one core process per call, so while many test files run at
+/// once its answer can take longer than 5 s, and a receipt it did issue
+/// would be counted as never received. No test makes a witness unreachable by
+/// being slow (one that is [AWitness.offline] or [AWitness.mute] answers 503 at
+/// once), so the longer wait changes no outcome a test checks; it only keeps
+/// load from faking one.
+const aWitnessAnswersWithin = Duration(seconds: 60);
+
 /// The name of a witness that is only named, never reached: the
 /// non-transferable identifier of a real Ed25519 key, one for each [label]
 /// character. A made-up one (`B` then the same letter repeated) is a key of

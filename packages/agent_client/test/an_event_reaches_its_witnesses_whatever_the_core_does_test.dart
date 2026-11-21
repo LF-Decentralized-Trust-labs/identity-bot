@@ -49,7 +49,8 @@ void main() {
         km,
         KnownWitnesses({
           for (final w in [w1, w2, w3]) w.aid: w.base
-        }));
+        }),
+        timeout: aWitnessAnswersWithin);
   });
 
   tearDownAll(() async {
@@ -160,7 +161,8 @@ void main() {
             km,
             KnownWitnesses({
               for (final w in [w1, w2, w3, w4]) w.aid: w.base
-            })));
+            }),
+            timeout: aWitnessAnswersWithin));
     final wider = WitnessSet([w1.aid, w2.aid, w4.aid], 3);
     // The witnesses are asked about a list their logs do not have, so each
     // issues its receipt at its place in that one.
