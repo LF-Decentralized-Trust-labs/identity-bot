@@ -84,3 +84,20 @@ func TestADocumentWithAByteOrderMarkIsRefused(t *testing.T) {
 		t.Error("a document that starts with a byte order mark was read")
 	}
 }
+
+// A whole-number field that is not one is refused with the field's place and
+// the number as it is written, all of it.
+func TestAFieldThatIsNotAWholeNumberIsSaidAsWritten(t *testing.T) {
+	long := "1." + strings.Repeat("5", 60)
+	for number, want := range map[string]string{
+		long:               ".t must be a whole number written plainly, not " + long,
+		"1e0":              ".t must be a whole number written plainly, not 1e0",
+		"9007199254740993": ".t is too large to be read exactly everywhere",
+	} {
+		var d doc
+		err := Decode([]byte(`{"t":`+number+`}`), &d)
+		if err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("%s was refused as %v, not with %q", number, err, want)
+		}
+	}
+}

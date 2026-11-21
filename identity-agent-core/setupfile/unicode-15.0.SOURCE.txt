@@ -1,0 +1,77 @@
+unicode-15.0.json was made by tools/setupunicode from these files of the
+Unicode Character Database, version 15.0.0:
+
+  UnicodeData.txt
+    https://www.unicode.org/Public/15.0.0/ucd/UnicodeData.txt
+    SHA-256 806e9aed65037197f1ec85e12be6e8cd870fc5608b4de0fffd990f689f376a73
+  CaseFolding.txt
+    https://www.unicode.org/Public/15.0.0/ucd/CaseFolding.txt
+    SHA-256 cdd49e55eae3bbf1f0a3f6580c974a0263cb86a6a08daa10fbf705b4808a56f7
+  CompositionExclusions.txt
+    https://www.unicode.org/Public/15.0.0/ucd/CompositionExclusions.txt
+    SHA-256 3b019c0a33c3140cbc920c078f4f9af2680ba4f71869c8d4de5190667c70b6a3
+  extracted/DerivedJoiningType.txt
+    https://www.unicode.org/Public/15.0.0/ucd/extracted/DerivedJoiningType.txt
+    SHA-256 c4870b11e2b8b7d0eb70b99ce85608e5c28a399efa316cca97238a58ae160e5e
+  emoji/emoji-data.txt
+    https://www.unicode.org/Public/15.0.0/ucd/emoji/emoji-data.txt
+    SHA-256 29071dba22c72c27783a73016afb8ffaeb025866740791f9c2d0b55cc45a3470
+
+The data files are used under the Unicode licence, whose copyright and
+permission notice follows word for word, as https://www.unicode.org/license.txt
+gave it when the files were fetched. The facts derived are a selection and a
+rearrangement of the files' contents, and nothing was added to them.
+
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2026 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+
+What was taken:
+  seen      General_Category L, M, N, P, S and U+0020, less the variation
+            selectors and the invisible fillers a signed statement refuses
+            (docs/statement-signature.md)
+  letters, marks, script, ccc, nfd, nfkd, compose
+            UnicodeData.txt (and CompositionExclusions.txt for compose)
+  fold      CaseFolding.txt, statuses C and S
+  joining   extracted/DerivedJoiningType.txt, values D, L, R and T
+  emoji     emoji/emoji-data.txt, property Emoji
+
+To move to a later version: fetch that version's files, run the tool with its
+-version, and read the diff. A character that becomes seen, a decomposition
+that is added, each is one line.

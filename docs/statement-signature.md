@@ -40,6 +40,34 @@ What the envelope does not carry is a nonce. The nonce protects the round trip b
 Agent. A statement must therefore say what it is for (a decision's id and a hash of its sentence, say) so that a
 signature of it cannot be moved to another purpose.
 
+## A statement made unasked
+
+An Identity Agent may sign a statement nobody asked it for: a statement about something of its own, which it hands
+out itself. The envelope is the same. The `asker` line then carries the **signer's own identifier**: nobody asked, so
+the signer names itself as the one the statement is made for.
+
+That calls for two rules in whatever answers an Ask, so that a statement made unasked can never be obtained by
+asking. Both are **proposed here, and not yet enforced**:
+
+- an Identity Agent answering an Ask **refuses a statement whose asker is the signer's own identifier**;
+- an Identity Agent answering an Ask **refuses a statement whose header is reserved** for statements made unasked.
+
+The reference Ask handler does not enforce either yet. It is safe today only because an asker is another identity's
+site identifier, and enforcing both there is a change of its own.
+
+**Reserved headers.** A reserved header is not a display form: a statement that carries one is never shown to a
+person to sign.
+
+| Header | What it is |
+|---|---|
+| `set-up-seal/1` | An Identity Agent's seal on a file its set-up was exported to ([set-up-file.md](set-up-file.md), ADR-088). Three lines: the header, `contents=<the digest of the file's contents>`, and `kel-sn=<a whole number in decimal>`. |
+
+**The sequence number of a seal.** A seal travels in a file, with no round trip to carry `kel_sn` beside it, so the
+sequence number is inside the statement and is signed. A verifier takes the key the signer's key history names at
+that sequence number, which must be an establishment event, and reports whether that event is still the latest
+establishment event: a seal by a key the signer has since replaced is reported as that, and never as a seal that
+holds. A signer whose key state at that event holds more than one key is not supported by version 1 of the seal.
+
 ## Registered display forms
 
 A form is a header a person's Identity Agent knows how to read, so it can show the statement more clearly. A form changes
