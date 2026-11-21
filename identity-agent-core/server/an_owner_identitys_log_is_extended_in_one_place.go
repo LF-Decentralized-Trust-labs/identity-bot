@@ -11,6 +11,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/ownership"
 	"identity-agent-core/store"
 )
 
@@ -672,40 +673,37 @@ func (s *CoreServer) reloadOwnerLogs() {
 
 // anchorsIn reads a held owner log for the anchor asked for. already is the
 // event that carries exactly this seal, if one does. other is an Identity
-// Agent other than m that an interaction of the log already seals an event
-// of: every event seal in an interaction of an owner log is an anchor,
-// because this writer is the only thing that adds one.
+// Agent other than m that an interaction of the log already anchors.
+//
+// An interaction is an anchor only as the ownership check reads one, from
+// its bytes: its data is exactly one event seal (ownership.TheAnchorIn). An
+// interaction that reader refuses is not an anchor of anything, here or to a
+// verifier, so it is neither already nor other.
 func anchorsIn(kel *drivers.DriverKelResponse, m string, seal json.RawMessage) (already *ownerLogEvent, other string) {
 	var want struct{ I, S, D string }
 	_ = json.Unmarshal(seal, &want)
 	for i, ev := range kel.KEL {
-		if t, _ := ev["t"].(string); t != "ixn" {
+		if t, _ := ev["t"].(string); t != "ixn" || i >= len(kel.RawEventsB64) {
 			continue
 		}
-		seals, _ := ev["a"].([]interface{})
-		for _, a := range seals {
-			fields, _ := a.(map[string]interface{})
-			sealed, _ := fields["i"].(string)
-			if sealed == "" {
-				continue
-			}
-			if sealed != m {
-				return nil, sealed
-			}
-			sn, _ := fields["s"].(string)
-			digest, _ := fields["d"].(string)
-			if sn != want.S || digest != want.D || already != nil || i >= len(kel.RawEventsB64) {
-				continue
-			}
-			raw, err := drivers.DecodeRawBytes(kel.RawEventsB64[i])
-			if err != nil {
-				continue
-			}
-			said, _ := ev["d"].(string)
-			already = &ownerLogEvent{OwnerAID: kel.AID, SN: i, SAID: said, Raw: raw}
-			if i < len(kel.Signatures) {
-				already.Signatures = kel.Signatures[i]
-			}
+		raw, err := drivers.DecodeRawBytes(kel.RawEventsB64[i])
+		if err != nil {
+			continue
+		}
+		anchor, err := ownership.TheAnchorIn(raw)
+		if err != nil {
+			continue
+		}
+		if anchor.Identifier != m {
+			return nil, anchor.Identifier
+		}
+		if already != nil || fmt.Sprintf("%x", anchor.SN) != want.S || anchor.SAID != want.D {
+			continue
+		}
+		said, _ := ev["d"].(string)
+		already = &ownerLogEvent{OwnerAID: kel.AID, SN: i, SAID: said, Raw: raw}
+		if i < len(kel.Signatures) {
+			already.Signatures = kel.Signatures[i]
 		}
 	}
 	return already, ""

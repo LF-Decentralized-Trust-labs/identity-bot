@@ -1145,3 +1145,49 @@ func TestTheSignerSignsOnlyAReservationThatIsWhatItSays(t *testing.T) {
 		})
 	}
 }
+
+// An interaction whose data is not exactly one event seal is not an anchor,
+// whatever seals it carries: the writer reads the log as the ownership check
+// does (ownership.TheAnchorIn). Here the owner identity's log holds, at place
+// 1, an interaction carrying the very seal asked for beside a second one. It
+// is not taken as the anchor already made, and the anchor is written after
+// it.
+func TestAnInteractionThatIsNotExactlyOneEventSealIsNotAnAnchor(t *testing.T) {
+	s := withWitnessesStandingIn(adoptingOwner(t))
+	owner := mintedOwnerOf(t, s, machineKindIndividual)
+	asked, _ := drivers.EventSeal(aMachine, "0", aMachine)
+	beside, _ := drivers.EventSeal(aMachine, "1", aMachinesRotation)
+	raw, err := keri.BuildInteraction(keri.InteractionInput{Prefix: owner, PriorSAID: owner, SN: 1,
+		Data: []json.RawMessage{asked, beside}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _, _ := s.DataStore.MachineOwnerIdentity(owner)
+	seed, err := s.pairwiseSigningSeed(id.KeyIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := signEventBytes(raw, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := eventRecordOf(owner, 1, raw, []string{sig})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DataStore.SaveEvent(rec); err != nil {
+		t.Fatal(err)
+	}
+	keptOwnerLog(t, s, owner)
+
+	ev, err := s.anchorInOwnerLog(owner, aMachine, 0, aMachine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ev.Written || ev.SN != 2 {
+		t.Fatalf("an interaction with two event seals was taken as the anchor: written=%v at %d", ev.Written, ev.SN)
+	}
+	if kept := keptOwnerLog(t, s, owner); len(kept) != 3 {
+		t.Fatalf("the kept log has %d events", len(kept))
+	}
+}
