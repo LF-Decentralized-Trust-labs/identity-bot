@@ -97,7 +97,7 @@ An Identity Agent service provider creates an organizational identity agent appl
   - Enterprise: employee delegated AID provisioning, department credential workflows, HR integration
   - Retail: customer identity, loyalty credential management, loyalty tier issuance
 - **Extends the database schema** with org-specific tables (employees, departments, org hierarchy, audit records)
-- **Provides rented infrastructure** — each organization runs its own isolated server instance; service providers may rent out machines for it
+- **Provides rented infrastructure** — each organization runs its own isolated server instance; a service provider may rent out a sealed machine for it, which the provider cannot read, or offer ordinary hosting, where the provider can
 
 Service providers may offer these as open source, freemium, or fully proprietary products — the Identity Agent Protocol imposes no restrictions. Their interoperability obligation is only to the core protocol.
 
