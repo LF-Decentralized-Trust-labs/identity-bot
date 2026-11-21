@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/drivers"
+	"identity-agent-core/ownership"
 )
 
 // An owner identity's key log is extended only at a place reserved first.
@@ -64,17 +66,22 @@ var (
 // one Identity Agent the owner identity anchors, in one transaction that is on
 // disk before this returns. It returns the reservation in force at that place:
 // r itself, or the one already there, which is never replaced. A caller signs
-// only what is returned.
+// only what is returned. r's bytes must be the interaction r describes, and
+// must anchor m (OwnerLogReservation.Anchors).
 func (s *SQLiteStore) ReserveOwnerLogPlace(r OwnerLogReservation, m string) (OwnerLogReservation, error) {
 	if m == "" {
 		return OwnerLogReservation{}, fmt.Errorf("a reservation names the Identity Agent the event anchors")
 	}
-	if err := r.coheres(); err != nil {
+	sealed, err := r.Anchors()
+	if err != nil {
 		return OwnerLogReservation{}, err
+	}
+	if sealed != m {
+		return OwnerLogReservation{}, fmt.Errorf("the reserved bytes anchor %s, not %s", sealed, m)
 	}
 	inForce := r
 	inForce.State = OwnerLogReserved
-	err := s.durably(func(tx *sql.Tx) error {
+	err = s.durably(func(tx *sql.Tx) error {
 		id, found, err := machineOwnerIdentity(tx, r.OwnerAID)
 		if err != nil {
 			return err
@@ -134,33 +141,42 @@ func (s *SQLiteStore) ReserveOwnerLogPlace(r OwnerLogReservation, m string) (Own
 	return inForce, nil
 }
 
-// coheres checks that a reservation's fields describe its own bytes: an
-// interaction of the owner identity, at the place and after the event stated,
-// with the digest stated.
-func (r OwnerLogReservation) coheres() error {
+// Anchors checks that a reservation's fields describe its own bytes, read as
+// the bytes are written and never from the fields alone, and returns the
+// Identity Agent whose event the reserved interaction anchors. The bytes must
+// be one interaction event of the owner identity, at the place and after the
+// event the reservation states, whose digest computed from the bytes is the
+// digest it states, carrying exactly one event seal
+// (ownership.TheAnchorIn). A reservation restored from a backup is a row
+// nothing wrote here, so this is asked of every reservation before its bytes
+// are signed, wherever it came from.
+func (r OwnerLogReservation) Anchors() (string, error) {
 	if r.OwnerAID == "" || r.SN < 1 || r.PriorDigest == "" || r.Digest == "" || r.RawB64 == "" {
-		return fmt.Errorf("a reservation needs the owner identity, a place after the founding, " +
+		return "", fmt.Errorf("a reservation needs the owner identity, a place after the founding, " +
 			"the digest before it, the digest reserved and the event's bytes")
 	}
 	raw, err := drivers.DecodeRawBytes(r.RawB64)
 	if err != nil {
-		return fmt.Errorf("the reserved bytes are not base64: %w", err)
+		return "", fmt.Errorf("the reserved bytes are not base64: %w", err)
 	}
-	var ev struct {
-		T string `json:"t"`
-		I string `json:"i"`
-		S string `json:"s"`
-		P string `json:"p"`
+	notIt := fmt.Errorf("the reserved bytes are not the interaction of %s at sequence number %d "+
+		"that the reservation describes", r.OwnerAID, r.SN)
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", notIt, err)
 	}
-	if err := json.Unmarshal(raw, &ev); err != nil {
-		return fmt.Errorf("the reserved bytes are not an event: %w", err)
+	if ev.Ilk != "ixn" || ev.Identifier != r.OwnerAID || ev.SN != uint64(r.SN) || ev.PriorSAID != r.PriorDigest ||
+		ev.SAID != r.Digest {
+		return "", notIt
 	}
-	said, _ := drivers.EventIDOfRawB64(r.RawB64)
-	if ev.T != "ixn" || ev.I != r.OwnerAID || ev.S != fmt.Sprintf("%x", r.SN) || ev.P != r.PriorDigest || said != r.Digest {
-		return fmt.Errorf("the reserved bytes are not the interaction of %s at sequence number %d "+
-			"that the reservation describes", r.OwnerAID, r.SN)
+	if computed, err := keri.ComputeSAID(raw); err != nil || computed != r.Digest {
+		return "", fmt.Errorf("%w: its digest is not the digest of its bytes", notIt)
 	}
-	return nil
+	seal, err := ownership.TheAnchorIn(raw)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", notIt, err)
+	}
+	return seal.Identifier, nil
 }
 
 // OwnerLogReservations are the places reserved in an owner identity's key

@@ -1051,3 +1051,72 @@ func TestTheServedOwnerLogFollowsTheKeptOneWhenTheCoreStarts(t *testing.T) {
 		t.Fatalf("the served copy has %d events and the kept log 2", len(served))
 	}
 }
+
+// A reservation written into the table by anything but the writer, as a
+// restore could leave one, is not signed unless its bytes are the
+// interaction it describes and anchor the Identity Agent the owner identity
+// is recorded as anchoring. The writer's permit is given, so what refuses is
+// the reading of the bytes. The reservation stays, waiting.
+func TestTheSignerSignsOnlyAReservationThatIsWhatItSays(t *testing.T) {
+	interaction := func(t *testing.T, prefix, prior string, sn int, anchors string) []byte {
+		t.Helper()
+		seal, err := drivers.EventSeal(anchors, "0", anchors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := keri.BuildInteraction(keri.InteractionInput{Prefix: prefix, PriorSAID: prior, SN: sn,
+			Data: []json.RawMessage{seal}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	digestOf := func(raw []byte) string {
+		d, _ := drivers.EventIDOfRawB64(base64.StdEncoding.EncodeToString(raw))
+		return d
+	}
+	stranger := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	cases := map[string]func(owner string) []byte{
+		"another identifier": func(owner string) []byte {
+			return interaction(t, stranger.AID, owner, 1, aMachine)
+		},
+		"another place": func(owner string) []byte {
+			return interaction(t, owner, owner, 2, aMachine)
+		},
+		"a rotation": func(owner string) []byte {
+			return []byte(strings.Replace(string(interaction(t, owner, owner, 1, aMachine)), `"t":"ixn"`, `"t":"rot"`, 1))
+		},
+		"a seal naming another Identity Agent": func(owner string) []byte {
+			return interaction(t, owner, owner, 1, anotherMachine)
+		},
+		"a digest that is not the digest of its bytes": func(owner string) []byte {
+			raw := interaction(t, owner, owner, 1, aMachine)
+			return []byte(strings.Replace(string(raw), digestOf(raw), aMachinesRotation, 1))
+		},
+	}
+	for name, bytesFor := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := withWitnessesStandingIn(adoptingOwner(t))
+			owner := mintedOwnerOf(t, s, machineKindIndividual)
+			raw := bytesFor(owner)
+			r := store.OwnerLogReservation{OwnerAID: owner, SN: 1, PriorDigest: owner, Digest: digestOf(raw),
+				RawB64: base64.StdEncoding.EncodeToString(raw)}
+			db := s.DataStore.(*store.SQLiteStore).DB()
+			if _, err := db.Exec(`INSERT INTO owner_log_reservations
+				(owner_aid, seq_num, prior_digest, digest, event_bytes_b64, state) VALUES (?, ?, ?, ?, ?, 'reserved')`,
+				r.OwnerAID, r.SN, r.PriorDigest, r.Digest, r.RawB64); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE machine_owner_identities SET anchored_m = ? WHERE aid = ?`, aMachine, owner); err != nil {
+				t.Fatal(err)
+			}
+			theWriterAllows(s, r)
+			if sig, err := s.signEventFor(owner, "", raw); err == nil || sig != "" {
+				t.Fatalf("bytes that are not what their reservation says were signed: %q", sig)
+			}
+			if res, _ := s.DataStore.OwnerLogReservations(owner); len(res) != 1 || res[0].State != store.OwnerLogReserved {
+				t.Fatalf("the reservation is %+v", res)
+			}
+		})
+	}
+}

@@ -927,7 +927,10 @@ func mergeContactKELs(ctx context.Context, tx *sql.Tx) (int, error) {
 //     they part proves nothing there and marks nothing. Of two logs, the one
 //     that verifies stands, this device's where both or neither do, and a log
 //     only the backup holds is taken only if it verifies.
-//   - The places reserved follow the log that stands. A place it holds an
+//   - A reservation of the backup is taken only if its bytes are the
+//     interaction it describes, anchoring the Identity Agent the backup
+//     records (restoredReservationHolds). The places reserved follow the log
+//     that stands. A place it holds an
 //     event at keeps the reservation of that event, done, and no other. The
 //     place after its tip keeps one waiting reservation, and only one that
 //     follows the tip: one whose event was kept elsewhere over one never
@@ -1052,6 +1055,12 @@ func mergeOwnerIdentity(ctx context.Context, tx *sql.Tx, aid string) error {
 	for sn := range places {
 		h, inHeld := held.reserved[sn]
 		o, inOffered := offered.reserved[sn]
+		// A row of the backup is taken only if it is what it says it is,
+		// anchoring what the backup records its owner identity anchoring:
+		// nothing here wrote it.
+		if inOffered && !restoredReservationHolds(o, offered.id.AnchoredM) {
+			inOffered = false
+		}
 		keep, state := reservationToKeep(kept, sn, h, inHeld, o, inOffered)
 		switch keep {
 		case "main":
@@ -1132,6 +1141,14 @@ func mergeOwnerIdentity(ctx context.Context, tx *sql.Tx, aid string) error {
 		return fmt.Errorf("restore owner identity %s: %w", aid, err)
 	}
 	return nil
+}
+
+// restoredReservationHolds says whether a reservation read from a backup
+// describes its own bytes (OwnerLogReservation.Anchors) and, where the backup
+// records which Identity Agent its owner identity anchors, anchors that one.
+func restoredReservationHolds(r OwnerLogReservation, anchoredM string) bool {
+	sealed, err := r.Anchors()
+	return err == nil && (anchoredM == "" || sealed == anchoredM)
 }
 
 // reservationToKeep decides which reservation stands at place sn of an owner

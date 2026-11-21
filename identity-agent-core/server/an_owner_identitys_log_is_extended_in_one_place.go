@@ -413,7 +413,9 @@ func (s *CoreServer) signWithPermit(r store.OwnerLogReservation, raw []byte) (st
 // signReservedOwnerLogEvent signs raw as owner only where all of these hold:
 // the writer has just allowed this one signing (a permit naming the place
 // and the digest, which this consumes), raw is exactly the bytes reserved at
-// that place, and those bytes still follow the kept log
+// that place, those bytes are the interaction the reservation describes and
+// anchor the Identity Agent the owner identity is recorded as anchoring
+// (store.OwnerLogReservation.Anchors), and they still follow the kept log
 // (reservedEventFollowsTheKeptLog). It is the one place an owner identity's
 // key signs an event, reached through the engine's signer (signEventFor).
 // Anything else that reaches the engine's signer for an owner identity, a
@@ -451,6 +453,19 @@ func (s *CoreServer) signReservedOwnerLogEvent(owner string, raw []byte) (string
 		if r.SN != permit.sn || r.Digest != permit.digest {
 			return "", fmt.Errorf("%w: it allowed sequence number %d, and these bytes are reserved at %d",
 				errOwnerLogSigningNotPermitted, permit.sn, r.SN)
+		}
+		// The row may have come from a backup rather than from the writer, so
+		// what it holds is read before the key is released: the interaction
+		// it says it is, anchoring the one Identity Agent this owner identity
+		// is recorded as anchoring.
+		anchored, err := r.Anchors()
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", errOwnerLogCannotBeExtended, err)
+		}
+		if id.AnchoredM != "" && anchored != id.AnchoredM {
+			return "", fmt.Errorf("%w: the event reserved at sequence number %d of %s anchors %s, "+
+				"and the owner identity is recorded as anchoring %s", errOwnerLogCannotBeExtended,
+				r.SN, owner, anchored, id.AnchoredM)
 		}
 		if err := s.reservedEventFollowsTheKeptLog(r); err != nil {
 			return "", err

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,6 +18,18 @@ const (
 	machineOne = "EMachineOneMachineOneMachineOneMachineOne000"
 	machineTwo = "EMachineTwoMachineTwoMachineTwoMachineTwo000"
 )
+
+// anchoring is l with an interaction appended that anchors event n of the
+// Identity Agent m, as the writer of an owner log writes one: one event seal.
+// Different n give different events at one place.
+func anchoring(t *testing.T, l *signedlog.Log, m string, n int) *signedlog.Log {
+	t.Helper()
+	seal, err := drivers.EventSeal(m, fmt.Sprintf("%x", n), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l.Seal(seal)
+}
 
 // ownerLogEvents is a test log as the rows the store keeps.
 func ownerLogEvents(l *signedlog.Log) []EventRecord {
@@ -100,8 +113,8 @@ func TestAPlaceIsReservedForOneEventForGood(t *testing.T) {
 	_, s := openStore(t)
 	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
 	mintedOwner(t, s, founded, 1)
-	first := reservationFor(founded.Fork().Interact("first"))
-	second := reservationFor(founded.Fork().Interact("second"))
+	first := reservationFor(anchoring(t, founded.Fork(), machineOne, 0))
+	second := reservationFor(anchoring(t, founded.Fork(), machineOne, 1))
 
 	got, err := s.ReserveOwnerLogPlace(first, machineOne)
 	if err != nil || got.Digest != first.Digest || got.State != OwnerLogReserved {
@@ -119,7 +132,7 @@ func TestAPlaceIsReservedForOneEventForGood(t *testing.T) {
 		t.Fatalf("the reservations are %+v", all)
 	}
 	// And only the reserved bytes are kept there.
-	if err := s.KeepOwnerLogEvent(ownerLogEvents(founded.Fork().Interact("second"))[1]); err == nil {
+	if err := s.KeepOwnerLogEvent(ownerLogEvents(anchoring(t, founded.Fork(), machineOne, 1))[1]); err == nil {
 		t.Fatal("an event that was not the one reserved was kept at the reserved place")
 	}
 	if got := digestsOf(t, s, founded.AID); len(got) != 1 {
@@ -133,7 +146,7 @@ func TestAnOwnerLogEventIsKeptOnlyWhereItWasReserved(t *testing.T) {
 	_, s := openStore(t)
 	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
 	mintedOwner(t, s, founded, 1)
-	next := founded.Fork().Interact("anchor")
+	next := anchoring(t, founded.Fork(), machineOne, 0)
 	ev := ownerLogEvents(next)[1]
 
 	if err := s.KeepOwnerLogEvent(ev); err == nil {
@@ -148,7 +161,7 @@ func TestAnOwnerLogEventIsKeptOnlyWhereItWasReserved(t *testing.T) {
 		t.Fatal("an unsigned event was kept")
 	}
 	// A different event, validly signed, at the place reserved for this one.
-	if err := s.KeepOwnerLogEvent(ownerLogEvents(founded.Fork().Interact("another"))[1]); err == nil {
+	if err := s.KeepOwnerLogEvent(ownerLogEvents(anchoring(t, founded.Fork(), machineOne, 1))[1]); err == nil {
 		t.Fatal("a different event was kept at the place reserved for another")
 	}
 	if got := digestsOf(t, s, founded.AID); len(got) != 1 {
@@ -175,7 +188,7 @@ func TestAReservationFollowsTheKeptLog(t *testing.T) {
 	_, s := openStore(t)
 	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
 	mintedOwner(t, s, founded, 1)
-	two := founded.Fork().Interact("one").Interact("two")
+	two := anchoring(t, anchoring(t, founded.Fork(), machineOne, 0), machineOne, 1)
 
 	if _, err := s.ReserveOwnerLogPlace(reservationFor(two), machineOne); !errors.Is(err, ErrOwnerLogPlaceNotNext) {
 		t.Fatalf("a place two past the tip was reserved: %v", err)
@@ -186,7 +199,7 @@ func TestAReservationFollowsTheKeptLog(t *testing.T) {
 	if _, err := s.ReserveOwnerLogPlace(reservationFor(two), machineOne); !errors.Is(err, ErrOwnerLogPlaceNotNext) {
 		t.Fatalf("a second place was reserved while the first still waits: %v", err)
 	}
-	stranger := signedlog.Incept(t, signedlog.NewKeys(t, 2)).Interact("x")
+	stranger := anchoring(t, signedlog.Incept(t, signedlog.NewKeys(t, 2)), machineOne, 0)
 	if _, err := s.ReserveOwnerLogPlace(reservationFor(stranger), machineOne); !errors.Is(err, ErrNotAnOwnerIdentity) {
 		t.Fatalf("a place was reserved in a log this device does not own: %v", err)
 	}
@@ -198,11 +211,11 @@ func TestAnOwnerIdentityReservesForOneIdentityAgentOnly(t *testing.T) {
 	_, s := openStore(t)
 	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
 	mintedOwner(t, s, founded, 1)
-	one := founded.Fork().Interact("one")
+	one := anchoring(t, founded.Fork(), machineOne, 0)
 	extended(t, s, one, machineOne)
 
-	two := one.Fork().Interact("two")
-	if _, err := s.ReserveOwnerLogPlace(reservationFor(two), machineTwo); !errors.Is(err, ErrOwnerLogNamesAnother) {
+	two := anchoring(t, one.Fork(), machineOne, 1)
+	if _, err := s.ReserveOwnerLogPlace(reservationFor(anchoring(t, one.Fork(), machineTwo, 0)), machineTwo); !errors.Is(err, ErrOwnerLogNamesAnother) {
 		t.Fatalf("a second Identity Agent was reserved for: %v", err)
 	}
 	if id, _, _ := s.MachineOwnerIdentity(founded.AID); id.AnchoredM != machineOne {
@@ -218,7 +231,7 @@ func TestAnOwnerIdentityReservesForOneIdentityAgentOnly(t *testing.T) {
 	if err := s.GiveUpMachineOwnerIdentity(givenUp.AID, machineOne); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReserveOwnerLogPlace(reservationFor(givenUp.Fork().Interact("x")), machineOne); !errors.Is(err, ErrOwnerIdentityGivenUp) {
+	if _, err := s.ReserveOwnerLogPlace(reservationFor(anchoring(t, givenUp.Fork(), machineOne, 0)), machineOne); !errors.Is(err, ErrOwnerIdentityGivenUp) {
 		t.Fatalf("a given-up owner identity reserved a place: %v", err)
 	}
 	if err := s.GiveUpMachineOwnerIdentity(givenUp.AID, machineTwo); err == nil {
@@ -239,7 +252,7 @@ func TestAnOwnerIdentityReservesForOneIdentityAgentOnly(t *testing.T) {
 	if id, _, _ := s.MachineOwnerIdentity(forked.AID); id.DuplicitousAt == nil || *id.DuplicitousAt != 2 {
 		t.Fatalf("the first place of duplicity is %v", id.DuplicitousAt)
 	}
-	if _, err := s.ReserveOwnerLogPlace(reservationFor(forked.Fork().Interact("x")), machineOne); !errors.Is(err, ErrOwnerIdentityDuplicitous) {
+	if _, err := s.ReserveOwnerLogPlace(reservationFor(anchoring(t, forked.Fork(), machineOne, 0)), machineOne); !errors.Is(err, ErrOwnerIdentityDuplicitous) {
 		t.Fatalf("a duplicitous owner identity reserved a place: %v", err)
 	}
 }

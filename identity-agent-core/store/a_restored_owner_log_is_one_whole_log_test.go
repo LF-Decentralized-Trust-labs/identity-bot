@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -13,10 +14,10 @@ import (
 func TestARestoredDatabaseNeverEndsWithTwoEventsAtOnePlaceInAnOwnerLog(t *testing.T) {
 	keys := signedlog.NewKeys(t, 2)
 	founded := signedlog.Incept(t, keys)
-	short := founded.Fork().Interact("a")
-	long := short.Fork().Interact("a2").Interact("a3")
-	other := founded.Fork().Interact("b")
-	otherLong := other.Fork().Interact("b2").Interact("b3").Interact("b4")
+	short := anchoring(t, founded.Fork(), machineOne, 0)
+	long := anchoring(t, anchoring(t, short.Fork(), machineOne, 1), machineOne, 2)
+	other := anchoring(t, founded.Fork(), machineOne, 5)
+	otherLong := anchoring(t, anchoring(t, anchoring(t, other.Fork(), machineOne, 6), machineOne, 7), machineOne, 8)
 
 	// A store holding log, written through reservations or, for a log from
 	// before they were kept, without.
@@ -180,8 +181,8 @@ func reservationsAre(t *testing.T, s *SQLiteStore, aid string, l *signedlog.Log)
 // as having two events at that place.
 func TestARestoreIsNotLockedOutByTwoAnchorsAtOnePlace(t *testing.T) {
 	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
-	anchoredFirst := founded.Fork().Interact("first")
-	anchoredHere := founded.Fork().Interact("here")
+	anchoredFirst := anchoring(t, founded.Fork(), machineOne, 0)
+	anchoredHere := anchoring(t, founded.Fork(), machineOne, 1)
 
 	// The first device: a backup before it anchored, and one after, with a
 	// contact and a credential.
@@ -229,8 +230,8 @@ func TestARestoreIsNotLockedOutByTwoAnchorsAtOnePlace(t *testing.T) {
 // settled without refusing the restore.
 func TestTwoDatabasesThatDisagreeAboutAnOwnerLogAreSettled(t *testing.T) {
 	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
-	a := founded.Fork().Interact("a")
-	b := founded.Fork().Interact("b")
+	a := anchoring(t, founded.Fork(), machineOne, 0)
+	b := anchoring(t, founded.Fork(), machineTwo, 0)
 
 	// done keeps l's events after the founding; waiting reserves l's last
 	// event and keeps nothing.
@@ -366,4 +367,61 @@ func TestTwoDatabasesThatDisagreeAboutAnOwnerLogAreSettled(t *testing.T) {
 			t.Fatalf("the identity reads %+v", id)
 		}
 	})
+}
+
+// tamperedReservations are bytes a reservation at place 1 of founded's log
+// can hold that are not the interaction the row says they are, each with the
+// digest the row would state for them.
+func tamperedReservations(t *testing.T, founded *signedlog.Log) map[string][2]string {
+	t.Helper()
+	at := func(l *signedlog.Log, i int) (string, string) {
+		raw := base64.StdEncoding.EncodeToString(l.Raws[i])
+		return raw, l.SAID(i)
+	}
+	out := map[string][2]string{}
+	stranger := anchoring(t, signedlog.Incept(t, signedlog.NewKeys(t, 2)), machineOne, 0)
+	raw, d := at(stranger, 1)
+	out["another identifier"] = [2]string{raw, d}
+	raw, d = at(anchoring(t, anchoring(t, founded.Fork(), machineOne, 0), machineOne, 1), 2)
+	out["another place"] = [2]string{raw, d}
+	raw, d = at(founded.Fork().Rotate(), 1)
+	out["a rotation"] = [2]string{raw, d}
+	raw, d = at(anchoring(t, founded.Fork(), machineTwo, 0), 1)
+	out["a seal naming another Identity Agent"] = [2]string{raw, d}
+	// The bytes of a true anchor with the digest field changed: the digest
+	// stated is not the digest of the bytes.
+	real := anchoring(t, founded.Fork(), machineOne, 0)
+	forged := "EForgedDigestForgedDigestForgedDigestForged0"
+	bytes := strings.Replace(string(real.Raws[1]), real.SAID(1), forged, 1)
+	out["a digest that is not the digest of its bytes"] = [2]string{
+		base64.StdEncoding.EncodeToString([]byte(bytes)), forged}
+	return out
+}
+
+// A reservation in a backup is taken only if its bytes are the interaction
+// it describes, anchoring the Identity Agent the backup records: nothing on
+// this device wrote it, and its bytes are what the key would sign.
+func TestARestoredReservationThatIsNotWhatItSaysIsNotTaken(t *testing.T) {
+	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	for name, bad := range tamperedReservations(t, founded) {
+		t.Run(name, func(t *testing.T) {
+			_, into := openStore(t)
+			mintedOwner(t, into, founded, 1)
+			_, from := openStore(t)
+			mintedOwner(t, from, founded, 1)
+			if _, err := from.ReserveOwnerLogPlace(reservationFor(anchoring(t, founded.Fork(), machineOne, 0)), machineOne); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := from.db.Exec(`UPDATE owner_log_reservations SET event_bytes_b64 = ?, digest = ?`,
+				bad[0], bad[1]); err != nil {
+				t.Fatal(err)
+			}
+			if err := into.ImportSnapshot(snapshotOf(t, from)); err != nil {
+				t.Fatalf("the restore was refused: %v", err)
+			}
+			if res, _ := into.OwnerLogReservations(founded.AID); len(res) != 0 {
+				t.Fatalf("a reservation that is not what it says was taken: %+v", res)
+			}
+		})
+	}
 }
