@@ -197,7 +197,7 @@ func dataDirSnapshot(t *testing.T, dir string) string {
 // has none — and the endpoint that publishes it refused to mint for a
 // non-owner, which is right in general and wrong for exactly one case. Every
 // new customer is in that state, and they are precisely the people who need to
-// be reachable: somebody who just bought hosting and has never written to
+// be reachable: somebody who just rented a machine and has never written to
 // anyone is who a payment warning is for.
 func TestAFreshAgentCanStillBeWrittenToFirst(t *testing.T) {
 	s := serverWithIdentity(t, "EOURS")

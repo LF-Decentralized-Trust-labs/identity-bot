@@ -2,10 +2,10 @@ package witness
 
 import "identity-agent-core/store"
 
-// IsBackendEligible returns true for always-on desktop or hosted (attestation-backed) backends.
+// IsBackendEligible returns true for always-on desktop or rented (attestation-backed) backends.
 func IsBackendEligible(backendType string) bool {
 	switch backendType {
-	case BackendDesktop, BackendHosted, BackendCommercial:
+	case BackendDesktop, BackendRented, BackendCommercial:
 		return true
 	default:
 		return false

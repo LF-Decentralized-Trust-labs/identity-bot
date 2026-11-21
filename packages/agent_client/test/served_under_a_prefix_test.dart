@@ -43,7 +43,7 @@ void main() {
 
     test('an agent at the root of a hostname is unchanged', () {
       // The behaviour every existing deployment has today. If this breaks,
-      // desktop and single-tenant hosting break with it.
+      // desktop and single-tenant rented machines break with it.
       expect(basePathFor('/'), '');
       expect(basePathFor(''), '');
       expect('${basePathFor('/')}/api/identity', '/api/identity');

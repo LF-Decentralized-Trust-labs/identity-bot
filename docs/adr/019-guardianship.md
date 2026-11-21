@@ -101,8 +101,8 @@ not need delegated inception or rotation for guardianship.
 | Consequence 9 (delegated inception in the driver) | Replaced: the KERI engine (ADR-037) must perform multi-signature inception and rotation |
 | Consequence 10 (store migration) | The legacy delegation fields are replaced by the three above; guardianship has not shipped, so it is still a hard migration |
 
-Unchanged: one identifier per Identity Agent instance, hosting of the
-dependent's instance, the four templates (their emancipation triggers become
+Unchanged: one identifier per Identity Agent instance, where the
+dependent's instance runs, the four templates (their emancipation triggers become
 rotations), contact labels, navigation, the API surface and phasing.
 
 ---
@@ -117,7 +117,7 @@ The Identity Agent manages an individual's user-controlled digital identity. How
 - **Temporary situations** (medical events, travel, short-term care) may require time-limited delegation.
 - **End of life** requires a way to transition identity management to an estate executor or designated family members.
 
-KERI already provides the cryptographic primitives needed for all of these scenarios — delegated AIDs, multi-sig, and pre-rotation commitments. This ADR establishes how these primitives are exposed to users through the Guardianship feature, including the device/hosting architecture for dependent identities.
+KERI already provides the cryptographic primitives needed for all of these scenarios — delegated AIDs, multi-sig, and pre-rotation commitments. This ADR establishes how these primitives are exposed to users through the Guardianship feature, including where a dependent's Identity Agent runs: on a device or on a rented machine.
 
 > *Replaced by the 2026-11-14 amendment above.*
 
@@ -169,7 +169,7 @@ The guardian can:
 - **Revoke** the delegation by rotating the guardian's Guardianship P-AID in a way that abandons the delegation seal (permanent KEL record)
 - **Emancipate** — perform a final DRT transferring authority to keys held solely by the dependent, then the dependent's instance performs a new standalone inception to establish its own Root AID
 
-### Dependent AID Hosting
+### Where a Dependent's Identity Agent Runs
 
 The dependent's Identity Agent instance runs on a **separate, dedicated device** — either provisioned via a Black Box Infrastructure Stewardship provider or on a physical device. There are no plans to support running multiple AIDs within a single Identity Agent instance on the same device.
 

@@ -19,8 +19,8 @@ import 'the_owner_at_this_computer.dart';
 /// connection: you are remote by definition, so "this request came from the
 /// machine the agent runs on" is never true for the person who owns it. Every
 /// owner endpoint therefore answers `sign this request with the owner key`, and
-/// until something does, a hosted agent is correctly locked and completely
-/// unusable by the person who owns it.
+/// until something does, such an Identity Agent is correctly locked and
+/// completely unusable by the person who owns it.
 ///
 /// The signing itself already existed. What did not was anything calling it —
 /// so this sits at the transport instead of at eighty-one call sites. A request

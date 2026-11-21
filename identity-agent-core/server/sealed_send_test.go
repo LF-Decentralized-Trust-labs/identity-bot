@@ -15,7 +15,7 @@ import (
 // End to end through the door an app actually uses: the app hands its request
 // to the core on its own device, that core seals it, and the answer comes back
 // — with a recording proxy in the middle seeing neither.
-func TestAnAppsRequestReachesAHostedAgentWithoutTheMiddleReadingIt(t *testing.T) {
+func TestAnAppsRequestReachesAnIdentityAgentOnRentedHardwareWithoutTheMiddleReadingIt(t *testing.T) {
 	caller, callerAID, responder, responderAID := twoAgents(t)
 
 	r := chi.NewRouter()

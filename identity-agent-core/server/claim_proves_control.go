@@ -283,7 +283,7 @@ func (s *CoreServer) theWitnessesDoNotRefuse(aid string, kel []map[string]interf
 		// exactly the situation setting it up is most normal.
 		log.Printf("[pairing] %s accepted on an UNCORROBORATED history (%d witnesses named, "+
 			"%d answered signed, %d held the events of %d needed, %d empty, %d behind, %d failed, receipts met: %v) — accepted because this machine was offered from its own screen, "+
-			"where the person is present; a hosted machine would refuse",
+			"where the person is present; a rented machine would refuse",
 			aid, c.Designated, c.Asked, c.Held, c.Required, c.Empty, c.Behind, c.Failed, c.ReceiptsMet)
 	}
 	return nil
