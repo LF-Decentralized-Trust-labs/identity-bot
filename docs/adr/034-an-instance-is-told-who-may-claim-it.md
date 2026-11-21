@@ -102,7 +102,7 @@ and no code is shown.
 | A computer in front of you | **one** | The computer shows it; the phone scans; there is one exchange. |
 | An instance you asked for, from the device holding your key | **none** | The same app asked for the instance and claims it. Nothing crosses. |
 | An organisation on a computer in front of you | **one** | The organisation is set up at a desktop; the key is on the phone. |
-| An organisation on a hosted instance | **two** | The same gap, plus a wait: one to agree, and one when the machine is up. |
+| An organisation on a rented instance | **two** | The same gap, plus a wait: one to agree, and one when the machine is up. |
 
 **The second code in the last row is not ceremony.** The instance does not exist
 when the first is scanned, so there is no token to carry yet. The window that

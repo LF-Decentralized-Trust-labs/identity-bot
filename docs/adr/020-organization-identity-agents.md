@@ -57,10 +57,10 @@ Key questions this ADR resolves:
     Trust repo           Separate repo            Separate repo
                          Org-specific screens     Industry-specific screens
                          Org-specific DB tables   Extended DB schema
-                         Hosted on org server     Hosted on org infrastructure
+                         Runs on org server       Runs on org infrastructure
 ```
 
-The individual identity agent (UI + core) lives entirely in the open source repository. Organizational identity agent applications are built by service providers using the open source core as their protocol foundation. Each org agent runs as an isolated instance on the organization's own server or hosted infrastructure.
+The individual identity agent (UI + core) lives entirely in the open source repository. Organizational identity agent applications are built by service providers using the open source core as their protocol foundation. Each org agent runs as an isolated instance on the organization's own server or on rented infrastructure.
 
 ---
 
@@ -80,7 +80,7 @@ The individual identity agent (UI + core) lives entirely in the open source repo
 | Department credential workflow UI | No | Service provider product |
 | Org-specific database tables and extensions | No | Service provider product |
 | Org-specific governance (internal org policies, inter-department access controls, compliance reporting, proprietary data governance) | No | Service provider product — governance logic that is specific to how an organization structures its internal authority and external data-sharing agreements is not part of the individual protocol |
-| Hosted infrastructure management | No | Service provider product |
+| Rented infrastructure management | No | Service provider product |
 | Industry-specific credential templates | No | Service provider product |
 
 ---
@@ -97,7 +97,7 @@ An Identity Agent service provider creates an organizational identity agent appl
   - Enterprise: employee delegated AID provisioning, department credential workflows, HR integration
   - Retail: customer identity, loyalty credential management, loyalty tier issuance
 - **Extends the database schema** with org-specific tables (employees, departments, org hierarchy, audit records)
-- **Provides hosted infrastructure** — each organization runs its own isolated server instance; service providers may offer managed hosting
+- **Provides rented infrastructure** — each organization runs its own isolated server instance; service providers may offer managed hosting
 
 Service providers may offer these as open source, freemium, or fully proprietary products — the Identity Agent Protocol imposes no restrictions. Their interoperability obligation is only to the core protocol.
 

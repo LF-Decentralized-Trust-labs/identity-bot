@@ -43,7 +43,7 @@ never been possible, because the CESR code table has no code for it.
 or ML-KEM to recompute them, so a core holding a different seed can plant keys
 of its own.
 
-**The app cannot learn which key is in force on a hosted Identity Agent.** It
+**The app cannot learn which key is in force on an Identity Agent on a rented machine.** It
 reads `GET /api/identity` and `GET /api/kel`, which are owner routes, and to
 sign as the owner it must first know which key is in force.
 
@@ -1073,7 +1073,7 @@ do not.
   credentials, recover, and move to a new phrase.
 - The core holds no key it could use to rotate an identity whose key the app
   holds; its post-quantum commitment and messaging keys are the app's.
-- A hosted Identity Agent can be driven by an app that holds the key with no
+- An Identity Agent on a rented machine can be driven by an app that holds the key with no
   owner route needed to learn which key to sign with, and cannot pin the
   identity by withholding a signed event.
 - Phrase-only recovery needs one public locator.

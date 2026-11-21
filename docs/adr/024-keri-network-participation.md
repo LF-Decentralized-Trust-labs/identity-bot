@@ -12,7 +12,7 @@
 
 KERI's security does not come from a blockchain or a central registry — it comes from a small set of network roles. **Witnesses** receipt an identity's key events so the controller can't later equivocate about its own history. **Watchers** observe identities they care about and detect *duplicity* (an identity presenting two conflicting versions of its KEL). And to be reachable at all, an always-on agent needs a stable public URL and a way to publish its KEL so others can resolve it.
 
-A user-controlled Identity Agent should participate in these roles itself rather than renting them from a platform. An always-on agent (a desktop left on, a hosted "black box") has exactly the uptime a witness needs. A watcher is just disciplined record-keeping plus cross-checking. And `did:webs` lets an agent publish its KEL over plain HTTPS. The open question each role raises is *scope and trust*: who do we witness for, whose duplicity do we check and how aggressively, and how do we get a public URL without becoming dependent on one provider.
+A user-controlled Identity Agent should participate in these roles itself rather than renting them from a platform. An always-on agent (a desktop left on, a rented "black box") has exactly the uptime a witness needs. A watcher is just disciplined record-keeping plus cross-checking. And `did:webs` lets an agent publish its KEL over plain HTTPS. The open question each role raises is *scope and trust*: who do we witness for, whose duplicity do we check and how aggressively, and how do we get a public URL without becoming dependent on one provider.
 
 ---
 
@@ -74,7 +74,7 @@ Only pairwise AIDs are published — never the agent's root AID — keeping the 
 
 ### Negative / Trade-offs
 
-- A witness must be always-on; mobile agents are excluded, so users in the phone+computer topology rely on their computer (own or hosted) for witnessing.
+- A witness must be always-on; mobile agents are excluded, so users in the phone+computer topology rely on their computer (own or rented) for witnessing.
 - The relay tunnel is a persistent outbound WebSocket — it consumes a connection and depends on the relay's uptime for inbound reachability (mitigated by reconnect and the ability to switch relays).
 - Some publisher paths defer full CESR-stream generation to the KERI driver; until that lands, the stream is served as JSON KEL events.
 - L2/L3 cross-checking adds network calls on first contact; these are advisory and rate-limited, but they are extra latency on the cold path.

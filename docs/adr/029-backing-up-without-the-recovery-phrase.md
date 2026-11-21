@@ -10,7 +10,7 @@
 
 Every backup key slot derived its wrapping key from something the owner holds — the recovery phrase, a passphrase, a guardian group. That means the machine writing the archive had to be given one of those secrets. The client loaded the phrase and posted it with every export.
 
-When that machine is one somebody else operates — a hosted instance, a shared server, any hardware whose owner is not the identity's owner — handing it the phrase gives away the identity itself, permanently and irrevocably. Unpairing does not undo it; deleting the instance does not undo it. **A backup should not cost more than what it protects.**
+When that machine is one somebody else operates — an instance on a rented machine, a shared server, any hardware whose owner is not the identity's owner — handing it the phrase gives away the identity itself, permanently and irrevocably. Unpairing does not undo it; deleting the instance does not undo it. **A backup should not cost more than what it protects.**
 
 It had two further consequences that were not obvious:
 
