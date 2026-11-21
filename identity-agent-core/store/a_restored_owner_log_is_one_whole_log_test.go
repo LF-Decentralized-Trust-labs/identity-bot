@@ -307,6 +307,19 @@ func TestTwoDatabasesThatDisagreeAboutAnOwnerLogAreSettled(t *testing.T) {
 		logIs(t, into, a)
 		reservationsAre(t, into, founded.AID, a)
 	})
+	t.Run("done in a backup whose log is not taken, only reserved here: the done one waits", func(t *testing.T) {
+		// The backup's log does not verify, so this device's stands, and the
+		// place after its tip is reserved in both. The backup's reservation
+		// was signed and kept there, so it may have been sent: it is the one
+		// that waits to be finished, with the same bytes.
+		into := waiting(t, anchoring(t, founded.Fork(), machineOne, 3), machineOne)
+		id := restore(t, into, broken(t, done(t, a, machineOne)))
+		if id.DuplicitousAt != nil || id.AnchoredM != machineOne {
+			t.Fatalf("the identity reads %+v", id)
+		}
+		logIs(t, into, founded)
+		waitingIs(t, into, a)
+	})
 	t.Run("both only reserved with different events: this device's stays", func(t *testing.T) {
 		into := waiting(t, a, machineOne)
 		id := restore(t, into, waiting(t, b, machineTwo))
