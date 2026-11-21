@@ -469,7 +469,7 @@ func TestAnOwnerProvedWithAKeyItsIdentityRetiredFoundsNothing(t *testing.T) {
 // Such a machine can always reach a witness, so a history no witness confirms
 // is refused there. The claimant's history is confirmed in both cases below.
 // Only the owner's differs, so only the owner's can be what decides.
-func TestAHostedMachineFoundsOnlyForAnOwnerAWitnessCorroborates(t *testing.T) {
+func TestARentedMachineFoundsOnlyForAnOwnerAWitnessCorroborates(t *testing.T) {
 	for _, c := range []struct {
 		what         string
 		corroborated bool
@@ -507,7 +507,7 @@ func TestAHostedMachineFoundsOnlyForAnOwnerAWitnessCorroborates(t *testing.T) {
 			confirm(claimerAID)
 
 			// Told what to accept by whoever set it up, and never offered from
-			// its own screen: a hosted machine.
+			// its own screen: a rented machine.
 			machine := agentWithNoIdentity(t)
 			machine.KeriDriver = startedEngine(t)
 			if err := SetExpectedClaim("TOKEN-FROM-THE-PROVISIONER", claimerAID); err != nil {

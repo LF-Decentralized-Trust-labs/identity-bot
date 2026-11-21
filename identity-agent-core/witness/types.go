@@ -48,8 +48,11 @@ const (
 )
 
 const (
-	BackendDesktop    = "desktop"
-	BackendHosted     = "hosted" // black box: attestation-backed, run for the owner
+	BackendDesktop = "desktop"
+	// BackendRented is a rented machine whose provider cannot read it:
+	// attestation-backed, run for the owner. Its value stays "hosted" because
+	// it is published in contact records and signed into witness answers.
+	BackendRented     = "hosted"
 	BackendMobile     = "mobile"
 	BackendCommercial = "commercial"
 )
@@ -114,7 +117,7 @@ type ContactMeta struct {
 	// reachable when somebody else's event needs receipting, and a phone is
 	// not. A phone paired to a computer is, because the computer answers — so
 	// what matters is whether there is an always-on backend, not what the
-	// person carries. Where that backend is hosted makes no difference.
+	// person carries. Where that backend runs makes no difference.
 	BackendType string
 	// WitnessKey is the non-transferable key this contact signs receipts with,
 	// as published in its OOBI. Empty when it publishes none, in which case it

@@ -43,10 +43,10 @@ func acceptedContactOfKind(t *testing.T, s *Service, mc *memContacts, aid, backe
 	}
 }
 
-// A contact whose agent runs on a computer — their own or hosted, it makes no
+// A contact whose agent runs on a computer — their own or rented, it makes no
 // difference — can answer when somebody else publishes an event, so it is asked.
 func TestAContactWithAnAlwaysOnBackendIsAskedToWitness(t *testing.T) {
-	for _, backend := range []string{BackendDesktop, BackendHosted, BackendCommercial} {
+	for _, backend := range []string{BackendDesktop, BackendRented, BackendCommercial} {
 		s, mc, sent := lifecycleService(t)
 		acceptedContact(t, s, mc, "EPeerWithABackend", backend)
 

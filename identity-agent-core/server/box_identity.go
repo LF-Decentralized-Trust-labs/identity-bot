@@ -22,8 +22,9 @@ import (
 // reaches this hardware.
 //
 // Those two facts only collide if the machine has to use the OWNER's identity.
-// It does not. A hosted agent is a distinct thing acting on the owner's behalf,
-// so it gets its own identity, with its own keys, made here and never leaving.
+// It does not. An Identity Agent on rented hardware is a distinct thing acting
+// on the owner's behalf, so it gets its own identity, with its own keys, made
+// here and never leaving.
 // The owner's authority arrives afterwards as a signature over the event below
 // — authority rather than key material, which is what lets the machine be
 // trusted without being given anything it could use to impersonate the owner.

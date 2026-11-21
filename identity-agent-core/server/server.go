@@ -360,7 +360,7 @@ type Config struct {
 	// This is a server-side rule on purpose. The refusal already exists in the
 	// organisation app's onboarding, but a rule that lives only in a client is a
 	// convention: anything else that can reach /api/inception can found an
-	// unowned identity, and on a hosted instance that is the difference between
+	// unowned identity, and on a rented instance that is the difference between
 	// a property you can attest to and one you hope the client honoured.
 	RequireOwnerAtInception bool
 

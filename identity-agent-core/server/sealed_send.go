@@ -9,12 +9,13 @@ import (
 	"time"
 )
 
-// The door an owner's own app uses to reach their hosted agent privately.
+// The door an owner's own app uses to reach their Identity Agent on rented
+// hardware privately.
 //
 // The encrypted transport was built, tested, and used by nothing. Every request
-// an app made to a hosted agent still crossed the network readable by whatever
-// terminates TLS in front of it — which on rented hardware is the machine's
-// operator. A mechanism with no callers protects nobody.
+// an app made to such an Identity Agent still crossed the network readable by
+// whatever terminates TLS in front of it — which on rented hardware is the
+// machine's operator. A mechanism with no callers protects nobody.
 //
 // The reason nothing called it is worth stating, because it looks like a
 // missing feature and is not: the envelope needs keys, and a browser or a
