@@ -1191,3 +1191,40 @@ func TestAnInteractionThatIsNotExactlyOneEventSealIsNotAnAnchor(t *testing.T) {
 		t.Fatalf("the kept log has %d events", len(kept))
 	}
 }
+
+// The signer signs a reservation only for an owner identity recorded as
+// anchoring the Identity Agent it anchors. A place is reserved only together
+// with recording one, so a reservation beside a record that names none is
+// not signed. The same reservation, with the record naming that Identity
+// Agent, is.
+func TestTheSignerSignsNoReservationForAnOwnerIdentityRecordedAsAnchoringNothing(t *testing.T) {
+	s := withWitnessesStandingIn(adoptingOwner(t))
+	owner := mintedOwnerOf(t, s, machineKindIndividual)
+	seal, _ := drivers.EventSeal(aMachine, "0", aMachine)
+	raw, err := keri.BuildInteraction(keri.InteractionInput{Prefix: owner, PriorSAID: owner, SN: 1,
+		Data: []json.RawMessage{seal}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := drivers.EventIDOfRawB64(base64.StdEncoding.EncodeToString(raw))
+	r := store.OwnerLogReservation{OwnerAID: owner, SN: 1, PriorDigest: owner, Digest: d,
+		RawB64: base64.StdEncoding.EncodeToString(raw)}
+	db := s.DataStore.(*store.SQLiteStore).DB()
+	if _, err := db.Exec(`INSERT INTO owner_log_reservations
+		(owner_aid, seq_num, prior_digest, digest, event_bytes_b64, state) VALUES (?, ?, ?, ?, ?, 'reserved')`,
+		r.OwnerAID, r.SN, r.PriorDigest, r.Digest, r.RawB64); err != nil {
+		t.Fatal(err)
+	}
+
+	theWriterAllows(s, r)
+	if sig, err := s.signEventFor(owner, "", raw); err == nil || sig != "" {
+		t.Fatalf("a reservation was signed for an owner identity recorded as anchoring nothing: %q", sig)
+	}
+	if _, err := db.Exec(`UPDATE machine_owner_identities SET anchored_m = ? WHERE aid = ?`, aMachine, owner); err != nil {
+		t.Fatal(err)
+	}
+	theWriterAllows(s, r)
+	if sig, err := s.signEventFor(owner, "", raw); err != nil || sig == "" {
+		t.Fatalf("with the record naming the Identity Agent it anchors, it was not signed: %v", err)
+	}
+}

@@ -480,3 +480,27 @@ func TestARestoredReservationThatIsNotWhatItSaysIsNotTaken(t *testing.T) {
 		})
 	}
 }
+
+// A backup that holds a reservation and records no Identity Agent as
+// anchored is not one this code wrote, since a place is reserved only
+// together with recording one: its reservation is not taken, though it is
+// what it says it is, and the restore goes on.
+func TestABackupReservationWithNoIdentityAgentRecordedIsNotTaken(t *testing.T) {
+	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	_, into := openStore(t)
+	mintedOwner(t, into, founded, 1)
+	_, from := openStore(t)
+	mintedOwner(t, from, founded, 1)
+	if _, err := from.ReserveOwnerLogPlace(reservationFor(anchoring(t, founded.Fork(), machineOne, 0)), machineOne); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.db.Exec(`UPDATE machine_owner_identities SET anchored_m = ''`); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snapshotOf(t, from)); err != nil {
+		t.Fatalf("the restore was refused: %v", err)
+	}
+	if res, _ := into.OwnerLogReservations(founded.AID); len(res) != 0 {
+		t.Fatalf("a reservation of a backup that records no anchored Identity Agent was taken: %+v", res)
+	}
+}

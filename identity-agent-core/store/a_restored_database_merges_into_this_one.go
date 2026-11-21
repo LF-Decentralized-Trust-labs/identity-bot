@@ -931,7 +931,7 @@ func mergeContactKELs(ctx context.Context, tx *sql.Tx) (int, error) {
 //     only the backup holds is taken only if it verifies.
 //   - A reservation of the backup is taken only if its bytes are the
 //     interaction it describes, anchoring the Identity Agent the backup
-//     records (restoredReservationHolds). The places reserved follow the log
+//     records, and it records one (restoredReservationHolds). The places reserved follow the log
 //     that stands. A place it holds an
 //     event at keeps the reservation of that event, done, and no other. The
 //     place after its tip keeps one waiting reservation, and only one that
@@ -1148,11 +1148,14 @@ func mergeOwnerIdentity(ctx context.Context, tx *sql.Tx, aid string) error {
 }
 
 // restoredReservationHolds says whether a reservation read from a backup
-// describes its own bytes (OwnerLogReservation.Anchors) and, where the backup
-// records which Identity Agent its owner identity anchors, anchors that one.
+// describes its own bytes (OwnerLogReservation.Anchors) and anchors the
+// Identity Agent the backup records its owner identity anchoring. A place is
+// reserved only together with recording that Identity Agent
+// (ReserveOwnerLogPlace), so a backup holding a reservation and recording
+// none is not one this code wrote, and its reservation is not taken.
 func restoredReservationHolds(r OwnerLogReservation, anchoredM string) bool {
 	sealed, err := r.Anchors()
-	return err == nil && (anchoredM == "" || sealed == anchoredM)
+	return err == nil && anchoredM != "" && sealed == anchoredM
 }
 
 // reservationToKeep decides which reservation stands at place sn of an owner

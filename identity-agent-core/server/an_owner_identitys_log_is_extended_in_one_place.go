@@ -415,7 +415,8 @@ func (s *CoreServer) signWithPermit(r store.OwnerLogReservation, raw []byte) (st
 // the writer has just allowed this one signing (a permit naming the place
 // and the digest, which this consumes), raw is exactly the bytes reserved at
 // that place, those bytes are the interaction the reservation describes and
-// anchor the Identity Agent the owner identity is recorded as anchoring
+// anchor the Identity Agent the owner identity is recorded as anchoring, which
+// it must record
 // (store.OwnerLogReservation.Anchors), and they still follow the kept log
 // (reservedEventFollowsTheKeptLog). It is the one place an owner identity's
 // key signs an event, reached through the engine's signer (signEventFor).
@@ -463,9 +464,12 @@ func (s *CoreServer) signReservedOwnerLogEvent(owner string, raw []byte) (string
 		if err != nil {
 			return "", fmt.Errorf("%w: %v", errOwnerLogCannotBeExtended, err)
 		}
-		if id.AnchoredM != "" && anchored != id.AnchoredM {
+		// A place is reserved only together with recording the Identity
+		// Agent anchored (ReserveOwnerLogPlace), so a record that names none
+		// beside a reservation is not one this code wrote.
+		if id.AnchoredM == "" || anchored != id.AnchoredM {
 			return "", fmt.Errorf("%w: the event reserved at sequence number %d of %s anchors %s, "+
-				"and the owner identity is recorded as anchoring %s", errOwnerLogCannotBeExtended,
+				"and the owner identity is recorded as anchoring %q", errOwnerLogCannotBeExtended,
 				r.SN, owner, anchored, id.AnchoredM)
 		}
 		if err := s.reservedEventFollowsTheKeptLog(r); err != nil {
