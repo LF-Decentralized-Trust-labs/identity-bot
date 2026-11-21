@@ -1795,7 +1795,7 @@ func (s *SQLiteStore) scanServiceProviders(rows *sql.Rows) ([]ServiceProviderRec
 // ("contacts", "login") ensure independent sequences.
 //
 // It reads the counter and then writes it, so it takes the write lock first
-// (takeTheWriteLock): another allocation or any other write committed between
+// (takeTheWriteLock), through the counter table itself: another allocation or any other write committed between
 // the read and the write would otherwise have this one refused at once, and
 // the mint that asked for the index fail.
 func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, error) {
@@ -1809,7 +1809,7 @@ func (s *SQLiteStore) AllocateNextRelationshipIndex(namespace string) (int, erro
 			tx.Rollback()
 		}
 	}()
-	if err := takeTheWriteLock(tx); err != nil {
+	if err := takeTheWriteLock(tx, "relationship_counters"); err != nil {
 		return 0, err
 	}
 

@@ -218,7 +218,7 @@ func (s *SQLiteStore) KeepOwnerLogEvent(ev EventRecord) error {
 		return fmt.Errorf("could not keep the owner log event: %w", err)
 	}
 	defer tx.Rollback()
-	if err := takeTheWriteLock(tx); err != nil {
+	if err := takeTheWriteLock(tx, "owner_log_reservations"); err != nil {
 		return fmt.Errorf("could not keep the owner log event: %w", err)
 	}
 	var reserved string
@@ -262,8 +262,13 @@ func (s *SQLiteStore) KeepOwnerLogEvent(ev EventRecord) error {
 // can no longer be brought forward. With the lock taken first, another writer
 // waits for it as busy_timeout says, and what the transaction reads is what
 // it writes against. The statement changes no row.
-func takeTheWriteLock(tx *sql.Tx) error {
-	_, err := tx.Exec(`UPDATE owner_log_reservations SET state = state WHERE 0`)
+//
+// The lock is the whole database's, whichever table the statement names, so
+// a caller names the table it is about to write: what it depends on is then
+// a table it needs anyway, and nothing another feature added. table is a
+// name written in the code, never one taken from input.
+func takeTheWriteLock(tx *sql.Tx, table string) error {
+	_, err := tx.Exec(fmt.Sprintf(`UPDATE "%s" SET rowid = rowid WHERE 0`, table))
 	return err
 }
 
@@ -305,7 +310,8 @@ func (s *SQLiteStore) durably(do func(tx *sql.Tx) error) error {
 		return fmt.Errorf("could not open a durable transaction: %w", err)
 	}
 	defer tx.Rollback()
-	if err := takeTheWriteLock(tx); err != nil {
+	// Its one caller writes a reservation.
+	if err := takeTheWriteLock(tx, "owner_log_reservations"); err != nil {
 		return fmt.Errorf("could not open a durable transaction: %w", err)
 	}
 	if err := do(tx); err != nil {

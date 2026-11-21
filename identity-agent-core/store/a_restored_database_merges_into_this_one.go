@@ -923,7 +923,9 @@ func mergeContactKELs(ctx context.Context, tx *sql.Tx) (int, error) {
 //     on from the other, the longer stands. Where they part, each holds a
 //     validly signed event at one place, which is duplicity: the owner
 //     identity is marked there, so that it anchors nothing again, and this
-//     device's log stands. A log that does not verify up to the place where
+//     device's log stands. The backup's events from that place on, and the
+//     Identity Agent they anchor, are not kept as evidence: only the place
+//     is recorded. A log that does not verify up to the place where
 //     they part proves nothing there and marks nothing. Of two logs, the one
 //     that verifies stands, this device's where both or neither do, and a log
 //     only the backup holds is taken only if it verifies.
@@ -1028,7 +1030,9 @@ func mergeOwnerIdentity(ctx context.Context, tx *sql.Tx, aid string) error {
 		return err
 	}
 
-	// The log.
+	// The log. Where the two part, only the place is recorded (forkedAt):
+	// the backup's events from there on, and what they anchor, are not kept
+	// as evidence of the duplicity.
 	from, forkedAt := ownerLogToTake(aid, held.events, offered.events)
 	kept := held.events
 	if from >= 0 {

@@ -131,7 +131,7 @@ func (s *SQLiteStore) GiveUpMachineOwnerIdentity(aid, m string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := takeTheWriteLock(tx); err != nil {
+	if err := takeTheWriteLock(tx, "machine_owner_identities"); err != nil {
 		return err
 	}
 	id, found, err := machineOwnerIdentity(tx, aid)
