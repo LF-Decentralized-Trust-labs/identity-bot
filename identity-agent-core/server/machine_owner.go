@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/store"
+	"io"
 	"net/http"
 
 	"identity-agent-core/internal/jsonreply"
@@ -40,8 +42,44 @@ type machineOwnerResponse struct {
 	// only matters here into a round trip that could return it wrong.
 }
 
+// mintMachineOwnerRequest is the optional body of a mint.
+type mintMachineOwnerRequest struct {
+	// Kind is what the identity is minted to own: "individual" for a person's
+	// own machine, "organisation" for an organisation's Identity Agent. No key
+	// log carries it, so it is kept with the identity from the moment it is
+	// minted (ADR-087 decision 13). Left out, nothing is recorded: a guess
+	// written down would read later as a fact. (An owner identity minted
+	// while adopting a machine takes the kind of that claim instead.)
+	Kind string `json:"kind"`
+}
+
+// The kinds of Identity Agent an owner identity is minted to own.
+const (
+	machineKindIndividual   = "individual"
+	machineKindOrganisation = "organisation"
+)
+
+// isAMachineKind says whether kind is one an owner identity is minted for.
+func isAMachineKind(kind string) bool {
+	return kind == machineKindIndividual || kind == machineKindOrganisation
+}
+
 func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Request) {
-	aid, oobi, err := s.mintAnIdentityToClaimAMachineWith()
+	var req mintMachineOwnerRequest
+	if r.Body != nil {
+		err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req)
+		if err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "body must be JSON", err.Error())
+			return
+		}
+	}
+	if req.Kind != "" && !isAMachineKind(req.Kind) {
+		writeError(w, http.StatusBadRequest, "Unknown kind",
+			"an identity is minted to own a computer of your own (individual) or an "+
+				"organisation, and "+req.Kind+" is neither")
+		return
+	}
+	aid, oobi, err := s.mintAnIdentityToClaimAMachineWith(req.Kind)
 	if err != nil {
 		if refuseIfRootSeedRefused(w, err) {
 			return
@@ -54,7 +92,8 @@ func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Reque
 }
 
 // mintAnIdentityToClaimAMachineWith derives, records and publishes an identity
-// this device can claim a machine as.
+// this device can claim a machine as. kind is what it is minted to own, or
+// empty where the caller cannot say.
 //
 // Separated from the route because it is needed before there is anything to
 // route to. A machine is told which identity may claim it BEFORE it starts, so
@@ -63,16 +102,30 @@ func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Reque
 // its owner agrees to own the organisation. Minting it there, rather than at
 // claim time, is what stops the two being different identities and the machine
 // refusing its own owner.
-func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err error) {
-	aid, oobi, _, idx, err := s.mintPairwiseIn("machines", "machine-owner")
+func (s *CoreServer) mintAnIdentityToClaimAMachineWith(kind string) (aid, oobi string, err error) {
+	aid, oobi, _, err = s.mintAMachineOwnerIdentity("machine-owner", kind)
+	return aid, oobi, err
+}
+
+// mintAMachineOwnerIdentity is the one way an owner identity is minted: a
+// pairwise identity in the machines pool, recorded with the index its key
+// comes from and what it was minted to own, and with its key log kept.
+//
+// Every mint passes here because each of the three is needed later and none
+// can be recovered: without the index the identity can never sign again,
+// without the kind a rebuilt record has to guess it, and without the kept log
+// the identity can neither prove itself after a restart nor have its log
+// extended.
+func (s *CoreServer) mintAMachineOwnerIdentity(name, kind string) (aid, oobi string, idx int, err error) {
+	aid, oobi, _, idx, err = s.mintPairwiseIn("machines", name)
 	if err != nil {
-		return "", "", fmt.Errorf("could not mint an identity for this machine: %w", err)
+		return "", "", 0, fmt.Errorf("could not mint an identity for this machine: %w", err)
 	}
 	// Remembered here rather than handed out and taken back. Adoption looks it
 	// up; an index that travelled through a caller would have to be trusted or
 	// verified, and neither is needed when this side minted it.
-	if err := s.DataStore.RememberMachineOwnerIdentity(aid, idx); err != nil {
-		return "", "", fmt.Errorf("could not record the identity for this machine: %w", err)
+	if err := s.DataStore.RememberMachineOwnerIdentity(aid, idx, kind); err != nil {
+		return "", "", 0, fmt.Errorf("could not record the identity for this machine: %w", err)
 	}
 	// Its key log is written down too, not only held in memory.
 	//
@@ -82,10 +135,10 @@ func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err 
 	// unable to prove itself — and the machine correctly refusing its own
 	// owner, permanently, with no way back.
 	if err := s.persistPairwiseKEL(aid); err != nil {
-		return "", "", fmt.Errorf("could not record this identity's key log, without which "+
+		return "", "", 0, fmt.Errorf("could not record this identity's key log, without which "+
 			"it could not prove itself to the machine later: %w", err)
 	}
-	return aid, oobi, nil
+	return aid, oobi, idx, nil
 }
 
 // persistPairwiseKEL writes a freshly minted pairwise identity's key log to

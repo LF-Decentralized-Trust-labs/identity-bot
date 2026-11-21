@@ -905,15 +905,16 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	// index: a pool that borrowed another's range would hand the same key to
 	// two unrelated relationships, which is the correlation a pairwise
 	// identifier exists to prevent.
-	// Refused rather than defaulted, because a wrong label here is silent: it
-	// puts an organisation in somebody's list of computers, or the reverse, and
-	// nothing later disagrees with it.
+	// A kind this does not know is refused rather than defaulted, because a
+	// wrong label here is silent: it puts an organisation in somebody's list
+	// of computers, or the reverse, and nothing later disagrees with it. A
+	// claim that names no kind is a computer of the person's own, as it has
+	// always been read.
 	kind := req.Kind
-	switch kind {
-	case "":
-		kind = "individual"
-	case "individual", "organisation":
-	default:
+	if kind == "" {
+		kind = machineKindIndividual
+	}
+	if !isAMachineKind(kind) {
 		writeError(w, http.StatusBadRequest, "Unknown kind",
 			"a claim says what it is founding — a computer of your own (individual) "+
 				"or an organisation — and "+kind+" is neither")
@@ -922,19 +923,31 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 
 	ownerAID, ownerIdx := req.OwnerAID, 0
 	if ownerAID != "" {
-		idx, known, lErr := s.DataStore.MachineOwnerIndex(ownerAID)
-		if lErr != nil || !known {
+		id, known, lErr := s.DataStore.MachineOwnerIdentity(ownerAID)
+		if lErr != nil {
+			writeError(w, http.StatusInternalServerError, "Could not read the owner identity", lErr.Error())
+			return
+		}
+		if !known {
 			writeError(w, http.StatusBadRequest, "Unknown owner identity",
 				"this device did not mint that identity, so it holds no key for it and the machine would answer to nobody")
 			return
 		}
-		ownerIdx = idx
+		if why := ownerIdentityCannotClaim(id); why != "" {
+			writeError(w, http.StatusConflict, "This owner identity cannot claim a machine", why)
+			return
+		}
+		ownerIdx = id.KeyIndex
 	}
 	if ownerAID == "" {
 		// Nothing was reserved in advance, so mint one now. This is the path a
-		// machine obtained without a provisioning step takes.
+		// machine obtained without a provisioning step takes. Minted as every
+		// owner identity is, so its index and kind are recorded: one that was
+		// not could never be signed as afterwards. Its kind is the claim's,
+		// "individual" where the claim names none, so the owner identity and
+		// the machine it was minted for are recorded as the same kind.
 		var mErr error
-		ownerAID, _, _, ownerIdx, mErr = s.mintPairwiseIn("machines", "machine-"+shortAID(offer.PairwiseAID))
+		ownerAID, _, ownerIdx, mErr = s.mintAMachineOwnerIdentity("machine-"+shortAID(offer.PairwiseAID), kind)
 		if mErr != nil {
 			if refuseIfRootSeedRefused(w, mErr) {
 				return
@@ -1140,6 +1153,32 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		"root_aid": identityAID, "owner_aid": ownerAID,
 		"box_pairwise_aid": offer.PairwiseAID, "box_response": result,
 	})
+}
+
+// ownerIdentityCannotClaim says why an owner identity this device minted may
+// not claim a machine, or "" where it may (ADR-087 decisions 7 and 8).
+//
+// One owner identity owns one Identity Agent, so one that already anchors
+// one claims no other, and one whose log holds two events at one place
+// claims nothing. A given-up one may still sign the claim a machine was told
+// to expect from it, with a fresh owner identity sent beside it as the
+// separate founding owner. This route sends no founding owner, and cannot
+// tell a machine told to expect the given-up identity from one told nothing
+// (boxExpectOwner reads both as accepted), so it refuses that too.
+func ownerIdentityCannotClaim(id store.MachineOwnerIdentity) string {
+	switch {
+	case id.DuplicitousAt != nil:
+		return fmt.Sprintf("two events are known at sequence number %d of the key log of %s, "+
+			"so it owns nothing; mint a fresh owner identity for this machine", *id.DuplicitousAt, id.AID)
+	case id.GivenUpFor != "":
+		return fmt.Sprintf("%s was given up for the Identity Agent %s; a claim by it would need a fresh "+
+			"owner identity sent beside it as the founding owner, which this route does not send yet",
+			id.AID, id.GivenUpFor)
+	case id.AnchoredM != "":
+		return fmt.Sprintf("%s already anchors the Identity Agent %s, and one owner identity owns one "+
+			"Identity Agent; mint a fresh owner identity for this machine", id.AID, id.AnchoredM)
+	}
+	return ""
 }
 
 // boxExpectOwner tells a machine which identity may claim it.

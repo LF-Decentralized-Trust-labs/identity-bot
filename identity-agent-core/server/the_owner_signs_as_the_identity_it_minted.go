@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -131,7 +132,7 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 	// Where this identity's key came from. Unknown means this device did not
 	// mint it, and the refusal is the point: a pairwise AID is not a secret, so
 	// naming one must not be enough to be signed for.
-	idx, known, err := s.DataStore.MachineOwnerIndex(ownerAID)
+	owner, known, err := s.DataStore.MachineOwnerIdentity(ownerAID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"could not look up where that identity's key came from", err.Error())
@@ -143,8 +144,30 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 			"only an identity minted here to own a machine can be signed as")
 		return
 	}
+	// An owner identity that was given up signs no owner request again
+	// (ADR-087 decision 7). Whatever it anchored may one day be founded by a
+	// machine this device never finished founding, and that machine must gain
+	// an owner that signs nothing.
+	if owner.GivenUpFor != "" {
+		writeError(w, http.StatusForbidden,
+			"that identity was given up, so it signs no request to a machine again",
+			"a machine founded since is owned by the identity minted in its place")
+		return
+	}
+	// An owner identity whose key log holds two events at one place signs
+	// nothing more (ADR-087 decision 10). The one request it will sign is the
+	// rotation of the machine that puts a fresh owner identity in its place
+	// and leaves this one out. No route makes that request yet; when one
+	// does, it is let through here and nothing else is.
+	if owner.DuplicitousAt != nil {
+		writeError(w, http.StatusConflict,
+			"that identity's key log holds two events at one place, so it signs no request to a machine",
+			fmt.Sprintf("two events are known at sequence number %d of its log; the machine is moved to a "+
+				"fresh owner identity, which nothing here does yet", *owner.DuplicitousAt))
+		return
+	}
 
-	seed, err := s.pairwiseSigningSeed(idx)
+	seed, err := s.pairwiseSigningSeed(owner.KeyIndex)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"could not derive the key for that identity", err.Error())

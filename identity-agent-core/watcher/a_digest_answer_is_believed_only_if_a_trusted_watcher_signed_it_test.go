@@ -198,14 +198,13 @@ func TestTheSeededDeadWatcherAddressIsCorrectedAndAChosenOneIsNot(t *testing.T) 
 		if _, err := db.Exec(`DELETE FROM watcher_config WHERE key='default_l2_url'`); err != nil {
 			t.Fatal(err)
 		}
-		// An agent as migration 12 left it, before migration 53.
+		// An Identity Agent as migration 12 left it, before migration 53. Only
+		// that migration is run again: the ones after it are not all written
+		// to be run twice.
 		if _, err := db.Exec(`INSERT INTO watcher_config (key, value) VALUES ('default_l2_url', ?)`, tc.stored); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`DELETE FROM identity_schema_migrations WHERE version >= 53`); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.ApplyIdentityMigrations(db); err != nil {
+		if err := store.ReapplyIdentityMigration(db, 53); err != nil {
 			t.Fatal(err)
 		}
 		if got := ws.DefaultL2URL(); got != tc.want {

@@ -322,6 +322,9 @@ type CoreServer struct {
 	record recordState
 	// witnessing is the worker that keeps the witnesses up to date.
 	witnessing witnessState
+	// ownerLog is the one writer of owner identities' key logs
+	// (an_owner_identitys_log_is_extended_in_one_place.go).
+	ownerLog ownerLogState
 	// edgesSince is when the first credential naming who authorised it was
 	// issued here; see issuedUnderFirstVersionTooLate.
 	edgesSince atomic.Value
@@ -2160,6 +2163,17 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Missing required fields", "aid and event_type are required")
 		return
 	}
+	// An owner identity's log is extended in one place, its writer, which
+	// keeps only signed events at places reserved first. A row written here
+	// would sit in that log unverified.
+	if _, minted, err := s.DataStore.MachineOwnerIdentity(req.AID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read the owner identities", err.Error())
+		return
+	} else if minted {
+		writeError(w, http.StatusConflict, "That is an owner identity's key log",
+			"an owner identity's key log is extended only by its own writer, never stored here")
+		return
+	}
 
 	// AN INCEPTION EVENT IS A FOUNDING, whatever route it arrives by. This one
 	// writes it into this machine's key event log AND publishes it to the
@@ -2209,6 +2223,9 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" || req.NewPublicKey == "" || req.NewNextPublicKey == "" {
 		writeError(w, http.StatusBadRequest, "Missing required fields", "name, new_public_key, and new_next_public_key are required")
+		return
+	}
+	if s.refuseAnIdentityNotOurOwn(w, req.Name) {
 		return
 	}
 
@@ -2288,6 +2305,37 @@ func (s *CoreServer) recordOwnRotation(result *drivers.DriverRotationResponse) {
 	s.notifyBackupEvent(backup.EventKeyRotation)
 }
 
+// refuseAnIdentityNotOurOwn answers, and returns true, where name is not how
+// the engine holds this Identity Agent's own identity: its identifier, or
+// the name the engine holds it under.
+//
+// The routes that have the engine build a key event by name (/rotation,
+// /interact and a recovery's rotation) extend this Identity Agent's own log
+// and nothing else, as /events/prepare and /events/commit do. The engine
+// also holds logs that are not this identity's, an owner identity's among
+// them, and those are extended only where they are kept: an owner
+// identity's by its one writer, after its witnesses are asked.
+func (s *CoreServer) refuseAnIdentityNotOurOwn(w http.ResponseWriter, name string) bool {
+	own, err := s.DataStore.GetIdentity()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read this Identity Agent's identity", err.Error())
+		return true
+	}
+	if own == nil {
+		writeError(w, http.StatusConflict, "There is no identity here to extend", "found one first")
+		return true
+	}
+	if name == own.AID {
+		return false
+	}
+	if kel, err := s.KeriDriver.GetKel(name); err == nil && kel != nil && kel.AID == own.AID {
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "That is not this Identity Agent's identity",
+		fmt.Sprintf("this Identity Agent keeps the log of %s, and extends no other here", own.AID))
+	return true
+}
+
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name          string        `json:"name"`
@@ -2300,6 +2348,9 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "Missing required field", "name is required")
+		return
+	}
+	if s.refuseAnIdentityNotOurOwn(w, req.Name) {
 		return
 	}
 
@@ -5196,10 +5247,12 @@ func (s *CoreServer) prepareKeyLogs() {
 }
 
 // reloadKeyLogs hands the engine every key log this Identity Agent writes to:
-// its identity's, then the record identity's, which its identity approved.
+// its identity's, then the record identity's, which its identity approved,
+// then those of the owner identities it minted to own machines.
 func (s *CoreServer) reloadKeyLogs() {
 	s.reloadIdentityIntoDriver()
 	s.reloadRecordIdentity()
+	s.reloadOwnerLogs()
 }
 
 // reloadIdentityIntoDriver hands the engine the identity's key log as stored,

@@ -48,3 +48,20 @@ func AnchorSeal(event []byte) (json.RawMessage, error) {
 func delegated(ev *keri.Event) bool {
 	return ev.Ilk == "dip" || ev.Ilk == "drt" || ev.Delegator != ""
 }
+
+// TheAnchorIn reads, from an owner identity's interaction as written, the one
+// event seal it carries, as Check reads the seals of an interaction
+// (elementsOf): its `a` list holds exactly one element, and that element is
+// an event seal. Anything else is refused: no seal, more than one, another
+// kind of seal, and one that cannot be read the same way by every reader.
+// An interaction the writer of an owner log makes carries exactly one.
+func TheAnchorIn(interaction []byte) (keri.Seal, error) {
+	elements, err := elementsOf(interaction)
+	if err != nil {
+		return keri.Seal{}, fmt.Errorf("the event is not readable: %w", err)
+	}
+	if len(elements) != 1 || elements[0].unreadable || !elements[0].eventSeal {
+		return keri.Seal{}, fmt.Errorf("an anchor carries exactly one event seal, and this event does not")
+	}
+	return elements[0].seal, nil
+}

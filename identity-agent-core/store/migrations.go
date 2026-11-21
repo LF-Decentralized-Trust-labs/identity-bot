@@ -1295,6 +1295,43 @@ ALTER TABLE guardianships_multisig RENAME TO guardianships;
 CREATE INDEX IF NOT EXISTS idx_guardianships_dependent ON guardianships(dependent_aid);
 CREATE INDEX IF NOT EXISTS idx_guardianships_status ON guardianships(status);
 `},
+	{
+		Version:     63,
+		Description: "An owner identity keeps what it was minted to own and which Identity Agent it anchors, and its log is extended only at a place reserved first",
+		SQL: `
+-- ADR-087. An owner identity's key log gains events after it is minted: an
+-- interaction that anchors the establishment event of the Identity Agent it
+-- owns. What the log cannot say is kept beside the index its key comes from.
+--
+-- kind           what it was minted to own, stored at mint (decision 13).
+-- anchored_m     the one Identity Agent its log anchors (decision 8). Set in
+--                the transaction that reserves the anchor's place, so it is
+--                fixed before anything is signed.
+-- given_up_for   the Identity Agent it was given up for (decision 7). A
+--                given-up owner identity never anchors or signs an owner
+--                request again.
+-- duplicitous_at the first sequence number at which two events of its log
+--                are known, or NULL.
+ALTER TABLE machine_owner_identities ADD COLUMN kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE machine_owner_identities ADD COLUMN anchored_m TEXT NOT NULL DEFAULT '';
+ALTER TABLE machine_owner_identities ADD COLUMN given_up_for TEXT NOT NULL DEFAULT '';
+ALTER TABLE machine_owner_identities ADD COLUMN duplicitous_at INTEGER;
+
+-- A place in an owner identity's log is reserved before the event there is
+-- signed (ADR-061 section 4): the exact bytes are written down first, and no
+-- other digest is ever signed at that place. The primary key is the rule.
+-- state is 'reserved' until the signed event is kept, then 'done'.
+CREATE TABLE IF NOT EXISTS owner_log_reservations (
+    owner_aid        TEXT NOT NULL,
+    seq_num          INTEGER NOT NULL,
+    prior_digest     TEXT NOT NULL,
+    digest           TEXT NOT NULL,
+    event_bytes_b64  TEXT NOT NULL,
+    state            TEXT NOT NULL DEFAULT 'reserved',
+    reserved_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (owner_aid, seq_num)
+);
+`},
 }
 
 // execMigration runs a migration's SQL. A migration that is one ALTER TABLE ... ADD
