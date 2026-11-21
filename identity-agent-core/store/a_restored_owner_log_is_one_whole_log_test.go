@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/signedlog"
 )
@@ -408,7 +410,43 @@ func tamperedReservations(t *testing.T, founded *signedlog.Log) map[string][2]st
 	bytes := strings.Replace(string(real.Raws[1]), real.SAID(1), forged, 1)
 	out["a digest that is not the digest of its bytes"] = [2]string{
 		base64.StdEncoding.EncodeToString([]byte(bytes)), forged}
+	// A true anchor with something after it, and its digest derived again
+	// over the longer bytes, so that the digest stated is theirs.
+	for name, tail := range map[string]string{"a newline after the event": "\n",
+		"spaces after the event": "   ", "an empty object after the event": "{}", "junk after the event": "junk"} {
+		raw, d := paddedWithItsDigest(t, real.Raws[1], real.SAID(1), tail)
+		out[name] = [2]string{base64.StdEncoding.EncodeToString(raw), d}
+	}
 	return out
+}
+
+// paddedWithItsDigest is an event's bytes with tail after them and the
+// digest field set to the digest computed over the padded bytes.
+func paddedWithItsDigest(t *testing.T, raw []byte, said, tail string) ([]byte, string) {
+	t.Helper()
+	padded := append(append([]byte{}, raw...), tail...)
+	d, err := keri.ComputeSAID(padded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []byte(strings.Replace(string(padded), said, d, 1)), d
+}
+
+// Padded bytes whose digest is that of the padded bytes are not one
+// canonical event, and Anchors refuses them, as it does every tampered row
+// but the one that is a true anchor of another Identity Agent, which is
+// refused by whoever knows which Identity Agent is meant.
+func TestAReservationOfBytesThatAreNotOneCanonicalEventIsRefused(t *testing.T) {
+	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	for name, bad := range tamperedReservations(t, founded) {
+		if name == "a seal naming another Identity Agent" {
+			continue
+		}
+		r := OwnerLogReservation{OwnerAID: founded.AID, SN: 1, PriorDigest: founded.SAID(0), Digest: bad[1], RawB64: bad[0]}
+		if _, err := r.Anchors(); err == nil {
+			t.Errorf("%s: Anchors accepted it", name)
+		}
+	}
 }
 
 // A reservation in a backup is taken only if its bytes are the interaction

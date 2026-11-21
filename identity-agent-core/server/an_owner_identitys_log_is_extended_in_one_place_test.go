@@ -1094,6 +1094,21 @@ func TestTheSignerSignsOnlyAReservationThatIsWhatItSays(t *testing.T) {
 			return []byte(strings.Replace(string(raw), digestOf(raw), aMachinesRotation, 1))
 		},
 	}
+	// A true anchor with something after it, its digest derived again over
+	// the longer bytes.
+	for name, tail := range map[string]string{"a newline after the event": "\n",
+		"spaces after the event": "   ", "an empty object after the event": "{}", "junk after the event": "junk"} {
+		tail := tail
+		cases[name] = func(owner string) []byte {
+			raw := interaction(t, owner, owner, 1, aMachine)
+			padded := append(append([]byte{}, raw...), tail...)
+			d, err := keri.ComputeSAID(padded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return []byte(strings.Replace(string(padded), digestOf(raw), d, 1))
+		}
+	}
 	for name, bytesFor := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := withWitnessesStandingIn(adoptingOwner(t))

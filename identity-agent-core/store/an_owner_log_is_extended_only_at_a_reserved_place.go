@@ -144,7 +144,8 @@ func (s *SQLiteStore) ReserveOwnerLogPlace(r OwnerLogReservation, m string) (Own
 // Anchors checks that a reservation's fields describe its own bytes, read as
 // the bytes are written and never from the fields alone, and returns the
 // Identity Agent whose event the reserved interaction anchors. The bytes must
-// be one interaction event of the owner identity, at the place and after the
+// be one canonical interaction event (keri.ValidateEvent) of the owner
+// identity, at the place and after the
 // event the reservation states, whose digest computed from the bytes is the
 // digest it states, carrying exactly one event seal
 // (ownership.TheAnchorIn). A reservation restored from a backup is a row
@@ -161,6 +162,12 @@ func (r OwnerLogReservation) Anchors() (string, error) {
 	}
 	notIt := fmt.Errorf("the reserved bytes are not the interaction of %s at sequence number %d "+
 		"that the reservation describes", r.OwnerAID, r.SN)
+	// One canonical event: its fields those of its type in their order, its
+	// version string true to its length, so nothing follows it, and its
+	// digest the digest of its bytes.
+	if err := keri.ValidateEvent(raw); err != nil {
+		return "", fmt.Errorf("%w: %v", notIt, err)
+	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", notIt, err)
