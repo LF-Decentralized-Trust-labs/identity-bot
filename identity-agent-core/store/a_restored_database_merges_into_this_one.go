@@ -240,6 +240,17 @@ func PrepareSnapshotForImport(path string) error {
 				"(it expects database version %d, this build understands %d) — "+
 				"update the software and run the recovery again", theirs, newest)
 	}
+	// Migrations can land out of order (see everyUnrecordedMigrationRunsFrom),
+	// so a backup no newer than this build by its highest number can still have
+	// run one this build has never heard of. It is newer all the same.
+	if unknown, err := unknownMigrationIn(db); err != nil {
+		return fmt.Errorf("read the backup's schema history: %w", err)
+	} else if unknown != 0 {
+		return fmt.Errorf(
+			"this backup was made by a newer version of the software "+
+				"(it ran database migration %d, which this build does not have) — "+
+				"update the software and run the recovery again", unknown)
+	}
 
 	// Bring it forward. This is where a renamed column is renamed and a new
 	// NOT NULL column gets its default, so that the copy afterwards is between
@@ -621,6 +632,27 @@ func hasNothingToMatchRowsOn(ctx context.Context, conn *sql.Conn, table string) 
 		}
 	}
 	return true, idx.Err()
+}
+
+// unknownMigrationIn returns a migration number, from
+// everyUnrecordedMigrationRunsFrom up, that db records as run and this build
+// does not list, or 0 when there is none.
+func unknownMigrationIn(db *sql.DB) (int, error) {
+	recorded, err := identityRecordedVersions(db)
+	if err != nil {
+		return 0, err
+	}
+	known := map[int]bool{}
+	for _, m := range identityMigrations {
+		known[m.Version] = true
+	}
+	unknown := 0
+	for v := range recorded {
+		if v >= everyUnrecordedMigrationRunsFrom && !known[v] && (unknown == 0 || v < unknown) {
+			unknown = v
+		}
+	}
+	return unknown, nil
 }
 
 func newestKnownMigration() int {

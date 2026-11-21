@@ -1358,7 +1358,42 @@ func ReapplyIdentityMigration(db *sql.DB, version int) error {
 	return fmt.Errorf("there is no identity migration %d", version)
 }
 
-// ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
+// everyUnrecordedMigrationRunsFrom is the lowest migration number that is run
+// whenever it has no record, however high the numbers already recorded are.
+//
+// Migration numbers are taken before the work that uses them lands, so they can
+// land out of order: 63 can be merged and run before 61 exists. Judged by the
+// highest number recorded alone, such a database would skip 61 for ever. So
+// from this number up, a migration runs exactly when its own number is not
+// recorded.
+//
+// Below it the highest number recorded still decides, as it always has: older
+// databases can lack records for migrations that did run, under numbers that
+// were later changed (see renumberBranchMigrations), and running those again
+// would fail. Every migration below this number had landed when the rule
+// changed, so none of them can arrive late. The number is one above the newest
+// migration at that time and it never moves.
+//
+// What this means for a migration's author: migrations run in the order the
+// list gives, but a migration numbered lower than one already landed may run
+// after it on some databases. A migration may rely on every migration below
+// this number and on any migration that had landed when it was written, never
+// on one with a higher number or one not yet landed.
+//
+// Two rules keep every database on the same order. A migration is added at the
+// end of the list when it lands, whatever its number, and is never inserted by
+// number: placed before one that had already landed, it would run first on a
+// new database and second on an existing one, and only one of those orders
+// would have been tested. And a migration that has shipped is never taken out
+// of the list; it is undone by a new one. A backup that recorded a migration
+// from this number up that the build does not list is refused on restore
+// (unknownMigrationIn), so removing one would strand every backup that ran it.
+const everyUnrecordedMigrationRunsFrom = 61
+
+// ApplyIdentityMigrations creates the migrations table and applies any pending
+// migrations: each one whose number is not recorded, except below
+// everyUnrecordedMigrationRunsFrom, where only those above the highest number
+// recorded are pending.
 func ApplyIdentityMigrations(db *sql.DB) error {
 	if err := ensureIdentityMigrationsTable(db); err != nil {
 		return fmt.Errorf("failed to create identity migrations table: %w", err)
@@ -1368,13 +1403,17 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 		return err
 	}
 
-	current, err := identityCurrentVersion(db)
+	recorded, err := identityRecordedVersions(db)
 	if err != nil {
-		return fmt.Errorf("failed to get identity schema version: %w", err)
+		return fmt.Errorf("failed to read the identity migrations recorded: %w", err)
+	}
+	current := 0
+	for v := range recorded {
+		current = max(current, v)
 	}
 
 	for _, m := range identityMigrations {
-		if m.Version <= current {
+		if recorded[m.Version] || (m.Version < everyUnrecordedMigrationRunsFrom && m.Version <= current) {
 			continue
 		}
 
@@ -1567,13 +1606,20 @@ func ensureIdentityMigrationsTable(db *sql.DB) error {
 	return err
 }
 
-func identityCurrentVersion(db *sql.DB) (int, error) {
-	var version int
-	err := db.QueryRow(
-		`SELECT COALESCE(MAX(version), 0) FROM identity_schema_migrations`,
-	).Scan(&version)
+// identityRecordedVersions returns every migration number recorded as applied.
+func identityRecordedVersions(db *sql.DB) (map[int]bool, error) {
+	rows, err := db.Query(`SELECT version FROM identity_schema_migrations`)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return version, nil
+	defer rows.Close()
+	recorded := map[int]bool{}
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		recorded[v] = true
+	}
+	return recorded, rows.Err()
 }
