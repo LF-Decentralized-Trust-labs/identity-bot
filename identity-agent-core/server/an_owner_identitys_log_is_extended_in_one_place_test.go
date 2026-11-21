@@ -1089,6 +1089,16 @@ func TestTheSignerSignsOnlyAReservationThatIsWhatItSays(t *testing.T) {
 		"a seal naming another Identity Agent": func(owner string) []byte {
 			return interaction(t, owner, owner, 1, anotherMachine)
 		},
+		"two event seals": func(owner string) []byte {
+			first, _ := drivers.EventSeal(aMachine, "0", aMachine)
+			second, _ := drivers.EventSeal(aMachine, "1", aMachine)
+			raw, err := keri.BuildInteraction(keri.InteractionInput{Prefix: owner, PriorSAID: owner, SN: 1,
+				Data: []json.RawMessage{first, second}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return raw
+		},
 		"a digest that is not the digest of its bytes": func(owner string) []byte {
 			raw := interaction(t, owner, owner, 1, aMachine)
 			return []byte(strings.Replace(string(raw), digestOf(raw), aMachinesRotation, 1))

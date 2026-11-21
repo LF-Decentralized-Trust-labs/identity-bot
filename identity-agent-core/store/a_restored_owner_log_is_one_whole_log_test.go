@@ -403,6 +403,10 @@ func tamperedReservations(t *testing.T, founded *signedlog.Log) map[string][2]st
 	out["a rotation"] = [2]string{raw, d}
 	raw, d = at(anchoring(t, founded.Fork(), machineTwo, 0), 1)
 	out["a seal naming another Identity Agent"] = [2]string{raw, d}
+	first, _ := drivers.EventSeal(machineOne, "0", machineOne)
+	second, _ := drivers.EventSeal(machineOne, "1", machineOne)
+	raw, d = at(founded.Fork().Seal(first, second), 1)
+	out["two event seals"] = [2]string{raw, d}
 	// The bytes of a true anchor with the digest field changed: the digest
 	// stated is not the digest of the bytes.
 	real := anchoring(t, founded.Fork(), machineOne, 0)

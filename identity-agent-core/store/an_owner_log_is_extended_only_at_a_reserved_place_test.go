@@ -205,6 +205,24 @@ func TestAReservationFollowsTheKeptLog(t *testing.T) {
 	}
 }
 
+// Bytes are reserved only as anchoring the Identity Agent they anchor: a
+// reservation of bytes that anchor one, recorded as anchoring another, is
+// refused, and nothing is recorded.
+func TestBytesAreReservedOnlyForTheIdentityAgentTheyAnchor(t *testing.T) {
+	_, s := openStore(t)
+	founded := signedlog.Incept(t, signedlog.NewKeys(t, 2))
+	mintedOwner(t, s, founded, 1)
+	if _, err := s.ReserveOwnerLogPlace(reservationFor(anchoring(t, founded.Fork(), machineTwo, 0)), machineOne); err == nil {
+		t.Fatal("bytes anchoring one Identity Agent were reserved as anchoring another")
+	}
+	if id, _, _ := s.MachineOwnerIdentity(founded.AID); id.AnchoredM != "" {
+		t.Fatalf("the refused reservation recorded %q as anchored", id.AnchoredM)
+	}
+	if res, _ := s.OwnerLogReservations(founded.AID); len(res) != 0 {
+		t.Fatalf("it was reserved: %+v", res)
+	}
+}
+
 // One owner identity anchors one Identity Agent, and one that was given up or
 // is known to be duplicitous anchors nothing.
 func TestAnOwnerIdentityReservesForOneIdentityAgentOnly(t *testing.T) {
