@@ -13,8 +13,9 @@ import 'package:test/test.dart';
 /// seed to 32 bytes while KeyManager hashes those same bytes, so the seed it
 /// handed to the signer produced a key the identity had never used. Nothing
 /// called it, so nothing had ever failed — and the first thing to call it would
-/// have been an app talking to a hosted agent, where the only symptom is
-/// "signature does not match the owner key" with no cause on screen.
+/// have been an app talking to an Identity Agent on rented hardware, where the
+/// only symptom is "signature does not match the owner key" with no cause on
+/// screen.
 void main() {
   test('the seed handed to the signer signs as the founded identity', () async {
     final words = Bip39.generateMnemonic();
@@ -36,7 +37,8 @@ void main() {
 
     expect(signsAs, equals(founded),
         reason: 'the owner client would sign with a key the identity has never '
-            'used, so every owner-signed request to a hosted agent is refused');
+            'used, so every owner-signed request to an Identity Agent on rented '
+            'hardware is refused');
   });
 
   test('no mnemonic means no seed, rather than a wrong one', () async {

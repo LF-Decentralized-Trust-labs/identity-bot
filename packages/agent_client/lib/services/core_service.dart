@@ -723,7 +723,8 @@ class CoreService {
   /// [ownerSeed] is what lets this talk to an agent running on hardware you
   /// rent. There, you are remote by definition, so every owner endpoint answers
   /// "sign this request with the owner key" — and without a seed to sign with,
-  /// a hosted agent is correctly locked and unusable by the person who owns it.
+  /// such an Identity Agent is correctly locked and unusable by the person who
+  /// owns it.
   ///
   /// Left out, requests go unsigned. That is right for an agent on the machine
   /// you are sitting at, which recognises a local request as its owner's, and
